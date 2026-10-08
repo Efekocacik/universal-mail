@@ -473,7 +473,15 @@ Varsayım: 30 şehir × 12 kategori, ızgara ortalaması 3 çağrı → ~1.100 D
 | Hunter.io (opsiyonel, Starter) | — | 0–34 USD |
 | **Toplam (temel)** | | **~8 USD/ay** |
 
-Kapsam 150 şehre çıkarsa Pro çağrıları ~11.000/ay → ~190 USD. Bütçe tavanı bu senaryoyu kullanıcıya önceden gösterir.
+Kapsam büyürse (150 şehir):
+
+| Senaryo | Pro çağrı | Enterprise çağrı | Google faturası |
+|---|---|---|---|
+| 30 şehir, ayda 2 tarama | ~2.200 | ~700 | 0 USD (ücretsiz kota) |
+| 150 şehir, ayda 2 tarama | ~11.000 | ~3.500 | ~280 USD |
+| 150 şehir, ayda 1 tarama | ~5.500 | ~1.750 | ~15 USD |
+
+Bütçe tavanı bu senaryoları kullanıcıya taramadan önce gösterir. Not: Autocomplete SKU'su (1.000 istekte 2,83 USD) projede kullanılmaz.
 
 ---
 
