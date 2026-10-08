@@ -6,7 +6,7 @@
 | Sürüm | 1.0 (taslak) |
 | Tarih | 8 Ekim 2026 |
 | Hedef kullanıcı | Müşteri şirketin yetkilisi (tek kullanıcı); kendi bilgisayarında kurar ve çalıştırır |
-| Ticari model | Geliştirici, yazılımı müşteri şirkete fatura keserek teslim eder (bkz. 1.5 ve `docs/03-SOZLESME-CERCEVESI.md`) |
+| Ticari model | Geliştirici, yazılımı müşteri şirkete fatura keserek teslim eder (bkz. 1.5 ve `docs/03-ANLASMA-NOTU.md`) |
 | Dağıtım | Özel (private) depo, internete açık sunucu yok; müşteri kendi bilgisayarına kurar, veri geliştiriciye gitmez |
 | Depo | https://github.com/Efekocacik/universal-mail.git |
 
@@ -63,14 +63,14 @@ Yazılım, müşteri şirkete **fatura karşılığı** teslim edilen bir araçt
 
 | Rol | Kim | Sorumluluk |
 |---|---|---|
-| Yazılım sağlayıcı | Geliştirici | Yazılımı sözleşmedeki kapsamda geliştirir, teslim eder, kararlaştırılan bakım/destek süresince hataları giderir. Müşterinin verisine erişmez, veri barındırmaz. |
+| Yazılım sağlayıcı | Geliştirici | Yazılımı kararlaştırılan kapsamda geliştirir, teslim eder, kararlaştırılan süre boyunca hataları giderir. Müşterinin verisine erişmez, veri barındırmaz. |
 | İşleten / gönderen | Müşteri şirket | Tüm hesapların sahibi (Google Cloud, alan adı, Workspace). Kime, ne, kaç kez e-posta göndereceğine karar verir. E-postaların hukuki göndereni ve kişisel veri sorumlusu müşteri şirkettir. |
 | Alıcı | Hedef işletme | Çıkış hakkı, silme hakkı ve itiraz hakkı vardır. |
 
 İlkeler (tasarımı bağlar):
 1. **Hesaplar müşteriye aittir.** Google Cloud projesi, API anahtarları, alan adı ve posta kutusu müşteri adına açılır; faturalar müşteriye gelir. Geliştiricinin kendi anahtarı hiçbir zaman dağıtılan kuruluma konmaz.
 2. **Veri yerelde kalır.** Telemetri, uzak günlük, otomatik raporlama yoktur. Destek gerekirse müşteri ekran paylaşır veya veriyi kendisi dışa aktarır.
-3. **Kullanım amacı sınırlıdır.** Yalnızca müşterinin kendi ürünlerinin B2B tanıtımı. Başkası adına gönderim, liste satışı, bireylere gönderim yasaktır (sözleşmede ve ilk açılış onayında yazılıdır).
+3. **Kullanım amacı sınırlıdır.** Yalnızca müşterinin kendi ürünlerinin B2B tanıtımı. Başkası adına gönderim, liste satışı, bireylere gönderim yasaktır (anlaşma notunda ve ilk açılış onayında yazılıdır).
 4. **Uyum varsayılan olarak açıktır.** Ülke politikası, çıkış bağlantısı, temas sınırları ve engel listesi kapatılamaz (Bölüm 5.6.1 ve 8).
 5. **Garanti kapsamı:** Yazılımın belirtilen şekilde çalışması taahhüt edilir; bulunan e-posta sayısı, teslim edilebilirlik, yanıt oranı veya satış sonucu taahhüt edilmez.
 
@@ -432,10 +432,10 @@ audit_log          (id, at, action, entity, entity_id, detail_json)
 
 ## 8. Yasal ve Uyum Gereksinimleri
 
-> Bu bölüm hukuki tavsiye değildir. Yüksek hacme çıkmadan önce bir avukata danışılması önerilir.
+> Bu bölüm hukuki tavsiye değildir. Ciddi hacme çıkmadan önce bir avukata kısa bir görüşme yaptırılması önerilir.
 
 ### 8.1 Google Maps Platform Hizmet Şartları
-- Place ID süresiz saklanabilir; enlem/boylam en fazla **30 gün** önbellekte tutulabilir. Diğer içerik (işletme adı, adres vb.) için toplu indirme ve saklama kısıtlıdır; bu yüzden yalnızca gösterim için kısa süreli tutulur ve yeniden çekilir → FR-DIS-10. **Bu madde canlıya çıkmadan önce Google'ın güncel şartlarından ve avukatla doğrulanmalıdır.**
+- Place ID süresiz saklanabilir; enlem/boylam en fazla **30 gün** önbellekte tutulabilir. Diğer içerik (işletme adı, adres vb.) için toplu indirme ve saklama kısıtlıdır; bu yüzden yalnızca gösterim için kısa süreli tutulur ve yeniden çekilir → FR-DIS-10. **Bu madde canlıya çıkmadan önce Google'ın güncel şartlarından doğrulanmalıdır.**
 - Places verisi yalnızca Google haritası ile birlikte gösterilebilir → Google Maps JS API kullanılır.
 - Toplu indirme ve veritabanı oluşturma amacıyla kullanım yasaktır; uygulama bu nedenle veriyi "lead yönetimi" bağlamında, tazeleme zorunluluğuyla tutar ve ham Google verisini dışa aktarımda **yalnızca place_id + kullanıcının kendi eklediği/doğruladığı alanlarla** sınırlar (ayarlardan bilinçli olarak açılabilir, uyarıyla).
 
@@ -459,12 +459,12 @@ Gönderen gerçek adı ve firma unvanı, fiziksel posta adresi, çalışan çık
 ### 8.4 Kişisel veri (GDPR / KVKK)
 `info@` gibi kurumsal adresler kişisel veri sayılmayabilir; `ahmet@kafe.com` gibi adresler kişisel veridir. Meşru menfaat kaydı (LIA) şablonu docs klasöründe tutulur; silme talepleri FR-CMPL-03 ile 72 saat içinde karşılanır; saklama süresi FR-CMPL-04.
 
-### 8.5 Sorumluluk dağılımı ve sözleşme
-> Hukuki tavsiye değildir; bir bilişim/yazılım avukatı tarafından gözden geçirilmelidir.
+### 8.5 Sorumluluk dağılımı
+> Hukuki tavsiye değildir.
 
 - E-postaların hukuki göndereni ve kişisel veri sorumlusu **müşteri şirkettir**; yazılım sağlayıcı verilere erişmediği ve gönderim kararlarını vermediği için veri işleyen konumunda değildir. Bu durum **yazılımın hiçbir veriyi geliştiriciye göndermemesi** şartına dayanır (NFR-01).
 - Google Maps Platform sözleşmesi müşteri ile Google arasındadır (müşterinin hesabı ve anahtarı). Yazılım, Google şartlarına uygun kullanım için tasarlanır (Bölüm 8.1); şartlar değişirse güncelleme sağlayıcı tarafından sağlanır, uyum sorumluluğu ise nihayetinde müşterideki kullanımdadır.
-- Sözleşme çerçevesi (kapsam, fikri mülkiyet, kullanım amacı, sorumluluk sınırı, tazminat, garanti reddi, destek süresi) `docs/03-SOZLESME-CERCEVESI.md` dosyasında madde madde listelenmiştir.
+- İki tarafın baştan mutabık olduğu noktalar (hesaplar kimde, gönderen kim, garanti yok, kod kimde kalacak) `docs/03-ANLASMA-NOTU.md` dosyasındaki yarım sayfalık notta yazılıdır; resmi sözleşme gerekmez.
 - Yazılım, kullanım amacına aykırı kullanımı (bireylere gönderim, engelli ülkeler, temas sınırlarını aşma) teknik olarak zorlaştıracak şekilde tasarlanmıştır; bu, sorumluluk ayrımının savunulabilirliği için bilinçli bir tasarım kararıdır.
 
 ---
@@ -512,8 +512,8 @@ Alternatif değerlendirildi: Python (FastAPI) + React. Scraping tarafında güç
 | Google ToS ihlali algısı (toplu veri) | Düşük | Orta | 30 gün tazeleme, dışa aktarım kısıtı, yalnızca resmi API |
 | Google tip adlarının/alanların değişmesi | Orta | Düşük | Tip listesi yapılandırma dosyasında; sürüm notları takip |
 | Tek kişilik bakım | Yüksek | Orta | Sade mimari, testler, dokümantasyon, otomatik güncelleme komutu |
-| Müşterinin yazılımı amacı dışında kullanması | Düşük | Yüksek | Yazılı sözleşme, ilk açılış kullanım onayı (FR-SET-08), kapatılamayan uyum kuralları, B2B dışı adreslerin hariç tutulması |
-| Geliştiriciye yöneltilen sorumluluk iddiası | Düşük | Yüksek | Sözleşmede sorumluluk sınırı ve tazminat maddeleri, veri barındırmama, avukat gözden geçirmesi, mümkünse faturayı şirket üzerinden kesme |
+| Müşterinin yazılımı amacı dışında kullanması | Düşük | Yüksek | Yazılı anlaşma notu, ilk açılış kullanım onayı (FR-SET-08), kapatılamayan uyum kuralları, B2B dışı adreslerin hariç tutulması |
+| Geliştiriciye yöneltilen sorumluluk iddiası | Düşük | Yüksek | Anlaşma notunda "gönderen müşteridir" maddesi, veri barındırmama, uyum kurallarının kapatılamaması; ticari satışa veya yüksek hacme çıkılırsa avukat görüşmesi |
 | Google şartlarının değişmesi / API erişiminin kısıtlanması | Orta | Yüksek | Müşterinin kendi anahtarı, Place ID merkezli veri modeli, şirket sicili ve web sitesi kaynaklarıyla çeşitlendirme, bakım dönemi güncellemeleri |
 
 ---
