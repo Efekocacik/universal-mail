@@ -7,7 +7,7 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 ## Belgeler
 - [Yazılım Gereksinim Spesifikasyonu (SRS)](docs/01-SRS.md) — ne yapılacak, hangi API'ler, veri modeli, yasal kurallar, kabul kriterleri
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
-- [Sözleşme Çerçevesi](docs/03-SOZLESME-CERCEVESI.md) — müşteriyle yapılacak sözleşme için madde listesi ve uygulama içi kullanım onayı taslağı (avukat gözden geçirmeli)
+- [Anlaşma Notu](docs/03-ANLASMA-NOTU.md) — müşteri şirketle yarım sayfalık, resmi olmayan mutabakat notu
 
 ## Özet kararlar
 | Konu | Karar |

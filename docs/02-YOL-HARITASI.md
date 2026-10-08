@@ -19,9 +19,8 @@ Hafta:  1    2    3    4    5    6    7    8    9    10   11   12
 
 Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirket adına** açılır (Google Cloud, alan adı, Workspace); geliştirici yalnızca rehberlik eder.
 
-**Sözleşme ve ticari çerçeve (kod yazmadan önce)**
-- [ ] Müşteri ile yazılı sözleşme: kapsam, teslim tarihi, ücret ve fatura kesilecek şirket, fikri mülkiyet (lisans mi devir mi), bakım/destek süresi. Madde listesi: `docs/03-SOZLESME-CERCEVESI.md`.
-- [ ] Sözleşme ve kullanım onayı metnini bir yazılım/bilişim avukatına gözden geçirt (tek seferlik, kısa görüşme yeterli).
+**Anlaşma (kod yazmadan önce, yarım sayfa)**
+- [ ] `docs/03-ANLASMA-NOTU.md` doldurulur ve iki taraf onaylar (bedel, fatura şirketi, kodun kimde kalacağı, destek süresi). Resmi sözleşme gerekmez.
 - [ ] Müşteri şirketin ihracat hedef ülkelerini ve ürün gruplarını yazılı al (pilot bölgeleri buna göre seçilecek).
 - [ ] Fatura/vergi konularını müşterinin ve kendi muhasebecinle netleştir.
 
@@ -154,7 +153,7 @@ Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirk
 - [ ] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
 - [ ] Performans testi: 100k lead ile filtreleme < 300 ms.
 - [ ] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca Google, işletme siteleri, sicil API'leri ve posta sunucusuna bağlantı olduğu kanıtlanır (geliştiriciye giden trafik yok).
-- [ ] Teslim paketi: kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kod/lisans devri sözleşmeye göre; bakım dönemi başlangıç tarihi yazılı.
+- [ ] Teslim paketi: kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kodun kimde kalacağı anlaşma notuna göre; bakım dönemi başlangıç tarihi yazılı.
 
 **Kabul:** Temiz bir Mac'te 30 dakikada kurulup ilk tarama yapılır (NFR-06).
 
