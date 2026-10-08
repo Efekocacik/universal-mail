@@ -98,7 +98,7 @@ Tek kullanıcı: işletme sahibi, teknik uzman değil. Arayüz Türkçe (ikincil
 | # | Kısıt | Etki |
 |---|---|---|
 | K1 | Places API'de "açılış tarihi" alanı yalnızca **gelecekte açılacak** işletmeler için dolu (`businessStatus = FUTURE_OPENING`). Geçmişe dönük "ne zaman açıldı" bilgisi yok. | "Yeni açıldı" tespiti snapshot karşılaştırması ve dolaylı sinyallerle yapılmak zorunda. |
-| K2 | Google ToS: Place ID dışındaki Places verisi en fazla **30 gün** önbelleklenebilir. | Lead kayıtlarında Google kaynaklı alanlar 30 günde bir tazelenmeli veya silinmeli; place_id kalıcı tutulabilir. |
+| K2 | Google şartları: Places'ten **yalnızca Place ID kalıcı**, **enlem/boylam en fazla 30 gün** saklanabilir; işletme adı, adres vb. içeriğin toplu indirilip kendi veritabanında saklanması kısıtlıdır (kesin metin, Google'ın güncel şartlarından avukatla doğrulanmalı). | Google kaynaklı içerik kalıcı lead veritabanının temeli olmamalı: kalıcı tutulan veri place_id + kullanıcının kendi eklediği/doğruladığı alanlar (e-posta, notlar, durum); ad/adres/koordinat gibi alanlar gösterim için 30 günü geçmeden yeniden çekilir. Lead listesinin ana kaynağı işletmelerin kendi web siteleri ve şirket sicilleri olmalı. |
 | K3 | Google ToS: Places verisi Google dışı bir harita üzerinde gösterilemez. | Harita bileşeni Google Maps JavaScript API olmalı (zaten istenen). |
 | K4 | Places API e-posta adresi **vermez**. | E-posta ayrı bir zenginleştirme adımıyla (web sitesi tarama) bulunur. |
 | K5 | Gmail/Workspace günlük gönderim limiti (Workspace: 2.000/gün; deneme hesabı: 500). Soğuk e-postada güvenli pratik çok daha düşüktür. | Gönderim kuyruğu günlük tavan + ısınma (warm-up) eğrisiyle çalışır. |
@@ -293,7 +293,7 @@ Lead'in web sitesi/menüsünden 1–2 cümlelik kişisel giriş üretmek için C
 | FR-TPL-02 | Şablonlar **dil bazlı** (TR, EN, DE, FR, ES, IT, NL, PT, PL + eklenebilir); lead'in ülkesine göre otomatik dil seçimi, elle değiştirilebilir. | Z |
 | FR-TPL-03 | Kategori bazlı varyant (kafe için ayrı, hastane için ayrı metin) ve A/B varyantı (iki konu satırı). | Ö |
 | FR-TPL-04 | Gerçek bir lead ile canlı önizleme; eksik değişken uyarısı. | Z |
-| FR-TPL-05 | Takip (follow-up) adımları: 1. e-postadan N gün sonra yanıt yoksa 2. e-posta, en fazla 3 adım; her adım ayrı şablon. | Ö |
+| FR-TPL-05 | Takip (follow-up) adımları: ilk e-postadan sonra en fazla **2 takip** (toplam 3 e-posta); adımlar arası en az 5 gün; yanıt, çıkış veya bounce olursa kalan adımlar iptal edilir. Her adım ayrı şablon. | Ö |
 | FR-TPL-06 | Zorunlu alt bilgi (footer) otomatik eklenir: gönderen unvanı, fiziksel adres, çıkış bağlantısı; TR için MERSİS no. Kullanıcı kaldıramaz, yalnızca düzenler. | Z |
 | FR-TPL-07 | Spam kelime kontrolü ve ilk gönderim öncesi "test e-postası kendime gönder". | Ö |
 | FR-TPL-08 | Hazır başlangıç şablonları (TR/EN, kafe/restoran/otel/klinik) ürünle gelir. | Z |
@@ -302,7 +302,7 @@ Lead'in web sitesi/menüsünden 1–2 cümlelik kişisel giriş üretmek için C
 | ID | Gereksinim | Öncelik |
 |---|---|---|
 | FR-CMP-01 | Kampanya = filtre/seçim + şablon seti + gönderim penceresi + posta kutusu. Sihirbazla 4 adımda oluşturulur. | Z |
-| FR-CMP-02 | Kampanyaya eklenirken **uyum kontrolü**: suppression listesinde mi, ülke politikası izin veriyor mu (Bölüm 8), e-posta doğrulanmış mı, son 30 günde temas edildi mi. Geçemeyenler sebebiyle listelenir ve hariç tutulur. | Z |
+| FR-CMP-02 | Kampanyaya eklenirken **uyum kontrolü**: suppression listesinde mi, ülke politikası izin veriyor mu (Bölüm 8), e-posta doğrulanmış mı, Bölüm 5.6.1 temas sıklığı sınırlarına uyuyor mu. Geçemeyenler sebebiyle listelenir ve hariç tutulur. | Z |
 | FR-CMP-03 | Gönderim kuyruğu Bölüm 4.6 politikasını uygular (günlük tavan, ısınma, rastgele aralık, yerel saat penceresi). | Z |
 | FR-CMP-04 | Her gönderim öncesi son durum: "Bugün 23 e-posta gidecek, ilk 5'ini önizle". Kullanıcı **Başlat**'a basmadan hiçbir şey gönderilmez. | Z |
 | FR-CMP-05 | Duraklat / devam / iptal; kuyruğun tamamı görünür ve tek tek çıkarılabilir. | Z |
@@ -311,6 +311,27 @@ Lead'in web sitesi/menüsünden 1–2 cümlelik kişisel giriş üretmek için C
 | FR-CMP-08 | Çıkış (unsubscribe): `List-Unsubscribe` ve `List-Unsubscribe-Post` başlıkları + gövdede bağlantı. Bağlantı yerel sunucuya değil, kullanıcının bir statik sayfasına ya da `mailto:` çıkış adresine gider; gelen çıkış talepleri otomatik işlenir (≤ 3 iş günü kuralı için anında). | Z |
 | FR-CMP-09 | Açılma takibi (tracking pixel) **varsayılan kapalı**; açılırsa gizlilik notu şablona eklenir. Tıklama takibi yok (v1). | İ |
 | FR-CMP-10 | Gönderim günlüğü: her e-posta için zaman, alıcı, konu, durum, hata mesajı; dışa aktarılabilir. | Z |
+| FR-CMP-11 | **Temas sıklığı sınırları** (Bölüm 5.6.1) kod seviyesinde uygulanır; kullanıcı yalnızca daha sıkı yapabilir, gevşetemez. | Z |
+
+#### 5.6.1 Temas sıklığı sınırları ("rahatsız etme" kuralları)
+
+Amaç: aynı işletmeye tekrar tekrar yazmamak, şikâyet ve spam riskini en aza indirmek. Bu kurallar kampanya ayarlarından bağımsız, her gönderimden önce kontrol edilir.
+
+| Kural | Varsayılan | Kullanıcı değiştirebilir mi |
+|---|---|---|
+| Bir işletmeye (aynı lead / aynı web alan adı / aynı e-posta) gönderilecek toplam e-posta (ilk + takip) | En fazla **3** | Yalnızca azaltabilir |
+| Takip e-postaları arası bekleme | En az **5 gün** | Yalnızca artırabilir |
+| Dizi bittiğinde (3 e-posta, yanıt yok) | Lead "yanıt yok, dinlenmede" olur; **180 gün** hiçbir e-posta gitmez | Yalnızca artırabilir |
+| 180 gün sonra yeniden temas | Otomatik **yapılmaz**; kullanıcı elle "yeniden etkinleştir" demeli, o zaman da yeni ilk e-posta olarak tek seferlik | Evet, elle |
+| Aynı alan adına (zincir/çok şubeli işletme) | Tüm şubeler için **toplam** 3 e-posta ve aynı gün en fazla 1 | Yalnızca azaltabilir |
+| Aynı kişiye iki farklı kampanyadan e-posta | Engellenir (son temastan sonra 30 gün) | Yalnızca artırabilir |
+| Yanıt gelirse (olumlu veya olumsuz) | Otomatik dizi durur; lead insan müdahalesine kalır | — |
+| "İlgilenmiyorum" benzeri yanıt (anahtar kelime tespiti: "no thanks", "ilgilenmiyoruz", "unsubscribe", "stop" vb.) | Otomatik suppression listesine eklenir, kullanıcıya bildirilir | — |
+| Çıkış, bounce, şikâyet | Kalıcı suppression; bir daha asla | Hayır |
+| Posta kutusu şikâyet/bounce oranı | Bounce > %3 veya şikâyet > %0,1 ise tüm gönderim otomatik durur ve kullanıcıya uyarı çıkar | Eşik yalnızca sıkılaştırılabilir |
+| Gönderim hacmi | Bölüm 4.6 ısınma eğrisi (başlangıç 20/gün) | Tavan aşılamaz |
+
+Bu kurallar `tests/` içinde birim testle doğrulanır (aynı lead'e 4. e-posta kuyruğa alınamaz, aynı alan adına aynı gün 2. e-posta alınamaz, vb.).
 
 ### 5.7 Harita ve arayüz
 | ID | Gereksinim | Öncelik |
@@ -387,7 +408,7 @@ audit_log          (id, at, action, entity, entity_id, detail_json)
 > Bu bölüm hukuki tavsiye değildir. Yüksek hacme çıkmadan önce bir avukata danışılması önerilir.
 
 ### 8.1 Google Maps Platform Hizmet Şartları
-- Place ID süresiz saklanabilir; diğer Places alanları en fazla **30 gün** önbellekte tutulabilir → FR-DIS-10.
+- Place ID süresiz saklanabilir; enlem/boylam en fazla **30 gün** önbellekte tutulabilir. Diğer içerik (işletme adı, adres vb.) için toplu indirme ve saklama kısıtlıdır; bu yüzden yalnızca gösterim için kısa süreli tutulur ve yeniden çekilir → FR-DIS-10. **Bu madde canlıya çıkmadan önce Google'ın güncel şartlarından ve avukatla doğrulanmalıdır.**
 - Places verisi yalnızca Google haritası ile birlikte gösterilebilir → Google Maps JS API kullanılır.
 - Toplu indirme ve veritabanı oluşturma amacıyla kullanım yasaktır; uygulama bu nedenle veriyi "lead yönetimi" bağlamında, tazeleme zorunluluğuyla tutar ve ham Google verisini dışa aktarımda **yalnızca place_id + kullanıcının kendi eklediği/doğruladığı alanlarla** sınırlar (ayarlardan bilinçli olarak açılabilir, uyarıyla).
 

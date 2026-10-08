@@ -87,6 +87,7 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Ülke politikası tablosu (`country_policies`) ve uyum kontrolü; hariç tutma sebepleri ekranı.
 - [ ] Suppression listesi (elle, CSV, otomatik).
 - [ ] Gmail OAuth bağlantısı + SMTP alternatifi; "kendime test gönder".
+- [ ] Temas sıklığı sınırları (SRS 5.6.1): işletme/alan adı başına en fazla 3 e-posta, 5 gün aralık, 180 gün dinlenme, otomatik durdurma eşikleri, birim testleri.
 - [ ] Gönderim kuyruğu: günlük tavan, ısınma eğrisi, rastgele aralık, alıcı yerel saat penceresi, duraklat/devam/iptal.
 - [ ] Kampanya sihirbazı (4 adım) ve "Başlat" öncesi özet + ilk 5 önizleme.
 - [ ] Gelen kutusu okuyucu: bounce (DSN) → suppression; yanıt → lead "yanıtladı", takip iptal.
@@ -111,7 +112,7 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Haritada bölge çizerek tarama / "görünümdekileri seç".
 - [ ] Kaydedilmiş filtreler, toplu işlemler, klavye kısayolları.
 - [ ] Koyu tema, boş durumlar, "Bu nedir?" balonları, TR/EN arayüz.
-- [ ] Takip (follow-up) adımları (en fazla 3).
+- [ ] Takip (follow-up) adımları (en fazla 2 takip, toplam 3 e-posta).
 - [ ] Yerel bildirimler (macOS/Windows) — "12 yeni işletme bulundu".
 
 **Kabul:** Uygulama bir hafta açık kaldığında zamanlanmış taramalar çalışır; yeni açılanlar dashboard'da birikir.
