@@ -5,8 +5,9 @@
 | Proje | Universal Mail — Yeni açılan işletmeleri bulup e-posta ile ulaşan yerel satış aracı |
 | Sürüm | 1.0 (taslak) |
 | Tarih | 8 Ekim 2026 |
-| Hedef kullanıcı | Tek kişi, kendi bilgisayarında kurar ve çalıştırır |
-| Dağıtım | Özel (private) depo, internete açık sunucu yok |
+| Hedef kullanıcı | Müşteri şirketin yetkilisi (tek kullanıcı); kendi bilgisayarında kurar ve çalıştırır |
+| Ticari model | Geliştirici, yazılımı müşteri şirkete fatura keserek teslim eder (bkz. 1.5 ve `docs/03-SOZLESME-CERCEVESI.md`) |
+| Dağıtım | Özel (private) depo, internete açık sunucu yok; müşteri kendi bilgisayarına kurar, veri geliştiriciye gitmez |
 | Depo | https://github.com/Efekocacik/universal-mail.git |
 
 ---
@@ -14,9 +15,11 @@
 ## 1. Giriş
 
 ### 1.1 Amaç
-Bu belge, Avrupa ve Türkiye'de **yeni açılan veya yakında açılacak** işletmeleri (kafe, restoran, otel, hastane, ofis vb.) Google Haritalar verisinden otomatik tespit eden, bu işletmelerin iletişim e-postalarını bulan ve düzenlenebilir şablonlarla **tek tek, kontrollü** satış e-postası gönderen masaüstü/yerel web uygulamasının gereksinimlerini tanımlar.
+Bu belge, **yurt dışı pazarlarda (öncelikle Avrupa)** **yeni açılan veya yakında açılacak** işletmeleri (kafe, restoran, otel, hastane, ofis vb.) Google Haritalar verisinden otomatik tespit eden, bu işletmelerin iletişim e-postalarını bulan ve düzenlenebilir şablonlarla **tek tek, kontrollü** satış e-postası gönderen masaüstü/yerel web uygulamasının gereksinimlerini tanımlar.
 
-Satılan ürün grubu: tek kullanımlık çatal-bıçak, amerikan servis, ıslak mendil, peçete, karton bardak ve benzeri **sarf malzemeleri**. Hedef, bu malzemeleri düzenli tüketen ve henüz tedarikçisi oturmamış **yeni** işletmelerdir.
+Müşteri şirketin ürün grubu: tek kullanımlık çatal-bıçak, amerikan servis, ıslak mendil, peçete, karton bardak ve benzeri **sarf malzemeleri**. Ana amaç, müşteri şirketin **yurt dışındaki dağıtım ağını büyütmek**: bu malzemeleri düzenli tüketen ve henüz tedarikçisi oturmamış **yeni** işletmelere (B2B) e-posta ile ulaşıp distribütör/bayi/tedarik ilişkisi başlatmaktır.
+
+Türkiye, ihracat odağı nedeniyle **varsayılan hedef pazar değildir**; müşteri isterse ayarlardan açabilir (İYS şartıyla, Bölüm 8.2).
 
 ### 1.2 Kapsam
 Uygulama şunları yapar:
@@ -29,7 +32,7 @@ Uygulama şunları yapar:
 7. Dil bazlı, değişkenli e-posta şablonları ile kampanya oluşturur; gönderimi hız sınırlı kuyruğa alır.
 8. Yanıt, geri dönüş (bounce) ve abonelikten çıkma (unsubscribe) takibi yapar; ülke bazlı yasal kuralları uygular.
 
-Kapsam dışı (v1): SMS/WhatsApp gönderimi, CRM entegrasyonu, çok kullanıcılı erişim, bulut sunucu kurulumu.
+Kapsam dışı (v1): SMS/WhatsApp gönderimi, CRM entegrasyonu, çok kullanıcılı erişim, bulut sunucu kurulumu, **bireylere (tüketicilere) gönderim**, hazır e-posta listesi satışı, müşteri dışında bir üçüncü taraf adına gönderim.
 
 ### 1.3 Tanımlar
 | Terim | Anlam |
@@ -53,6 +56,23 @@ Kapsam dışı (v1): SMS/WhatsApp gönderimi, CRM entegrasyonu, çok kullanıcı
 - Gmail gönderim limitleri: https://knowledge.workspace.google.com/admin/gmail/gmail-sending-limits-in-google-workspace
 - 6563 sayılı Elektronik Ticaretin Düzenlenmesi Hakkında Kanun ve Ticari İletişim Yönetmeliği (Türkiye)
 - UK PECR, Almanya UWG §7, Fransa CNIL B2B rehberi (bkz. Bölüm 8)
+
+### 1.5 Roller ve ticari çerçeve
+
+Yazılım, müşteri şirkete **fatura karşılığı** teslim edilen bir araçtır. Roller şöyle ayrılır:
+
+| Rol | Kim | Sorumluluk |
+|---|---|---|
+| Yazılım sağlayıcı | Geliştirici | Yazılımı sözleşmedeki kapsamda geliştirir, teslim eder, kararlaştırılan bakım/destek süresince hataları giderir. Müşterinin verisine erişmez, veri barındırmaz. |
+| İşleten / gönderen | Müşteri şirket | Tüm hesapların sahibi (Google Cloud, alan adı, Workspace). Kime, ne, kaç kez e-posta göndereceğine karar verir. E-postaların hukuki göndereni ve kişisel veri sorumlusu müşteri şirkettir. |
+| Alıcı | Hedef işletme | Çıkış hakkı, silme hakkı ve itiraz hakkı vardır. |
+
+İlkeler (tasarımı bağlar):
+1. **Hesaplar müşteriye aittir.** Google Cloud projesi, API anahtarları, alan adı ve posta kutusu müşteri adına açılır; faturalar müşteriye gelir. Geliştiricinin kendi anahtarı hiçbir zaman dağıtılan kuruluma konmaz.
+2. **Veri yerelde kalır.** Telemetri, uzak günlük, otomatik raporlama yoktur. Destek gerekirse müşteri ekran paylaşır veya veriyi kendisi dışa aktarır.
+3. **Kullanım amacı sınırlıdır.** Yalnızca müşterinin kendi ürünlerinin B2B tanıtımı. Başkası adına gönderim, liste satışı, bireylere gönderim yasaktır (sözleşmede ve ilk açılış onayında yazılıdır).
+4. **Uyum varsayılan olarak açıktır.** Ülke politikası, çıkış bağlantısı, temas sınırları ve engel listesi kapatılamaz (Bölüm 5.6.1 ve 8).
+5. **Garanti kapsamı:** Yazılımın belirtilen şekilde çalışması taahhüt edilir; bulunan e-posta sayısı, teslim edilebilirlik, yanıt oranı veya satış sonucu taahhüt edilmez.
 
 ---
 
@@ -85,7 +105,7 @@ Kullanıcının bilgisayarında çalışan, tarayıcıdan `http://localhost:3000
 ```
 
 ### 2.2 Kullanıcı profili
-Tek kullanıcı: işletme sahibi, teknik uzman değil. Arayüz Türkçe (ikincil İngilizce), adımlar sade, "ne yapmalıyım" sorusunu arayüz kendisi yanıtlamalı. Kurulum tek komut veya tek tıklamayla yapılmalı.
+Tek kullanıcı: müşteri şirketin yetkilisi (ihracat/satış sorumlusu), teknik uzman değil. Arayüz Türkçe (ikincil İngilizce), adımlar sade, "ne yapmalıyım" sorusunu arayüz kendisi yanıtlamalı. Kurulum tek komut veya tek tıklamayla yapılmalı.
 
 ### 2.3 Çalışma ortamı
 - macOS 13+ veya Windows 10/11 (öncelik macOS, kullanıcının mevcut makinesi).
@@ -108,7 +128,9 @@ Tek kullanıcı: işletme sahibi, teknik uzman değil. Arayüz Türkçe (ikincil
 ### 2.5 Varsayımlar
 - Kullanıcı kendi alan adından gönderim yapacak ve SPF/DKIM/DMARC kayıtlarını (kurulum rehberi eşliğinde) ekleyecek.
 - Aylık API bütçesi başlangıçta ≤ 50 USD; uygulama bunu aşmamak için kendi bütçe sayacını tutar.
-- Türkiye gönderimleri için kullanıcı İYS'ye hizmet sağlayıcı olarak kayıt yaptıracaktır.
+- Türkiye gönderimleri açılırsa müşteri İYS'ye hizmet sağlayıcı olarak kayıt yaptıracaktır.
+- Gönderen kimliği (unvan, adres, vergi/sicil numarası) müşteri şirketin bilgileridir; footer'da bu bilgiler yer alır.
+- Müşteri, Google Cloud ve posta hesaplarını kendi adına açar ve kendi kartıyla faturalandırır.
 
 ---
 
@@ -247,6 +269,9 @@ Lead'in web sitesi/menüsünden 1–2 cümlelik kişisel giriş üretmek için C
 | FR-SET-04 | Google anahtarı girildiğinde test çağrısı yapılır; faturalandırma/kota hatası anlaşılır Türkçe mesajla gösterilir. | Z |
 | FR-SET-05 | Aylık API bütçe tavanı (USD) ayarlanır; uygulama tahmini harcamayı sayar, %80'de uyarır, %100'de otomatik taramaları durdurur. | Z |
 | FR-SET-06 | SPF/DKIM/DMARC kurulum rehberi ve alan adı için otomatik kontrol (DNS sorgusu) ekranı. | Ö |
+| FR-SET-07 | **Gönderen firma profili** zorunludur: ticari unvan, adres, vergi/sicil numarası, telefon, ihracat sorumlusu adı. Doldurulmadan gönderim açılmaz; tüm e-postaların footer'ı bu profilden üretilir. | Z |
+| FR-SET-08 | **İlk açılış kullanım onayı:** kullanım amacı (yalnızca kendi ürünlerinin B2B tanıtımı), gönderenin sorumluluğu, ülke politikalarının bağlayıcılığı ve temas sınırları özetlenir; yetkili onaylamadan uygulama kullanılamaz. Onay sürümü, tarihi ve onaylayan ad-soyad audit log'a yazılır. | Z |
+| FR-SET-09 | Hedef pazar seçimi: kurulumda "hangi ülkelere ihracat yapıyorsunuz?" sorusuyla ülke listesi seçilir; keşif ve kampanyalar varsayılan olarak yalnızca bu ülkelerle sınırlıdır. Türkiye varsayılan kapalıdır. | Z |
 
 ### 5.2 Tarama (Discovery)
 | ID | Gereksinim | Öncelik |
@@ -353,6 +378,8 @@ Bu kurallar `tests/` içinde birim testle doğrulanır (aynı lead'e 4. e-posta 
 | FR-CMPL-04 | Kişisel veri saklama süresi: temas edilmemiş lead'ler 12 ay sonra otomatik silinir (ayarlanabilir). | Ö |
 | FR-CMPL-05 | Yedekleme: veritabanının şifreli dışa aktarımı ve geri yükleme. | Ö |
 | FR-CMPL-06 | İşlem kaydı (audit log): kim/ne zaman/ne gönderdi, hangi filtreyle; dışa aktarılabilir (denetim talebi için). | Ö |
+| FR-CMPL-07 | **Yalnızca işletmelere (B2B):** kişisel/ücretsiz posta alan adları (gmail.com, hotmail.com, outlook.com, yahoo.com, icloud.com, gmx.* vb.) varsayılan olarak kampanyadan hariç tutulur; hariç tutma sebebi lead'de görünür. Liste ayarlardan genişletilebilir, daraltılamaz. | Z |
+| FR-CMPL-08 | Gönderen unvanı, adresi ve sicil numarası olmayan hiçbir şablon gönderilemez; kullanıcı bu alanları şablondan silerse kayıt reddedilir. | Z |
 
 ---
 
@@ -416,7 +443,7 @@ audit_log          (id, at, action, entity, entity_id, detail_json)
 | Ülke | Kural (özet) | Uygulama modu |
 |---|---|---|
 | Birleşik Krallık | PECR: kurumsal abonelere izin; kimlik + çıkış zorunlu. Şahıs işletmeleri (sole trader) birey sayılır → genel adres tercih. | `allowed` |
-| Türkiye | 6563 s. Kanun m.6/2: tacir/esnafa ön onay aranmaz; ancak İYS kaydı, MERSİS/unvan bilgisi ve ret hakkı (3 iş günü) zorunlu. | `allowed` (İYS kaydı onay kutusu işaretlenmeden gönderim açılmaz) |
+| Türkiye | 6563 s. Kanun m.6/2: tacir/esnafa ön onay aranmaz; ancak İYS kaydı, MERSİS/unvan bilgisi ve ret hakkı (3 iş günü) zorunlu. | `allowed`, ama **varsayılan kapalı** (ihracat odağı); açılırsa İYS kaydı onay kutusu işaretlenmeden gönderim açılmaz |
 | Fransa | CNIL: mesleki ilgiyle sınırlı, bilgilendirme + çıkış şartıyla B2B izinli. | `allowed` |
 | Hollanda, Belçika, İrlanda, İsveç, Danimarka, Finlandiya, Portekiz, Polonya, Çekya | Genel olarak meşru menfaatle kurumsal adrese B2B izinli; çıkış zorunlu. | `allowed` |
 | İspanya | LSSI: önceki ilişki yoksa onay esas; genel kurumsal adres (info@) daha düşük risk. | `generic_only` |
@@ -431,6 +458,14 @@ Gönderen gerçek adı ve firma unvanı, fiziksel posta adresi, çalışan çık
 
 ### 8.4 Kişisel veri (GDPR / KVKK)
 `info@` gibi kurumsal adresler kişisel veri sayılmayabilir; `ahmet@kafe.com` gibi adresler kişisel veridir. Meşru menfaat kaydı (LIA) şablonu docs klasöründe tutulur; silme talepleri FR-CMPL-03 ile 72 saat içinde karşılanır; saklama süresi FR-CMPL-04.
+
+### 8.5 Sorumluluk dağılımı ve sözleşme
+> Hukuki tavsiye değildir; bir bilişim/yazılım avukatı tarafından gözden geçirilmelidir.
+
+- E-postaların hukuki göndereni ve kişisel veri sorumlusu **müşteri şirkettir**; yazılım sağlayıcı verilere erişmediği ve gönderim kararlarını vermediği için veri işleyen konumunda değildir. Bu durum **yazılımın hiçbir veriyi geliştiriciye göndermemesi** şartına dayanır (NFR-01).
+- Google Maps Platform sözleşmesi müşteri ile Google arasındadır (müşterinin hesabı ve anahtarı). Yazılım, Google şartlarına uygun kullanım için tasarlanır (Bölüm 8.1); şartlar değişirse güncelleme sağlayıcı tarafından sağlanır, uyum sorumluluğu ise nihayetinde müşterideki kullanımdadır.
+- Sözleşme çerçevesi (kapsam, fikri mülkiyet, kullanım amacı, sorumluluk sınırı, tazminat, garanti reddi, destek süresi) `docs/03-SOZLESME-CERCEVESI.md` dosyasında madde madde listelenmiştir.
+- Yazılım, kullanım amacına aykırı kullanımı (bireylere gönderim, engelli ülkeler, temas sınırlarını aşma) teknik olarak zorlaştıracak şekilde tasarlanmıştır; bu, sorumluluk ayrımının savunulabilirliği için bilinçli bir tasarım kararıdır.
 
 ---
 
@@ -477,10 +512,13 @@ Alternatif değerlendirildi: Python (FastAPI) + React. Scraping tarafında güç
 | Google ToS ihlali algısı (toplu veri) | Düşük | Orta | 30 gün tazeleme, dışa aktarım kısıtı, yalnızca resmi API |
 | Google tip adlarının/alanların değişmesi | Orta | Düşük | Tip listesi yapılandırma dosyasında; sürüm notları takip |
 | Tek kişilik bakım | Yüksek | Orta | Sade mimari, testler, dokümantasyon, otomatik güncelleme komutu |
+| Müşterinin yazılımı amacı dışında kullanması | Düşük | Yüksek | Yazılı sözleşme, ilk açılış kullanım onayı (FR-SET-08), kapatılamayan uyum kuralları, B2B dışı adreslerin hariç tutulması |
+| Geliştiriciye yöneltilen sorumluluk iddiası | Düşük | Yüksek | Sözleşmede sorumluluk sınırı ve tazminat maddeleri, veri barındırmama, avukat gözden geçirmesi, mümkünse faturayı şirket üzerinden kesme |
+| Google şartlarının değişmesi / API erişiminin kısıtlanması | Orta | Yüksek | Müşterinin kendi anahtarı, Place ID merkezli veri modeli, şirket sicili ve web sitesi kaynaklarıyla çeşitlendirme, bakım dönemi güncellemeleri |
 
 ---
 
-## 12. Maliyet Senaryosu (aylık, tek kullanıcı)
+## 12. Maliyet Senaryosu (aylık, müşterinin işletme gideri)
 
 Varsayım: 30 şehir × 12 kategori, ızgara ortalaması 3 çağrı → ~1.100 Discovery çağrısı/tarama; ayda 2 tarama; %15 yeni/değişen kayıt için Enrich.
 
@@ -508,7 +546,7 @@ Bütçe tavanı bu senaryoları kullanıcıya taramadan önce gösterir. Not: Au
 
 ## 13. Kabul Kriterleri (MVP)
 
-1. Kullanıcı sihirbazla anahtarlarını girip Londra + İstanbul için "kafe, restoran, fırın" taramasını başlatabilir; tahmini maliyet gösterilir; tarama ≤ 10 dakikada biter.
+1. Kullanıcı sihirbazla anahtarlarını girip Londra + Amsterdam için "kafe, restoran, fırın" taramasını başlatabilir; tahmini maliyet gösterilir; tarama ≤ 10 dakikada biter.
 2. Haritada ve listede sonuçlar görünür; `FUTURE_OPENING` kayıtlar mor işaretçiyle ayrılır.
 3. 14 gün sonra tekrar taramada yeni place_id'ler "Yeni" etiketi alır.
 4. Seçilen 100 lead için zenginleştirme çalışır; en az %40'ında en az bir e-posta bulunur ve kaynak URL gösterilir.
@@ -518,6 +556,9 @@ Bütçe tavanı bu senaryoları kullanıcıya taramadan önce gösterir. Not: Au
 8. Bir adres bounce olduğunda suppression listesine düşer ve bir daha kuyruğa alınamaz.
 9. Uygulama kapatılıp açıldığında tüm veri ve kuyruk durumu korunur.
 10. Aylık API tahmini harcama dashboard'da görünür ve tavana ulaşınca tarama durur.
+11. Gönderen firma profili ve ilk açılış kullanım onayı tamamlanmadan gönderim açılamaz; onay audit log'da görünür.
+12. gmail.com gibi kişisel adresler kampanyaya alınmaz ve sebebi lead'de yazar.
+13. Temiz kurulumda uygulamanın hiçbir geliştirici sunucusuna bağlanmadığı ağ trafiği izlenerek doğrulanır.
 
 ---
 

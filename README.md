@@ -1,12 +1,13 @@
 # Universal Mail
 
-Avrupa ve Türkiye'de **yeni açılan / yakında açılacak** işletmeleri (kafe, restoran, otel, hastane, ofis vb.) Google Haritalar verisinden bulan, e-posta adreslerini çıkaran ve düzenlenebilir şablonlarla kontrollü satış e-postası gönderen **yerel, tek kullanıcılı** araç.
+Müşteri şirketin **yurt dışı dağıtım ağını büyütmek** için, Avrupa'da **yeni açılan / yakında açılacak** işletmeleri (kafe, restoran, otel, hastane, ofis vb.) Google Haritalar verisinden bulan, e-posta adreslerini çıkaran ve düzenlenebilir şablonlarla kontrollü B2B e-postası gönderen **yerel, tek kullanıcılı** araç. Yazılım müşteri şirkete fatura ile teslim edilir; hesaplar ve veriler müşteriye aittir, geliştiriciye hiçbir veri gitmez.
 
 Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak mendil, peçete ve benzeri sarf malzemeleri.
 
 ## Belgeler
 - [Yazılım Gereksinim Spesifikasyonu (SRS)](docs/01-SRS.md) — ne yapılacak, hangi API'ler, veri modeli, yasal kurallar, kabul kriterleri
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
+- [Sözleşme Çerçevesi](docs/03-SOZLESME-CERCEVESI.md) — müşteriyle yapılacak sözleşme için madde listesi ve uygulama içi kullanım onayı taslağı (avukat gözden geçirmeli)
 
 ## Özet kararlar
 | Konu | Karar |
@@ -18,6 +19,7 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 | Gönderim | Kendi alan adı + Google Workspace (Gmail API) veya SMTP; ısınma ve günlük tavan |
 | Harita | Google Maps JavaScript API (ToS gereği zorunlu) |
 | Teknoloji | TypeScript, Next.js 15, SQLite + Drizzle, Tailwind + shadcn/ui |
+| Ticari model | Müşteri şirkete faturalı teslim; hesaplar/anahtarlar müşteri adına; yalnızca B2B; kişisel posta adresleri (gmail vb.) hariç; temas başına en fazla 3 e-posta |
 | Uyum | Ülke bazlı politika motoru (DE/AT engelli, ES/IT yalnızca genel adres, UK/TR/FR/NL izinli), çıkış bağlantısı ve suppression zorunlu |
 
 ## Durum

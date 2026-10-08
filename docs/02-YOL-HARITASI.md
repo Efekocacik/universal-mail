@@ -17,9 +17,15 @@ Hafta:  1    2    3    4    5    6    7    8    9    10   11   12
 
 ## Faz 0 — Hazırlık ve hesaplar (1 hafta)
 
-Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin yapacağı adımlardır.
+Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirket adına** açılır (Google Cloud, alan adı, Workspace); geliştirici yalnızca rehberlik eder.
 
-**Hesaplar ve anahtarlar**
+**Sözleşme ve ticari çerçeve (kod yazmadan önce)**
+- [ ] Müşteri ile yazılı sözleşme: kapsam, teslim tarihi, ücret ve fatura kesilecek şirket, fikri mülkiyet (lisans mi devir mi), bakım/destek süresi. Madde listesi: `docs/03-SOZLESME-CERCEVESI.md`.
+- [ ] Sözleşme ve kullanım onayı metnini bir yazılım/bilişim avukatına gözden geçirt (tek seferlik, kısa görüşme yeterli).
+- [ ] Müşteri şirketin ihracat hedef ülkelerini ve ürün gruplarını yazılı al (pilot bölgeleri buna göre seçilecek).
+- [ ] Fatura/vergi konularını müşterinin ve kendi muhasebecinle netleştir.
+
+**Hesaplar ve anahtarlar (müşteri adına)**
 - [ ] Google Cloud projesi aç, faturalandırmayı etkinleştir (kart gerekir; ücretsiz kota için bile zorunlu).
 - [ ] Şu API'leri etkinleştir: **Places API (New)**, **Maps JavaScript API**. (Eski "Places API"yi değil.)
 - [ ] İki ayrı anahtar oluştur: sunucu anahtarı (IP kısıtlı, Places için) ve tarayıcı anahtarı (HTTP referrer `localhost` kısıtlı, Maps JS için).
@@ -27,12 +33,12 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Gönderim için alan adı al (ana marka alan adından **farklı** olması önerilir: `firmaadi-iletisim.com` gibi) ve Google Workspace Starter hesabı aç.
 - [ ] SPF, DKIM, DMARC kayıtlarını ekle (Faz 3'te uygulama bunu kontrol edecek).
 - [ ] Google Cloud'da OAuth istemcisi oluştur (Gmail API, "Desktop app" tipi).
-- [ ] Türkiye gönderimi yapılacaksa İYS'ye hizmet sağlayıcı kaydı başlat (süreç uzun sürebilir).
+- [ ] Türkiye'ye de gönderim istenirse İYS'ye hizmet sağlayıcı kaydı başlat (süreç uzun sürebilir). İhracat odağında genelde gerekmez.
 - [ ] (Faz 5 için) Companies House geliştirici hesabı ve INSEE API hesabı aç.
 
 **Karar ve belge**
 - [ ] SRS'yi oku, Bölüm 3 kategori listesini ve Bölüm 8 ülke listesini kendi önceliklerine göre işaretle.
-- [ ] İlk pilot bölgeleri seç (öneri: Londra, Manchester, İstanbul, Amsterdam — hepsi `allowed` ülkeler).
+- [ ] İlk pilot bölgeleri müşterinin ihracat hedeflerine göre seç (öneri: Londra, Manchester, Amsterdam, Brüksel — hepsi `allowed` ülkeler; Türkiye varsayılan kapalı).
 - [ ] Meşru menfaat değerlendirmesi (LIA) şablonunu doldur (`docs/LIA.md`, Faz 3'te eklenecek).
 
 **Çıktı:** `.env.example` doldurulmuş, anahtarlar hazır, pilot bölge listesi.
@@ -54,7 +60,7 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Yenilik skoru v1 (FUTURE_OPENING, yorum sayısı, snapshot diff).
 - [ ] Keşif ekranı: sol sanal liste + sağ Google Haritası, kümeleme, renkli işaretçiler, temel filtreler (ülke, şehir, kategori, yenilik, businessStatus).
 - [ ] CSV dışa aktarma.
-- [ ] Kurulum sihirbazı v1 (yalnızca Google anahtarları + bütçe).
+- [ ] Kurulum sihirbazı v1 (Google anahtarları, bütçe, gönderen firma profili, hedef ihracat ülkeleri, ilk açılış kullanım onayı).
 
 **Kabul:** Londra "kafe + fırın" taraması ≤ 5 dk, harita ve liste dolu, mor işaretçiler (yakında açılacak) görünüyor, maliyet sayacı artıyor.
 
@@ -87,6 +93,7 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Ülke politikası tablosu (`country_policies`) ve uyum kontrolü; hariç tutma sebepleri ekranı.
 - [ ] Suppression listesi (elle, CSV, otomatik).
 - [ ] Gmail OAuth bağlantısı + SMTP alternatifi; "kendime test gönder".
+- [ ] Kişisel posta alan adlarını (gmail.com vb.) hariç tutma, gönderen profili olmadan gönderimi kilitleme (FR-CMPL-07/08).
 - [ ] Temas sıklığı sınırları (SRS 5.6.1): işletme/alan adı başına en fazla 3 e-posta, 5 gün aralık, 180 gün dinlenme, otomatik durdurma eşikleri, birim testleri.
 - [ ] Gönderim kuyruğu: günlük tavan, ısınma eğrisi, rastgele aralık, alıcı yerel saat penceresi, duraklat/devam/iptal.
 - [ ] Kampanya sihirbazı (4 adım) ve "Başlat" öncesi özet + ilk 5 önizleme.
@@ -146,6 +153,8 @@ Kod yazılmadan önce yapılması gerekenler. Çoğu kullanıcının kendisinin 
 - [ ] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü.
 - [ ] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
 - [ ] Performans testi: 100k lead ile filtreleme < 300 ms.
+- [ ] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca Google, işletme siteleri, sicil API'leri ve posta sunucusuna bağlantı olduğu kanıtlanır (geliştiriciye giden trafik yok).
+- [ ] Teslim paketi: kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kod/lisans devri sözleşmeye göre; bakım dönemi başlangıç tarihi yazılı.
 
 **Kabul:** Temiz bir Mac'te 30 dakikada kurulup ilk tarama yapılır (NFR-06).
 
