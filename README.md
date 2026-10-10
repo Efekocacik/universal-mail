@@ -9,6 +9,9 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
 - [Anlaşma Notu](docs/03-ANLASMA-NOTU.md) — müşteri şirketle yarım sayfalık, resmi olmayan mutabakat notu
 
+## Kurulum modeli
+Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
+
 ## Özet kararlar
 | Konu | Karar |
 |---|---|

@@ -21,6 +21,7 @@ Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirk
 
 **Anlaşma (kod yazmadan önce, yarım sayfa)**
 - [ ] `docs/03-ANLASMA-NOTU.md` doldurulur ve iki taraf onaylar (bedel, fatura şirketi, kodun kimde kalacağı, destek süresi). Resmi sözleşme gerekmez.
+- [ ] Arkadaşının bilgisayarının işletim sistemini (macOS mu Windows mu) ve ona uzaktan/yan yana kurulum yapılıp yapılamayacağını öğren.
 - [ ] Müşteri şirketin ihracat hedef ülkelerini ve ürün gruplarını yazılı al (pilot bölgeleri buna göre seçilecek).
 - [ ] Fatura/vergi konularını müşterinin ve kendi muhasebecinle netleştir.
 
@@ -59,6 +60,7 @@ Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirk
 - [ ] Yenilik skoru v1 (FUTURE_OPENING, yorum sayısı, snapshot diff).
 - [ ] Keşif ekranı: sol sanal liste + sağ Google Haritası, kümeleme, renkli işaretçiler, temel filtreler (ülke, şehir, kategori, yenilik, businessStatus).
 - [ ] CSV dışa aktarma.
+- [ ] **Electron kabuğu + GitHub Actions derleme hattı** (macOS `.dmg`, Windows `.exe`): daha ilk fazda kurulabilir bir sürüm üretilir; arkadaşın bilgisayarında erken test edilir. Derleme bulutta olduğu için geliştirici makinesi yük almaz.
 - [ ] Kurulum sihirbazı v1 (Google anahtarları, bütçe, gönderen firma profili, hedef ihracat ülkeleri, ilk açılış kullanım onayı).
 
 **Kabul:** Londra "kafe + fırın" taraması ≤ 5 dk, harita ve liste dolu, mor işaretçiler (yakında açılacak) görünüyor, maliyet sayacı artıyor.
@@ -145,17 +147,19 @@ Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirk
 
 ## Faz 6 — Paketleme, yedekleme, dokümantasyon (1 hafta)
 
-- [ ] Tek tıklanabilir başlatıcı (macOS `.command`, Windows `.bat`) ve ardından Tauri paketleme denemesi.
+- [ ] Kurulum dosyalarının cilası: simge, ilk açılış rehberi, "imzasız uygulama" uyarısı için ekran görüntülü kurulum rehberi (macOS sağ tık → Aç, Windows SmartScreen).
+- [ ] Otomatik veri klasörü, açılışta otomatik yedek ve göç; "verilerimi de sil" ile kaldırma.
+- [ ] Opsiyonel: kod imzalama (Apple Developer, Windows sertifikası), uyarısız kurulum istenirse.
 - [ ] Şifreli yedekleme/geri yükleme; otomatik haftalık yedek.
-- [ ] `git pull && npm run migrate` güncelleme akışı; göç testleri.
+- [ ] Güncelleme akışı: yeni kurulum dosyası mevcut kurulumun üstüne kurulur, veri korunur; göç testleri.
 - [ ] Veri saklama süresi (12 ay) ve "veriyi sil" akışı.
 - [ ] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü.
 - [ ] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
 - [ ] Performans testi: 100k lead ile filtreleme < 300 ms.
 - [ ] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca Google, işletme siteleri, sicil API'leri ve posta sunucusuna bağlantı olduğu kanıtlanır (geliştiriciye giden trafik yok).
-- [ ] Teslim paketi: kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kodun kimde kalacağı anlaşma notuna göre; bakım dönemi başlangıç tarihi yazılı.
+- [ ] Teslim paketi (kurulum dosyası + rehber): kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kodun kimde kalacağı anlaşma notuna göre; bakım dönemi başlangıç tarihi yazılı.
 
-**Kabul:** Temiz bir Mac'te 30 dakikada kurulup ilk tarama yapılır (NFR-06).
+**Kabul:** Temiz bir bilgisayarda (Node/terminal olmadan) kurulum dosyasıyla 30 dakikada kurulup ilk tarama yapılır (NFR-06); geliştiricinin bilgisayarı kapalıyken de çalışır.
 
 ---
 

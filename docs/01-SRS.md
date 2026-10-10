@@ -7,7 +7,7 @@
 | Tarih | 8 Ekim 2026 |
 | Hedef kullanıcı | Müşteri şirketin yetkilisi (tek kullanıcı); kendi bilgisayarında kurar ve çalıştırır |
 | Ticari model | Geliştirici, yazılımı müşteri şirkete fatura keserek teslim eder (bkz. 1.5 ve `docs/03-ANLASMA-NOTU.md`) |
-| Dağıtım | Özel (private) depo, internete açık sunucu yok; müşteri kendi bilgisayarına kurar, veri geliştiriciye gitmez |
+| Dağıtım | Müşteri, hazır kurulum dosyasını (macOS `.dmg` / Windows `.exe`) kendi bilgisayarına kurar. Geliştiricinin bilgisayarında hiçbir şey çalışmaz; internete açık sunucu yok; veri geliştiriciye gitmez |
 | Depo | https://github.com/Efekocacik/universal-mail.git |
 
 ---
@@ -72,7 +72,8 @@ Yazılım, müşteri şirkete **fatura karşılığı** teslim edilen bir araçt
 2. **Veri yerelde kalır.** Telemetri, uzak günlük, otomatik raporlama yoktur. Destek gerekirse müşteri ekran paylaşır veya veriyi kendisi dışa aktarır.
 3. **Kullanım amacı sınırlıdır.** Yalnızca müşterinin kendi ürünlerinin B2B tanıtımı. Başkası adına gönderim, liste satışı, bireylere gönderim yasaktır (anlaşma notunda ve ilk açılış onayında yazılıdır).
 4. **Uyum varsayılan olarak açıktır.** Ülke politikası, çıkış bağlantısı, temas sınırları ve engel listesi kapatılamaz (Bölüm 5.6.1 ve 8).
-5. **Garanti kapsamı:** Yazılımın belirtilen şekilde çalışması taahhüt edilir; bulunan e-posta sayısı, teslim edilebilirlik, yanıt oranı veya satış sonucu taahhüt edilmez.
+5. **Çalışma yeri müşterinin bilgisayarıdır.** Uygulama yalnızca müşterinin bilgisayarında, uygulama açıkken çalışır. Geliştiricinin bilgisayarında zamanlayıcı, sunucu veya arka plan işlemi çalışmaz; geliştirici yalnızca kodu yazar ve kurulum dosyasını üretir (Bölüm 2.6).
+6. **Garanti kapsamı:** Yazılımın belirtilen şekilde çalışması taahhüt edilir; bulunan e-posta sayısı, teslim edilebilirlik, yanıt oranı veya satış sonucu taahhüt edilmez.
 
 ---
 
@@ -108,8 +109,9 @@ Kullanıcının bilgisayarında çalışan, tarayıcıdan `http://localhost:3000
 Tek kullanıcı: müşteri şirketin yetkilisi (ihracat/satış sorumlusu), teknik uzman değil. Arayüz Türkçe (ikincil İngilizce), adımlar sade, "ne yapmalıyım" sorusunu arayüz kendisi yanıtlamalı. Kurulum tek komut veya tek tıklamayla yapılmalı.
 
 ### 2.3 Çalışma ortamı
-- macOS 13+ veya Windows 10/11 (öncelik macOS, kullanıcının mevcut makinesi).
-- Node.js 20+ (kurulum betiğiyle otomatik kontrol edilir).
+- macOS 13+ veya Windows 10/11 (müşterinin kullandığı sisteme göre; ikisi için de kurulum dosyası üretilir).
+- Node.js veya başka bir yazılımın ayrıca kurulması **gerekmez**; kurulum dosyası her şeyi içerir.
+- Disk: kurulum yaklaşık 300–500 MB, veri tabanı lead sayısına göre birkaç yüz MB.
 - İnternet bağlantısı (API çağrıları için).
 - Google Cloud hesabı + faturalandırma açık (ücretsiz kota için bile zorunlu).
 - Kendi alan adı (örn. `firmaadi.com`) ve bu alan adına bağlı Google Workspace **veya** Microsoft 365 posta kutusu. Kişisel `@gmail.com` adresinden soğuk e-posta gönderimi **tavsiye edilmez** (spam riski ve hesap kapanma riski).
@@ -131,6 +133,20 @@ Tek kullanıcı: müşteri şirketin yetkilisi (ihracat/satış sorumlusu), tekn
 - Türkiye gönderimleri açılırsa müşteri İYS'ye hizmet sağlayıcı olarak kayıt yaptıracaktır.
 - Gönderen kimliği (unvan, adres, vergi/sicil numarası) müşteri şirketin bilgileridir; footer'da bu bilgiler yer alır.
 - Müşteri, Google Cloud ve posta hesaplarını kendi adına açar ve kendi kartıyla faturalandırır.
+
+### 2.6 Dağıtım ve kurulum modeli
+
+| Konu | Karar |
+|---|---|
+| Biçim | Masaüstü uygulaması (Electron). Müşteri bir kurulum dosyasını indirir, çift tıklar, uygulama açılır. Komut satırı, Node, terminal gerekmez. |
+| Üretim | Kurulum dosyaları geliştiricinin bilgisayarında değil, **GitHub Actions** ile bulutta (macOS ve Windows) derlenir; sonuç GitHub Release olarak yayımlanır. Geliştirici makinesi sadece kod yazmak için kullanılır, derleme/çalıştırma yükü orada oluşmaz. |
+| Teslim | Release dosyası müşteriye doğrudan link/dosya olarak verilir; depo özel olduğu için müşteri isterse depoya "okuma" yetkisiyle eklenir. |
+| Veri yeri | İşletim sisteminin kullanıcı veri klasörü (macOS: `~/Library/Application Support/UniversalMail`, Windows: `%APPDATA%\UniversalMail`). Veritabanı, ayarlar, yedekler burada. |
+| Çalışma | Uygulama açıkken çalışır (tarama, zamanlayıcı, gönderim kuyruğu). Kapatılınca hiçbir şey çalışmaz; sonraki açılışta kaçan işler telafi edilir (FR-DIS-07). Bilgisayar açılışında otomatik başlama **varsayılan kapalı**, ayarlardan açılabilir. |
+| Güncelleme | Yeni sürüm = yeni kurulum dosyası; üstüne kurulur, veri korunur, veritabanı göçleri uygulama açılırken otomatik çalışır ve öncesinde otomatik yedek alınır. |
+| Kaldırma | Uygulama normal şekilde silinir; veri klasörü için "verilerimi de sil" seçeneği sunulur. |
+| İmzalama | Kurulum dosyaları başlangıçta **imzasız** olur. İlk açılışta macOS "tanımlanamayan geliştirici" (sağ tık → Aç), Windows SmartScreen "Yine de çalıştır" uyarısı gösterebilir. Rehberde ekran görüntülü anlatılır. Uyarısız deneyim için Apple Developer (~99 USD/yıl) ve Windows kod imzalama sertifikası gerekir; müşteri isterse sonradan eklenir. |
+| Tarayıcı bileşeni | Dinamik siteleri okumak için ayrı Chromium indirilmez; Electron'un kendi gizli penceresi kullanılır (Playwright zorunlu değil). |
 
 ---
 
@@ -263,7 +279,7 @@ Lead'in web sitesi/menüsünden 1–2 cümlelik kişisel giriş üretmek için C
 ### 5.1 Kurulum ve ayarlar
 | ID | Gereksinim | Öncelik |
 |---|---|---|
-| FR-SET-01 | Uygulama tek komutla (`npm run setup && npm start`) veya çift tıklanabilir başlatıcı ile kurulur; Node sürümünü kontrol eder, veritabanını oluşturur. | Z |
+| FR-SET-01 | Uygulama hazır kurulum dosyası (macOS `.dmg`, Windows `.exe`) ile kurulur; ek yazılım gerektirmez. İlk açılışta veri klasörünü ve veritabanını kendisi oluşturur. Geliştirme ortamı için ayrıca `npm run setup` komutu bulunur. | Z |
 | FR-SET-02 | İlk açılışta "Kurulum Sihirbazı": Google API anahtarı, gönderim hesabı (Gmail OAuth veya SMTP), firma bilgileri (unvan, adres, MERSİS no, telefon), varsayılan dil. | Z |
 | FR-SET-03 | API anahtarları ve OAuth token'ları işletim sistemi anahtarlığında (macOS Keychain / Windows Credential Manager) veya şifreli dosyada saklanır; düz metin `.env` içinde **tutulmaz**. | Z |
 | FR-SET-04 | Google anahtarı girildiğinde test çağrısı yapılır; faturalandırma/kota hatası anlaşılır Türkçe mesajla gösterilir. | Z |
@@ -393,10 +409,11 @@ Bu kurallar `tests/` içinde birim testle doğrulanır (aynı lead'e 4. e-posta 
 | NFR-04 | Dayanıklılık | Tüm dış çağrılar üstel geri çekilme ile 3 kez denenir; 429/kota hatalarında tarama otomatik duraklar. |
 | NFR-05 | Maliyet güvenliği | Bütçe sayacı her çağrıyı SKU'ya göre tahmini fiyatla kaydeder; tavan aşımında dış çağrı yapılmaz. |
 | NFR-06 | Kullanılabilirlik | Teknik olmayan kullanıcı, rehberle 30 dakikada ilk taramayı tamamlayabilmeli. |
-| NFR-07 | Taşınabilirlik | macOS ve Windows; Linux "çalışır ama test edilmez". |
+| NFR-07 | Taşınabilirlik | macOS ve Windows için ayrı kurulum dosyası; Linux "çalışır ama test edilmez". |
 | NFR-08 | Bakım | TypeScript, ESLint, Prettier; birim testleri (Vitest) kritik modüllerde (skorlama, uyum kontrolü, e-posta çıkarma) ≥ %80 kapsama. |
 | NFR-09 | Yerelleştirme | Arayüz TR/EN; şablonlar çok dilli; tarih/saat alıcı saat dilimine göre. |
-| NFR-10 | Güncellenebilirlik | `git pull && npm run migrate` ile sürüm yükseltme; veritabanı göçleri geriye uyumlu. |
+| NFR-10 | Güncellenebilirlik | Yeni kurulum dosyasını mevcut kurulumun üstüne kurmak yeterli; veri korunur, veritabanı göçleri otomatik ve geriye uyumlu, öncesinde otomatik yedek alınır. |
+| NFR-11 | Geliştirici makinesi | Dağıtım için geliştiricinin bilgisayarında hiçbir servis, zamanlayıcı veya sunucu çalışmaz; derleme GitHub Actions'ta yapılır. Geliştirme sırasında `node_modules` ve derleme çıktıları depoya girmez (`.gitignore`). |
 
 ---
 
@@ -495,7 +512,7 @@ Gönderen gerçek adı ve firma unvanı, fiziksel posta adresi, çalışan çık
 | E-posta | `googleapis` (Gmail), `nodemailer` (SMTP), `mailparser` (gelen) | |
 | Arayüz bileşenleri | Tailwind CSS + shadcn/ui + TanStack Table/Virtual | Hızlı, erişilebilir, sanal kaydırma |
 | Test | Vitest, Playwright (e2e) | |
-| Paketleme | v1: `npm start` + başlatıcı betik; v2: Tauri ile tek tıklanabilir masaüstü uygulaması | |
+| Paketleme | Electron + electron-builder; Next.js "standalone" çıktısı uygulamanın içinde yerel sunucu olarak çalışır. Derleme: GitHub Actions (macOS ve Windows). Tauri değerlendirildi, Node tabanlı işçi/tarayıcı kodunu içine gömmek zor olduğu için reddedildi | |
 
 Alternatif değerlendirildi: Python (FastAPI) + React. Scraping tarafında güçlü ancak iki dil/iki paket yöneticisi tek kişilik bakım yükünü artırır. Reddedildi.
 
@@ -559,6 +576,7 @@ Bütçe tavanı bu senaryoları kullanıcıya taramadan önce gösterir. Not: Au
 11. Gönderen firma profili ve ilk açılış kullanım onayı tamamlanmadan gönderim açılamaz; onay audit log'da görünür.
 12. gmail.com gibi kişisel adresler kampanyaya alınmaz ve sebebi lead'de yazar.
 13. Temiz kurulumda uygulamanın hiçbir geliştirici sunucusuna bağlanmadığı ağ trafiği izlenerek doğrulanır.
+14. Müşterinin bilgisayarında, Node veya terminal olmadan, yalnızca kurulum dosyasıyla kurulum yapılır ve ilk açılış sihirbazına ulaşılır; bu sırada geliştiricinin bilgisayarı kapalıdır.
 
 ---
 
