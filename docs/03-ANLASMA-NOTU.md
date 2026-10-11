@@ -1,18 +1,67 @@
-# Anlaşma Notu (yarım sayfa, resmi sözleşme değil)
+# Universal Mail — Anlaşma Notu
 
-Amaç: iki taraf da baştan neyin kimde olduğunu bilsin; ileride yanlış anlaşılma olmasın. İki tarafın WhatsApp/e-posta ile "tamamdır" demesi yeterlidir.
+**Amaç:** Projeye başlamadan önce temel konularda anlaşmak ve ileride herhangi bir yanlış anlaşılma yaşanmamasını sağlamak. Bu belge, iki tarafın üzerinde konuştuğu konuları kısaca kayıt altına almak için hazırlanmıştır.
 
-1. **Ne yapılıyor:** Müşteri şirketin yurt dışı dağıtımı için, yeni açılan işletmeleri bulan ve onlara B2B e-posta gönderen yerel bir yazılım. Kapsam `docs/01-SRS.md` içindeki MVP kabul kriterleridir.
-2. **Hesaplar müşteride:** Google Cloud, alan adı ve posta hesapları müşteri şirketin adına açılır. Bu servislerin ücretleri müşteriye aittir.
-3. **Gönderen müşteridir:** Kime, ne içerikle, kaç e-posta gideceğine müşteri şirket karar verir. Alıcı şikâyetleri veya mevzuat konularında muhatap gönderen şirkettir.
-4. **Yazılım yalnızca kendi ürünleri için:** Müşteri yazılımı sadece kendi ürünlerinin işletmelere (B2B) tanıtımı için kullanır. Bireylere gönderim, başkası adına gönderim ve uyum ayarlarını kapatma yoktur.
-5. **Sonuç garanti edilmez:** Bulunacak işletme sayısı, e-postaların spam'e düşmemesi, yanıt veya satış sonucu taahhüt edilmez. Google gibi servisler kural veya fiyat değiştirirse yazılımın uyarlanması gerekebilir.
-6. **Veri müşteride kalır:** Yazılım hiçbir veriyi geliştiriciye göndermez. Destek gerekirse müşteri ekranını kendisi paylaşır.
-7. **Bedel ve fatura:** Tutar, ödeme zamanı ve faturanın hangi şirket adına kesileceği: ______
-8. **Kaynak kod ve destek:** Kodun kimde kalacağı (müşteri kullanır, kod geliştiricide mi kalır, yoksa devir mi) ve ilk ... ay hata düzeltme desteği: ______
+### 1. Projenin Kapsamı
 
-Tarih: ______   Geliştirici: ______   Müşteri şirket yetkilisi: ______
+Müşteri şirketin ürünlerini yurt dışındaki işletmelere tanıtabilmesi için yeni açılan veya potansiyel müşteri olabilecek işletmeleri bulan ve B2B e-posta gönderimini kolaylaştıran bir yazılım geliştirilecektir.
+
+Projenin özellikleri `docs/01-SRS.md`, geliştirme aşamaları ise `docs/02-YOL-HARITASI.md` dosyasında açıklanmıştır.
+
+### 2. Hesaplar ve Giderler
+
+Google Cloud, e-posta ve alan adı gibi gerekli hesaplar müşteri şirket adına açılacaktır. Bu hizmetlerin kullanım ve abonelik ücretleri müşteri tarafından karşılanacaktır.
+
+### 3. Yazılımın Kullanımı
+
+Yazılım, müşteri şirketin kendi ürünlerini işletmelere tanıtması amacıyla kullanılacaktır.
+
+Gönderilecek e-postaların içeriği, hedef işletmeler ve kampanyalar müşteri tarafından belirlenecektir. Yazılım geliştirilirken ilgili ülkelerin iletişim kuralları ve veri gizliliği gereklilikleri dikkate alınacaktır.
+
+### 4. Beklentiler
+
+Yazılımın belirlenen özelliklere uygun şekilde çalışması hedeflenmektedir. Ancak bulunabilecek işletme sayısı, e-postalara dönüş oranı veya elde edilecek satış miktarı önceden garanti edilemez.
+
+Google ve diğer hizmetlerin kullanım koşullarında değişiklik olması durumunda gerekli düzenlemeler birlikte değerlendirilecektir.
+
+### 5. Verilerin Saklanması
+
+Yazılım yerel olarak çalışacak ve müşteri verileri geliştiriciye otomatik olarak gönderilmeyecektir.
+
+Uygulamanın çalışması için gerekli harici servislerle bağlantı kurulabilecektir. Teknik destek gerektiğinde müşteriyle birlikte çözüm üretilecektir.
+
+### 6. Proje Bedeli
+
+**Toplam ücret:** ....................................
+
+**Ödeme şekli ve zamanı:** ....................................
+
+**Fatura bilgileri (gerekiyorsa):** ....................................
+
+### 7. Kaynak Kod ve Destek
+
+Yazılımın kaynak kodunun kimde kalacağı ve müşterinin kullanım hakları birlikte kararlaştırılacaktır.
+
+**Kaynak kod konusunda anlaşma:** ....................................
+
+**Teslim tarihi:** ....................................
+
+**Teslim sonrası destek süresi:** ....................................
+
+Teslim sonrasında ortaya çıkabilecek hatalar belirlenen destek süresi içinde giderilecektir. Yeni özellikler veya büyük değişiklikler gerektiğinde ayrıca konuşulacaktır.
+
+### 8. Teslim ve Onay
+
+Proje tamamlandığında yazılımın kurulum dosyası ve kullanım rehberi müşteriyle paylaşılacak, ilk kurulum ve kullanım birlikte gerçekleştirilecektir.
+
+Proje kapsamındaki önemli değişiklikler iki tarafın görüşmesiyle kararlaştırılacaktır.
 
 ---
 
-Not: Ürün ticari olarak başka şirketlere de satılacak veya hacim ciddi şekilde büyüyecek olursa, o aşamada bir avukata kısa bir görüşme yaptırmak mantıklıdır. Arkadaş şirketi için tek seferlik teslimde bu not yeterlidir.
+**Tarih:** ....................................
+
+**Geliştirici:** ....................................
+
+**Müşteri şirket yetkilisi:** ....................................
+
+**Karşılıklı onay:** ....................................
