@@ -28,6 +28,8 @@ Kod yazılmadan önce yapılması gerekenler. Hesap adımları **müşteri şirk
 
 **Hesaplar ve anahtarlar (müşteri adına)**
 
+Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). Sıra önemlidir: önce alan adı, sonra Workspace, sonra Google Cloud (Gmail bağlantısının "Internal" türünde, Google doğrulaması gerektirmeden çalışması için proje Workspace kuruluşuna ait olmalı). Bütçe uyarısı harcamayı durdurmaz; bu yüzden **günlük kota sınırları** da konur.
+
 - [ ] Google Cloud projesi aç, faturalandırmayı etkinleştir (kart gerekir; ücretsiz kota için bile zorunlu).
 - [ ] Şu API'leri etkinleştir: **Places API (New)**, **Maps JavaScript API**. (Eski "Places API"yi değil.)
 - [ ] Places API (New) ve Maps JavaScript API için ayrı anahtarlar oluştur; Electron/yerel uygulama ortamında uygulanabilir anahtar ve API kısıtlarını doğrula. Yerel istemciye gömülü anahtarların tamamen gizli tutulamayacağını hesaba kat.
