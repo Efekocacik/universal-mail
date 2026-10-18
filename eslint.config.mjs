@@ -13,6 +13,7 @@ const config = [
       "node_modules/**",
       ".data/**",
       "coverage/**",
+      "e2e/dev/**",
       "test-results/**",
       "playwright-report/**",
       "drizzle/**",

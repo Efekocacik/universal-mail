@@ -16,7 +16,6 @@ export async function installFakeGoogleMaps(page: Page): Promise<void> {
   // tsx/esbuild, adlandırılmış sınıf ve işlevlere `__name(...)` çağrısı ekler; sayfada tanımlı olmadığından önce tanımlanır.
   await page.addInitScript("window.__name = window.__name || function (f) { return f; };");
   await page.addInitScript(() => {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
     const w = window as any;
     const MAP_EVENTS = [
       "bounds_changed",
@@ -67,6 +66,8 @@ export async function installFakeGoogleMaps(page: Page): Promise<void> {
       shapes: [] as any[],
       fitBoundsCalls: [] as any[],
     });
+
+    type Handler = (...args: any[]) => void;
 
     class LatLng {
       constructor(a: any, b?: any) {
@@ -172,11 +173,11 @@ export async function installFakeGoogleMaps(page: Page): Promise<void> {
 
     class Evented {
       _valid: Set<string>;
-      _handlers = new Map<string, Set<Function>>();
+      _handlers = new Map<string, Set<Handler>>();
       constructor(valid: string[]) {
         this._valid = new Set(valid);
       }
-      addListener(name: string, fn: Function) {
+      addListener(name: string, fn: Handler) {
         if (!this._valid.has(name))
           log.violations.push(
             `${this.constructor.name}.addListener("${name}"): belgelenmiş bir olay değil`,
@@ -482,8 +483,8 @@ export async function installFakeGoogleMaps(page: Page): Promise<void> {
     OverlayView.prototype.onRemove = function () {};
 
     const event = {
-      addListener: (obj: any, name: string, fn: Function) => obj.addListener(name, fn),
-      addListenerOnce: (obj: any, name: string, fn: Function) => {
+      addListener: (obj: any, name: string, fn: Handler) => obj.addListener(name, fn),
+      addListenerOnce: (obj: any, name: string, fn: Handler) => {
         const l = obj.addListener(name, (...a: any[]) => {
           l.remove();
           fn(...a);
