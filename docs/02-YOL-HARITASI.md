@@ -56,20 +56,22 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Teknik işler**
 
-- [ ] Proje iskeleti: Next.js 15 + TypeScript + Tailwind + shadcn/ui + Drizzle/SQLite. `npm run setup` betiği.
-- [ ] Veri modeli: `regions`, `category_sets`, `scans`, `places`, `place_snapshots`, `leads`, `api_usage`, `settings`. Google kaynaklı alanları diğer kaynaklardan ayır; saklama ve dışa aktarma kurallarını veri kaynağına göre uygula.
-- [ ] Places (New) REST istemcisi; `DISCOVERY` ve `ENRICH` field mask'leri sabit olarak kodda.
-- [ ] Şehir → sınır kutusu listesi (Avrupa + Türkiye, ~500 şehir; açık veri setinden türetilir).
-- [ ] Izgara bölücü: sınır kutusu → uyarlanabilir hücreler → Text Search/Nearby çağrıları; `includeFutureOpeningBusinesses: true`.
-- [ ] Tarama öncesi çağrı/maliyet tahmini; bütçe sayacı; tavan aşımında durdurma.
-- [ ] Uygulamanın yönettiği yerel worker süreci (`worker.ts`) + SQLite kuyruk tablosu; harici Redis kullanılmadan kaldığı yerden devam.
-- [ ] Yenilik skoru v1 (FUTURE_OPENING, yorum sayısı, snapshot diff). Kullanıcının manuel başlattığı ikinci taramada önceki sonuçlarla karşılaştırma yap; zamanlanmış tekrar taramayı Faz 4'e bırak.
-- [ ] Keşif ekranı: sol sanal liste + sağ Google Haritası, kümeleme, renkli işaretçiler, temel filtreler (ülke, şehir, kategori, yenilik, businessStatus). Harita üzerinde dikdörtgen/daire çizerek tarama bölgesi belirleme (FR-DIS-01, FR-UI-03).
-- [ ] CSV dışa aktarma.
-- [ ] **Electron kabuğu + GitHub Actions derleme hattı** (macOS `.dmg`, Windows `.exe`): daha ilk fazda kurulabilir bir sürüm üretilir; arkadaşın bilgisayarında erken test edilir. Derleme bulutta olduğu için geliştirici makinesi yük almaz.
-- [ ] Kurulum sihirbazı v1 (Google anahtarları, bütçe, gönderen firma profili, hedef ihracat ülkeleri, ilk açılış kullanım onayı).
+- [x] Proje iskeleti: Next.js 15 + TypeScript + Tailwind + shadcn/ui + Drizzle/SQLite. `npm run setup` betiği.
+- [x] Veri modeli: `regions`, `category_sets`, `scans`, `places`, `place_snapshots`, `leads`, `api_usage`, `settings`. Google kaynaklı alanları diğer kaynaklardan ayır; saklama ve dışa aktarma kurallarını veri kaynağına göre uygula.
+- [x] Places (New) REST istemcisi; `DISCOVERY` ve `ENRICH` field mask'leri sabit olarak kodda.
+- [x] Şehir → sınır kutusu listesi (Avrupa + Türkiye, ~500 şehir; açık veri setinden türetilir).
+- [x] Izgara bölücü: sınır kutusu → uyarlanabilir hücreler → Text Search/Nearby çağrıları; `includeFutureOpeningBusinesses: true`.
+- [x] Tarama öncesi çağrı/maliyet tahmini; bütçe sayacı; tavan aşımında durdurma.
+- [x] Uygulamanın yönettiği yerel worker süreci (`worker.ts`) + SQLite kuyruk tablosu; harici Redis kullanılmadan kaldığı yerden devam.
+- [x] Yenilik skoru v1 (FUTURE_OPENING, yorum sayısı, snapshot diff). Kullanıcının manuel başlattığı ikinci taramada önceki sonuçlarla karşılaştırma yap; zamanlanmış tekrar taramayı Faz 4'e bırak.
+- [x] Keşif ekranı: sol sanal liste + sağ Google Haritası, kümeleme, renkli işaretçiler, temel filtreler (ülke, şehir, kategori, yenilik, businessStatus). Harita üzerinde dikdörtgen/daire çizerek tarama bölgesi belirleme (FR-DIS-01, FR-UI-03).
+- [x] CSV dışa aktarma.
+- [x] **Electron kabuğu + GitHub Actions derleme hattı** (macOS `.dmg`, Windows `.exe`): daha ilk fazda kurulabilir bir sürüm üretilir; arkadaşın bilgisayarında erken test edilir. Derleme bulutta olduğu için geliştirici makinesi yük almaz.
+- [x] Kurulum sihirbazı v1 (Google anahtarları, bütçe, gönderen firma profili, hedef ihracat ülkeleri, ilk açılış kullanım onayı).
 
 **Kabul:** Londra "kafe + fırın" taraması ≤ 5 dk, harita ve liste dolu, mor işaretçiler (yakında açılacak) görünüyor, maliyet sayacı artıyor.
+
+**Durum (19 Ekim 2026):** Faz 1 `feat/faz-1` dalında tamamlandı ve **demo sağlayıcıyla** doğrulandı: tarama, liste, harita, ikinci taramada yeni tespit, CSV, kurulum sihirbazı ve macOS paketi uçtan uca testlerden geçti. Gerçek Google anahtarıyla ilk deneme (Google Haritası görünümü, tür adları, `openingDate`) Faz 0 hesapları açılınca yapılacak. Ayrıntılar, SRS'den sapmalar ve bilinen sınırlar: [`05-FAZ1-NOTLARI.md`](05-FAZ1-NOTLARI.md).
 
 ---
 
