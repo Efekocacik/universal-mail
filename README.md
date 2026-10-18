@@ -22,7 +22,7 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 | E-posta bulma | İşletmenin kendi web sitesini tarama (ücretsiz); opsiyonel Hunter/Snov |
 | Gönderim | Kendi alan adı + Google Workspace (Gmail API) veya SMTP; ısınma ve günlük tavan |
 | Harita | Google Maps JavaScript API (ToS gereği zorunlu) |
-| Teknoloji | TypeScript, Next.js 15, SQLite + Drizzle, Tailwind + shadcn/ui |
+| Teknoloji | TypeScript, Next.js 15, SQLite + Drizzle, Tailwind 4, Electron (masaüstü paketi) |
 | Ticari model | Müşteri şirkete faturalı teslim; hesaplar/anahtarlar müşteri adına; yalnızca B2B; kişisel posta adresleri (gmail vb.) hariç; temas başına en fazla 3 e-posta |
 | Uyum | Ülke bazlı politika motoru (DE/AT engelli, ES/IT yalnızca genel adres, UK/TR/FR/NL izinli), çıkış bağlantısı ve suppression zorunlu |
 
