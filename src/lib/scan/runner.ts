@@ -215,7 +215,8 @@ async function runUnit(
     collected += res.places.length;
     token = res.nextPageToken;
 
-    await sleep(deps.minIntervalMs ?? 150);
+    // Kibar hız sınırı yalnızca gerçek Google çağrıları için gerekir; demo sağlayıcıda kısa tutulur.
+    await sleep(deps.minIntervalMs ?? (provider.id === "mock" ? 20 : 150));
   } while (token && collected < cap);
 
   const saturated = collected >= cap;

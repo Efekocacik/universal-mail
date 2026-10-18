@@ -50,6 +50,30 @@ function usePanelWidth(): [number, (w: number) => void] {
   return [width, set];
 }
 
+/**
+ * Sayfa düzeyinde klavye kısayolları. Liste ekrandan kalksa (ayrıntı açıkken) bile çalışır.
+ * Esc: önce çizim modunu kapatır, sonra seçili işletmeyi bırakır. Metin alanları ve diyaloglar etkilenmez.
+ */
+function GlobalKeys() {
+  const ex = useExplore();
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      if (
+        (e.target as HTMLElement).closest(
+          "input, textarea, select, [contenteditable=true], [role=dialog], [role=listbox]",
+        )
+      )
+        return;
+      if (ex.drawMode) ex.setDrawMode(null);
+      else if (ex.selectedId !== null) ex.select(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [ex]);
+  return null;
+}
+
 function LeftPanel() {
   const ex = useExplore();
   const showDetail = ex.tab === "list" && ex.selectedId !== null;
@@ -159,6 +183,7 @@ function Layout() {
 export function ExplorePage({ initialScanId }: { initialScanId?: number }) {
   return (
     <ExploreProvider initialScanId={initialScanId}>
+      <GlobalKeys />
       <Layout />
     </ExploreProvider>
   );

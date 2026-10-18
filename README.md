@@ -27,4 +27,14 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 | Uyum | Ülke bazlı politika motoru (DE/AT engelli, ES/IT yalnızca genel adres, UK/TR/FR/NL izinli), çıkış bağlantısı ve suppression zorunlu |
 
 ## Durum
-Faz 0 (hazırlık). Henüz kod yok; önce `docs/02-YOL-HARITASI.md` içindeki Faz 0 listesi tamamlanmalı.
+**Faz 1 tamamlandı** (`feat/faz-1` dalı): şehir/harita seçimi, tarama, liste + harita, yeni işletme tespiti, CSV, kurulum sihirbazı ve masaüstü paketi. Demo sağlayıcıyla uçtan uca doğrulandı; gerçek Google anahtarıyla ilk deneme Faz 0 hesapları açılınca yapılacak. Ayrıntılar: [Faz 1 Notları](docs/05-FAZ1-NOTLARI.md).
+
+## Geliştirme
+```bash
+npm run setup      # .env.local + veritabanı (ilk kez)
+npm run dev        # http://127.0.0.1:3000 (web + arka plan işçisi)
+npm test           # birim ve entegrasyon testleri
+npm run build && npx playwright test   # uçtan uca testler
+npm run dist       # macOS/Windows kurulum paketi (bulutta: GitHub Actions)
+```
+İlk denemede kurulum sihirbazında **Demo modu**'nu seçin: Google anahtarı olmadan yapay verilerle tüm akışı görebilirsiniz.

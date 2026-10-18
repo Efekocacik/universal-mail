@@ -31,7 +31,8 @@
     "dist:dir": "npm run build && electron-builder --dir --publish never",
     "build:standalone": "node scripts/prepare-standalone.mjs",
     "smoke": "node scripts/smoke.mjs",
-    "icon": "node scripts/make-icon.mjs"
+    "icon": "node scripts/make-icon.mjs",
+    "bench": "tsx scripts/bench.mts"
   },
   "dependencies": {},
   "devDependencies": {

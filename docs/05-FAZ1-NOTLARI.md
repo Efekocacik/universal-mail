@@ -1,6 +1,6 @@
 # Faz 1 — Uygulama Notları ve Devam Listesi
 
-**Durum (18 Ekim 2026):** Çalışma `feat/faz-1` dalında, **GitHub'a gönderilmedi**. Faz 1 işlevsel olarak büyük ölçüde bitti; aşağıdaki "Kalan işler" tamamlanınca dal `main`'e birleştirilebilir.
+**Durum (19 Ekim 2026):** Faz 1 `feat/faz-1` dalında tamamlandı. Demo sağlayıcıyla uçtan uca doğrulandı. Aşağıdaki "Kalan işler" (çoğu gerçek Google anahtarı ve bulut derlemesi gerektirir) dışında bitti.
 
 ## 1. Ne yapıldı
 
@@ -19,23 +19,24 @@
 | Kurulum sihirbazı v1 (onay, firma, pazarlar, Google, bütçe) | ✔ | Onay olmadan veri toplama çalışmaz |
 | Demo modu (yapay veri) | ✔ | Anahtarsız deneme ve test için |
 | Electron kabuğu + paketleme | ✔ (macOS arm64) | Paketli uygulama duman testini ve pencere testini geçti |
-| GitHub Actions derleme hattı | ✖ | Yazılmadı (aşağıda) |
+| GitHub Actions derleme hattı | ✔ (yazıldı) | `.github/workflows/ci.yml`; **henüz bulutta çalıştırılmadı** (dal itilince ilk kez çalışır) |
 
-**Testler:** 159 birim/entegrasyon testi geçiyor, kritik modüllerde kapsam %95,9 (hedef %80). Playwright uçtan uca paketi yazıldı (`e2e/app.spec.ts`): 3 geçti, 1 başarısız (aşağıdaki hata), 5 çalıştırılamadı.
+**Performans (NFR-03, `npm run bench`):** 100.000 kayıtlık sentetik veritabanında liste, filtre, metin araması, harita kutusu ve harita noktası sorguları 15–98 ms, süzgeç sayıları (facet) 176 ms; hedef < 300 ms karşılandı. Kurulum paketi: macOS `.dmg` yaklaşık 141 MB.
 
-## 2. Bilinen hata (devam ederken ilk iş)
+**Testler:** 165 birim/entegrasyon testi geçiyor, kritik modüllerde kapsam %95,9 (hedef %80). Playwright uçtan uca paketi (`e2e/app.spec.ts`) 9/9 geçiyor. Paketlenmiş macOS uygulaması duman testini (`npm run smoke`) ve pencere testini geçti.
 
-**Esc tuşu işletme ayrıntısını kapatmıyor.** Klavye dinleyicisi (`J`/`K`/`Esc`) `LeadList` bileşeninde; ayrıntı açılınca `LeadList` ekrandan kalktığı için dinleyici de kalkıyor. Çözüm: dinleyiciyi `ExplorePage` / `LeftPanel` düzeyine taşımak. Sonra `npx playwright test` baştan koşulmalı; kalan 5 test bu hatanın arkasında kaldı.
+## 2. Çözülen hata
+
+Esc tuşu ayrıntıyı kapatmıyordu: dinleyici, ayrıntı açılınca ekrandan kalkan liste bileşenindeydi. Dinleyici sayfa düzeyine (`GlobalKeys`) taşındı; Esc artık önce çizim modunu, sonra seçili işletmeyi kapatır. E2E testi bunu kapsar.
 
 ## 3. Kalan işler (sırayla)
 
-1. Esc hatasını düzelt, e2e paketini baştan çalıştır.
-2. `.github/workflows/ci.yml`: ubuntu'da `typecheck`, `lint`, `format:check`, `test:coverage`, e2e; macOS ve Windows matrisinde `npm run dist` + `npm run smoke`; çıktıları artifact olarak yükle; `v*` etiketinde `gh release create`.
-3. Windows doğrulaması (hiç denenmedi): libsql dosya yolu, NSIS kurulumu, duman testi. Bunu CI'ın Windows işi gösterecek.
-4. Gerçek Google anahtarıyla ilk deneme (Faz 0 hesapları tamamlanınca): Ayarlar → "Anahtarı test et"; küçük bir tarama; tür adlarının (örn. `tea_house`) ve `openingDate` alanının doğrulanması; Google Haritası'nda işaretçi, kümeleme ve çizimin görsel testi.
-5. README ve yol haritası kutucuklarını güncelle; SRS'ye aşağıdaki sapmaları işle.
-6. `npm audit` ve güvenlik gözden geçirmesi; içerik güvenlik politikası (CSP) Faz 6'ya bırakıldı çünkü Google Maps ile birlikte gerçek anahtarla denenmeden güvenli yazılamaz.
-7. Dalı `main`'e birleştirmek için PR aç (kullanıcı onayıyla).
+1. **Dalı GitHub'a gönder ve bulut hattını ilk kez çalıştır** (kullanıcı onayıyla). Windows paketi, NSIS kurulumu ve Windows duman testi ilk kez orada denenecek; libsql dosya yolu Windows'ta doğrulanmadı (macOS'ta Türkçe harf, boşluk, `%`, `#`, `?` içeren yollar testle doğrulandı).
+2. **Gerçek Google anahtarıyla ilk deneme** (Faz 0 hesapları tamamlanınca): Ayarlar → "Anahtarı test et"; küçük bir tarama; tür adlarının (örn. `tea_house`) ve `openingDate` alanının doğrulanması; Google Haritası'nda işaretçi, kümeleme ve çizimin görsel testi.
+3. SRS'ye aşağıdaki sapmaları işle (SRS'yi başka bir kişi güncellediği için ayrı, küçük bir PR olarak).
+4. `npm audit` ve güvenlik gözden geçirmesi; içerik güvenlik politikası (CSP) Faz 6'ya bırakıldı çünkü Google Maps ile birlikte gerçek anahtarla denenmeden güvenli yazılamaz.
+5. Dalı `main`'e birleştirmek için PR aç (kullanıcı onayıyla).
+6. İsteğe bağlı: Intel Mac paketi (x64 koşucu), kod imzalama.
 
 ## 4. SRS'den sapmalar ve kararlar
 

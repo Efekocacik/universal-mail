@@ -12,6 +12,9 @@ const config = [
       "release/**",
       "node_modules/**",
       ".data/**",
+      "coverage/**",
+      "test-results/**",
+      "playwright-report/**",
       "drizzle/**",
       "next-env.d.ts",
     ],
@@ -25,6 +28,11 @@ const config = [
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
     },
+  },
+  {
+    // Testlerde dış JSON yanıtları gevşek tipli okunur.
+    files: ["tests/**/*.ts", "e2e/**/*.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "off" },
   },
 ];
 

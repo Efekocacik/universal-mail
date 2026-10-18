@@ -222,20 +222,18 @@ describe("sağlayıcı fabrikası ve zenginleştirme uç durumları", () => {
 
   it("var olmayan işletme atlanır; sağlayıcı null dönerse atlanır; 'invalid' hata atlanır; diğer hatalar fırlatılır", async () => {
     const now = Date.now();
-    await db
-      .insert(places)
-      .values({
-        placeId: "p1",
-        source: "demo",
-        name: "A",
-        lat: 1,
-        lng: 2,
-        types: [],
-        googleFetchedAt: now,
-        firstSeenAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
+    await db.insert(places).values({
+      placeId: "p1",
+      source: "demo",
+      name: "A",
+      lat: 1,
+      lng: 2,
+      types: [],
+      googleFetchedAt: now,
+      firstSeenAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
     await db
       .insert(leads)
       .values({ placeId: "p1", source: "demo", createdAt: now, updatedAt: now });

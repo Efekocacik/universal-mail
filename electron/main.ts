@@ -83,6 +83,20 @@ function dataDir(): string {
  * hale gelir; yeni anahtar üretilir ve kullanıcıdan API anahtarlarını yeniden girmesi beklenir.
  */
 function loadMasterKey(): string {
+  try {
+    return loadMasterKeyUnsafe();
+  } catch (e) {
+    if (!SMOKE) throw e;
+    // Duman testi (CI): anahtarlık erişilemezse geçici, kalıcı olmayan anahtarla devam et.
+    log(
+      "main",
+      `UYARI: güvenli depolama hatası (${(e as Error).message}); geçici anahtar kullanılıyor.`,
+    );
+    return crypto.randomBytes(32).toString("hex");
+  }
+}
+
+function loadMasterKeyUnsafe(): string {
   if (!safeStorage.isEncryptionAvailable()) {
     if (SMOKE) {
       log("main", "UYARI: güvenli depolama yok; duman testi için geçici anahtar kullanılıyor.");

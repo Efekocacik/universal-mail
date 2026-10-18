@@ -120,7 +120,7 @@ export function LeadList() {
     [rows, ex],
   );
 
-  // Klavye: J/K gezinme, Esc seçimi kaldır (FR-UI-05). Metin alanlarında devre dışı.
+  // Klavye: J/K ile liste gezinme (FR-UI-05). Metin alanlarında devre dışı. Esc, ExplorePage'deki GlobalKeys'te işlenir.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement;
@@ -132,8 +132,6 @@ export function LeadList() {
       } else if (e.key === "k" || e.key === "K") {
         e.preventDefault();
         move(-1);
-      } else if (e.key === "Escape") {
-        ex.select(null);
       }
     };
     window.addEventListener("keydown", onKey);
