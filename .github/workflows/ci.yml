@@ -1,11 +1,11 @@
 name: CI
 
-# Her push ve PR'da kalite denetimleri ve uçtan uca test çalışır.
+# Her dal itişinde ve PR'da kalite denetimleri ve uçtan uca test çalışır.
 # macOS ve Windows kurulum paketleri burada (bulutta) derlenir; geliştirici bilgisayarı yük almaz.
 # `v*` etiketi (örn. v0.1.0) itilince paketler bir GitHub Release olarak yayımlanır.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
