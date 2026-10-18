@@ -1,6 +1,6 @@
 # Faz 1 — Uygulama Notları ve Devam Listesi
 
-**Durum (19 Ekim 2026):** Faz 1 `feat/faz-1` dalında tamamlandı. Demo sağlayıcıyla uçtan uca doğrulandı. Aşağıdaki "Kalan işler" (çoğu gerçek Google anahtarı ve bulut derlemesi gerektirir) dışında bitti.
+**Durum (19 Ekim 2026):** Faz 1 `feat/faz-1` dalında tamamlandı. Demo sağlayıcıyla uçtan uca doğrulandı. Bulut hattı (kalite denetimleri, uçtan uca test, macOS ve Windows paketleri ve duman testleri) 19 Ekim 2026'da GitHub Actions'ta yeşil çalıştı. Aşağıdaki "Kalan işler" (çoğu gerçek Google anahtarı gerektirir) dışında bitti.
 
 ## 1. Ne yapıldı
 
@@ -19,7 +19,7 @@
 | Kurulum sihirbazı v1 (onay, firma, pazarlar, Google, bütçe) | ✔ | Onay olmadan veri toplama çalışmaz |
 | Demo modu (yapay veri) | ✔ | Anahtarsız deneme ve test için |
 | Electron kabuğu + paketleme | ✔ (macOS arm64) | Paketli uygulama duman testini ve pencere testini geçti |
-| GitHub Actions derleme hattı | ✔ (yazıldı) | `.github/workflows/ci.yml`; **henüz bulutta çalıştırılmadı** (dal itilince ilk kez çalışır) |
+| GitHub Actions derleme hattı | ✔ | `.github/workflows/ci.yml`; bulutta yeşil: kalite denetimleri, e2e, macOS ve Windows paketi + duman testi. İlk çalışmada `npm ci`, kilit dosyasındaki eksik `@emnapi/*` kayıtları yüzünden düşmüştü; düzeltildi |
 
 **Performans (NFR-03, `npm run bench`):** 100.000 kayıtlık sentetik veritabanında liste, filtre, metin araması, harita kutusu ve harita noktası sorguları 15–98 ms, süzgeç sayıları (facet) 176 ms; hedef < 300 ms karşılandı. Kurulum paketi: macOS `.dmg` yaklaşık 141 MB.
 
@@ -53,8 +53,7 @@ Google Maps Platform şartlarına göre **yalnızca Place ID süresiz, enlem/boy
 
 ## 4. Kalan işler (sırayla)
 
-1. **Bulut hattını ilk kez çalıştır:** dal GitHub'a gönderilince `ci.yml` ilk kez çalışır; sonucu (özellikle Windows paketi ve duman testi) kontrol edin. Saklama kararından sonra paketli macOS uygulamasının duman ve pencere testi de yeniden çalıştırılmalıdır.
-   Ayrıca: Windows paketi, NSIS kurulumu ve Windows duman testi ilk kez orada denenecek; libsql dosya yolu Windows'ta doğrulanmadı (macOS'ta Türkçe harf, boşluk, `%`, `#`, `?` içeren yollar testle doğrulandı).
+1. **Windows kurulumunu elle dene:** CI, Windows paketini derleyip duman testini geçirdi; ancak NSIS kurulumunu gerçek bir Windows bilgisayarda (kurulum, ilk açılış, kapanışta Google önbelleğinin silinmesi) arkadaşınızın makinesine vermeden önce bir kez elle denemek gerekir. macOS'ta Türkçe harf, boşluk, `%`, `#`, `?` içeren veri yolları testle doğrulandı; Windows'ta yalnızca duman testi var.
 2. **Gerçek Google anahtarıyla ilk deneme** (Faz 0 hesapları tamamlanınca): Ayarlar → "Anahtarı test et"; küçük bir tarama; tür adlarının (örn. `tea_house`) ve `openingDate` alanının doğrulanması; Google Haritası'nda işaretçi, kümeleme ve çizimin görsel testi.
 3. SRS'ye Bölüm 5'teki sapmaları işle (SRS'yi başka bir kişi güncellediği için ayrı, küçük bir PR olarak).
 4. `npm audit` ve güvenlik gözden geçirmesi; içerik güvenlik politikası (CSP) Faz 6'ya bırakıldı çünkü Google Maps ile birlikte gerçek anahtarla denenmeden güvenli yazılamaz.
