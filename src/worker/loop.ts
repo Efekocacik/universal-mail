@@ -1,7 +1,15 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { scans } from "@/lib/db/schema";
-import { cancelJob, claimNextJob, completeJob, failJob, heartbeatJob, listRunningJobs, requeueJob } from "@/lib/jobs/queue";
+import {
+  cancelJob,
+  claimNextJob,
+  completeJob,
+  failJob,
+  heartbeatJob,
+  listRunningJobs,
+  requeueJob,
+} from "@/lib/jobs/queue";
 import { getJobHandler, NonRetryableJobError } from "@/lib/jobs/registry";
 import { enqueueScanJob } from "@/lib/scan/service";
 import { errorMessage, sleep } from "@/lib/util";
@@ -50,12 +58,18 @@ export class Worker {
     }
     const interrupted = await db
       .update(scans)
-      .set({ status: "paused", pauseReason: "Uygulama kapandı veya beklenmedik şekilde durdu; devam edebilirsiniz." })
+      .set({
+        status: "paused",
+        pauseReason: "Uygulama kapandı veya beklenmedik şekilde durdu; devam edebilirsiniz.",
+      })
       .where(eq(scans.status, "running"))
       .returning({ id: scans.id });
     if (interrupted.length > 0) this.log(`${interrupted.length} yarım kalan tarama duraklatıldı.`);
 
-    const queued = await db.select({ id: scans.id }).from(scans).where(and(inArray(scans.status, ["queued"])));
+    const queued = await db
+      .select({ id: scans.id })
+      .from(scans)
+      .where(and(inArray(scans.status, ["queued"])));
     for (const s of queued) await enqueueScanJob(db, s.id);
   }
 
@@ -67,11 +81,18 @@ export class Worker {
 
     const handler = getJobHandler(job.type);
     if (!handler) {
-      await failJob(db, { id: job.id, attempts: job.maxAttempts, maxAttempts: job.maxAttempts }, `Bilinmeyen iş türü: ${job.type}`);
+      await failJob(
+        db,
+        { id: job.id, attempts: job.maxAttempts, maxAttempts: job.maxAttempts },
+        `Bilinmeyen iş türü: ${job.type}`,
+      );
       return true;
     }
 
-    const timer = setInterval(() => void heartbeatJob(db, job.id).catch(() => undefined), this.heartbeatMs);
+    const timer = setInterval(
+      () => void heartbeatJob(db, job.id).catch(() => undefined),
+      this.heartbeatMs,
+    );
     try {
       this.log(`iş #${job.id} (${job.type}) başladı`);
       await handler({
@@ -86,7 +107,11 @@ export class Worker {
       const message = errorMessage(e);
       this.log(`iş #${job.id} hata verdi: ${message}`);
       const permanent = e instanceof NonRetryableJobError;
-      await failJob(db, permanent ? { id: job.id, attempts: job.maxAttempts, maxAttempts: job.maxAttempts } : job, message);
+      await failJob(
+        db,
+        permanent ? { id: job.id, attempts: job.maxAttempts, maxAttempts: job.maxAttempts } : job,
+        message,
+      );
     } finally {
       clearInterval(timer);
     }

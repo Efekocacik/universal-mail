@@ -12,7 +12,14 @@ import {
   splitBBox,
 } from "@/lib/geo/bbox";
 import { countryName, countryOptions, isKnownCountry } from "@/lib/geo/countries";
-import { cityBBox, defaultRadiusKm, getCityById, nearestCity, normalizeText, searchCities } from "@/lib/geo/cities";
+import {
+  cityBBox,
+  defaultRadiusKm,
+  getCityById,
+  nearestCity,
+  normalizeText,
+  searchCities,
+} from "@/lib/geo/cities";
 import path from "node:path";
 
 beforeAll(() => {
@@ -62,7 +69,9 @@ describe("bbox", () => {
       [london.south, london.east],
       [london.north, london.west],
     ] as const) {
-      expect(haversineM({ lat: c.lat, lng: c.lng }, { lat, lng })).toBeLessThanOrEqual(c.radiusM + 1);
+      expect(haversineM({ lat: c.lat, lng: c.lng }, { lat, lng })).toBeLessThanOrEqual(
+        c.radiusM + 1,
+      );
     }
   });
 

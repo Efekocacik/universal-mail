@@ -14,7 +14,11 @@ export interface NoveltyConfig {
   newWindowDays: number;
 }
 
-export const DEFAULT_NOVELTY_CONFIG: NoveltyConfig = { highAt: 60, likelyAt: 30, newWindowDays: 60 };
+export const DEFAULT_NOVELTY_CONFIG: NoveltyConfig = {
+  highAt: 60,
+  likelyAt: 30,
+  newWindowDays: 60,
+};
 
 export interface NoveltyInput {
   businessStatus?: string | null;
@@ -40,7 +44,10 @@ function within(ts: number | null | undefined, now: number, days: number): boole
   return typeof ts === "number" && now - ts <= days * DAY_MS && now - ts >= -DAY_MS;
 }
 
-export function computeNovelty(input: NoveltyInput, config: NoveltyConfig = DEFAULT_NOVELTY_CONFIG): NoveltyResult {
+export function computeNovelty(
+  input: NoveltyInput,
+  config: NoveltyConfig = DEFAULT_NOVELTY_CONFIG,
+): NoveltyResult {
   const now = input.now ?? Date.now();
 
   if (input.businessStatus === "CLOSED_PERMANENTLY") {
@@ -97,8 +104,12 @@ export function computeNovelty(input: NoveltyInput, config: NoveltyConfig = DEFA
   signals.push(...(input.extraSignals ?? []));
 
   const bestByGroup = new Map<string, number>();
-  for (const s of signals) bestByGroup.set(s.group, Math.max(bestByGroup.get(s.group) ?? 0, s.points));
-  const score = Math.min(100, [...bestByGroup.values()].reduce((a, b) => a + b, 0));
+  for (const s of signals)
+    bestByGroup.set(s.group, Math.max(bestByGroup.get(s.group) ?? 0, s.points));
+  const score = Math.min(
+    100,
+    [...bestByGroup.values()].reduce((a, b) => a + b, 0),
+  );
 
   const label: NoveltyLabel =
     input.businessStatus === "FUTURE_OPENING"

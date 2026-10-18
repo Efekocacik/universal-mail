@@ -35,7 +35,8 @@ let warnedDevKey = false;
 export function resolveMasterKey(): Buffer {
   const fromEnv = process.env.UM_MASTER_KEY;
   if (fromEnv) {
-    if (!/^[0-9a-f]{64}$/i.test(fromEnv)) throw new Error("UM_MASTER_KEY 64 karakterlik onaltılık (hex) olmalıdır.");
+    if (!/^[0-9a-f]{64}$/i.test(fromEnv))
+      throw new Error("UM_MASTER_KEY 64 karakterlik onaltılık (hex) olmalıdır.");
     return Buffer.from(fromEnv, "hex");
   }
   if (process.env.UM_REQUIRE_MASTER_KEY === "1") {
@@ -47,7 +48,9 @@ export function resolveMasterKey(): Buffer {
   }
   if (!warnedDevKey) {
     warnedDevKey = true;
-    console.warn("[secrets] Geliştirme modu: ana anahtar .data/master.key dosyasında. Üretimde işletim sistemi anahtarlığı kullanılır.");
+    console.warn(
+      "[secrets] Geliştirme modu: ana anahtar .data/master.key dosyasında. Üretimde işletim sistemi anahtarlığı kullanılır.",
+    );
   }
   return Buffer.from(fs.readFileSync(file, "utf8").trim(), "hex");
 }
@@ -73,14 +76,25 @@ function encrypt(name: string, plain: string, key: Buffer) {
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
   cipher.setAAD(Buffer.from(name));
   const data = Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]);
-  return { iv: iv.toString("base64"), tag: cipher.getAuthTag().toString("base64"), data: data.toString("base64") };
+  return {
+    iv: iv.toString("base64"),
+    tag: cipher.getAuthTag().toString("base64"),
+    data: data.toString("base64"),
+  };
 }
 
-function decrypt(name: string, item: { iv: string; tag: string; data: string }, key: Buffer): string {
+function decrypt(
+  name: string,
+  item: { iv: string; tag: string; data: string },
+  key: Buffer,
+): string {
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(item.iv, "base64"));
   decipher.setAAD(Buffer.from(name));
   decipher.setAuthTag(Buffer.from(item.tag, "base64"));
-  return Buffer.concat([decipher.update(Buffer.from(item.data, "base64")), decipher.final()]).toString("utf8");
+  return Buffer.concat([
+    decipher.update(Buffer.from(item.data, "base64")),
+    decipher.final(),
+  ]).toString("utf8");
 }
 
 export async function setSecret(name: SecretName, value: string): Promise<void> {
@@ -128,7 +142,11 @@ export async function secretStatus(name: SecretName): Promise<SecretStatus> {
   const item = readFile().items[name];
   if (item) {
     try {
-      return { set: true, source: "store", masked: maskSecret(decrypt(name, item, resolveMasterKey())) };
+      return {
+        set: true,
+        source: "store",
+        masked: maskSecret(decrypt(name, item, resolveMasterKey())),
+      };
     } catch {
       /* aşağıda ortam değişkenine bakılır */
     }

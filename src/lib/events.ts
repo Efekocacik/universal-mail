@@ -23,7 +23,10 @@ export function onEvent<K extends keyof AppEvents>(name: K, handler: Handler<K>)
   return () => set.delete(handler as Handler<never>);
 }
 
-export async function emitEvent<K extends keyof AppEvents>(name: K, payload: AppEvents[K]): Promise<void> {
+export async function emitEvent<K extends keyof AppEvents>(
+  name: K,
+  payload: AppEvents[K],
+): Promise<void> {
   for (const h of handlers.get(name) ?? []) {
     try {
       await (h as Handler<K>)(payload);

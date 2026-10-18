@@ -29,11 +29,18 @@ export interface BudgetStatus {
 
 export const WARNING_PCT = 80;
 
-export async function monthSkuCalls(db: Db, provider: ProviderId, sku: SkuId, month: string = monthKey()): Promise<number> {
+export async function monthSkuCalls(
+  db: Db,
+  provider: ProviderId,
+  sku: SkuId,
+  month: string = monthKey(),
+): Promise<number> {
   const rows = await db
     .select({ calls: sql<number>`coalesce(sum(${apiUsage.calls}), 0)` })
     .from(apiUsage)
-    .where(and(eq(apiUsage.provider, provider), eq(apiUsage.sku, sku), like(apiUsage.day, `${month}-%`)));
+    .where(
+      and(eq(apiUsage.provider, provider), eq(apiUsage.sku, sku), like(apiUsage.day, `${month}-%`)),
+    );
   return Number(rows[0]?.calls ?? 0);
 }
 
@@ -75,8 +82,15 @@ export async function budgetStatus(
     .from(apiUsage)
     .where(and(eq(apiUsage.provider, provider), like(apiUsage.day, `${month}-%`)))
     .groupBy(apiUsage.sku);
-  const bySku: SkuUsage[] = rows.map((r) => ({ sku: r.sku, calls: Number(r.calls), costUsd: round(Number(r.cost), 4) }));
-  const spentUsd = round(bySku.reduce((a, r) => a + r.costUsd, 0), 4);
+  const bySku: SkuUsage[] = rows.map((r) => ({
+    sku: r.sku,
+    calls: Number(r.calls),
+    costUsd: round(Number(r.cost), 4),
+  }));
+  const spentUsd = round(
+    bySku.reduce((a, r) => a + r.costUsd, 0),
+    4,
+  );
   const pct = monthlyUsd > 0 ? (spentUsd / monthlyUsd) * 100 : spentUsd > 0 ? 100 : 0;
   const level: BudgetLevel = pct >= 100 ? "blocked" : pct >= WARNING_PCT ? "warning" : "ok";
   return {

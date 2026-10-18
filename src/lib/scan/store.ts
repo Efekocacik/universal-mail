@@ -16,7 +16,12 @@ export async function setScanStatus(
   db: Db,
   scanId: number,
   status: ScanStatus,
-  extra: { pauseReason?: string | null; error?: string | null; finishedAt?: number | null; startedAt?: number } = {},
+  extra: {
+    pauseReason?: string | null;
+    error?: string | null;
+    finishedAt?: number | null;
+    startedAt?: number;
+  } = {},
 ): Promise<void> {
   await db
     .update(scans)
@@ -31,7 +36,11 @@ export async function setScanStatus(
 }
 
 export async function scanStatusOf(db: Db, scanId: number): Promise<ScanStatus | undefined> {
-  const rows = await db.select({ status: scans.status }).from(scans).where(eq(scans.id, scanId)).limit(1);
+  const rows = await db
+    .select({ status: scans.status })
+    .from(scans)
+    .where(eq(scans.id, scanId))
+    .limit(1);
   return rows[0]?.status;
 }
 
@@ -52,7 +61,14 @@ export function unitBBox(u: Pick<UnitRow, "south" | "west" | "north" | "east">):
 export async function insertUnits(
   db: Db,
   scanId: number,
-  units: { bbox: BBox; kind: "text" | "nearby"; termKind: "type" | "keyword"; term: string; depth: number; parentId?: number }[],
+  units: {
+    bbox: BBox;
+    kind: "text" | "nearby";
+    termKind: "type" | "keyword";
+    term: string;
+    depth: number;
+    parentId?: number;
+  }[],
   now: number,
 ): Promise<void> {
   for (const part of chunk(units, 150)) {
@@ -85,7 +101,12 @@ export interface UpsertResult {
  * ve `leads` (kullanıcıya ait alanlar). Zenginleştirme alanları (web sitesi, telefon, yorum sayısı) keşif
  * maskesinde gelmediğinde mevcut değerler KORUNUR.
  */
-export async function persistPlaces(db: Db, scanId: number, records: PlaceRecord[], now: number): Promise<UpsertResult> {
+export async function persistPlaces(
+  db: Db,
+  scanId: number,
+  records: PlaceRecord[],
+  now: number,
+): Promise<UpsertResult> {
   if (records.length === 0) return { inserted: 0, openedIds: [] };
   const unique = [...new Map(records.map((r) => [r.placeId, r])).values()];
   const ids = unique.map((r) => r.placeId);
@@ -153,10 +174,15 @@ export async function persistPlaces(db: Db, scanId: number, records: PlaceRecord
 
   // FUTURE_OPENING → OPERATIONAL geçişi (açılış anı yakalandı).
   const openedIds = unique
-    .filter((r) => prevStatus.get(r.placeId) === "FUTURE_OPENING" && r.businessStatus === "OPERATIONAL")
+    .filter(
+      (r) => prevStatus.get(r.placeId) === "FUTURE_OPENING" && r.businessStatus === "OPERATIONAL",
+    )
     .map((r) => r.placeId);
   if (openedIds.length > 0) {
-    await db.update(places).set({ openedDetectedAt: now }).where(inArray(places.placeId, openedIds));
+    await db
+      .update(places)
+      .set({ openedDetectedAt: now })
+      .where(inArray(places.placeId, openedIds));
   }
 
   await db
@@ -173,13 +199,18 @@ export async function persistPlaces(db: Db, scanId: number, records: PlaceRecord
 
   await db
     .insert(leads)
-    .values(unique.map((r) => ({ placeId: r.placeId, source: r.source, createdAt: now, updatedAt: now })))
+    .values(
+      unique.map((r) => ({ placeId: r.placeId, source: r.source, createdAt: now, updatedAt: now })),
+    )
     .onConflictDoNothing({ target: leads.placeId });
 
   return { inserted: unique.filter((r) => !prevStatus.has(r.placeId)).length, openedIds };
 }
 
-export async function countSnapshot(db: Db, scanId: number): Promise<{ total: number; future: number }> {
+export async function countSnapshot(
+  db: Db,
+  scanId: number,
+): Promise<{ total: number; future: number }> {
   const rows = await db
     .select({
       total: sql<number>`count(*)`,
@@ -190,7 +221,10 @@ export async function countSnapshot(db: Db, scanId: number): Promise<{ total: nu
   return { total: Number(rows[0]?.total ?? 0), future: Number(rows[0]?.future ?? 0) };
 }
 
-export async function unitCounts(db: Db, scanId: number): Promise<{ total: number; done: number; failed: number }> {
+export async function unitCounts(
+  db: Db,
+  scanId: number,
+): Promise<{ total: number; done: number; failed: number }> {
   const rows = await db
     .select({ status: scanUnits.status, n: sql<number>`count(*)` })
     .from(scanUnits)

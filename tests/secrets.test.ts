@@ -2,7 +2,14 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deleteSecret, getSecret, maskSecret, resolveMasterKey, secretStatus, setSecret } from "@/lib/secrets/store";
+import {
+  deleteSecret,
+  getSecret,
+  maskSecret,
+  resolveMasterKey,
+  secretStatus,
+  setSecret,
+} from "@/lib/secrets/store";
 
 let dir: string;
 const saved = { ...process.env };

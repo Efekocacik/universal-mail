@@ -22,7 +22,8 @@ function loadDevEnv(): void {
 async function main(): Promise<void> {
   loadDevEnv();
   const init = await initDatabase();
-  if (init.migrated.pending > 0) console.log(`[worker] ${init.migrated.pending} şema geçişi uygulandı.`);
+  if (init.migrated.pending > 0)
+    console.log(`[worker] ${init.migrated.pending} şema geçişi uygulandı.`);
 
   registerCoreHandlers();
   const db = await getDb();

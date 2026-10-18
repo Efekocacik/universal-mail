@@ -16,12 +16,24 @@ function provider(epoch = 0) {
   return new MockPlacesProvider({ getEpoch: () => epoch });
 }
 
-async function allPages(p: MockPlacesProvider, bbox = londonCentre, fields: readonly string[] = DISCOVERY_FIELDS, future = true) {
+async function allPages(
+  p: MockPlacesProvider,
+  bbox = londonCentre,
+  fields: readonly string[] = DISCOVERY_FIELDS,
+  future = true,
+) {
   const out: PlaceRecord[] = [];
   let token: string | undefined;
   let pages = 0;
   do {
-    const res = await p.searchText({ textQuery: "cafe", includedType: "cafe", bbox, pageToken: token, fields, includeFutureOpening: future });
+    const res = await p.searchText({
+      textQuery: "cafe",
+      includedType: "cafe",
+      bbox,
+      pageToken: token,
+      fields,
+      includeFutureOpening: future,
+    });
     out.push(...res.places);
     token = res.nextPageToken;
     pages++;
@@ -59,7 +71,9 @@ describe("MockPlacesProvider", () => {
   it("kutu bölününce çocuk sonuçları ebeveynin kümesiyle tutarlıdır (aynı kimlikler)", async () => {
     const big = bboxFromCenter(51.5085, -0.1257, 0.5);
     const parent = await allPages(provider(), big);
-    const children = (await Promise.all(splitBBox(big).map((c) => allPages(provider(), c)))).flatMap((r) => r.places);
+    const children = (
+      await Promise.all(splitBBox(big).map((c) => allPages(provider(), c)))
+    ).flatMap((r) => r.places);
     const childIds = new Set(children.map((p) => p.placeId));
     // Ebeveyn 60 ile sınırlıysa onun gördüğü her yer çocuklarda da bulunmalı.
     for (const p of parent.places) expect(childIds.has(p.placeId)).toBe(true);
@@ -73,9 +87,15 @@ describe("MockPlacesProvider", () => {
   it("FUTURE_OPENING yalnızca includeFutureOpening açıkken döner ve açılış tarihi içerir", async () => {
     const big = bboxFromCenter(51.5085, -0.1257, 4);
     // Birden çok küçük hücre tara, çünkü tek sorgu 60 ile sınırlı.
-    const cells = splitBBox(bboxFromCenter(51.5085, -0.1257, 4)).flatMap((c) => splitBBox(c)).flatMap((c) => splitBBox(c));
-    const withFuture = (await Promise.all(cells.map((c) => allPages(provider(), c, DISCOVERY_FIELDS, true)))).flatMap((r) => r.places);
-    const without = (await Promise.all(cells.map((c) => allPages(provider(), c, DISCOVERY_FIELDS, false)))).flatMap((r) => r.places);
+    const cells = splitBBox(bboxFromCenter(51.5085, -0.1257, 4))
+      .flatMap((c) => splitBBox(c))
+      .flatMap((c) => splitBBox(c));
+    const withFuture = (
+      await Promise.all(cells.map((c) => allPages(provider(), c, DISCOVERY_FIELDS, true)))
+    ).flatMap((r) => r.places);
+    const without = (
+      await Promise.all(cells.map((c) => allPages(provider(), c, DISCOVERY_FIELDS, false)))
+    ).flatMap((r) => r.places);
     void big;
     const future = withFuture.filter((p) => p.businessStatus === "FUTURE_OPENING");
     expect(future.length).toBeGreaterThan(0);
@@ -84,26 +104,48 @@ describe("MockPlacesProvider", () => {
   });
 
   it("epoch artınca yeni işletmeler belirir ve bazı FUTURE_OPENING işletmeler açılır", async () => {
-    const cells = splitBBox(bboxFromCenter(51.5085, -0.1257, 4)).flatMap((c) => splitBBox(c)).flatMap((c) => splitBBox(c));
+    const cells = splitBBox(bboxFromCenter(51.5085, -0.1257, 4))
+      .flatMap((c) => splitBBox(c))
+      .flatMap((c) => splitBBox(c));
     const scan = async (epoch: number) =>
-      (await Promise.all(cells.map((c) => allPages(provider(epoch), c, DISCOVERY_FIELDS, true)))).flatMap((r) => r.places);
+      (
+        await Promise.all(cells.map((c) => allPages(provider(epoch), c, DISCOVERY_FIELDS, true)))
+      ).flatMap((r) => r.places);
     const e0 = await scan(0);
     const e3 = await scan(3);
     const ids0 = new Set(e0.map((p) => p.placeId));
     const added = e3.filter((p) => !ids0.has(p.placeId));
     expect(added.length).toBeGreaterThan(0);
 
-    const futureAt0 = new Map(e0.filter((p) => p.businessStatus === "FUTURE_OPENING").map((p) => [p.placeId, p]));
+    const futureAt0 = new Map(
+      e0.filter((p) => p.businessStatus === "FUTURE_OPENING").map((p) => [p.placeId, p]),
+    );
     const opened = e3.filter((p) => futureAt0.has(p.placeId) && p.businessStatus === "OPERATIONAL");
     expect(opened.length).toBeGreaterThan(0);
   });
 
   it("zenginleştirme alanları yalnızca istenirse gelir; web siteleri .example alan adındadır", async () => {
     const cheap = await allPages(provider(), londonCentre, DISCOVERY_FIELDS);
-    expect(cheap.places.every((p) => p.website === undefined && p.userRatingCount === undefined)).toBe(true);
+    expect(
+      cheap.places.every((p) => p.website === undefined && p.userRatingCount === undefined),
+    ).toBe(true);
     const rich = await allPages(provider(), londonCentre, ENRICH_FIELDS);
-    expect(rich.places.every((p) => p.website?.endsWith(".example") && typeof p.userRatingCount === "number")).toBe(true);
-    expect((await provider().searchText({ textQuery: "cafe", includedType: "cafe", bbox: londonCentre, fields: ENRICH_FIELDS, includeFutureOpening: true })).sku).toBe("text_search_enterprise");
+    expect(
+      rich.places.every(
+        (p) => p.website?.endsWith(".example") && typeof p.userRatingCount === "number",
+      ),
+    ).toBe(true);
+    expect(
+      (
+        await provider().searchText({
+          textQuery: "cafe",
+          includedType: "cafe",
+          bbox: londonCentre,
+          fields: ENRICH_FIELDS,
+          includeFutureOpening: true,
+        })
+      ).sku,
+    ).toBe("text_search_enterprise");
   });
 
   it("Nearby Search en fazla 20 sonuç döndürür ve daire içinde kalır", async () => {
@@ -121,16 +163,30 @@ describe("MockPlacesProvider", () => {
 
   it("anahtar kelime aramaları türe eşlenir, bilinmeyen kelime sonuç vermez", async () => {
     const p = provider();
-    const hit = await p.searchText({ textQuery: "specialty coffee", bbox: londonCentre, fields: DISCOVERY_FIELDS, includeFutureOpening: false });
+    const hit = await p.searchText({
+      textQuery: "specialty coffee",
+      bbox: londonCentre,
+      fields: DISCOVERY_FIELDS,
+      includeFutureOpening: false,
+    });
     expect(hit.places.length).toBeGreaterThan(0);
-    const none = await p.searchText({ textQuery: "bowling alley", bbox: londonCentre, fields: DISCOVERY_FIELDS, includeFutureOpening: false });
+    const none = await p.searchText({
+      textQuery: "bowling alley",
+      bbox: londonCentre,
+      fields: DISCOVERY_FIELDS,
+      includeFutureOpening: false,
+    });
     expect(none.places).toHaveLength(0);
   });
 
   it("Place Details demo kimliğinden aynı kaydı yeniden üretir", async () => {
     const { places } = await allPages(provider(), londonCentre, ENRICH_FIELDS);
     const target = places[5]!;
-    const res = await provider().getDetails(target.placeId, ["id", "websiteUri", "userRatingCount"]);
+    const res = await provider().getDetails(target.placeId, [
+      "id",
+      "websiteUri",
+      "userRatingCount",
+    ]);
     expect(res.place?.placeId).toBe(target.placeId);
     expect(res.place?.website).toBe(target.website);
     expect(res.sku).toBe("place_details_enterprise");
@@ -139,7 +195,14 @@ describe("MockPlacesProvider", () => {
 
   it("geçersiz sayfa belirteci hata verir", async () => {
     await expect(
-      provider().searchText({ textQuery: "cafe", includedType: "cafe", bbox: londonCentre, pageToken: "!!!", fields: DISCOVERY_FIELDS, includeFutureOpening: true }),
+      provider().searchText({
+        textQuery: "cafe",
+        includedType: "cafe",
+        bbox: londonCentre,
+        pageToken: "!!!",
+        fields: DISCOVERY_FIELDS,
+        includeFutureOpening: true,
+      }),
     ).rejects.toMatchObject({ kind: "invalid" });
   });
 });

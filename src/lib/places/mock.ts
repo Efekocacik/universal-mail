@@ -46,19 +46,71 @@ const KEYWORD_TYPES: [RegExp, string[]][] = [
 
 const NAME_PARTS: Record<string, { adj: string[]; noun: string[] }> = {
   cafe: {
-    adj: ["Daily", "Little", "Golden", "Corner", "Maple", "Velvet", "Urban", "Quiet", "Sunny", "Olive"],
-    noun: ["Grind Café", "Bean Café", "Owl Café", "Kettle Café", "Table Café", "Pour Café", "Crumb Café"],
+    adj: [
+      "Daily",
+      "Little",
+      "Golden",
+      "Corner",
+      "Maple",
+      "Velvet",
+      "Urban",
+      "Quiet",
+      "Sunny",
+      "Olive",
+    ],
+    noun: [
+      "Grind Café",
+      "Bean Café",
+      "Owl Café",
+      "Kettle Café",
+      "Table Café",
+      "Pour Café",
+      "Crumb Café",
+    ],
   },
   coffee_shop: {
-    adj: ["Copper", "Black", "Fresh", "Nordic", "Mellow", "Bright", "Arabica", "Dawn", "Stone", "Harbor"],
+    adj: [
+      "Copper",
+      "Black",
+      "Fresh",
+      "Nordic",
+      "Mellow",
+      "Bright",
+      "Arabica",
+      "Dawn",
+      "Stone",
+      "Harbor",
+    ],
     noun: ["Coffee Roasters", "Coffee House", "Espresso Bar", "Coffee Works", "Brew Lab"],
   },
   pub: {
-    adj: ["Red", "Old", "Royal", "Crown", "Silver", "Iron", "Hungry", "Wandering", "Lucky", "Foxes"],
+    adj: [
+      "Red",
+      "Old",
+      "Royal",
+      "Crown",
+      "Silver",
+      "Iron",
+      "Hungry",
+      "Wandering",
+      "Lucky",
+      "Foxes",
+    ],
     noun: ["Lion Pub", "Arms", "Anchor Inn", "Oak Tavern", "Swan Pub", "Barrel House"],
   },
   bar: {
-    adj: ["Blue", "Midnight", "Neon", "Hidden", "Social", "Amber", "Velvet", "Dry", "Spirit", "Lemon"],
+    adj: [
+      "Blue",
+      "Midnight",
+      "Neon",
+      "Hidden",
+      "Social",
+      "Amber",
+      "Velvet",
+      "Dry",
+      "Spirit",
+      "Lemon",
+    ],
     noun: ["Cocktail Bar", "Wine Bar", "Lounge", "Social Club", "Tap Room"],
   },
   restaurant: {
@@ -70,12 +122,36 @@ const NAME_PARTS: Record<string, { adj: string[]; noun: string[] }> = {
     noun: ["Bakery", "Bread Co.", "Patisserie", "Bake House", "Oven"],
   },
   hotel: {
-    adj: ["Grand", "Park", "City", "Station", "Garden", "Plaza", "Harbour", "Central", "Albert", "Regent"],
+    adj: [
+      "Grand",
+      "Park",
+      "City",
+      "Station",
+      "Garden",
+      "Plaza",
+      "Harbour",
+      "Central",
+      "Albert",
+      "Regent",
+    ],
     noun: ["Hotel", "Inn", "Suites", "Lodge", "Guest House"],
   },
 };
 
-const STREETS = ["High", "Station", "Church", "Market", "Park", "Mill", "King", "Queen", "Bridge", "Garden", "Victoria", "Lake"];
+const STREETS = [
+  "High",
+  "Station",
+  "Church",
+  "Market",
+  "Park",
+  "Mill",
+  "King",
+  "Queen",
+  "Bridge",
+  "Garden",
+  "Victoria",
+  "Lake",
+];
 const STREET_SUFFIX = ["Street", "Road", "Lane", "Square", "Avenue"];
 
 function fnv1a(input: string): number {
@@ -118,7 +194,11 @@ function typesForQuery(req: { includedType?: string; textQuery?: string }): stri
   return hit ? hit[1] : [];
 }
 
-function nearestCityIn(cities: City[], lat: number, lng: number): { city: City; km: number } | undefined {
+function nearestCityIn(
+  cities: City[],
+  lat: number,
+  lng: number,
+): { city: City; km: number } | undefined {
   let best: { city: City; km: number } | undefined;
   for (const city of cities) {
     const km = haversineM({ lat, lng }, { lat: city.lat, lng: city.lng }) / 1000;
@@ -128,7 +208,9 @@ function nearestCityIn(cities: City[], lat: number, lng: number): { city: City; 
 }
 
 function decodePageToken(token: string): number {
-  const decoded = /^[A-Za-z0-9_-]+$/.test(token) ? Buffer.from(token, "base64url").toString("utf8") : "";
+  const decoded = /^[A-Za-z0-9_-]+$/.test(token)
+    ? Buffer.from(token, "base64url").toString("utf8")
+    : "";
   if (!/^\d+$/.test(decoded)) throw new PlacesApiError("invalid", "Geçersiz sayfa belirteci.");
   return Number(decoded);
 }
@@ -160,7 +242,8 @@ export class MockPlacesProvider implements PlacesProvider {
     const next = offset + this.pageSize;
     return {
       places: page.map((c) => c.place),
-      nextPageToken: next < capped.length ? Buffer.from(String(next), "utf8").toString("base64url") : undefined,
+      nextPageToken:
+        next < capped.length ? Buffer.from(String(next), "utf8").toString("base64url") : undefined,
       sku: skuFor("text", req.fields),
     };
   }
@@ -171,8 +254,10 @@ export class MockPlacesProvider implements PlacesProvider {
     const bbox = circleToBBox(req.circle.lat, req.circle.lng, req.circle.radiusM);
     const within = this.generate(bbox, types, epoch, req.fields, req.includeFutureOpening).filter(
       (c) =>
-        haversineM({ lat: req.circle.lat, lng: req.circle.lng }, { lat: c.place.lat, lng: c.place.lng }) <=
-        req.circle.radiusM,
+        haversineM(
+          { lat: req.circle.lat, lng: req.circle.lng },
+          { lat: c.place.lat, lng: c.place.lng },
+        ) <= req.circle.radiusM,
     );
     return {
       places: within.slice(0, this.maxNearbyResults).map((c) => c.place),
@@ -190,7 +275,9 @@ export class MockPlacesProvider implements PlacesProvider {
       west: parsed.ix * TILE_DEG,
       east: (parsed.ix + 1) * TILE_DEG,
     };
-    const found = this.generate(bbox, [parsed.type], epoch, fields, true).find((c) => c.place.placeId === placeId);
+    const found = this.generate(bbox, [parsed.type], epoch, fields, true).find(
+      (c) => c.place.placeId === placeId,
+    );
     return { place: found?.place ?? null, sku: skuFor("details", fields) };
   }
 
@@ -212,7 +299,9 @@ export class MockPlacesProvider implements PlacesProvider {
     const wantEnrich = fields.includes("websiteUri") || fields.includes("userRatingCount");
     const cx = (bbox.west + bbox.east) / 2;
     const cy = (bbox.south + bbox.north) / 2;
-    const nearby = loadCities().filter((c) => Math.abs(c.lat - cy) < 1.2 && Math.abs(c.lng - cx) < 1.8);
+    const nearby = loadCities().filter(
+      (c) => Math.abs(c.lat - cy) < 1.2 && Math.abs(c.lng - cx) < 1.8,
+    );
     const out: Candidate[] = [];
 
     for (let iy = iyMin; iy <= iyMax; iy++) {

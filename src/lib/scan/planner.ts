@@ -51,7 +51,8 @@ export function validatePlanInput(input: PlanInput): void {
       `Tarama alanı çok büyük (${Math.round(area).toLocaleString("tr-TR")} km²). En fazla ${MAX_AREA_KM2.toLocaleString("tr-TR")} km² (yaklaşık 100×100 km) taranabilir; alanı küçültün veya parçalara bölün.`,
     );
   }
-  if (input.queries.length === 0) throw new PlanError("En az bir kategori veya anahtar kelime seçin.");
+  if (input.queries.length === 0)
+    throw new PlanError("En az bir kategori veya anahtar kelime seçin.");
 }
 
 /**
@@ -59,7 +60,10 @@ export function validatePlanInput(input: PlanInput): void {
  * türler tek birimde gruplanır (Nearby birden çok türü tek çağrıda kabul eder); anahtar kelimeler
  * Nearby'de aranamadığından yine Text Search birimi olur.
  */
-export function queryTerms(queries: ScanQuery[], strategy: SearchStrategy): { kind: SearchStrategy; termKind: "type" | "keyword"; term: string }[] {
+export function queryTerms(
+  queries: ScanQuery[],
+  strategy: SearchStrategy,
+): { kind: SearchStrategy; termKind: "type" | "keyword"; term: string }[] {
   const types = queries.filter((q) => q.kind === "type").map((q) => q.term);
   const keywords = queries.filter((q) => q.kind === "keyword").map((q) => q.term);
   const out: { kind: SearchStrategy; termKind: "type" | "keyword"; term: string }[] = [];
@@ -123,9 +127,14 @@ export interface ScanEstimate {
   notes: string[];
 }
 
-export function skuForScan(strategy: SearchStrategy, fieldProfile: FieldProfile, termKind: "type" | "keyword" = "type"): SkuId {
+export function skuForScan(
+  strategy: SearchStrategy,
+  fieldProfile: FieldProfile,
+  termKind: "type" | "keyword" = "type",
+): SkuId {
   const text = strategy === "text" || termKind === "keyword";
-  if (fieldProfile === "enrich") return text ? "text_search_enterprise" : "nearby_search_enterprise";
+  if (fieldProfile === "enrich")
+    return text ? "text_search_enterprise" : "nearby_search_enterprise";
   return text ? "text_search_pro" : "nearby_search_pro";
 }
 
@@ -155,13 +164,19 @@ export function estimateScan(
 
   const notes: string[] = [];
   if (input.fieldProfile === "enrich") {
-    notes.push("Zenginleştirme açık: web sitesi, telefon ve değerlendirme sayısı da istenir (Enterprise, daha pahalı).");
+    notes.push(
+      "Zenginleştirme açık: web sitesi, telefon ve değerlendirme sayısı da istenir (Enterprise, daha pahalı).",
+    );
   }
   if (calls.high > calls.expected * 2.5) {
-    notes.push("Yoğun şehir merkezlerinde alanlar otomatik bölündüğü için gerçek kullanım yüksek tahmine yaklaşabilir.");
+    notes.push(
+      "Yoğun şehir merkezlerinde alanlar otomatik bölündüğü için gerçek kullanım yüksek tahmine yaklaşabilir.",
+    );
   }
   if (input.strategy === "nearby") {
-    notes.push("Nearby Search çağrı başına en fazla 20 sonuç döner; yoğun bölgelerde daha çok bölünme gerekir.");
+    notes.push(
+      "Nearby Search çağrı başına en fazla 20 sonuç döner; yoğun bölgelerde daha çok bölünme gerekir.",
+    );
   }
 
   return {

@@ -2,7 +2,7 @@ import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { canSpend, recordUsage } from "@/lib/budget";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
-import { placeSnapshots, places, regions, scanUnits, scans } from "@/lib/db/schema";
+import { places, regions, scanUnits, scans } from "@/lib/db/schema";
 import type { SkuId } from "@/lib/domain/types";
 import { emitEvent } from "@/lib/events";
 import { splitBBox, bboxCircumCircle } from "@/lib/geo/bbox";
@@ -68,20 +68,26 @@ function readMaxCalls(scan: ScanRow): number {
  * Ücretli her çağrıdan önce bütçe denetlenir; geçici hatalarda tarama duraklatılır, kalıcı hatalarda başarısız olur.
  */
 export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOutcome> {
-  const { db, provider } = deps;
+  const { db } = deps;
   const now = deps.now ?? Date.now;
   const log = deps.log ?? (() => undefined);
 
   const scan = await loadScan(db, scanId);
   if (!scan) throw new Error(`Tarama bulunamadı: ${scanId}`);
   if (scan.status !== "queued" && scan.status !== "running") {
-    return scan.status === "completed" || scan.status === "failed" || scan.status === "cancelled" || scan.status === "budget_stopped"
+    return scan.status === "completed" ||
+      scan.status === "failed" ||
+      scan.status === "cancelled" ||
+      scan.status === "budget_stopped"
       ? scan.status
       : "paused";
   }
 
   await setScanStatus(db, scanId, "running", { startedAt: scan.startedAt ?? now() });
-  await db.update(scanUnits).set({ status: "queued", updatedAt: now() }).where(and(eq(scanUnits.scanId, scanId), eq(scanUnits.status, "running")));
+  await db
+    .update(scanUnits)
+    .set({ status: "queued", updatedAt: now() })
+    .where(and(eq(scanUnits.scanId, scanId), eq(scanUnits.status, "running")));
 
   const state: RunState = {
     callsBySku: { ...(scan.callsBySku ?? {}) },
@@ -97,7 +103,9 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     const current = await scanStatusOf(db, scanId);
     if (current === "paused" || current === "cancelled") return current;
     if (deps.shouldStop?.()) {
-      await setScanStatus(db, scanId, "paused", { pauseReason: "Uygulama kapatıldı; devam edebilirsiniz." });
+      await setScanStatus(db, scanId, "paused", {
+        pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+      });
       return "paused";
     }
 
@@ -129,14 +137,20 @@ async function runUnit(
   const sku: SkuId = skuFor(unit.kind === "text" ? "text" : "nearby", fields);
   const bbox = unitBBox(unit);
 
-  await db.update(scanUnits).set({ status: "running", updatedAt: now() }).where(eq(scanUnits.id, unit.id));
+  await db
+    .update(scanUnits)
+    .set({ status: "running", updatedAt: now() })
+    .where(eq(scanUnits.id, unit.id));
 
   let token: string | undefined;
   let collected = 0;
   let calls = 0;
 
   const requeue = async () => {
-    await db.update(scanUnits).set({ status: "queued", callsMade: unit.callsMade + calls, updatedAt: now() }).where(eq(scanUnits.id, unit.id));
+    await db
+      .update(scanUnits)
+      .set({ status: "queued", callsMade: unit.callsMade + calls, updatedAt: now() })
+      .where(eq(scanUnits.id, unit.id));
   };
 
   do {
@@ -156,7 +170,9 @@ async function runUnit(
     }
     if (deps.shouldStop?.()) {
       await requeue();
-      await setScanStatus(db, scan.id, "paused", { pauseReason: "Uygulama kapatıldı; devam edebilirsiniz." });
+      await setScanStatus(db, scan.id, "paused", {
+        pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+      });
       return "paused";
     }
 
@@ -205,7 +221,13 @@ async function runUnit(
   const saturated = collected >= cap;
   await db
     .update(scanUnits)
-    .set({ status: "done", callsMade: unit.callsMade + calls, resultCount: collected, saturated, updatedAt: now() })
+    .set({
+      status: "done",
+      callsMade: unit.callsMade + calls,
+      resultCount: collected,
+      saturated,
+      updatedAt: now(),
+    })
     .where(eq(scanUnits.id, unit.id));
   state.consecutiveUnitFailures = 0;
 
@@ -213,7 +235,14 @@ async function runUnit(
     await insertUnits(
       db,
       scan.id,
-      splitBBox(bbox).map((b) => ({ bbox: b, kind: unit.kind, termKind: unit.termKind, term: unit.term, depth: unit.depth + 1, parentId: unit.id })),
+      splitBBox(bbox).map((b) => ({
+        bbox: b,
+        kind: unit.kind,
+        termKind: unit.termKind,
+        term: unit.term,
+        depth: unit.depth + 1,
+        parentId: unit.id,
+      })),
       now(),
     );
     log(`Birim ${unit.id} doygun (${collected} sonuç); 4 alt hücreye bölündü.`);
@@ -250,7 +279,10 @@ async function handleCallError(
 
   if (e.kind === "invalid") {
     // Tek bir sorgu geçersiz (ör. desteklenmeyen tür): yalnızca bu birim başarısız sayılır, tarama sürer.
-    await db.update(scanUnits).set({ status: "failed", error: e.message, updatedAt: now() }).where(eq(scanUnits.id, unit.id));
+    await db
+      .update(scanUnits)
+      .set({ status: "failed", error: e.message, updatedAt: now() })
+      .where(eq(scanUnits.id, unit.id));
     state.unitsFailed++;
     state.consecutiveUnitFailures++;
     log(`Birim ${unit.id} (${unit.term}) reddedildi: ${e.message}`);
@@ -289,13 +321,22 @@ async function findPreviousComparable(db: Db, scan: ScanRow): Promise<ScanRow | 
   const rows = await db
     .select()
     .from(scans)
-    .where(and(eq(scans.scanKey, scan.scanKey), eq(scans.status, "completed"), lt(scans.id, scan.id)))
+    .where(
+      and(eq(scans.scanKey, scan.scanKey), eq(scans.status, "completed"), lt(scans.id, scan.id)),
+    )
     .orderBy(desc(scans.id))
     .limit(10);
-  return rows.find((r) => ((r.progress as { unitsFailed?: number } | null)?.unitsFailed ?? 0) === 0);
+  return rows.find(
+    (r) => ((r.progress as { unitsFailed?: number } | null)?.unitsFailed ?? 0) === 0,
+  );
 }
 
-async function finalizeScan(deps: RunnerDeps, scanId: number, state: RunState, now: () => number): Promise<ScanOutcome> {
+async function finalizeScan(
+  deps: RunnerDeps,
+  scanId: number,
+  state: RunState,
+  now: () => number,
+): Promise<ScanOutcome> {
   const { db } = deps;
   const scan = (await loadScan(db, scanId))!;
   const units = await unitCounts(db, scanId);
@@ -316,7 +357,10 @@ async function finalizeScan(deps: RunnerDeps, scanId: number, state: RunState, n
     `);
     const newIds = newRows.map((r) => r.place_id);
     for (const part of chunk(newIds, 500)) {
-      await db.update(places).set({ newDetectedAt: t }).where(and(inArray(places.placeId, part), sql`${places.newDetectedAt} IS NULL`));
+      await db
+        .update(places)
+        .set({ newDetectedAt: t })
+        .where(and(inArray(places.placeId, part), sql`${places.newDetectedAt} IS NULL`));
     }
     newDetected = newIds.length;
 
@@ -327,8 +371,14 @@ async function finalizeScan(deps: RunnerDeps, scanId: number, state: RunState, n
       WHERE o.scan_id = ${previous.id}
         AND NOT EXISTS (SELECT 1 FROM place_snapshots s WHERE s.scan_id = ${scanId} AND s.place_id = o.place_id)
     `);
-    for (const part of chunk(missingRows.map((r) => r.place_id), 500)) {
-      await db.update(places).set({ notFoundInScanId: scanId }).where(inArray(places.placeId, part));
+    for (const part of chunk(
+      missingRows.map((r) => r.place_id),
+      500,
+    )) {
+      await db
+        .update(places)
+        .set({ notFoundInScanId: scanId })
+        .where(inArray(places.placeId, part));
     }
   }
 
@@ -358,4 +408,3 @@ async function finalizeScan(deps: RunnerDeps, scanId: number, state: RunState, n
   await emitEvent("scan.completed", { scanId, newPlaces: newDetected, totalPlaces: snap.total });
   return "completed";
 }
-

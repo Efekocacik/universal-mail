@@ -6,7 +6,11 @@ const DAY = 86_400_000;
 
 describe("computeNovelty", () => {
   it("yakında açılacak işletme 100 puan ve mor etiket", () => {
-    const r = computeNovelty({ businessStatus: "FUTURE_OPENING", openingDate: "2027-02-01", now: NOW });
+    const r = computeNovelty({
+      businessStatus: "FUTURE_OPENING",
+      openingDate: "2027-02-01",
+      now: NOW,
+    });
     expect(r.score).toBe(100);
     expect(r.label).toBe("future_opening");
     expect(r.signals[0]?.reason).toContain("2027-02-01");
@@ -18,13 +22,21 @@ describe("computeNovelty", () => {
   });
 
   it("yeni tespit edilen (snapshot farkı) 70 puan, yüksek etiket", () => {
-    const r = computeNovelty({ businessStatus: "OPERATIONAL", newDetectedAt: NOW - 3 * DAY, now: NOW });
+    const r = computeNovelty({
+      businessStatus: "OPERATIONAL",
+      newDetectedAt: NOW - 3 * DAY,
+      now: NOW,
+    });
     expect(r.score).toBe(70);
     expect(r.label).toBe("high");
   });
 
   it("yeni tespit sinyali pencere dışına çıkınca düşer", () => {
-    const r = computeNovelty({ businessStatus: "OPERATIONAL", newDetectedAt: NOW - 90 * DAY, now: NOW });
+    const r = computeNovelty({
+      businessStatus: "OPERATIONAL",
+      newDetectedAt: NOW - 90 * DAY,
+      now: NOW,
+    });
     expect(r.score).toBe(0);
     const wide = computeNovelty(
       { businessStatus: "OPERATIONAL", newDetectedAt: NOW - 90 * DAY, now: NOW },
@@ -44,12 +56,24 @@ describe("computeNovelty", () => {
   });
 
   it("yorum sayısı sinyalleri toplanır ama kendi içinde tek sayılır", () => {
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 2, now: NOW }).score).toBe(25);
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 5, now: NOW }).score).toBe(25);
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 6, now: NOW }).score).toBe(10);
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 20, now: NOW }).score).toBe(10);
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 21, now: NOW }).score).toBe(0);
-    expect(computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: null, now: NOW }).score).toBe(0);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 2, now: NOW }).score,
+    ).toBe(25);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 5, now: NOW }).score,
+    ).toBe(25);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 6, now: NOW }).score,
+    ).toBe(10);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 20, now: NOW }).score,
+    ).toBe(10);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: 21, now: NOW }).score,
+    ).toBe(0);
+    expect(
+      computeNovelty({ businessStatus: "OPERATIONAL", userRatingCount: null, now: NOW }).score,
+    ).toBe(0);
   });
 
   it("farklı gruplar toplanır ve 100 ile sınırlanır", () => {
@@ -71,12 +95,21 @@ describe("computeNovelty", () => {
 
   it("eşikler ayarlanabilir", () => {
     const input = { businessStatus: "OPERATIONAL", newDetectedAt: NOW, now: NOW } as const;
-    expect(computeNovelty(input, { highAt: 80, likelyAt: 50, newWindowDays: 60 }).label).toBe("likely");
-    expect(computeNovelty(input, { highAt: 80, likelyAt: 75, newWindowDays: 60 }).label).toBe("low");
+    expect(computeNovelty(input, { highAt: 80, likelyAt: 50, newWindowDays: 60 }).label).toBe(
+      "likely",
+    );
+    expect(computeNovelty(input, { highAt: 80, likelyAt: 75, newWindowDays: 60 }).label).toBe(
+      "low",
+    );
   });
 
   it("kalıcı olarak kapanan işletme 0 puan", () => {
-    const r = computeNovelty({ businessStatus: "CLOSED_PERMANENTLY", newDetectedAt: NOW, userRatingCount: 0, now: NOW });
+    const r = computeNovelty({
+      businessStatus: "CLOSED_PERMANENTLY",
+      newDetectedAt: NOW,
+      userRatingCount: 0,
+      now: NOW,
+    });
     expect(r).toMatchObject({ score: 0, label: "low" });
   });
 

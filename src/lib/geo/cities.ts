@@ -51,8 +51,8 @@ const ALIASES_TR: Record<string, string> = {
   venedik: "venice",
   floransa: "florence",
   napoli: "naples",
-  "istanbul": "istanbul",
-  "izmir": "izmir",
+  istanbul: "istanbul",
+  izmir: "izmir",
 };
 
 let cache: City[] | undefined;
@@ -71,15 +71,13 @@ export function resetCityCache(): void {
 }
 
 export function normalizeText(s: string): string {
-  return s
-    .toLocaleLowerCase("tr")
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/ı/g, "i")
-    .trim();
+  return s.toLocaleLowerCase("tr").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ı/g, "i").trim();
 }
 
-export function searchCities(query: string, opts: { countries?: string[]; limit?: number } = {}): City[] {
+export function searchCities(
+  query: string,
+  opts: { countries?: string[]; limit?: number } = {},
+): City[] {
   const limit = opts.limit ?? 20;
   const q = normalizeText(query);
   const alias = ALIASES_TR[query.toLocaleLowerCase("tr").trim()];

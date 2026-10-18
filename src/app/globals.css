@@ -1,0 +1,126 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-nov-future: var(--nov-future);
+  --color-nov-high: var(--nov-high);
+  --color-nov-likely: var(--nov-likely);
+  --color-nov-low: var(--nov-low);
+  --color-contacted: var(--contacted);
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+}
+
+/* Renk dili (SRS 9): yeşil = yüksek yenilik, mor = yakında açılacak, sarı = muhtemel, gri = düşük, mavi = temas kuruldu, kırmızı = yalnızca hata. */
+:root {
+  --background: #f6f6f3;
+  --foreground: #16181d;
+  --card: #ffffff;
+  --card-foreground: #16181d;
+  --popover: #ffffff;
+  --popover-foreground: #16181d;
+  --primary: #14705a;
+  --primary-foreground: #ffffff;
+  --secondary: #ecece7;
+  --secondary-foreground: #23262d;
+  --muted: #efefea;
+  --muted-foreground: #646872;
+  --accent: #e4efe9;
+  --accent-foreground: #0d4d3d;
+  --destructive: #c62828;
+  --border: #e1e1da;
+  --input: #d6d6cd;
+  --ring: #14705a;
+  --nov-future: #7c3aed;
+  --nov-high: #16a34a;
+  --nov-likely: #d4a017;
+  --nov-low: #9aa0a8;
+  --contacted: #2563eb;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* Odak halkası: klavye kullanıcıları için görünür */
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Harita işaretçileri */
+.um-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
+  transform: translateY(50%);
+  transition: transform 120ms ease;
+}
+.um-pin--selected {
+  width: 20px;
+  height: 20px;
+  box-shadow:
+    0 0 0 3px rgb(20 112 90 / 0.45),
+    0 2px 6px rgb(0 0 0 / 0.5);
+  z-index: 10;
+}
+.um-pin--contacted {
+  box-shadow:
+    0 0 0 2px var(--contacted),
+    0 1px 3px rgb(0 0 0 / 0.45);
+}
+.um-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  color: #fff;
+  font-weight: 600;
+  font-size: 12px;
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
+  background: var(--primary);
+}

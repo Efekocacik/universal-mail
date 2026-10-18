@@ -4,7 +4,11 @@ import fs from "node:fs";
  * Basit dosya kilidi (süreçler arası). Veritabanı şema geçişinin iki süreçte aynı anda çalışmasını önler.
  * Kilit 2 dakikadan eskiyse bayat sayılıp devralınır.
  */
-export async function withFileLock<T>(lockPath: string, fn: () => Promise<T>, timeoutMs = 30_000): Promise<T> {
+export async function withFileLock<T>(
+  lockPath: string,
+  fn: () => Promise<T>,
+  timeoutMs = 30_000,
+): Promise<T> {
   const started = Date.now();
   for (;;) {
     try {
@@ -20,7 +24,8 @@ export async function withFileLock<T>(lockPath: string, fn: () => Promise<T>, ti
       } catch {
         continue; // kilit bu sırada kaldırıldı
       }
-      if (Date.now() - started > timeoutMs) throw new Error("Veritabanı kilidi alınamadı (zaman aşımı).");
+      if (Date.now() - started > timeoutMs)
+        throw new Error("Veritabanı kilidi alınamadı (zaman aşımı).");
       await new Promise((r) => setTimeout(r, 150));
     }
   }

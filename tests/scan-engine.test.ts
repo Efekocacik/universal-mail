@@ -1,7 +1,15 @@
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { budgetStatus, canSpend, recordUsage } from "@/lib/budget";
-import { categorySets, jobs, leads, placeSnapshots, places, scanUnits, scans } from "@/lib/db/schema";
+import {
+  categorySets,
+  jobs,
+  leads,
+  placeSnapshots,
+  places,
+  scanUnits,
+  scans,
+} from "@/lib/db/schema";
 import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import type { PlacesProvider } from "@/lib/places/provider";
@@ -11,7 +19,13 @@ import { bboxFromCenter } from "@/lib/geo/bbox";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import { enrichPlaces } from "@/lib/scan/enrich";
 import { runScan, type RunnerDeps } from "@/lib/scan/runner";
-import { cancelScan, createAndStartScan, estimateForRequest, pauseScan, resumeScan } from "@/lib/scan/service";
+import {
+  cancelScan,
+  createAndStartScan,
+  estimateForRequest,
+  pauseScan,
+  resumeScan,
+} from "@/lib/scan/service";
 import { getSetting, setSetting } from "@/lib/settings";
 import { createTestDb, type TestDb } from "./helpers/db";
 
@@ -93,7 +107,10 @@ describe("tahmin ve planlama", () => {
       }),
     ).rejects.toThrow(/çok büyük/);
     await expect(
-      createAndStartScan(db, { region: { kind: "city", name: "London", bbox: londonBox }, categoryIds: [] }),
+      createAndStartScan(db, {
+        region: { kind: "city", name: "London", bbox: londonBox },
+        categoryIds: [],
+      }),
     ).rejects.toThrow(/kategori/);
   });
 });
@@ -124,13 +141,20 @@ describe("temel tarama (baz çizgi)", () => {
     const future = l.filter((x) => x.noveltyLabel === "future_opening");
     expect(future.length).toBeGreaterThan(0);
     expect(future.every((x) => x.noveltyScore === 100)).toBe(true);
-    expect(l.filter((x) => x.noveltyLabel !== "future_opening").every((x) => x.noveltyScore === 0)).toBe(true);
+    expect(
+      l.filter((x) => x.noveltyLabel !== "future_opening").every((x) => x.noveltyScore === 0),
+    ).toBe(true);
   });
 
   it("yoğun hücreleri otomatik böler (doygunluk) ve tekrarlayan kayıtları tekilleştirir", async () => {
     // Geniş alan => büyük hücreler => merkezdeki hücreler 60 sonuç sınırına ulaşır.
     const { scanId } = await createAndStartScan(db, {
-      region: { kind: "city", name: "London (geniş)", countryCode: "GB", bbox: bboxFromCenter(51.5085, -0.1257, 12) },
+      region: {
+        kind: "city",
+        name: "London (geniş)",
+        countryCode: "GB",
+        bbox: bboxFromCenter(51.5085, -0.1257, 12),
+      },
       categoryIds: await categoryIds(["cafe"]),
     });
     expect(await runScan(deps(), scanId)).toBe("completed");
@@ -151,7 +175,9 @@ describe("temel tarama (baz çizgi)", () => {
     // Kayıtlar tekil; bölme sayesinde ana hücrelerin 60'lık sınırından fazla işletme bulundu.
     const ids = await db.select({ id: places.placeId }).from(places);
     expect(new Set(ids.map((i) => i.id)).size).toBe(ids.length);
-    const rootCap = units.filter((u) => u.parentId === null).reduce((a, u) => a + Math.min(u.resultCount, 60), 0);
+    const rootCap = units
+      .filter((u) => u.parentId === null)
+      .reduce((a, u) => a + Math.min(u.resultCount, 60), 0);
     expect(ids.length).toBeGreaterThan(rootCap * 0.5);
     expect(units.reduce((a, u) => a + u.resultCount, 0)).toBeGreaterThan(rootCap);
   });
@@ -187,13 +213,23 @@ describe("ikinci tarama: yeni işletme tespiti (snapshot karşılaştırması)",
     const after = await db.select().from(places);
     const fresh = after.filter((p) => !before.has(p.placeId));
     expect(fresh.length).toBeGreaterThan(0);
-    expect(fresh.every((p) => p.newDetectedAt !== null && p.firstSeenScanId === second.scanId)).toBe(true);
+    expect(
+      fresh.every((p) => p.newDetectedAt !== null && p.firstSeenScanId === second.scanId),
+    ).toBe(true);
     // Önceden var olanlar "yeni" sayılmaz
-    expect(after.filter((p) => before.has(p.placeId)).every((p) => p.newDetectedAt === null)).toBe(true);
+    expect(after.filter((p) => before.has(p.placeId)).every((p) => p.newDetectedAt === null)).toBe(
+      true,
+    );
 
     const opened = after.filter((p) => p.openedDetectedAt !== null);
     expect(opened.length).toBeGreaterThan(0);
-    expect(opened.every((p) => before.get(p.placeId)?.businessStatus === "FUTURE_OPENING" && p.businessStatus === "OPERATIONAL")).toBe(true);
+    expect(
+      opened.every(
+        (p) =>
+          before.get(p.placeId)?.businessStatus === "FUTURE_OPENING" &&
+          p.businessStatus === "OPERATIONAL",
+      ),
+    ).toBe(true);
 
     const l = await db.select().from(leads);
     const byPlace = new Map(l.map((x) => [x.placeId, x]));
@@ -241,7 +277,9 @@ describe("ikinci tarama: yeni işletme tespiti (snapshot karşılaştırması)",
     epoch = 3;
     const c = await newScan(["cafe"]);
     await runScan(deps(), c.scanId);
-    expect((await db.select().from(places)).filter((p) => p.notFoundInScanId !== null)).toHaveLength(0);
+    expect(
+      (await db.select().from(places)).filter((p) => p.notFoundInScanId !== null),
+    ).toHaveLength(0);
   });
 
   it("zamanla yeni-tespit sinyali sona erer (yeniden hesaplama)", async () => {
@@ -251,13 +289,17 @@ describe("ikinci tarama: yeni işletme tespiti (snapshot karşılaştırması)",
     const b = await newScan(["cafe"]);
     await runScan(deps(), b.scanId);
     const config = await getSetting(db, "novelty.thresholds");
-    const stillNew = (await db.select().from(leads)).filter((l) => l.noveltyLabel === "high").length;
+    const stillNew = (await db.select().from(leads)).filter(
+      (l) => l.noveltyLabel === "high",
+    ).length;
     expect(stillNew).toBeGreaterThan(0);
 
     const in90Days = Date.now() + 90 * 86_400_000;
     const updated = await recomputeNovelty(db, config, { now: in90Days });
     expect(updated).toBeGreaterThan(0);
-    expect((await db.select().from(leads)).filter((l) => l.noveltyLabel === "high")).toHaveLength(0);
+    expect((await db.select().from(leads)).filter((l) => l.noveltyLabel === "high")).toHaveLength(
+      0,
+    );
   });
 });
 
@@ -265,7 +307,14 @@ describe("duraklatma, devam ve kalıcılık", () => {
   it("birim sayısı dolunca durdurulan tarama duraklar ve devamında aynı sonuca ulaşır", async () => {
     const uninterrupted = await newScan(["cafe"]);
     await runScan(deps(), uninterrupted.scanId);
-    const expectedIds = new Set((await db.select({ id: placeSnapshots.placeId }).from(placeSnapshots).where(eq(placeSnapshots.scanId, uninterrupted.scanId))).map((x) => x.id));
+    const expectedIds = new Set(
+      (
+        await db
+          .select({ id: placeSnapshots.placeId })
+          .from(placeSnapshots)
+          .where(eq(placeSnapshots.scanId, uninterrupted.scanId))
+      ).map((x) => x.id),
+    );
 
     const interrupted = await newScan(["cafe"]);
     let calls = 0;
@@ -274,13 +323,22 @@ describe("duraklatma, devam ve kalıcılık", () => {
     let scan = (await db.select().from(scans).where(eq(scans.id, interrupted.scanId)))[0]!;
     expect(scan.status).toBe("paused");
     expect(scan.pauseReason).toContain("devam");
-    const doneSoFar = (await db.select().from(scanUnits).where(eq(scanUnits.scanId, interrupted.scanId))).filter((u) => u.status === "done").length;
+    const doneSoFar = (
+      await db.select().from(scanUnits).where(eq(scanUnits.scanId, interrupted.scanId))
+    ).filter((u) => u.status === "done").length;
     expect(doneSoFar).toBeGreaterThan(0);
 
     expect(await resumeScan(db, interrupted.scanId)).toEqual({ ok: true });
     expect(await runScan(deps(), interrupted.scanId)).toBe("completed");
     scan = (await db.select().from(scans).where(eq(scans.id, interrupted.scanId)))[0]!;
-    const gotIds = new Set((await db.select({ id: placeSnapshots.placeId }).from(placeSnapshots).where(eq(placeSnapshots.scanId, interrupted.scanId))).map((x) => x.id));
+    const gotIds = new Set(
+      (
+        await db
+          .select({ id: placeSnapshots.placeId })
+          .from(placeSnapshots)
+          .where(eq(placeSnapshots.scanId, interrupted.scanId))
+      ).map((x) => x.id),
+    );
     expect(gotIds).toEqual(expectedIds);
     expect(scan.status).toBe("completed");
   });
@@ -288,7 +346,10 @@ describe("duraklatma, devam ve kalıcılık", () => {
   it("çökme sonrası 'running' kalmış birimler kuyruğa döner ve tarama sürer", async () => {
     const { scanId } = await newScan(["cafe"]);
     await db.update(scans).set({ status: "queued" }).where(eq(scans.id, scanId));
-    await db.update(scanUnits).set({ status: "running" }).where(sql`${scanUnits.id} IN (SELECT id FROM scan_units WHERE scan_id = ${scanId} LIMIT 3)`);
+    await db
+      .update(scanUnits)
+      .set({ status: "running" })
+      .where(sql`${scanUnits.id} IN (SELECT id FROM scan_units WHERE scan_id = ${scanId} LIMIT 3)`);
     expect(await runScan(deps(), scanId)).toBe("completed");
     const units = await db.select().from(scanUnits).where(eq(scanUnits.scanId, scanId));
     expect(units.every((u) => u.status === "done")).toBe(true);
@@ -359,7 +420,10 @@ describe("bütçe koruması", () => {
 
   it("güvenlik çağrı sınırı aşılırsa tarama duraklar", async () => {
     const { scanId } = await newScan(["cafe"]);
-    await db.update(scans).set({ estimate: { maxCalls: 5 } }).where(eq(scans.id, scanId));
+    await db
+      .update(scans)
+      .set({ estimate: { maxCalls: 5 } })
+      .where(eq(scans.id, scanId));
     const out = await runScan(deps(), scanId);
     expect(out).toBe("paused");
     const scan = (await db.select().from(scans).where(eq(scans.id, scanId)))[0]!;
@@ -368,7 +432,10 @@ describe("bütçe koruması", () => {
 });
 
 describe("hata yönetimi", () => {
-  function failingProvider(kind: ConstructorParameters<typeof PlacesApiError>[0], failOn: (n: number, term: string) => boolean): PlacesProvider {
+  function failingProvider(
+    kind: ConstructorParameters<typeof PlacesApiError>[0],
+    failOn: (n: number, term: string) => boolean,
+  ): PlacesProvider {
     const inner = new MockPlacesProvider({ getEpoch: () => epoch });
     let n = 0;
     return {
@@ -388,7 +455,13 @@ describe("hata yönetimi", () => {
 
   it("kota hatasında tarama duraklatılır, birim kuyrukta kalır", async () => {
     const { scanId } = await newScan(["cafe"]);
-    const out = await runScan(deps({}, failingProvider("quota", (n) => n === 4)), scanId);
+    const out = await runScan(
+      deps(
+        {},
+        failingProvider("quota", (n) => n === 4),
+      ),
+      scanId,
+    );
     expect(out).toBe("paused");
     const scan = (await db.select().from(scans).where(eq(scans.id, scanId)))[0]!;
     expect(scan.status).toBe("paused");
@@ -402,7 +475,13 @@ describe("hata yönetimi", () => {
 
   it("yetkilendirme/faturalandırma hatasında tarama başarısız olur", async () => {
     const { scanId } = await newScan(["cafe"]);
-    const out = await runScan(deps({}, failingProvider("billing", () => true)), scanId);
+    const out = await runScan(
+      deps(
+        {},
+        failingProvider("billing", () => true),
+      ),
+      scanId,
+    );
     expect(out).toBe("failed");
     const scan = (await db.select().from(scans).where(eq(scans.id, scanId)))[0]!;
     expect(scan.status).toBe("failed");
@@ -411,7 +490,13 @@ describe("hata yönetimi", () => {
 
   it("tek bir türün geçersiz olması taramayı bozmaz; sonuç karşılaştırmaya girmez", async () => {
     const { scanId } = await newScan(["cafe"]); // cafe + coffee_shop
-    const out = await runScan(deps({}, failingProvider("invalid", (_n, term) => term === "coffee shop")), scanId);
+    const out = await runScan(
+      deps(
+        {},
+        failingProvider("invalid", (_n, term) => term === "coffee shop"),
+      ),
+      scanId,
+    );
     expect(out).toBe("completed");
     const units = await db.select().from(scanUnits).where(eq(scanUnits.scanId, scanId));
     expect(units.filter((u) => u.status === "failed").length).toBeGreaterThan(0);
@@ -427,7 +512,13 @@ describe("hata yönetimi", () => {
 
   it("art arda çok sayıda geçersiz birimde tarama başarısız olur", async () => {
     const { scanId } = await newScan(["cafe"]);
-    const out = await runScan(deps({}, failingProvider("invalid", () => true)), scanId);
+    const out = await runScan(
+      deps(
+        {},
+        failingProvider("invalid", () => true),
+      ),
+      scanId,
+    );
     expect(out).toBe("failed");
   });
 });
@@ -436,8 +527,12 @@ describe("zenginleştirme (Place Details)", () => {
   it("web sitesi, telefon ve yorum sayısını doldurur; lead durumu ve skor güncellenir", async () => {
     const { scanId } = await newScan(["cafe"]);
     await runScan(deps(), scanId);
-    const target = (await db.select().from(places).where(eq(places.businessStatus, "OPERATIONAL")).limit(3)).map((p) => p.placeId);
-    expect((await db.select().from(places).where(eq(places.placeId, target[0]!)))[0]!.website).toBeNull();
+    const target = (
+      await db.select().from(places).where(eq(places.businessStatus, "OPERATIONAL")).limit(3)
+    ).map((p) => p.placeId);
+    expect(
+      (await db.select().from(places).where(eq(places.placeId, target[0]!)))[0]!.website,
+    ).toBeNull();
 
     const res = await enrichPlaces(
       {

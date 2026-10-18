@@ -16,15 +16,30 @@ export interface RecomputeOptions {
  * (ör. "son 60 gün") bu fonksiyonun periyodik çağrılmasıyla düşer.
  * Dönen değer: güncellenen lead sayısı.
  */
-export async function recomputeNovelty(db: Db, config: NoveltyConfig, opts: RecomputeOptions = {}): Promise<number> {
+export async function recomputeNovelty(
+  db: Db,
+  config: NoveltyConfig,
+  opts: RecomputeOptions = {},
+): Promise<number> {
   let ids: string[] | undefined = opts.placeIds;
   if (opts.scanId !== undefined) {
-    const rows = await db.select({ placeId: placeSnapshots.placeId }).from(placeSnapshots).where(eq(placeSnapshots.scanId, opts.scanId));
+    const rows = await db
+      .select({ placeId: placeSnapshots.placeId })
+      .from(placeSnapshots)
+      .where(eq(placeSnapshots.scanId, opts.scanId));
     ids = rows.map((r) => r.placeId);
   }
 
   let updated = 0;
-  const process = async (rows: { id: number; score: number; label: string; signals: unknown; p: typeof places.$inferSelect }[]) => {
+  const process = async (
+    rows: {
+      id: number;
+      score: number;
+      label: string;
+      signals: unknown;
+      p: typeof places.$inferSelect;
+    }[],
+  ) => {
     const statements = [];
     for (const row of rows) {
       const res = computeNovelty(
@@ -39,12 +54,19 @@ export async function recomputeNovelty(db: Db, config: NoveltyConfig, opts: Reco
         config,
       );
       const changed =
-        res.score !== row.score || res.label !== row.label || JSON.stringify(res.signals) !== JSON.stringify(row.signals);
+        res.score !== row.score ||
+        res.label !== row.label ||
+        JSON.stringify(res.signals) !== JSON.stringify(row.signals);
       if (!changed) continue;
       statements.push(
         db
           .update(leads)
-          .set({ noveltyScore: res.score, noveltyLabel: res.label, noveltySignals: res.signals, updatedAt: opts.now ?? Date.now() })
+          .set({
+            noveltyScore: res.score,
+            noveltyLabel: res.label,
+            noveltySignals: res.signals,
+            updatedAt: opts.now ?? Date.now(),
+          })
           .where(eq(leads.id, row.id)),
       );
     }
@@ -74,10 +96,7 @@ export async function recomputeNovelty(db: Db, config: NoveltyConfig, opts: Reco
     // Tüm lead'ler: sayfa sayfa.
     let lastId = 0;
     for (;;) {
-      const page = await select()
-        .where(gt(leads.id, lastId))
-        .orderBy(leads.id)
-        .limit(500);
+      const page = await select().where(gt(leads.id, lastId)).orderBy(leads.id).limit(500);
       if (page.length === 0) break;
       await process(page);
       lastId = page[page.length - 1]!.id;

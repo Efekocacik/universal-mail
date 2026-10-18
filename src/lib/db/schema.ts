@@ -181,7 +181,10 @@ export const placeSnapshots = sqliteTable(
     businessStatus: text("business_status"),
     userRatingCount: integer("user_rating_count"),
   },
-  (t) => [primaryKey({ columns: [t.scanId, t.placeId] }), index("snapshots_place_idx").on(t.placeId)],
+  (t) => [
+    primaryKey({ columns: [t.scanId, t.placeId] }),
+    index("snapshots_place_idx").on(t.placeId),
+  ],
 );
 
 export type LeadStatus =
@@ -234,7 +237,10 @@ export const apiUsage = sqliteTable(
     calls: integer("calls").notNull().default(0),
     estCostUsd: real("est_cost_usd").notNull().default(0),
   },
-  (t) => [uniqueIndex("api_usage_uq").on(t.provider, t.sku, t.day), index("api_usage_day_idx").on(t.day)],
+  (t) => [
+    uniqueIndex("api_usage_uq").on(t.provider, t.sku, t.day),
+    index("api_usage_day_idx").on(t.day),
+  ],
 );
 
 export const jobs = sqliteTable(

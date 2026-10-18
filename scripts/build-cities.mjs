@@ -68,4 +68,10 @@ fs.mkdirSync(path.dirname(target), { recursive: true });
 fs.writeFileSync(target, JSON.stringify(out));
 const byCc = out.reduce((m, r) => ((m[r.cc] = (m[r.cc] ?? 0) + 1), m), {});
 console.log(`${out.length} şehir yazıldı → ${path.relative(process.cwd(), target)}`);
-console.log(Object.entries(byCc).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `${k}:${v}`).join(" "));
+console.log(
+  Object.entries(byCc)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12)
+    .map(([k, v]) => `${k}:${v}`)
+    .join(" "),
+);

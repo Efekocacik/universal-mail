@@ -79,7 +79,10 @@ export class GooglePlacesClient implements PlacesProvider {
 
   async searchNearby(req: NearbySearchRequest): Promise<SearchResult> {
     if (req.circle.radiusM <= 0 || req.circle.radiusM > 50_000) {
-      throw new PlacesApiError("invalid", "Nearby Search yarıçapı 0–50.000 m aralığında olmalıdır.");
+      throw new PlacesApiError(
+        "invalid",
+        "Nearby Search yarıçapı 0–50.000 m aralığında olmalıdır.",
+      );
     }
     const body: Record<string, unknown> = {
       includedTypes: req.includedTypes,
@@ -122,7 +125,10 @@ export class GooglePlacesClient implements PlacesProvider {
   ): Promise<Record<string, unknown>> {
     const key = await this.getApiKey();
     if (!key) {
-      throw new PlacesApiError("auth", "Google Places API anahtarı tanımlı değil. Ayarlar'dan anahtarı girin.");
+      throw new PlacesApiError(
+        "auth",
+        "Google Places API anahtarı tanımlı değil. Ayarlar'dan anahtarı girin.",
+      );
     }
 
     let lastError: PlacesApiError | undefined;
@@ -184,6 +190,10 @@ export class GooglePlacesClient implements PlacesProvider {
       errBody = undefined;
     }
     const retryAfter = Number(res.headers.get("retry-after"));
-    throw classifyGoogleError(res.status, errBody, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined);
+    throw classifyGoogleError(
+      res.status,
+      errBody,
+      Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : undefined,
+    );
   }
 }

@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DISCOVERY_FIELDS, ENRICH_FIELDS, detailsFieldMask, searchFieldMask, skuFor, tierOf } from "@/lib/places/fields";
+import {
+  DISCOVERY_FIELDS,
+  ENRICH_FIELDS,
+  detailsFieldMask,
+  searchFieldMask,
+  skuFor,
+  tierOf,
+} from "@/lib/places/fields";
 import { marginalCostUsd, skuLabel } from "@/lib/places/pricing";
 
 describe("marginalCostUsd", () => {

@@ -11,7 +11,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "dev": "concurrently -k -n web,worker -c blue,green \"npm:dev:web\" \"npm:dev:worker\"",
+    "dev": "npm run db:migrate && concurrently -k -n web,worker -c blue,green \"npm:dev:web\" \"npm:dev:worker\"",
     "dev:web": "next dev --hostname 127.0.0.1 --port 3000",
     "dev:worker": "tsx watch --clear-screen=false src/worker/index.ts",
     "build": "npm run build:web && npm run build:bundles",
@@ -45,11 +45,13 @@
     "radix-ui": "^1.8.1",
     "react": "^19.1.10",
     "react-dom": "^19.1.10",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/google.maps": "^3.66.7",
     "@types/node": "^24.19.2",

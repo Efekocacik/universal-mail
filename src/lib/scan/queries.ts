@@ -15,7 +15,10 @@ export function isValidPlaceType(type: string): boolean {
 }
 
 /** Seçilen kategorilerden ve serbest anahtar kelimelerden yinelenmeyen sorgu listesi üretir. */
-export function buildQueries(categories: CategoryLike[], customKeywords: string[] = []): ScanQuery[] {
+export function buildQueries(
+  categories: CategoryLike[],
+  customKeywords: string[] = [],
+): ScanQuery[] {
   const seen = new Set<string>();
   const out: ScanQuery[] = [];
   const add = (q: ScanQuery) => {
@@ -25,8 +28,10 @@ export function buildQueries(categories: CategoryLike[], customKeywords: string[
     out.push(q);
   };
   for (const c of categories) {
-    for (const t of c.placeTypes) if (isValidPlaceType(t)) add({ kind: "type", term: t, categoryKey: c.key });
-    for (const k of c.keywords) if (k.trim()) add({ kind: "keyword", term: k.trim(), categoryKey: c.key });
+    for (const t of c.placeTypes)
+      if (isValidPlaceType(t)) add({ kind: "type", term: t, categoryKey: c.key });
+    for (const k of c.keywords)
+      if (k.trim()) add({ kind: "keyword", term: k.trim(), categoryKey: c.key });
   }
   for (const k of customKeywords) if (k.trim()) add({ kind: "keyword", term: k.trim() });
   return out;
@@ -48,7 +53,11 @@ export function computeScanKey(input: ScanKeyInput): string {
     stableStringify({
       bbox: roundBBox(input.bbox, 4),
       circle: input.circle
-        ? { lat: Math.round(input.circle.lat * 1e4) / 1e4, lng: Math.round(input.circle.lng * 1e4) / 1e4, r: Math.round(input.circle.radiusM) }
+        ? {
+            lat: Math.round(input.circle.lat * 1e4) / 1e4,
+            lng: Math.round(input.circle.lng * 1e4) / 1e4,
+            r: Math.round(input.circle.radiusM),
+          }
         : null,
       queries: input.queries.map((q) => `${q.kind}:${q.term.toLowerCase()}`).sort(),
       strategy: input.strategy,

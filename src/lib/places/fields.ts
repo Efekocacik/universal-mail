@@ -68,7 +68,10 @@ export function tierOf(fields: readonly string[]): FieldTier {
   let tier: FieldTier = "ids";
   for (const f of fields) {
     const t = FIELD_TIERS[f];
-    if (!t) throw new Error(`Bilinmeyen Places alanı: "${f}". Önce fiyat sınıfını FIELD_TIERS içine ekleyin.`);
+    if (!t)
+      throw new Error(
+        `Bilinmeyen Places alanı: "${f}". Önce fiyat sınıfını FIELD_TIERS içine ekleyin.`,
+      );
     if (t === "enterprise") return "enterprise";
     if (t === "pro") tier = "pro";
   }
@@ -78,7 +81,11 @@ export function tierOf(fields: readonly string[]): FieldTier {
 export function skuFor(endpoint: Endpoint, fields: readonly string[]): SkuId {
   const tier = tierOf(fields);
   if (endpoint === "text") {
-    return tier === "ids" ? "text_search_ids" : tier === "pro" ? "text_search_pro" : "text_search_enterprise";
+    return tier === "ids"
+      ? "text_search_ids"
+      : tier === "pro"
+        ? "text_search_pro"
+        : "text_search_enterprise";
   }
   if (endpoint === "nearby") {
     // Nearby Search'te `id` bile Pro sınıfındadır.

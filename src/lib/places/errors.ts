@@ -1,13 +1,5 @@
 export type PlacesErrorKind =
-  | "auth"
-  | "billing"
-  | "disabled"
-  | "quota"
-  | "rate"
-  | "invalid"
-  | "network"
-  | "server"
-  | "unknown";
+  "auth" | "billing" | "disabled" | "quota" | "rate" | "invalid" | "network" | "server" | "unknown";
 
 export class PlacesApiError extends Error {
   readonly kind: PlacesErrorKind;
@@ -29,7 +21,12 @@ export class PlacesApiError extends Error {
 
   /** Taramayı duraklatıp daha sonra devam ettirmeyi gerektiren geçici durumlar. */
   get isPausable(): boolean {
-    return this.kind === "quota" || this.kind === "rate" || this.kind === "network" || this.kind === "server";
+    return (
+      this.kind === "quota" ||
+      this.kind === "rate" ||
+      this.kind === "network" ||
+      this.kind === "server"
+    );
   }
 
   /** Yeniden denemenin anlamlı olduğu hatalar. */
@@ -40,10 +37,12 @@ export class PlacesApiError extends Error {
 
 const MESSAGES_TR: Record<PlacesErrorKind, string> = {
   auth: "Google API anahtarı geçersiz ya da bu isteğe izin vermiyor. Anahtarın 'Places API (New)' ile kısıtlandığını ve doğru kopyalandığını kontrol edin.",
-  billing: "Google Cloud projesinde faturalandırma kapalı. Faturalandırma hesabını projeye bağlayın.",
+  billing:
+    "Google Cloud projesinde faturalandırma kapalı. Faturalandırma hesabını projeye bağlayın.",
   disabled:
     "'Places API (New)' bu projede etkin değil. Google Cloud'da API kitaplığından etkinleştirin (eski 'Places API' değil, '(New)' olanı).",
-  quota: "Google kota sınırına ulaşıldı. Tarama duraklatıldı; kota sıfırlandığında veya sınırı yükselttiğinizde devam edebilirsiniz.",
+  quota:
+    "Google kota sınırına ulaşıldı. Tarama duraklatıldı; kota sıfırlandığında veya sınırı yükselttiğinizde devam edebilirsiniz.",
   rate: "Google isteklerimizi geçici olarak yavaşlattı (çok sık istek). Tarama duraklatıldı; biraz sonra devam edebilirsiniz.",
   invalid: "Google isteği reddetti.",
   network: "Google'a ulaşılamadı. İnternet bağlantınızı kontrol edin; tarama duraklatıldı.",
@@ -66,7 +65,11 @@ interface GoogleErrorBody {
 }
 
 /** Google hata yanıtını anlaşılır bir hata türüne çevirir. */
-export function classifyGoogleError(status: number, body: unknown, retryAfterMs?: number): PlacesApiError {
+export function classifyGoogleError(
+  status: number,
+  body: unknown,
+  retryAfterMs?: number,
+): PlacesApiError {
   const err = (body as GoogleErrorBody | undefined)?.error;
   const googleStatus = err?.status;
   const message = err?.message ?? `HTTP ${status}`;
@@ -76,9 +79,24 @@ export function classifyGoogleError(status: number, body: unknown, retryAfterMs?
   const lower = message.toLowerCase();
   let kind: PlacesErrorKind;
   if (reason === "BILLING_DISABLED" || lower.includes("billing")) kind = "billing";
-  else if (reason === "SERVICE_DISABLED" || lower.includes("has not been used") || lower.includes("is disabled")) kind = "disabled";
-  else if (status === 401 || status === 403 || reason === "API_KEY_INVALID" || reason?.startsWith("API_KEY")) kind = "auth";
-  else if (status === 429) kind = lower.includes("quota") && (lower.includes("per day") || lower.includes("daily")) ? "quota" : "rate";
+  else if (
+    reason === "SERVICE_DISABLED" ||
+    lower.includes("has not been used") ||
+    lower.includes("is disabled")
+  )
+    kind = "disabled";
+  else if (
+    status === 401 ||
+    status === 403 ||
+    reason === "API_KEY_INVALID" ||
+    reason?.startsWith("API_KEY")
+  )
+    kind = "auth";
+  else if (status === 429)
+    kind =
+      lower.includes("quota") && (lower.includes("per day") || lower.includes("daily"))
+        ? "quota"
+        : "rate";
   else if (status === 400 && reason === "API_KEY_INVALID") kind = "auth";
   else if (status === 400 || status === 404) kind = "invalid";
   else if (status >= 500) kind = "server";

@@ -7,3 +7,6 @@ drizzle
 package-lock.json
 docs/*.pdf
 data/*.json
+docs
+README.md
+.github

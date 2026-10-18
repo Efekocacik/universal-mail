@@ -16,3 +16,4 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 .DS_Store
+e2e/dev/

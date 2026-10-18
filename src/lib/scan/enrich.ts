@@ -42,7 +42,13 @@ export async function enrichPlaces(deps: EnrichDeps, placeIds: string[]): Promis
 
   for (const id of placeIds) {
     if (deps.shouldStop?.()) break;
-    const spend = await canSpend(db, provider.id, await deps.getBudgetUsd(), "place_details_enterprise", 1);
+    const spend = await canSpend(
+      db,
+      provider.id,
+      await deps.getBudgetUsd(),
+      "place_details_enterprise",
+      1,
+    );
     if (!spend.ok) {
       stoppedReason = spend.reason;
       break;
@@ -89,7 +95,10 @@ export async function enrichPlaces(deps: EnrichDeps, placeIds: string[]): Promis
         updatedAt: t,
       })
       .where(eq(places.placeId, id));
-    await db.update(leads).set({ status: "enriched", updatedAt: t }).where(and(eq(leads.placeId, id), eq(leads.status, "new")));
+    await db
+      .update(leads)
+      .set({ status: "enriched", updatedAt: t })
+      .where(and(eq(leads.placeId, id), eq(leads.status, "new")));
     done.push(id);
     await sleep(120);
   }
@@ -103,6 +112,9 @@ export async function enrichPlaces(deps: EnrichDeps, placeIds: string[]): Promis
 
 export async function placeIdsForLeads(db: Db, leadIds: number[]): Promise<string[]> {
   if (leadIds.length === 0) return [];
-  const rows = await db.select({ placeId: leads.placeId }).from(leads).where(inArray(leads.id, leadIds));
+  const rows = await db
+    .select({ placeId: leads.placeId })
+    .from(leads)
+    .where(inArray(leads.id, leadIds));
   return rows.map((r) => r.placeId).filter((p): p is string => !!p);
 }

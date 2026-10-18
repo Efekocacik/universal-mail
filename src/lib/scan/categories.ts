@@ -18,8 +18,22 @@ export interface BuiltInCategory {
 }
 
 export const BUILTIN_CATEGORIES: readonly BuiltInCategory[] = [
-  { key: "cafe", name: "Kafe / kahveci", placeTypes: ["cafe", "coffee_shop"], keywords: [], priority: 3, defaultEnabled: true },
-  { key: "pub", name: "Bar / pub", placeTypes: ["pub", "bar"], keywords: [], priority: 3, defaultEnabled: true },
+  {
+    key: "cafe",
+    name: "Kafe / kahveci",
+    placeTypes: ["cafe", "coffee_shop"],
+    keywords: [],
+    priority: 3,
+    defaultEnabled: true,
+  },
+  {
+    key: "pub",
+    name: "Bar / pub",
+    placeTypes: ["pub", "bar"],
+    keywords: [],
+    priority: 3,
+    defaultEnabled: true,
+  },
   {
     key: "restaurant",
     name: "Restoran / paket servis",
@@ -102,7 +116,11 @@ export const BUILTIN_CATEGORIES: readonly BuiltInCategory[] = [
 export async function seedCategories(db: Db): Promise<number> {
   let inserted = 0;
   for (const [i, c] of BUILTIN_CATEGORIES.entries()) {
-    const existing = await db.select({ id: categorySets.id }).from(categorySets).where(eq(categorySets.key, c.key)).limit(1);
+    const existing = await db
+      .select({ id: categorySets.id })
+      .from(categorySets)
+      .where(eq(categorySets.key, c.key))
+      .limit(1);
     if (existing.length > 0) continue;
     await db.insert(categorySets).values({
       key: c.key,

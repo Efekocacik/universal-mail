@@ -14,7 +14,12 @@ export interface EnqueueOptions {
 }
 
 /** İş ekler. `dedupeKey` zaten varsa `null` döner. */
-export async function enqueueJob(db: Db, type: string, payload: unknown, opts: EnqueueOptions = {}): Promise<number | null> {
+export async function enqueueJob(
+  db: Db,
+  type: string,
+  payload: unknown,
+  opts: EnqueueOptions = {},
+): Promise<number | null> {
   const now = Date.now();
   const rows = await db
     .insert(jobs)
@@ -38,7 +43,11 @@ export async function enqueueJob(db: Db, type: string, payload: unknown, opts: E
  * Çalıştırılabilir en eski/en öncelikli işi kilitleyip döndürür. Kilitleme iyimserdir: aynı anda
  * iki işçi denerse yalnızca biri `status='queued'` koşulunu sağlayıp kazanır.
  */
-export async function claimNextJob(db: Db, workerId: string, now: number = Date.now()): Promise<JobRow | null> {
+export async function claimNextJob(
+  db: Db,
+  workerId: string,
+  now: number = Date.now(),
+): Promise<JobRow | null> {
   const candidates = await db
     .select()
     .from(jobs)
@@ -48,7 +57,13 @@ export async function claimNextJob(db: Db, workerId: string, now: number = Date.
   for (const c of candidates) {
     const res = await db
       .update(jobs)
-      .set({ status: "running", lockedBy: workerId, lockedAt: now, attempts: sql`${jobs.attempts} + 1`, updatedAt: now })
+      .set({
+        status: "running",
+        lockedBy: workerId,
+        lockedAt: now,
+        attempts: sql`${jobs.attempts} + 1`,
+        updatedAt: now,
+      })
       .where(and(eq(jobs.id, c.id), eq(jobs.status, "queued")))
       .returning();
     if (res[0]) return res[0];
@@ -57,15 +72,24 @@ export async function claimNextJob(db: Db, workerId: string, now: number = Date.
 }
 
 export async function heartbeatJob(db: Db, id: number, now: number = Date.now()): Promise<void> {
-  await db.update(jobs).set({ lockedAt: now, updatedAt: now }).where(and(eq(jobs.id, id), eq(jobs.status, "running")));
+  await db
+    .update(jobs)
+    .set({ lockedAt: now, updatedAt: now })
+    .where(and(eq(jobs.id, id), eq(jobs.status, "running")));
 }
 
 export async function completeJob(db: Db, id: number, now: number = Date.now()): Promise<void> {
-  await db.update(jobs).set({ status: "done", finishedAt: now, updatedAt: now, lockedBy: null }).where(eq(jobs.id, id));
+  await db
+    .update(jobs)
+    .set({ status: "done", finishedAt: now, updatedAt: now, lockedBy: null })
+    .where(eq(jobs.id, id));
 }
 
 export async function cancelJob(db: Db, id: number, now: number = Date.now()): Promise<void> {
-  await db.update(jobs).set({ status: "cancelled", finishedAt: now, updatedAt: now, lockedBy: null }).where(eq(jobs.id, id));
+  await db
+    .update(jobs)
+    .set({ status: "cancelled", finishedAt: now, updatedAt: now, lockedBy: null })
+    .where(eq(jobs.id, id));
 }
 
 /** İş hata verdi: deneme hakkı varsa gecikmeyle yeniden kuyruğa alınır, yoksa `failed` olur. */
@@ -80,7 +104,14 @@ export async function failJob(
   if (job.attempts < job.maxAttempts) {
     await db
       .update(jobs)
-      .set({ status: "queued", lastError, runAt: now + retryDelayMs * job.attempts, updatedAt: now, lockedBy: null, lockedAt: null })
+      .set({
+        status: "queued",
+        lastError,
+        runAt: now + retryDelayMs * job.attempts,
+        updatedAt: now,
+        lockedBy: null,
+        lockedAt: null,
+      })
       .where(eq(jobs.id, job.id));
     return "queued";
   }
@@ -96,7 +127,10 @@ export async function listRunningJobs(db: Db): Promise<JobRow[]> {
 }
 
 export async function requeueJob(db: Db, id: number, now: number = Date.now()): Promise<void> {
-  await db.update(jobs).set({ status: "queued", lockedBy: null, lockedAt: null, runAt: now, updatedAt: now }).where(eq(jobs.id, id));
+  await db
+    .update(jobs)
+    .set({ status: "queued", lockedBy: null, lockedAt: null, runAt: now, updatedAt: now })
+    .where(eq(jobs.id, id));
 }
 
 export async function countJobs(db: Db, status: JobStatus, type?: string): Promise<number> {
@@ -108,6 +142,17 @@ export async function countJobs(db: Db, status: JobStatus, type?: string): Promi
 }
 
 /** Bitmiş eski iş kayıtlarını temizler (varsayılan 30 gün). */
-export async function pruneFinishedJobs(db: Db, olderThanMs = 30 * 86_400_000, now: number = Date.now()): Promise<void> {
-  await db.delete(jobs).where(and(sql`${jobs.status} in ('done','failed','cancelled')`, lte(jobs.finishedAt, now - olderThanMs)));
+export async function pruneFinishedJobs(
+  db: Db,
+  olderThanMs = 30 * 86_400_000,
+  now: number = Date.now(),
+): Promise<void> {
+  await db
+    .delete(jobs)
+    .where(
+      and(
+        sql`${jobs.status} in ('done','failed','cancelled')`,
+        lte(jobs.finishedAt, now - olderThanMs),
+      ),
+    );
 }

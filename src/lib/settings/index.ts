@@ -73,7 +73,10 @@ export async function getSettings<K extends SettingKey>(
   db: Db,
   keys: readonly K[],
 ): Promise<{ [P in K]: SettingValue<P> }> {
-  const rows = await db.select().from(settings).where(inArray(settings.key, [...keys]));
+  const rows = await db
+    .select()
+    .from(settings)
+    .where(inArray(settings.key, [...keys]));
   const byKey = new Map(rows.map((r) => [r.key, r.value]));
   const out = {} as { [P in K]: SettingValue<P> };
   for (const key of keys) {
@@ -84,7 +87,11 @@ export async function getSettings<K extends SettingKey>(
   return out;
 }
 
-export async function setSetting<K extends SettingKey>(db: Db, key: K, value: SettingValue<K>): Promise<void> {
+export async function setSetting<K extends SettingKey>(
+  db: Db,
+  key: K,
+  value: SettingValue<K>,
+): Promise<void> {
   const parsed = settingSchemas[key].parse(value);
   const now = Date.now();
   await db
@@ -94,7 +101,10 @@ export async function setSetting<K extends SettingKey>(db: Db, key: K, value: Se
 }
 
 /** Hedef ülke listesi boşsa tüm desteklenen ülkeler (Türkiye hariç) varsayılan kabul edilir. */
-export function effectiveTargetCountries(selected: string[], allCodes: readonly string[]): string[] {
+export function effectiveTargetCountries(
+  selected: string[],
+  allCodes: readonly string[],
+): string[] {
   if (selected.length > 0) return selected;
   return allCodes.filter((c) => !DEFAULT_EXCLUDED_COUNTRIES.includes(c));
 }

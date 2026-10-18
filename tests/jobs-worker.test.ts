@@ -7,7 +7,14 @@ import { openDatabase } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { runMigrations } from "@/lib/db/migrate";
 import { jobs, scans } from "@/lib/db/schema";
-import { claimNextJob, completeJob, countJobs, enqueueJob, failJob, pruneFinishedJobs } from "@/lib/jobs/queue";
+import {
+  claimNextJob,
+  completeJob,
+  countJobs,
+  enqueueJob,
+  failJob,
+  pruneFinishedJobs,
+} from "@/lib/jobs/queue";
 import { clearJobHandlers, NonRetryableJobError, registerJobHandler } from "@/lib/jobs/registry";
 import { createAndStartScan } from "@/lib/scan/service";
 import { categorySets } from "@/lib/db/schema";
@@ -118,7 +125,9 @@ describe("işçi döngüsü", () => {
   it("açılışta kurtarma: çalışıyor görünen tarama duraklatılır, diğer işler yeniden kuyruğa girer, kuyruktaki taramaya iş eklenir", async () => {
     await initDatabase();
     await setSetting(db, "places.provider", "mock");
-    const cats = (await db.select().from(categorySets)).filter((c) => c.key === "cafe").map((c) => c.id);
+    const cats = (await db.select().from(categorySets))
+      .filter((c) => c.key === "cafe")
+      .map((c) => c.id);
     const { scanId } = await createAndStartScan(db, {
       region: { kind: "city", name: "London", bbox: bboxFromCenter(51.5085, -0.1257, 2) },
       categoryIds: cats,
@@ -131,7 +140,9 @@ describe("işçi döngüsü", () => {
 
     await new Worker({ db, workerId: "yeni", log: () => undefined }).recover();
 
-    expect((await db.select().from(jobs).where(eq(jobs.id, scanJob.id)))[0]!.status).toBe("cancelled");
+    expect((await db.select().from(jobs).where(eq(jobs.id, scanJob.id)))[0]!.status).toBe(
+      "cancelled",
+    );
     expect((await db.select().from(jobs).where(eq(jobs.id, other.id)))[0]!.status).toBe("queued");
     const scan = (await db.select().from(scans).where(eq(scans.id, scanId)))[0]!;
     expect(scan.status).toBe("paused");
@@ -141,7 +152,9 @@ describe("işçi döngüsü", () => {
   it("kuyrukta kalan taramanın kayıp işi yeniden eklenir", async () => {
     await initDatabase();
     await setSetting(db, "places.provider", "mock");
-    const cats = (await db.select().from(categorySets)).filter((c) => c.key === "cafe").map((c) => c.id);
+    const cats = (await db.select().from(categorySets))
+      .filter((c) => c.key === "cafe")
+      .map((c) => c.id);
     const { scanId } = await createAndStartScan(db, {
       region: { kind: "city", name: "London", bbox: bboxFromCenter(51.5085, -0.1257, 2) },
       categoryIds: cats,
@@ -162,8 +175,16 @@ describe("şema geçişi ve yedek", () => {
     const dst = path.join(t.dir, "migrations-v2");
     fs.cpSync(src, dst, { recursive: true });
     const journalPath = path.join(dst, "meta", "_journal.json");
-    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as { entries: Record<string, unknown>[] };
-    journal.entries.push({ idx: 1, version: "6", when: Date.now() + 1000, tag: "0001_test", breakpoints: true });
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8")) as {
+      entries: Record<string, unknown>[];
+    };
+    journal.entries.push({
+      idx: 1,
+      version: "6",
+      when: Date.now() + 1000,
+      tag: "0001_test",
+      breakpoints: true,
+    });
     fs.writeFileSync(journalPath, JSON.stringify(journal));
     fs.writeFileSync(path.join(dst, "0001_test.sql"), sql);
     return dst;
@@ -171,8 +192,22 @@ describe("şema geçişi ve yedek", () => {
 
   it("temiz veritabanına migrasyon uygulanır; ilk kurulumda yedek alınmaz", async () => {
     const handle = await openDatabase(t.path);
-    const rows = (await handle.client.execute("SELECT name FROM sqlite_master WHERE type='table'")).rows.map((r) => String(r.name));
-    for (const name of ["settings", "regions", "category_sets", "scans", "scan_units", "places", "place_snapshots", "leads", "api_usage", "jobs", "audit_log"]) {
+    const rows = (
+      await handle.client.execute("SELECT name FROM sqlite_master WHERE type='table'")
+    ).rows.map((r) => String(r.name));
+    for (const name of [
+      "settings",
+      "regions",
+      "category_sets",
+      "scans",
+      "scan_units",
+      "places",
+      "place_snapshots",
+      "leads",
+      "api_usage",
+      "jobs",
+      "audit_log",
+    ]) {
       expect(rows).toContain(name);
     }
     expect(fs.existsSync(path.join(t.dir, "backups"))).toBe(false);
@@ -181,7 +216,9 @@ describe("şema geçişi ve yedek", () => {
 
   it("veri varken bekleyen migrasyon uygulanmadan önce yedek alınır; yedekte eski şema vardır", async () => {
     await setSetting(db, "budget.monthlyUsd", 42);
-    process.env.UM_MIGRATIONS_DIR = folderWithExtraMigration("CREATE TABLE `lead_emails_test` (`id` integer PRIMARY KEY NOT NULL);");
+    process.env.UM_MIGRATIONS_DIR = folderWithExtraMigration(
+      "CREATE TABLE `lead_emails_test` (`id` integer PRIMARY KEY NOT NULL);",
+    );
     const handle = await openDatabase(t.path);
     const res = await runMigrations(handle.db, handle.client);
     expect(res.pending).toBe(1);
@@ -189,11 +226,19 @@ describe("şema geçişi ve yedek", () => {
     expect(fs.existsSync(res.backupPath!)).toBe(true);
 
     // Yeni tablo ana veritabanında var, yedekte yok; mevcut veri korunmuş.
-    const main = (await handle.client.execute("SELECT name FROM sqlite_master WHERE name='lead_emails_test'")).rows;
+    const main = (
+      await handle.client.execute("SELECT name FROM sqlite_master WHERE name='lead_emails_test'")
+    ).rows;
     expect(main).toHaveLength(1);
     const backup = await openDatabase(res.backupPath!);
-    expect((await backup.client.execute("SELECT name FROM sqlite_master WHERE name='lead_emails_test'")).rows).toHaveLength(0);
-    expect((await backup.client.execute("SELECT value FROM settings WHERE key='budget.monthlyUsd'")).rows).toHaveLength(1);
+    expect(
+      (await backup.client.execute("SELECT name FROM sqlite_master WHERE name='lead_emails_test'"))
+        .rows,
+    ).toHaveLength(0);
+    expect(
+      (await backup.client.execute("SELECT value FROM settings WHERE key='budget.monthlyUsd'"))
+        .rows,
+    ).toHaveLength(1);
     backup.client.close();
     handle.client.close();
 
@@ -205,13 +250,22 @@ describe("şema geçişi ve yedek", () => {
 
   it("hatalı migrasyon veriyi bozmaz: yedek yerinde, ana veritabanı eski halde", async () => {
     await setSetting(db, "budget.monthlyUsd", 42);
-    process.env.UM_MIGRATIONS_DIR = folderWithExtraMigration("CREATE TABLE `ok_table` (`id` integer);\n--> statement-breakpoint\nTHIS IS NOT SQL;");
+    process.env.UM_MIGRATIONS_DIR = folderWithExtraMigration(
+      "CREATE TABLE `ok_table` (`id` integer);\n--> statement-breakpoint\nTHIS IS NOT SQL;",
+    );
     const handle = await openDatabase(t.path);
     await expect(runMigrations(handle.db, handle.client)).rejects.toThrow();
-    const tables = (await handle.client.execute("SELECT name FROM sqlite_master WHERE name='ok_table'")).rows;
+    const tables = (
+      await handle.client.execute("SELECT name FROM sqlite_master WHERE name='ok_table'")
+    ).rows;
     expect(tables).toHaveLength(0); // işlem geri alındı
-    expect((await handle.client.execute("SELECT value FROM settings WHERE key='budget.monthlyUsd'")).rows).toHaveLength(1);
-    expect(fs.readdirSync(path.join(t.dir, "backups")).some((f) => f.startsWith("pre-migrate-"))).toBe(true);
+    expect(
+      (await handle.client.execute("SELECT value FROM settings WHERE key='budget.monthlyUsd'"))
+        .rows,
+    ).toHaveLength(1);
+    expect(
+      fs.readdirSync(path.join(t.dir, "backups")).some((f) => f.startsWith("pre-migrate-")),
+    ).toBe(true);
     handle.client.close();
   });
 });
