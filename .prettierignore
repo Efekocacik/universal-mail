@@ -1,0 +1,9 @@
+.next
+dist
+release
+node_modules
+.data
+drizzle
+package-lock.json
+docs/*.pdf
+data/*.json
