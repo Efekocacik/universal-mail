@@ -431,6 +431,42 @@ describe("bütçe koruması", () => {
   });
 });
 
+describe("güvenlik çağrı sınırı: duraklayan tarama devam ettirilebilir", () => {
+  it("'Devam et' her seferinde ilerler ve sonunda tarama biter", async () => {
+    const { scanId } = await newScan(["cafe"]);
+    await db
+      .update(scans)
+      .set({ estimate: { maxCalls: 6 } })
+      .where(eq(scans.id, scanId));
+    const callsOf = async () =>
+      Object.values(
+        (await db.select().from(scans).where(eq(scans.id, scanId)))[0]!.callsBySku,
+      ).reduce((a, b) => a + b, 0);
+
+    expect(await runScan(deps(), scanId)).toBe("paused");
+    let last = await callsOf();
+    expect(last).toBe(6);
+    let outcome = "paused";
+    for (let i = 0; i < 80 && outcome === "paused"; i++) {
+      expect(await resumeScan(db, scanId)).toEqual({ ok: true });
+      outcome = await runScan(deps(), scanId);
+      const now = await callsOf();
+      expect(now).toBeGreaterThan(last); // her devam ilerler
+      expect(now - last).toBeLessThanOrEqual(3 + 1); // en fazla sınırın yarısı kadar yeni pay (+ son sayfa)
+      last = now;
+    }
+    expect(outcome).toBe("completed");
+  });
+
+  it("effectiveMaxCalls: ilk çalıştırmada sınır aynı, devamda yarısı kadar eklenir", async () => {
+    const { effectiveMaxCalls } = await import("@/lib/scan/runner");
+    expect(effectiveMaxCalls(100, 0)).toBe(100);
+    expect(effectiveMaxCalls(100, 100)).toBe(150);
+    expect(effectiveMaxCalls(100, 150)).toBe(200);
+    expect(effectiveMaxCalls(5, 5)).toBe(8);
+  });
+});
+
 describe("hata yönetimi", () => {
   function failingProvider(
     kind: ConstructorParameters<typeof PlacesApiError>[0],

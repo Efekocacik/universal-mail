@@ -63,6 +63,15 @@ function readMaxCalls(scan: ScanRow): number {
 }
 
 /**
+ * Güvenlik çağrı sınırı. İlk çalıştırmada tahminden türetilen sınırdır. Kullanıcı duraklamış bir taramayı
+ * SÜRDÜRDÜĞÜNDE, o zamana kadar yapılmış çağrıların üstüne sınırın yarısı kadar yeni pay verilir; böylece
+ * "Devam et" her zaman ilerler ama kontrolsüz de sürmez (her duraklamada kullanıcıya yeniden sorulur).
+ */
+export function effectiveMaxCalls(estimateMax: number, callsSoFar: number): number {
+  return Math.max(estimateMax, callsSoFar + Math.ceil(estimateMax * 0.5));
+}
+
+/**
  * Bir taramanın kalan birimlerini çalıştırır. Yeniden başlatılabilir: durum tamamen veritabanındadır,
  * "running" kalmış birimler kuyruğa döner ve tarama kaldığı yerden devam eder.
  * Ücretli her çağrıdan önce bütçe denetlenir; geçici hatalarda tarama duraklatılır, kalıcı hatalarda başarısız olur.
@@ -96,8 +105,9 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     unitsFailed: (await unitCounts(db, scanId)).failed,
     consecutiveUnitFailures: 0,
     newPlaces: 0,
-    maxCalls: readMaxCalls(scan),
+    maxCalls: 0,
   };
+  state.maxCalls = effectiveMaxCalls(readMaxCalls(scan), state.callsTotal);
 
   for (;;) {
     const current = await scanStatusOf(db, scanId);
