@@ -4,7 +4,7 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
-import type { DraftRegion } from "./state";
+import { regionFromDrag } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
 
 const SHAPE_STYLE = {
@@ -15,6 +15,16 @@ const SHAPE_STYLE = {
   fillOpacity: 0.08,
 } as const;
 
+interface PinRef {
+  marker: google.maps.marker.AdvancedMarkerElement;
+  el: HTMLElement;
+}
+
+/**
+ * İşaretçiler. Google belgelerine göre `AdvancedMarkerElement` tıklamaları yalnızca `gmpClickable: true` iken ve
+ * `gmp-click` olayıyla (addEventListener) alınır; `addListener("click")` kullanımdan kalkmıştır.
+ * İçerik öğelerine kendi referanslarımızdan erişiriz (marker.content özelliği kullanımdan kalkmıştır).
+ */
 function Markers({
   points,
   selectedId,
@@ -22,7 +32,7 @@ function Markers({
 }: Pick<MapViewProps, "points" | "selectedId" | "onSelect">) {
   const map = useMap();
   const markerLib = useMapsLibrary("marker");
-  const byId = useRef(new globalThis.Map<number, google.maps.marker.AdvancedMarkerElement>());
+  const byId = useRef(new globalThis.Map<number, PinRef>());
   const selectRef = useRef(onSelect);
   const prevSelected = useRef<number | null>(null);
   selectRef.current = onSelect;
@@ -37,9 +47,11 @@ function Markers({
       const marker = new markerLib.AdvancedMarkerElement({
         position: { lat: p[1]!, lng: p[2]! },
         content: el,
+        gmpClickable: true,
+        title: t("map.marker"),
       });
-      marker.addListener("click", () => selectRef.current(p[0]!));
-      index.set(p[0]!, marker);
+      marker.addEventListener("gmp-click", () => selectRef.current(p[0]!));
+      index.set(p[0]!, { marker, el });
       return marker;
     });
     const clusterer = new MarkerClusterer({
@@ -52,10 +64,13 @@ function Markers({
           el.className = "um-cluster";
           el.style.width = el.style.height = `${size}px`;
           el.textContent = count >= 1000 ? `${(count / 1000).toFixed(1)}k` : String(count);
+          // Küme tıklaması (yakınlaştırma) için işaretçinin tıklanabilir olması gerekir.
           return new markerLib.AdvancedMarkerElement({
             position,
             content: el,
             zIndex: 1000 + count,
+            gmpClickable: true,
+            title: t("map.cluster", { n: count }),
           });
         },
       },
@@ -72,13 +87,13 @@ function Markers({
     const index = byId.current;
     const prev = prevSelected.current !== null ? index.get(prevSelected.current) : undefined;
     if (prev) {
-      (prev.content as HTMLElement).classList.remove("um-pin--selected");
-      prev.zIndex = null;
+      prev.el.classList.remove("um-pin--selected");
+      prev.marker.zIndex = null;
     }
     const cur = selectedId !== null ? index.get(selectedId) : undefined;
     if (cur) {
-      (cur.content as HTMLElement).classList.add("um-pin--selected");
-      cur.zIndex = 9999;
+      cur.el.classList.add("um-pin--selected");
+      cur.marker.zIndex = 9999;
     }
     prevSelected.current = selectedId;
   }, [selectedId, points]);
@@ -97,7 +112,7 @@ function ViewReporter({ onBoundsChange }: Pick<MapViewProps, "onBoundsChange">) 
   useEffect(() => {
     if (!map) return;
     const report = () => {
-      const b = map.getBounds();
+      const b = map.getBounds(); // harita hazır olana kadar undefined olabilir
       if (b) onBoundsChange(bboxOfBounds(b));
     };
     const l = map.addListener("idle", report);
@@ -129,7 +144,7 @@ function Focuser({ focus }: Pick<MapViewProps, "focus">) {
   return null;
 }
 
-/** Taslak bölgeyi çizer; kullanıcı tutamaçlardan sürükleyerek düzenleyebilir. */
+/** Taslak bölgeyi çizer; kullanıcı tutamaçlardan sürükleyerek düzenleyebilir (Rectangle/Circle `editable`). */
 function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onDraftChange">) {
   const map = useMap();
   const shapeRef = useRef<google.maps.Rectangle | google.maps.Circle | null>(null);
@@ -157,14 +172,12 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
       const push = () => {
         const c = circle.getCenter();
         const cur = draftRef.current;
-        if (!c || !cur) return;
-        const radiusM = Math.round(circle.getRadius());
         const b = circle.getBounds();
-        if (!b) return;
+        if (!c || !cur || !b) return;
         changeRef.current({
           ...cur,
           kind: "circle",
-          circle: { lat: c.lat(), lng: c.lng(), radiusM },
+          circle: { lat: c.lat(), lng: c.lng(), radiusM: Math.round(circle.getRadius()) },
           bbox: bboxOfBounds(b),
         });
       };
@@ -235,104 +248,82 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
   return null;
 }
 
-/** Fare ile dikdörtgen veya daire çizme (FR-UI-03). Google'ın kullanımdan kalkan DrawingManager'ı kullanılmaz. */
-function Drawer({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onDrawn">) {
+/**
+ * Fare ile dikdörtgen veya daire çizme (FR-UI-03). Google'ın `Map` nesnesi fare basma/bırakma olayı vermediğinden
+ * (olay listesinde yok) ve `DrawingManager` kullanımdan kaldırıldığından, haritanın üstüne saydam bir katman konur.
+ * Önizleme piksel tabanlı SVG'dir; bırakınca pikseller `map.getBounds()` üzerinden koordinata çevrilir (map-math.ts).
+ * Harita 2B kalır (eğim/yön etkileşimi kapalı), bu yüzden dönüşüm kesindir.
+ */
+function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onDrawn">) {
   const map = useMap();
-  const drawnRef = useRef(onDrawn);
-  drawnRef.current = onDrawn;
+  const ref = useRef<HTMLDivElement>(null);
+  const [drag, setDrag] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
+  if (!drawMode) return null;
 
-  useEffect(() => {
-    if (!map || !drawMode) return;
-    map.setOptions({ draggable: false, draggableCursor: "crosshair", gestureHandling: "none" });
-    let start: google.maps.LatLng | null = null;
-    let shape: google.maps.Rectangle | google.maps.Circle | null = null;
+  const rel = (e: React.PointerEvent) => {
+    const r = ref.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
 
-    const bounds = (a: google.maps.LatLng, b: google.maps.LatLng) => ({
-      south: Math.min(a.lat(), b.lat()),
-      north: Math.max(a.lat(), b.lat()),
-      west: Math.min(a.lng(), b.lng()),
-      east: Math.max(a.lng(), b.lng()),
-    });
-
-    const down = map.addListener("mousedown", (e: google.maps.MapMouseEvent) => {
-      if (!e.latLng) return;
-      start = e.latLng;
-      shape =
-        drawMode === "rect"
-          ? new google.maps.Rectangle({
-              ...SHAPE_STYLE,
-              map,
-              bounds: bounds(start, start),
-              clickable: false,
-            })
-          : new google.maps.Circle({
-              ...SHAPE_STYLE,
-              map,
-              center: start,
-              radius: 1,
-              clickable: false,
-            });
-    });
-    const move = map.addListener("mousemove", (e: google.maps.MapMouseEvent) => {
-      if (!start || !shape || !e.latLng) return;
-      if (shape instanceof google.maps.Rectangle) shape.setBounds(bounds(start, e.latLng));
-      else
-        shape.setRadius(
-          google.maps.geometry?.spherical
-            ? google.maps.geometry.spherical.computeDistanceBetween(start, e.latLng)
-            : approxMeters(start, e.latLng),
+  return (
+    <div
+      ref={ref}
+      data-testid="draw-overlay"
+      className="absolute inset-0 z-10 cursor-crosshair touch-none select-none"
+      onPointerDown={(e) => {
+        const p = rel(e);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        setDrag({ x0: p.x, y0: p.y, x1: p.x, y1: p.y });
+      }}
+      onPointerMove={(e) => {
+        if (!drag) return;
+        const p = rel(e);
+        setDrag({ ...drag, x1: p.x, y1: p.y });
+      }}
+      onPointerUp={(e) => {
+        if (!drag || !map) return setDrag(null);
+        const p = rel(e);
+        const bounds = map.getBounds();
+        const el = ref.current!;
+        setDrag(null);
+        if (!bounds) return;
+        const region = regionFromDrag(
+          drawMode,
+          { x: drag.x0, y: drag.y0 },
+          p,
+          { w: el.clientWidth, h: el.clientHeight },
+          bboxOfBounds(bounds),
         );
-    });
-    const up = map.addListener("mouseup", (e: google.maps.MapMouseEvent) => {
-      if (!start || !shape || !e.latLng) return;
-      const s = start;
-      shape.setMap(null);
-      shape = null;
-      start = null;
-      if (drawMode === "rect") {
-        const b = bounds(s, e.latLng);
-        if (b.north - b.south < 1e-4 || b.east - b.west < 1e-4) return;
-        drawnRef.current({ kind: "bbox", name: "Çizilen alan", bbox: b });
-      } else {
-        const radiusM = Math.max(100, Math.min(50_000, Math.round(approxMeters(s, e.latLng))));
-        const dLat = radiusM / 111_320;
-        const dLng = radiusM / (111_320 * Math.cos((s.lat() * Math.PI) / 180));
-        drawnRef.current({
-          kind: "circle",
-          name: "Çizilen daire",
-          circle: { lat: s.lat(), lng: s.lng(), radiusM },
-          bbox: {
-            south: s.lat() - dLat,
-            north: s.lat() + dLat,
-            west: s.lng() - dLng,
-            east: s.lng() + dLng,
-          },
-        });
-      }
-    });
-
-    return () => {
-      down.remove();
-      move.remove();
-      up.remove();
-      shape?.setMap(null);
-      map.setOptions({ draggable: true, draggableCursor: null, gestureHandling: "greedy" });
-    };
-  }, [map, drawMode]);
-
-  return null;
-}
-
-function approxMeters(a: google.maps.LatLng, b: google.maps.LatLng): number {
-  const R = 6_371_000;
-  const dLat = ((b.lat() - a.lat()) * Math.PI) / 180;
-  const dLng = ((b.lng() - a.lng()) * Math.PI) / 180;
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat() * Math.PI) / 180) *
-      Math.cos((b.lat() * Math.PI) / 180) *
-      Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+        if (region) onDrawn(region);
+      }}
+      onPointerCancel={() => setDrag(null)}
+    >
+      {drag && (
+        <svg className="pointer-events-none absolute inset-0 size-full">
+          {drawMode === "rect" ? (
+            <rect
+              x={Math.min(drag.x0, drag.x1)}
+              y={Math.min(drag.y0, drag.y1)}
+              width={Math.abs(drag.x1 - drag.x0)}
+              height={Math.abs(drag.y1 - drag.y0)}
+              fill="rgba(20,112,90,0.12)"
+              stroke="#14705a"
+              strokeWidth={2}
+            />
+          ) : (
+            <circle
+              cx={drag.x0}
+              cy={drag.y0}
+              r={Math.hypot(drag.x1 - drag.x0, drag.y1 - drag.y0)}
+              fill="rgba(20,112,90,0.12)"
+              stroke="#14705a"
+              strokeWidth={2}
+            />
+          )}
+        </svg>
+      )}
+    </div>
+  );
 }
 
 export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: string }) {
@@ -359,27 +350,30 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
   }
 
   return (
-    <APIProvider apiKey={props.apiKey} language="tr" libraries={["marker", "geometry"]}>
-      <Map
-        mapId={props.mapId}
-        defaultCenter={{ lat: 50, lng: 10 }}
-        defaultZoom={4}
-        gestureHandling="greedy"
-        mapTypeControl={false}
-        streetViewControl={false}
-        fullscreenControl={false}
-        clickableIcons={false}
-        className="size-full"
-        onClick={() => props.onSelect(null)}
-      >
-        <Markers points={props.points} selectedId={props.selectedId} onSelect={props.onSelect} />
-        <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
-        <Drawer drawMode={props.drawMode} onDrawn={props.onDrawn} />
-        <ViewReporter onBoundsChange={props.onBoundsChange} />
-        <Focuser focus={props.focus} />
-      </Map>
-    </APIProvider>
+    <div className="relative size-full">
+      <APIProvider apiKey={props.apiKey} language="tr">
+        <Map
+          mapId={props.mapId}
+          defaultCenter={{ lat: 50, lng: 10 }}
+          defaultZoom={4}
+          gestureHandling="greedy"
+          mapTypeControl={false}
+          streetViewControl={false}
+          fullscreenControl={false}
+          rotateControl={false}
+          tiltInteractionEnabled={false}
+          headingInteractionEnabled={false}
+          clickableIcons={false}
+          className="size-full"
+          onClick={() => props.onSelect(null)}
+        >
+          <Markers points={props.points} selectedId={props.selectedId} onSelect={props.onSelect} />
+          <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
+          <ViewReporter onBoundsChange={props.onBoundsChange} />
+          <Focuser focus={props.focus} />
+        </Map>
+        <DrawOverlay drawMode={props.drawMode} onDrawn={props.onDrawn} />
+      </APIProvider>
+    </div>
   );
 }
-
-export type { DraftRegion };

@@ -153,6 +153,8 @@ export const tr = {
   // Harita
   "map.loading": "Harita yükleniyor…",
   "map.fit": "Sonuçlara sığdır",
+  "map.marker": "İşletme",
+  "map.cluster": "{n} işletme (yakınlaştırmak için tıklayın)",
   "map.legend": "Harita göstergesi",
   "map.legend.contacted": "Temas kuruldu",
   "map.truncated":
