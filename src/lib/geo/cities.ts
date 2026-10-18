@@ -121,6 +121,21 @@ export function cityBBox(city: City, radiusKm: number = defaultRadiusKm(city.pop
   return bboxFromCenter(city.lat, city.lng, radiusKm);
 }
 
+/**
+ * Bir koordinat için yaklaşık ülke ve şehir: KENDİ şehir veri setimizden (GeoNames) türetilir, Google adres verisinden değil.
+ * Yakında şehir yoksa bölgenin ülkesi (varsa) kullanılır. Yaklaşıktır; e-posta uyumu için kesin ülke gönderim anında
+ * canlı olarak doğrulanır (docs/05-FAZ1-NOTLARI.md).
+ */
+export function deriveLocation(
+  lat: number,
+  lng: number,
+  regionCountry?: string | null,
+): { countryCode: string | null; city: string | null } {
+  const near = nearestCity(lat, lng, 60);
+  if (near) return { countryCode: near.cc, city: near.ascii };
+  return { countryCode: regionCountry ?? null, city: null };
+}
+
 /** Koordinata en yakın şehir (belirli bir uzaklığın içinde). Ülke/şehir tahmini için yedek yöntemdir. */
 export function nearestCity(lat: number, lng: number, maxKm = 60): City | undefined {
   let best: City | undefined;

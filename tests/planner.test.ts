@@ -23,7 +23,6 @@ import {
   type PlanInput,
 } from "@/lib/scan/planner";
 import { buildQueries, computeScanKey, isValidPlaceType } from "@/lib/scan/queries";
-import { persistPlaces } from "@/lib/scan/store";
 import { getSetting, setSetting } from "@/lib/settings";
 import { createTestDb, type TestDb } from "./helpers/db";
 
@@ -189,27 +188,6 @@ describe("sağlayıcı fabrikası ve zenginleştirme uç durumları", () => {
     expect((await mock.getDetails("yok", ["id"])).place).toBeNull();
   });
 
-  async function seedPlace(id: string, status = "OPERATIONAL") {
-    await persistPlaces(
-      db,
-      1 as never,
-      [
-        {
-          placeId: id,
-          source: "demo",
-          name: id,
-          lat: 1,
-          lng: 2,
-          types: ["cafe"],
-          businessStatus: status,
-        },
-      ],
-      Date.now(),
-    ).catch(async () => {
-      // scan_id yabancı anahtarı yok (snapshot için scan gerekir); yalnızca places/leads'e doğrudan yaz
-    });
-  }
-
   function deps(provider: PlacesProvider) {
     return {
       db,
@@ -225,11 +203,9 @@ describe("sağlayıcı fabrikası ve zenginleştirme uç durumları", () => {
     await db.insert(places).values({
       placeId: "p1",
       source: "demo",
-      name: "A",
       lat: 1,
       lng: 2,
-      types: [],
-      googleFetchedAt: now,
+      coordsFetchedAt: now,
       firstSeenAt: now,
       createdAt: now,
       updatedAt: now,
@@ -279,10 +255,7 @@ describe("sağlayıcı fabrikası ve zenginleştirme uç durumları", () => {
     ).rejects.toMatchObject({ kind: "auth" });
 
     // Zenginleştirme "yeni açıldı" geçişini de yakalar
-    await db
-      .update(places)
-      .set({ businessStatus: "FUTURE_OPENING" })
-      .where(eq(places.placeId, "p1"));
+    await db.update(places).set({ wasFuture: true }).where(eq(places.placeId, "p1"));
     const opened = stub(async () => ({
       place: {
         placeId: "p1",
@@ -300,10 +273,10 @@ describe("sağlayıcı fabrikası ve zenginleştirme uç durumları", () => {
     expect((await enrichPlaces(deps(opened), ["p1"])).enriched).toBe(1);
     const row = (await db.select().from(places).where(eq(places.placeId, "p1")))[0]!;
     expect(row.openedDetectedAt).not.toBeNull();
-    expect(row.businessStatus).toBe("OPERATIONAL");
+    expect(row.wasFuture).toBe(false);
+    expect(row.isClosed).toBe(false);
     const lead = (await db.select().from(leads).where(eq(leads.placeId, "p1")))[0]!;
     expect(lead.status).toBe("enriched");
     expect(lead.noveltyScore).toBe(100); // 90 (açıldı) + 25 (az yorum) → 100 ile sınırlı
-    void seedPlace;
   });
 });

@@ -1,18 +1,57 @@
 import { database, HttpError, intParam, json, route, body } from "@/lib/api/http";
 import { getLeadDetail } from "@/lib/leads/query";
 import { leadPatchSchema, patchLead } from "@/lib/leads/mutations";
-import { getSetting } from "@/lib/settings";
+import { googleMapsUrl } from "@/lib/places/maps-url";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Lead ayrıntısı. `place`: kalıcı kayıt (yer kimliği, en çok 30 günlük konum, türetilmiş bayraklar).
+ * `google`: oturum önbelleğindeki Google içeriği; uygulama yeniden açıldıktan sonra null olur ("Yenile" ile geri yüklenir).
+ */
 async function detail(id: number) {
   const db = await database();
   const row = await getLeadDetail(db, id);
   if (!row) throw new HttpError(404, "Lead bulunamadı.");
-  const cacheDays = await getSetting(db, "google.cacheDays");
-  const fetched = row.place?.googleFetchedAt ?? null;
-  const stale = fetched !== null && Date.now() - fetched > cacheDays * 86_400_000;
-  return { lead: row.lead, place: row.place, googleDataStale: stale, googleCacheDays: cacheDays };
+  const { place, cache } = row;
+  return {
+    lead: row.lead,
+    place: place
+      ? {
+          placeId: place.placeId,
+          source: place.source,
+          lat: place.lat,
+          lng: place.lng,
+          wasFuture: place.wasFuture,
+          isClosed: place.isClosed,
+          firstSeenAt: place.firstSeenAt,
+          newDetectedAt: place.newDetectedAt,
+          openedDetectedAt: place.openedDetectedAt,
+          notFoundInScanId: place.notFoundInScanId,
+          mapsUrl: googleMapsUrl(place.placeId, {
+            source: place.source,
+            lat: place.lat,
+            lng: place.lng,
+          }),
+        }
+      : null,
+    google: cache
+      ? {
+          name: cache.name,
+          formattedAddress: cache.formattedAddress,
+          primaryType: cache.primaryType,
+          types: cache.types,
+          businessStatus: cache.businessStatus,
+          openingDate: cache.openingDate,
+          website: cache.website,
+          phone: cache.phone,
+          intlPhone: cache.intlPhone,
+          userRatingCount: cache.userRatingCount,
+          fetchedAt: cache.fetchedAt,
+          enrichedAt: cache.enrichedAt,
+        }
+      : null,
+  };
 }
 
 export const GET = route(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {

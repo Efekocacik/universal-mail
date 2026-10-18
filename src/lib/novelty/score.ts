@@ -22,7 +22,6 @@ export const DEFAULT_NOVELTY_CONFIG: NoveltyConfig = {
 
 export interface NoveltyInput {
   businessStatus?: string | null;
-  openingDate?: string | null;
   userRatingCount?: number | null;
   /** Snapshot karşılaştırmasıyla "yeni tespit edildi" olarak işaretlendiği an (ms). */
   newDetectedAt?: number | null;
@@ -57,12 +56,13 @@ export function computeNovelty(
   const signals: NoveltySignal[] = [];
 
   if (input.businessStatus === "FUTURE_OPENING") {
-    const when = input.openingDate ? ` (beklenen açılış: ${input.openingDate})` : "";
+    // Gerekçe metni KALICI saklanır; bu yüzden Google'dan gelen açılış tarihi metne yazılmaz (arayüz tarihi önbellekten gösterir).
     signals.push({
       id: "future_opening",
       group: "lifecycle",
       points: 100,
-      reason: `Google bu işletmeyi "yakında açılacak" olarak bildiriyor${when}. Tedarikçi aradığı anlamına gelmez.`,
+      reason:
+        'Google bu işletmeyi "yakında açılacak" olarak bildiriyor. Tedarikçi aradığı anlamına gelmez.',
     });
   }
   if (within(input.openedDetectedAt, now, config.newWindowDays)) {
@@ -89,14 +89,14 @@ export function computeNovelty(
         id: "reviews_very_few",
         group: "reviews",
         points: 25,
-        reason: `Çok az değerlendirme var (${ratings}). Tek başına yeni olduğunu göstermez.`,
+        reason: "Çok az değerlendirme var. Tek başına yeni olduğunu göstermez.",
       });
     } else if (ratings <= 20) {
       signals.push({
         id: "reviews_few",
         group: "reviews",
         points: 10,
-        reason: `Az sayıda değerlendirme var (${ratings}). Düşük güvenilirlikte bir gösterge.`,
+        reason: "Az sayıda değerlendirme var. Düşük güvenilirlikte bir gösterge.",
       });
     }
   }

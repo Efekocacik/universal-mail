@@ -25,9 +25,10 @@ export const FIELD_TIERS: Readonly<Record<string, FieldTier>> = {
 };
 
 /**
- * İlk keşif maskesi (SRS 4.1 DISCOVERY). Hepsi "Pro" sınıfındadır.
- * `addressComponents` ve `googleMapsUri` aynı sınıfta olduğundan ek maliyet getirmez; ülke/şehir
- * filtreleri ve Google Haritalar bağlantısı için gereklidir.
+ * İlk keşif maskesi (SRS 4.1 DISCOVERY). Hepsi "Pro" sınıfındadır. Alanlar yalnızca OTURUM ÖNBELLEĞİNE yazılır
+ * (bkz. db/cache-schema.ts); ana veritabanına yalnızca yer kimliği, koordinat ve türetilmiş bayraklar gider.
+ * Ülke/şehir Google adres verisinden değil, kendi şehir veri setimizden türetildiği için `addressComponents`
+ * istenmez; Google Haritalar bağlantısı yer kimliğinden üretildiği için `googleMapsUri` de istenmez.
  */
 export const DISCOVERY_FIELDS = [
   "id",
@@ -38,8 +39,6 @@ export const DISCOVERY_FIELDS = [
   "primaryType",
   "businessStatus",
   "openingDate",
-  "addressComponents",
-  "googleMapsUri",
 ] as const;
 
 /** Zenginleştirme maskesi (SRS 4.1 ENRICH): keşif alanları + Enterprise alanlar. */
@@ -51,16 +50,11 @@ export const ENRICH_FIELDS = [
   "userRatingCount",
 ] as const;
 
-/** Tekil Place Details ile zenginleştirmede istenen alanlar. */
-export const DETAILS_ENRICH_FIELDS = [
-  "id",
-  "businessStatus",
-  "openingDate",
-  "websiteUri",
-  "nationalPhoneNumber",
-  "internationalPhoneNumber",
-  "userRatingCount",
-] as const;
+/** "Yenile": önbelleği Place Details ile doldurur (Pro sınıfı, ücretsiz kotası daha geniştir). */
+export const REFRESH_FIELDS = DISCOVERY_FIELDS;
+
+/** "Zenginleştir": web sitesi, telefon ve değerlendirme sayısı da alınır (Place Details Enterprise). */
+export const ENRICH_DETAILS_FIELDS = ENRICH_FIELDS;
 
 export type Endpoint = "text" | "nearby" | "details";
 

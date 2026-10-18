@@ -37,6 +37,28 @@ export function buildQueries(
   return out;
 }
 
+/**
+ * Bir sonucun hangi kategori aramasından geldiğini bulur. Kategori, Google'ın türü değil BİZİM etiketimizdir.
+ * Nearby gruplarında (birden çok tür tek birimde) sonucun türü, kategori türlerinden biriyle eşleştirilir.
+ */
+export function categoryKeyFor(
+  queries: ScanQuery[],
+  unit: { kind: "text" | "nearby"; termKind: "type" | "keyword"; term: string },
+  record: { primaryType?: string; types: string[] },
+): string | null {
+  if (unit.kind === "nearby") {
+    for (const q of queries) {
+      if (q.kind === "type" && (record.primaryType === q.term || record.types.includes(q.term)))
+        return q.categoryKey ?? null;
+    }
+    return null;
+  }
+  const hit = queries.find(
+    (q) => q.kind === unit.termKind && q.term.toLowerCase() === unit.term.toLowerCase(),
+  );
+  return hit?.categoryKey ?? null;
+}
+
 export interface ScanKeyInput {
   bbox: BBox;
   circle?: { lat: number; lng: number; radiusM: number };

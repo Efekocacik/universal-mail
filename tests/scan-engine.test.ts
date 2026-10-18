@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { budgetStatus, canSpend, recordUsage } from "@/lib/budget";
 import {
@@ -14,6 +14,7 @@ import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import type { PlacesProvider } from "@/lib/places/provider";
 import { PlacesApiError } from "@/lib/places/errors";
+import { getCacheMap } from "@/lib/places/cache";
 import { MockPlacesProvider } from "@/lib/places/mock";
 import { bboxFromCenter } from "@/lib/geo/bbox";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
@@ -133,8 +134,11 @@ describe("temel tarama (baz çizgi)", () => {
     const l = await db.select().from(leads);
     expect(p.length).toBe(snaps.length);
     expect(l.length).toBe(p.length);
-    expect(p.every((x) => x.source === "demo" && x.countryCode === "GB")).toBe(true);
-    expect(p.every((x) => x.lat >= londonBox.south && x.lat <= londonBox.north)).toBe(true);
+    expect(p.every((x) => x.source === "demo")).toBe(true);
+    expect(
+      l.every((x) => x.countryCode === "GB" && x.city !== null && x.categoryKey !== null),
+    ).toBe(true);
+    expect(p.every((x) => x.lat! >= londonBox.south && x.lat! <= londonBox.north)).toBe(true);
 
     // Baz çizgide "yeni tespit" sinyali yok; yalnızca FUTURE_OPENING yüksek skor taşır.
     expect(p.every((x) => x.newDetectedAt === null)).toBe(true);
@@ -224,11 +228,7 @@ describe("ikinci tarama: yeni işletme tespiti (snapshot karşılaştırması)",
     const opened = after.filter((p) => p.openedDetectedAt !== null);
     expect(opened.length).toBeGreaterThan(0);
     expect(
-      opened.every(
-        (p) =>
-          before.get(p.placeId)?.businessStatus === "FUTURE_OPENING" &&
-          p.businessStatus === "OPERATIONAL",
-      ),
+      opened.every((p) => before.get(p.placeId)?.wasFuture === true && !p.wasFuture && !p.isClosed),
     ).toBe(true);
 
     const l = await db.select().from(leads);
@@ -259,7 +259,11 @@ describe("ikinci tarama: yeni işletme tespiti (snapshot karşılaştırması)",
     await runScan(deps(), b.scanId);
     const c = await newScan(["cafe", "pub"]); // aynı anahtar: b ile karşılaştırılır
     await runScan(deps(), c.scanId);
-    const cafes = (await db.select().from(places)).filter((p) => p.primaryType === "cafe");
+    const cafeIds = new Set(
+      (await db.select().from(leads)).filter((x) => x.categoryKey === "cafe").map((x) => x.placeId),
+    );
+    const cafes = (await db.select().from(places)).filter((p) => cafeIds.has(p.placeId));
+    expect(cafes.length).toBeGreaterThan(0);
     expect(cafes.every((p) => p.newDetectedAt === null)).toBe(true);
   });
 
@@ -564,11 +568,13 @@ describe("zenginleştirme (Place Details)", () => {
     const { scanId } = await newScan(["cafe"]);
     await runScan(deps(), scanId);
     const target = (
-      await db.select().from(places).where(eq(places.businessStatus, "OPERATIONAL")).limit(3)
+      await db
+        .select()
+        .from(places)
+        .where(and(eq(places.wasFuture, false), eq(places.isClosed, false)))
+        .limit(3)
     ).map((p) => p.placeId);
-    expect(
-      (await db.select().from(places).where(eq(places.placeId, target[0]!)))[0]!.website,
-    ).toBeNull();
+    expect((await getCacheMap(db, target)).get(target[0]!)!.website).toBeNull();
 
     const res = await enrichPlaces(
       {
@@ -581,8 +587,9 @@ describe("zenginleştirme (Place Details)", () => {
       target,
     );
     expect(res.enriched).toBe(3);
+    const cache = await getCacheMap(db, target);
     for (const id of target) {
-      const p = (await db.select().from(places).where(eq(places.placeId, id)))[0]!;
+      const p = cache.get(id)!;
       expect(p.website).toMatch(/\.example$/);
       expect(typeof p.userRatingCount).toBe("number");
       expect(p.enrichedAt).not.toBeNull();

@@ -15,6 +15,8 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
+import { SESSION_CACHE_FILENAME } from "../src/lib/config/paths";
+import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
 
 /**
  * Universal Mail masaüstü kabuğu.
@@ -227,7 +229,8 @@ async function startBackend(): Promise<string> {
   const env = childEnv(port, masterKey);
 
   // 1) şema geçişi (öncesinde otomatik yedek alınır)
-  const migrate = spawnChild("migrate", "migrate.cjs", env);
+  // Önceki oturumdan kalan Google önbelleği (çökme/zorla kapanma olasılığına karşı) açılışta da silinir.
+  const migrate = spawnChild("migrate", "migrate.cjs", { ...env, UM_WIPE_SESSION: "1" });
   const code = await waitForExit(migrate, 120_000);
   if (code !== 0)
     throw new Error(`Veritabanı hazırlanamadı (kod=${code}). Ayrıntı için günlük dosyasına bakın.`);
@@ -435,6 +438,13 @@ async function shutdown(): Promise<void> {
   children.get("server")?.kill("SIGTERM");
   await new Promise((r) => setTimeout(r, 200));
   for (const c of children.values()) c.kill("SIGKILL");
+  // Google verisi kalıcı saklanmaz: süreçler durduktan sonra oturum önbelleği silinir (Windows'ta dosya kilidi için bir kez daha denenir).
+  if (!DEV_URL) {
+    const cacheFile = path.join(dataDir(), SESSION_CACHE_FILENAME);
+    wipeSessionCacheFiles(cacheFile);
+    await new Promise((r) => setTimeout(r, 300));
+    wipeSessionCacheFiles(cacheFile);
+  }
 }
 
 if (!app.requestSingleInstanceLock() && !SMOKE) {

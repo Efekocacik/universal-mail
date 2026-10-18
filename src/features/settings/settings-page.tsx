@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
   CircleAlert,
@@ -31,7 +31,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { api } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
 import { qk, useBudget, useCategories, useCountries, useSettings } from "@/lib/client/queries";
-import type { Category, CompanyProfile, SecretInfo } from "@/lib/client/types";
+import type { Category, CompanyProfile, GoogleDataSummary, SecretInfo } from "@/lib/client/types";
 import { skuLabel, PRICING_VERIFIED_AT } from "@/lib/places/pricing";
 import { t } from "@/lib/i18n";
 
@@ -667,7 +667,7 @@ function NoveltySection() {
             id="n-window"
             type="number"
             min={1}
-            max={365}
+            max={30}
             value={v.newWindowDays}
             onChange={num("newWindowDays")}
           />
@@ -808,6 +808,57 @@ function CategoriesSection() {
 
 /* ---------------------------- Veri ve hakkında ---------------------------- */
 
+function GoogleDataBox() {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const { data } = useQuery({
+    queryKey: ["google-data"],
+    queryFn: () => api<GoogleDataSummary>("/api/google-data"),
+  });
+  const clear = useMutation({
+    mutationFn: () => api("/api/google-data", { method: "DELETE" }),
+    onSuccess: () => {
+      setOpen(false);
+      for (const key of ["google-data", "lead", "leads", "points", "facets"])
+        void qc.invalidateQueries({ queryKey: [key] });
+      toast.success(t("settings.data.google.cleared"));
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  return (
+    <div className="space-y-2 rounded-lg border p-3">
+      <p className="text-[13px] font-medium">{t("settings.data.google.title")}</p>
+      <p className="text-[12px] text-muted-foreground">
+        {data
+          ? t("settings.data.google.summary", {
+              cached: fmtNumber(data.cachedPlaces),
+              coords: fmtNumber(data.storedCoordinates),
+            })
+          : t("common.loading")}
+      </p>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        {t("settings.data.google.clear")}
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("settings.data.google.clear")}</DialogTitle>
+            <DialogDescription>{t("settings.data.google.confirm")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={() => clear.mutate()} disabled={clear.isPending}>
+              {t("settings.data.google.clear")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function DataSection() {
   const { data } = useSettings();
   const save = useSave();
@@ -846,7 +897,7 @@ function DataSection() {
             id="cache-days"
             type="number"
             min={1}
-            max={365}
+            max={30}
             value={days}
             onChange={(e) => setDays(Number(e.target.value))}
             className="w-28"
@@ -859,6 +910,7 @@ function DataSection() {
       <p className="text-[12px] leading-relaxed text-muted-foreground">
         {t("settings.data.googleNote")}
       </p>
+      <GoogleDataBox />
       <details className="rounded-lg bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground">
           {t("settings.about.title")}

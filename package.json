@@ -11,7 +11,7 @@
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
-    "dev": "npm run db:migrate && concurrently -k -n web,worker -c blue,green \"npm:dev:web\" \"npm:dev:worker\"",
+    "dev": "npm run db:migrate -- --wipe-session && concurrently -k -n web,worker -c blue,green \"npm:dev:web\" \"npm:dev:worker\"",
     "dev:web": "next dev --hostname 127.0.0.1 --port 3000",
     "dev:worker": "tsx watch --clear-screen=false src/worker/index.ts",
     "build": "npm run build:web && npm run build:bundles && npm run build:standalone",

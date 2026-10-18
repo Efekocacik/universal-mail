@@ -1,7 +1,17 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { leads, placeSnapshots, places, scanUnits, scans } from "@/lib/db/schema";
-import type { BBox, PlaceRecord, ScanProgress, ScanStatus } from "@/lib/domain/types";
+import type {
+  BBox,
+  PlaceRecord,
+  ScanProgress,
+  ScanQuery,
+  ScanStatus,
+  SearchStrategy,
+} from "@/lib/domain/types";
+import { deriveLocation } from "@/lib/geo/cities";
+import { upsertCache } from "@/lib/places/cache";
+import { categoryKeyFor } from "./queries";
 import { chunk } from "@/lib/util";
 
 export type ScanRow = typeof scans.$inferSelect;
@@ -96,26 +106,42 @@ export interface UpsertResult {
   openedIds: string[];
 }
 
+export interface PersistContext {
+  queries: ScanQuery[];
+  unit: { kind: SearchStrategy; termKind: "type" | "keyword"; term: string };
+  /** Taranan bölgenin ülkesi (varsa); yakında şehir bulunamazsa yedek olarak kullanılır. */
+  regionCountry: string | null;
+}
+
 /**
- * Tarama sonucunu kaydeder: `places` (Google kaynaklı alanlar), `place_snapshots` (tarama karşılaştırması)
- * ve `leads` (kullanıcıya ait alanlar). Zenginleştirme alanları (web sitesi, telefon, yorum sayısı) keşif
- * maskesinde gelmediğinde mevcut değerler KORUNUR.
+ * Tarama sonucunu kaydeder. Google içeriğinin SAKLANMASI kısıtlı olduğundan veri üçe ayrılır:
+ *  1) `gcache.place_cache`: ad, adres, tür, durum, web sitesi, telefon, değerlendirme (GEÇİCİ, oturum önbelleği),
+ *  2) `places`: yer kimliği, koordinat (en çok 30 gün) ve bizim türettiğimiz bayraklar,
+ *  3) `place_snapshots` ve `leads`: tarama karşılaştırması için yer kimlikleri ve bizim etiketlerimiz.
+ * Zenginleştirme alanları keşif maskesinde gelmediğinde önbellekteki mevcut değerler KORUNUR.
  */
 export async function persistPlaces(
   db: Db,
   scanId: number,
   records: PlaceRecord[],
   now: number,
+  ctx?: PersistContext,
 ): Promise<UpsertResult> {
   if (records.length === 0) return { inserted: 0, openedIds: [] };
   const unique = [...new Map(records.map((r) => [r.placeId, r])).values()];
   const ids = unique.map((r) => r.placeId);
 
+  await upsertCache(db, unique, now);
+
   const existing = await db
-    .select({ placeId: places.placeId, businessStatus: places.businessStatus })
+    .select({ placeId: places.placeId, wasFuture: places.wasFuture })
     .from(places)
     .where(inArray(places.placeId, ids));
-  const prevStatus = new Map(existing.map((e) => [e.placeId, e.businessStatus]));
+  const prevFuture = new Map(existing.map((e) => [e.placeId, e.wasFuture]));
+  const flags = (r: PlaceRecord) => ({
+    wasFuture: r.businessStatus === "FUTURE_OPENING",
+    isClosed: r.businessStatus === "CLOSED_PERMANENTLY",
+  });
 
   await db
     .insert(places)
@@ -123,22 +149,10 @@ export async function persistPlaces(
       unique.map((r) => ({
         placeId: r.placeId,
         source: r.source,
-        name: r.name,
-        formattedAddress: r.formattedAddress ?? null,
         lat: r.lat,
         lng: r.lng,
-        countryCode: r.countryCode ?? null,
-        city: r.city ?? null,
-        primaryType: r.primaryType ?? null,
-        types: r.types,
-        businessStatus: r.businessStatus ?? null,
-        openingDate: r.openingDate ?? null,
-        website: r.website ?? null,
-        phone: r.phone ?? null,
-        intlPhone: r.intlPhone ?? null,
-        userRatingCount: r.userRatingCount ?? null,
-        googleMapsUri: r.googleMapsUri ?? null,
-        googleFetchedAt: now,
+        coordsFetchedAt: now,
+        ...flags(r),
         firstSeenScanId: scanId,
         lastSeenScanId: scanId,
         firstSeenAt: now,
@@ -150,33 +164,20 @@ export async function persistPlaces(
       target: places.placeId,
       set: {
         source: sql`excluded.source`,
-        name: sql`excluded.name`,
-        formattedAddress: sql`coalesce(excluded.formatted_address, ${places.formattedAddress})`,
         lat: sql`excluded.lat`,
         lng: sql`excluded.lng`,
-        countryCode: sql`coalesce(excluded.country_code, ${places.countryCode})`,
-        city: sql`coalesce(excluded.city, ${places.city})`,
-        primaryType: sql`coalesce(excluded.primary_type, ${places.primaryType})`,
-        types: sql`excluded.types`,
-        businessStatus: sql`excluded.business_status`,
-        openingDate: sql`excluded.opening_date`,
-        website: sql`coalesce(excluded.website, ${places.website})`,
-        phone: sql`coalesce(excluded.phone, ${places.phone})`,
-        intlPhone: sql`coalesce(excluded.intl_phone, ${places.intlPhone})`,
-        userRatingCount: sql`coalesce(excluded.user_rating_count, ${places.userRatingCount})`,
-        googleMapsUri: sql`coalesce(excluded.google_maps_uri, ${places.googleMapsUri})`,
-        googleFetchedAt: sql`excluded.google_fetched_at`,
+        coordsFetchedAt: sql`excluded.coords_fetched_at`,
+        wasFuture: sql`excluded.was_future`,
+        isClosed: sql`excluded.is_closed`,
         lastSeenScanId: sql`excluded.last_seen_scan_id`,
         notFoundInScanId: sql`NULL`,
         updatedAt: sql`excluded.updated_at`,
       },
     });
 
-  // FUTURE_OPENING → OPERATIONAL geçişi (açılış anı yakalandı).
+  // FUTURE_OPENING → açıldı geçişi (açılış anı yakalandı).
   const openedIds = unique
-    .filter(
-      (r) => prevStatus.get(r.placeId) === "FUTURE_OPENING" && r.businessStatus === "OPERATIONAL",
-    )
+    .filter((r) => prevFuture.get(r.placeId) === true && !flags(r).wasFuture && !flags(r).isClosed)
     .map((r) => r.placeId);
   if (openedIds.length > 0) {
     await db
@@ -187,24 +188,35 @@ export async function persistPlaces(
 
   await db
     .insert(placeSnapshots)
-    .values(
-      unique.map((r) => ({
-        scanId,
-        placeId: r.placeId,
-        businessStatus: r.businessStatus ?? null,
-        userRatingCount: r.userRatingCount ?? null,
-      })),
-    )
+    .values(unique.map((r) => ({ scanId, placeId: r.placeId, wasFuture: flags(r).wasFuture })))
     .onConflictDoNothing();
 
   await db
     .insert(leads)
     .values(
-      unique.map((r) => ({ placeId: r.placeId, source: r.source, createdAt: now, updatedAt: now })),
+      unique.map((r) => {
+        const loc = deriveLocation(r.lat, r.lng, ctx?.regionCountry);
+        return {
+          placeId: r.placeId,
+          source: r.source,
+          countryCode: loc.countryCode,
+          city: loc.city,
+          categoryKey: ctx ? categoryKeyFor(ctx.queries, ctx.unit, r) : null,
+          createdAt: now,
+          updatedAt: now,
+        };
+      }),
     )
-    .onConflictDoNothing({ target: leads.placeId });
+    .onConflictDoUpdate({
+      target: leads.placeId,
+      set: {
+        categoryKey: sql`coalesce(${leads.categoryKey}, excluded.category_key)`,
+        countryCode: sql`coalesce(${leads.countryCode}, excluded.country_code)`,
+        city: sql`coalesce(${leads.city}, excluded.city)`,
+      },
+    });
 
-  return { inserted: unique.filter((r) => !prevStatus.has(r.placeId)).length, openedIds };
+  return { inserted: unique.filter((r) => !prevFuture.has(r.placeId)).length, openedIds };
 }
 
 export async function countSnapshot(
@@ -214,7 +226,7 @@ export async function countSnapshot(
   const rows = await db
     .select({
       total: sql<number>`count(*)`,
-      future: sql<number>`coalesce(sum(case when ${placeSnapshots.businessStatus} = 'FUTURE_OPENING' then 1 else 0 end), 0)`,
+      future: sql<number>`coalesce(sum(case when ${placeSnapshots.wasFuture} then 1 else 0 end), 0)`,
     })
     .from(placeSnapshots)
     .where(eq(placeSnapshots.scanId, scanId));

@@ -53,6 +53,7 @@ interface RunState {
   consecutiveUnitFailures: number;
   newPlaces: number;
   maxCalls: number;
+  regionCountry: string | null;
 }
 
 const MAX_CONSECUTIVE_UNIT_FAILURES = 5;
@@ -106,6 +107,14 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     consecutiveUnitFailures: 0,
     newPlaces: 0,
     maxCalls: 0,
+    regionCountry:
+      (
+        await db
+          .select({ cc: regions.countryCode })
+          .from(regions)
+          .where(eq(regions.id, scan.regionId))
+          .limit(1)
+      )[0]?.cc ?? null,
   };
   state.maxCalls = effectiveMaxCalls(readMaxCalls(scan), state.callsTotal);
 
@@ -220,7 +229,11 @@ async function runUnit(
     state.callsBySku[res.sku] = (state.callsBySku[res.sku] ?? 0) + 1;
     state.costUsd += await recordUsage(db, provider.id, res.sku, 1, now());
 
-    const saved = await persistPlaces(db, scan.id, res.places, now());
+    const saved = await persistPlaces(db, scan.id, res.places, now(), {
+      queries: scan.queries,
+      unit: { kind: unit.kind, termKind: unit.termKind, term: unit.term },
+      regionCountry: state.regionCountry,
+    });
     state.newPlaces += saved.inserted;
     collected += res.places.length;
     token = res.nextPageToken;

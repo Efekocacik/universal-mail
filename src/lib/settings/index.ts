@@ -39,7 +39,7 @@ export const settingSchemas = {
   "places.provider": z.enum(["google", "mock"]),
   "maps.mapId": z.string(),
   "novelty.thresholds": noveltySchema,
-  "google.cacheDays": z.number().min(1).max(365),
+  "google.cacheDays": z.number().min(1).max(30),
   "mock.epoch": z.number().int().min(0).max(50),
   "ui.language": z.enum(["tr", "en"]),
 } as const;

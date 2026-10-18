@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
+import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import { registerCoreHandlers } from "./handlers";
@@ -38,8 +39,24 @@ async function main(): Promise<void> {
       console.error("[worker] yenilik yenilemesi başarısız:", e);
     }
   };
-  void refreshNovelty();
-  const interval = setInterval(refreshNovelty, 6 * 3_600_000);
+  // Google şartları gereği süresi dolan konumlar ve önbellek satırları düzenli silinir.
+  const purgeGoogle = async () => {
+    try {
+      const r = await purgeExpiredGoogleData(db, await getSetting(db, "google.cacheDays"));
+      if (r.coordinates + r.cacheRows > 0)
+        console.log(
+          `[worker] süresi dolan Google verisi silindi (${r.coordinates} konum, ${r.cacheRows} önbellek satırı).`,
+        );
+    } catch (e) {
+      console.error("[worker] Google veri temizliği başarısız:", e);
+    }
+  };
+  const housekeeping = async () => {
+    await purgeGoogle();
+    await refreshNovelty();
+  };
+  void housekeeping();
+  const interval = setInterval(housekeeping, 6 * 3_600_000);
 
   const shutdown = () => {
     console.log("[worker] kapanış isteği alındı; iş güvenle durduruluyor...");

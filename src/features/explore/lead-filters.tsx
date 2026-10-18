@@ -101,12 +101,8 @@ function MultiList({
   );
 }
 
-const BUSINESS_STATUSES = [
-  "OPERATIONAL",
-  "FUTURE_OPENING",
-  "CLOSED_TEMPORARILY",
-  "CLOSED_PERMANENTLY",
-] as const;
+// Kalıcı bayraklardan türetilen durumlar; geçici kapalı gibi ayrıntılar yalnızca önbellekteki Google verisinde bulunur.
+const BUSINESS_STATUSES = ["OPERATIONAL", "FUTURE_OPENING", "CLOSED_PERMANENTLY"] as const;
 const LEAD_STATUSES = [
   "new",
   "enriched",
@@ -252,7 +248,11 @@ export function LeadFilters() {
           summary={summaryOf(filters.categories.length)}
         >
           <MultiList
-            options={(categories ?? []).map((c) => ({ value: c.key, label: c.name }))}
+            options={(categories ?? []).map((c) => ({
+              value: c.key,
+              label: c.name,
+              count: facets?.categories.find((f) => f.key === c.key)?.count ?? 0,
+            }))}
             selected={filters.categories}
             onChange={(v) => set("categories", v)}
           />

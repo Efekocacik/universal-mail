@@ -10,9 +10,11 @@ import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
 import { countryLabel, fmtNumber, fmtOpeningDate, typeLabel } from "@/lib/client/format";
-import { useLeadsInfinite } from "@/lib/client/queries";
+import { useFacets, useLeadsInfinite } from "@/lib/client/queries";
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
+import { toSearchParams } from "@/lib/client/api";
+import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
 
 const ROW_HEIGHT = 78;
@@ -39,7 +41,14 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
           )}
           aria-hidden
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold">{row.name}</span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm font-semibold",
+            !row.name && "font-normal italic text-muted-foreground",
+          )}
+        >
+          {row.name ?? t("list.unnamed")}
+        </span>
         <span
           className="tabular shrink-0 text-[12px] text-muted-foreground"
           title={t("list.score")}
@@ -156,6 +165,8 @@ export function LeadList() {
         </Select>
       </div>
 
+      <UncachedBanner />
+
       <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto" tabIndex={-1}>
         {q.isLoading ? (
           <div className="space-y-px p-4">
@@ -205,6 +216,26 @@ export function LeadList() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Google verisi (ad, adres) önbellekte olmayan kayıtlar varsa, tek tıkla yükleme önerir. */
+function UncachedBanner() {
+  const ex = useExplore();
+  const { data } = useFacets(ex.apiFilters);
+  if (!data || data.uncached === 0) return null;
+  return (
+    <div className="flex items-center gap-3 border-b bg-muted/60 px-4 py-2 text-[12px]">
+      <p className="min-w-0 flex-1 text-muted-foreground">
+        {t("list.uncached", { n: fmtNumber(data.uncached) })}
+      </p>
+      <GoogleLoadButton
+        target={{ filtersQuery: toSearchParams(ex.apiFilters).toString() }}
+        mode="refresh"
+        label={t("list.uncached.load")}
+        variant="default"
+      />
     </div>
   );
 }

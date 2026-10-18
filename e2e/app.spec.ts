@@ -159,6 +159,56 @@ test("ikinci tarama: demo zamanı ilerletilir, yeniden taranır, yeni işletmele
   await expect(page.getByText(/Yeni (tespit edildi|açıldı)/).first()).toBeVisible();
 });
 
+test("Google verisi silinince (yeniden açılış) liste adsız gelir; kalıcı bilgiler korunur; 'Yükle' ile geri gelir", async () => {
+  const countOf = async () =>
+    (await (await page.request.get("/api/leads?limit=1")).json()).total as number;
+  const before = await countOf();
+  const futureBefore = (await (await page.request.get("/api/leads/facets")).json()).novelty
+    .future_opening as number;
+
+  await page.goto("/settings");
+  await expect(page.getByText(/işletmenin bilgisi geçici önbellekte/)).toBeVisible();
+  await page.getByRole("button", { name: "Google verilerini sil" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Google verilerini sil" }).click();
+  await expect(page.getByText("Google verileri silindi.")).toBeVisible();
+
+  // Kalıcı kayıtlar yerinde: sayı ve yenilik etiketi aynı; ad/adres yok.
+  expect(await countOf()).toBe(before);
+  const facets = await (await page.request.get("/api/leads/facets")).json();
+  expect(facets.novelty.future_opening).toBe(futureBefore);
+  expect(facets.uncached).toBe(before);
+
+  await page.goto("/");
+  await expect(page.getByText("Ad yüklenmedi").first()).toBeVisible();
+  await expect(page.getByText(/yüklü değil\. Bu veriler uygulama kapanınca silinir/)).toBeVisible();
+
+  // Ayrıntıda da uyarı ve yükleme düğmesi görünür
+  await page.locator("button[aria-current]").first().click();
+  await expect(
+    page.getByText(/ad, adres, web sitesi ve telefon bilgileri uygulama kapandığında/),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // Toplu yükleme: maliyet onayı → başlat → liste yeniden dolar
+  await page.getByRole("button", { name: "Yükle", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Google verisini yükle" })).toBeVisible();
+  await page.getByRole("button", { name: "Başlat" }).click();
+  // Tek seferde en fazla 2000 işletme yüklenir (maliyet güvenliği); kalan, banner'da görünmeye devam eder.
+  const expectedLeft = Math.max(0, before - 2000);
+  await expect
+    .poll(async () => (await (await page.request.get("/api/leads/facets")).json()).uncached, {
+      timeout: 90_000,
+      intervals: [1000],
+    })
+    .toBe(expectedLeft);
+  await expect(page.getByText("Ad yüklenmedi")).toHaveCount(0);
+  if (expectedLeft === 0)
+    await expect(
+      page.getByText(/yüklü değil\. Bu veriler uygulama kapanınca silinir/),
+    ).toBeHidden();
+  expect(await countOf()).toBe(before);
+});
+
 test("dar pencerede liste ve harita sekmeli gösterilir", async () => {
   await page.setViewportSize({ width: 800, height: 900 });
   await page.goto("/");

@@ -56,6 +56,10 @@ CREATE TABLE `leads` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`place_id` text,
 	`source` text NOT NULL,
+	`display_name` text,
+	`country_code` text,
+	`city` text,
+	`category_key` text,
 	`novelty_score` integer DEFAULT 0 NOT NULL,
 	`novelty_label` text DEFAULT 'low' NOT NULL,
 	`novelty_signals` text DEFAULT '[]' NOT NULL,
@@ -72,11 +76,12 @@ CREATE UNIQUE INDEX `leads_place_uq` ON `leads` (`place_id`);--> statement-break
 CREATE INDEX `leads_novelty_idx` ON `leads` (`novelty_score`);--> statement-breakpoint
 CREATE INDEX `leads_status_idx` ON `leads` (`status`);--> statement-breakpoint
 CREATE INDEX `leads_source_idx` ON `leads` (`source`);--> statement-breakpoint
+CREATE INDEX `leads_country_city_idx` ON `leads` (`country_code`,`city`);--> statement-breakpoint
+CREATE INDEX `leads_category_idx` ON `leads` (`category_key`);--> statement-breakpoint
 CREATE TABLE `place_snapshots` (
 	`scan_id` integer NOT NULL,
 	`place_id` text NOT NULL,
-	`business_status` text,
-	`user_rating_count` integer,
+	`was_future` integer DEFAULT false NOT NULL,
 	PRIMARY KEY(`scan_id`, `place_id`),
 	FOREIGN KEY (`scan_id`) REFERENCES `scans`(`id`) ON UPDATE no action ON DELETE cascade
 );
@@ -85,23 +90,11 @@ CREATE INDEX `snapshots_place_idx` ON `place_snapshots` (`place_id`);--> stateme
 CREATE TABLE `places` (
 	`place_id` text PRIMARY KEY NOT NULL,
 	`source` text NOT NULL,
-	`name` text NOT NULL,
-	`formatted_address` text,
-	`lat` real NOT NULL,
-	`lng` real NOT NULL,
-	`country_code` text,
-	`city` text,
-	`primary_type` text,
-	`types` text NOT NULL,
-	`business_status` text,
-	`opening_date` text,
-	`website` text,
-	`phone` text,
-	`intl_phone` text,
-	`user_rating_count` integer,
-	`google_maps_uri` text,
-	`google_fetched_at` integer NOT NULL,
-	`enriched_at` integer,
+	`lat` real,
+	`lng` real,
+	`coords_fetched_at` integer NOT NULL,
+	`was_future` integer DEFAULT false NOT NULL,
+	`is_closed` integer DEFAULT false NOT NULL,
 	`first_seen_scan_id` integer,
 	`last_seen_scan_id` integer,
 	`first_seen_at` integer NOT NULL,
@@ -113,8 +106,6 @@ CREATE TABLE `places` (
 );
 --> statement-breakpoint
 CREATE INDEX `places_latlng_idx` ON `places` (`lat`,`lng`);--> statement-breakpoint
-CREATE INDEX `places_country_idx` ON `places` (`country_code`,`city`);--> statement-breakpoint
-CREATE INDEX `places_status_idx` ON `places` (`business_status`);--> statement-breakpoint
 CREATE INDEX `places_source_idx` ON `places` (`source`);--> statement-breakpoint
 CREATE TABLE `regions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -1,46 +1,25 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  CircleAlert,
-  ExternalLink,
-  Globe,
-  Loader2,
-  MapPin,
-  Phone,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ArrowLeft, CircleAlert, ExternalLink, Globe, MapPin, Phone, X } from "lucide-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { NoveltyBadge } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { HelpTip } from "@/components/ui/tooltip";
-import { api, ApiError } from "@/lib/client/api";
 import {
   countryLabel,
   fmtDate,
   fmtNumber,
   fmtOpeningDate,
   fmtRelativeDays,
-  fmtUsd,
   typeLabel,
 } from "@/lib/client/format";
-import { qk, useLead, usePatchLead } from "@/lib/client/queries";
+import { useLead, usePatchLead } from "@/lib/client/queries";
 import type { LeadDetailResponse } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
+import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
 
 const LEAD_STATUSES = [
@@ -122,12 +101,22 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
   const { lead, place } = data;
   const patch = usePatchLead(lead.id);
   const [notes, setNotes] = useState(lead.notes ?? "");
+  const [displayName, setDisplayName] = useState(lead.displayName ?? "");
   const [tag, setTag] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
     setNotes(lead.notes ?? "");
   }, [lead.id, lead.notes]);
+  useEffect(() => {
+    setDisplayName(lead.displayName ?? "");
+  }, [lead.id, lead.displayName]);
+
+  const commitDisplayName = () => {
+    const v = displayName.trim();
+    if ((lead.displayName ?? "") === v) return;
+    patch.mutate({ displayName: v === "" ? null : v });
+  };
 
   const commitNotes = () => {
     if ((lead.notes ?? "") === notes) return;
@@ -151,25 +140,32 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
 
   if (!place) return <p className="p-4 text-sm text-muted-foreground">{t("detail.noPlace")}</p>;
 
-  const mapsUrl =
-    safeHttpUrl(place.googleMapsUri) ??
-    `https://www.google.com/maps/search/?api=1&query=${place.lat},${place.lng}`;
-  const website = safeHttpUrl(place.website);
-  const isFuture = place.businessStatus === "FUTURE_OPENING";
+  const g = data.google;
+  const mapsUrl = safeHttpUrl(place.mapsUrl) ?? "https://www.google.com/maps";
+  const website = safeHttpUrl(g?.website);
+  const status =
+    g?.businessStatus ??
+    (place.isClosed ? "CLOSED_PERMANENTLY" : place.wasFuture ? "FUTURE_OPENING" : "OPERATIONAL");
+  const isFuture = status === "FUTURE_OPENING";
+  const title = g?.name ?? lead.displayName;
 
   return (
     <>
       <div className="space-y-2 border-b px-4 py-4">
         <div className="flex items-start gap-2">
-          <h2 className="min-w-0 flex-1 text-lg font-semibold leading-snug">{place.name}</h2>
+          <h2
+            className={`min-w-0 flex-1 text-lg font-semibold leading-snug ${title ? "" : "text-muted-foreground"}`}
+          >
+            {title ?? t("detail.unnamed")}
+          </h2>
           {place.source === "demo" && <Badge variant="outline">DEMO</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <NoveltyBadge label={lead.noveltyLabel} score={lead.noveltyScore} showScore />
-          <Badge variant="outline">{typeLabel(place.primaryType)}</Badge>
-          {isFuture && place.openingDate && (
+          {g?.primaryType && <Badge variant="outline">{typeLabel(g.primaryType)}</Badge>}
+          {isFuture && (
             <Badge variant="future">
-              {t("list.opens")} {fmtOpeningDate(place.openingDate)}
+              {t("list.opens")} {fmtOpeningDate(g?.openingDate) || t("list.soon")}
             </Badge>
           )}
           {place.notFoundInScanId !== null && <Badge variant="warning">{t("list.notFound")}</Badge>}
@@ -177,7 +173,9 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
         <p className="flex items-start gap-1.5 text-[13px] text-muted-foreground">
           <MapPin className="mt-0.5 size-3.5 shrink-0" />
           <span>
-            {[place.formattedAddress, countryLabel(place.countryCode)].filter(Boolean).join(" · ")}
+            {[g?.formattedAddress, lead.city, countryLabel(lead.countryCode)]
+              .filter(Boolean)
+              .join(" · ") || "—"}
           </span>
         </p>
         <div className="flex flex-wrap gap-2 pt-1">
@@ -186,8 +184,27 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               <ExternalLink /> {t("detail.openMaps")}
             </a>
           </Button>
-          <EnrichButton leadId={lead.id} enriched={place.enrichedAt !== null} />
+          {g ? (
+            <GoogleLoadButton
+              target={{ leadIds: [lead.id] }}
+              mode="enrich"
+              label={g.enrichedAt ? t("detail.enrich.again") : t("detail.enrich")}
+            />
+          ) : (
+            <GoogleLoadButton
+              target={{ leadIds: [lead.id] }}
+              mode="refresh"
+              label={t("detail.refresh")}
+              variant="default"
+            />
+          )}
         </div>
+        {!g && (
+          <p className="flex items-start gap-1.5 rounded-md bg-muted px-2.5 py-2 text-[12px] text-muted-foreground">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+            {t("detail.noGoogle")}
+          </p>
+        )}
       </div>
 
       <Section title={t("detail.why")} hint={<HelpTip>{t("detail.why.help")}</HelpTip>}>
@@ -210,9 +227,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
 
       <Section title={t("detail.info")}>
         <dl>
-          <Fact label={t("detail.businessStatus")}>
-            {place.businessStatus ? t(`businessStatus.${place.businessStatus}` as never) : "—"}
-          </Fact>
+          <Fact label={t("detail.businessStatus")}>{t(`businessStatus.${status}` as never)}</Fact>
           <Fact label={t("detail.website")}>
             {website ? (
               <a
@@ -225,39 +240,64 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               </a>
             ) : (
               <span className="text-muted-foreground">
-                {place.enrichedAt ? t("detail.none") : t("detail.notFetched")}
+                {!g
+                  ? t("detail.notLoaded")
+                  : g.enrichedAt
+                    ? t("detail.none")
+                    : t("detail.notFetched")}
               </span>
             )}
           </Fact>
           <Fact label={t("detail.phone")}>
-            {place.phone || place.intlPhone ? (
+            {g?.phone || g?.intlPhone ? (
               <span className="inline-flex items-center gap-1">
-                <Phone className="size-3.5" /> {place.intlPhone ?? place.phone}
+                <Phone className="size-3.5" /> {g.intlPhone ?? g.phone}
               </span>
             ) : (
               <span className="text-muted-foreground">
-                {place.enrichedAt ? t("detail.none") : t("detail.notFetched")}
+                {!g
+                  ? t("detail.notLoaded")
+                  : g.enrichedAt
+                    ? t("detail.none")
+                    : t("detail.notFetched")}
               </span>
             )}
           </Fact>
           <Fact label={t("detail.ratings")}>
-            {place.userRatingCount !== null ? (
-              fmtNumber(place.userRatingCount)
+            {g?.userRatingCount != null ? (
+              fmtNumber(g.userRatingCount)
             ) : (
-              <span className="text-muted-foreground">{t("detail.notFetched")}</span>
+              <span className="text-muted-foreground">
+                {g ? t("detail.notFetched") : t("detail.notLoaded")}
+              </span>
             )}
           </Fact>
         </dl>
-        {data.googleDataStale && (
+        {place.lat === null && (
           <p className="flex items-start gap-1.5 rounded-md bg-nov-likely/15 px-2.5 py-2 text-[12px] text-[#6b5200]">
             <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
-            {t("detail.stale", { days: data.googleCacheDays })}
+            {t("detail.coordsExpired")}
           </p>
         )}
       </Section>
 
       <Section title={t("detail.manage")}>
         <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label htmlFor="lead-display-name" className="flex items-center gap-1">
+              {t("detail.displayName")}
+              <HelpTip>{t("detail.displayName.help")}</HelpTip>
+            </Label>
+            <Input
+              id="lead-display-name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              onBlur={commitDisplayName}
+              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+              maxLength={200}
+              placeholder={t("detail.displayName.placeholder")}
+            />
+          </div>
           <div className="space-y-1.5">
             <Label htmlFor="lead-status">{t("detail.status")}</Label>
             <Select
@@ -328,7 +368,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             { at: place.firstSeenAt, label: t("detail.tl.detected") },
             { at: place.newDetectedAt, label: t("detail.tl.new") },
             { at: place.openedDetectedAt, label: t("detail.tl.opened") },
-            { at: place.enrichedAt, label: t("detail.tl.enriched") },
+            { at: g?.enrichedAt ?? null, label: t("detail.tl.enriched") },
           ]
             .filter((e) => e.at)
             .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))
@@ -343,87 +383,6 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             ))}
         </ol>
       </Section>
-    </>
-  );
-}
-
-function EnrichButton({ leadId, enriched }: { leadId: number; enriched: boolean }) {
-  const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
-  const [pollUntil, setPollUntil] = useState(0);
-
-  const preview = useMutation({
-    mutationFn: () =>
-      api<{ preview: { places: number; estimatedCostUsd: number; remainingBudgetUsd: number } }>(
-        "/api/leads/enrich",
-        { method: "POST", json: { leadIds: [leadId], dryRun: true } },
-      ),
-    onSuccess: () => setOpen(true),
-    onError: (e: Error) => toast.error(e.message),
-  });
-  const run = useMutation({
-    mutationFn: () => api("/api/leads/enrich", { method: "POST", json: { leadIds: [leadId] } }),
-    onSuccess: () => {
-      setOpen(false);
-      setPollUntil(Date.now() + 30_000);
-      toast.success(t("detail.enrich.queued"));
-    },
-    onError: (e: Error) => toast.error(e instanceof ApiError ? e.message : t("common.error")),
-  });
-
-  // Kuyruk işi bitene kadar ayrıntıyı kısa aralıklarla yenile.
-  useEffect(() => {
-    if (pollUntil <= Date.now()) return;
-    const id = setInterval(() => {
-      void qc.invalidateQueries({ queryKey: qk.lead(leadId) });
-      void qc.invalidateQueries({ queryKey: ["leads"] });
-      if (Date.now() > pollUntil) clearInterval(id);
-    }, 1500);
-    return () => clearInterval(id);
-  }, [pollUntil, leadId, qc]);
-
-  const data = preview.data?.preview;
-  return (
-    <>
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={() => preview.mutate()}
-        disabled={preview.isPending || run.isPending}
-      >
-        {preview.isPending ? <Loader2 className="animate-spin" /> : <Sparkles />}{" "}
-        {enriched ? t("detail.enrich.again") : t("detail.enrich")}
-      </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("detail.enrich.title")}</DialogTitle>
-            <DialogDescription>{t("detail.enrich.body")}</DialogDescription>
-          </DialogHeader>
-          {data && (
-            <dl className="rounded-lg bg-muted p-3 text-[13px]">
-              <Fact label={t("detail.enrich.places")}>{data.places}</Fact>
-              <Fact label={t("detail.enrich.cost")}>
-                <span className="tabular font-medium">{fmtUsd(data.estimatedCostUsd)}</span>
-                {data.estimatedCostUsd === 0 && (
-                  <span className="ml-1 text-muted-foreground">({t("detail.enrich.free")})</span>
-                )}
-              </Fact>
-              <Fact label={t("detail.enrich.remaining")}>
-                <span className="tabular">{fmtUsd(data.remainingBudgetUsd)}</span>
-              </Fact>
-            </dl>
-          )}
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={() => run.mutate()} disabled={run.isPending}>
-              {run.isPending && <Loader2 className="animate-spin" />} {t("detail.enrich.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

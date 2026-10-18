@@ -2,6 +2,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
+import { placeCache } from "@/lib/db/cache-schema";
 import { apiUsage, leads, placeSnapshots, places, scans } from "@/lib/db/schema";
 
 export const leadPatchSchema = z.object({
@@ -20,6 +21,8 @@ export const leadPatchSchema = z.object({
   notes: z.string().max(5000).nullable().optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
   language: z.string().max(10).nullable().optional(),
+  /** Kendi kaydımız: işletmenin görünen adı (Google adı saklanmadığı için kullanıcı girebilir). */
+  displayName: z.string().trim().max(200).nullable().optional(),
 });
 
 export type LeadPatch = z.infer<typeof leadPatchSchema>;
@@ -39,6 +42,9 @@ export async function patchLead(db: Db, leadId: number, patch: LeadPatch): Promi
       ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
       ...(tags ? { tags } : {}),
       ...(patch.language !== undefined ? { language: patch.language } : {}),
+      ...(patch.displayName !== undefined
+        ? { displayName: patch.displayName?.trim() || null }
+        : {}),
       updatedAt: Date.now(),
     })
     .where(eq(leads.id, leadId));
@@ -63,6 +69,16 @@ export async function purgeDemoData(db: Db): Promise<{ places: number; scans: nu
     await db.delete(scans).where(inArray(scans.id, scanIds)); // scan_units ON DELETE CASCADE
   }
   await db.delete(leads).where(eq(leads.source, "demo"));
+  if (demoPlaces.length) {
+    for (let i = 0; i < demoPlaces.length; i += 500) {
+      await db.delete(placeCache).where(
+        inArray(
+          placeCache.placeId,
+          demoPlaces.slice(i, i + 500).map((p) => p.id),
+        ),
+      );
+    }
+  }
   await db.delete(places).where(eq(places.source, "demo"));
   await db.delete(apiUsage).where(eq(apiUsage.provider, "mock"));
   await db.run(sql`DELETE FROM regions WHERE id NOT IN (SELECT region_id FROM scans)`);

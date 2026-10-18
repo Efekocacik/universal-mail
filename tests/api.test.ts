@@ -479,7 +479,7 @@ describe("lead uç noktaları ve dışa aktarma", () => {
       await leadRoute.GET(req("GET", `/api/leads/${row.leadId}`), params(row.leadId)),
     );
     expect(detail.place.placeId).toBe(row.placeId);
-    expect(detail.googleDataStale).toBe(false);
+    expect(detail.google).not.toBeNull();
     const patched = await json(
       await leadRoute.PATCH(
         req("PATCH", `/api/leads/${row.leadId}`, { status: "replied", tags: ["sıcak"] }),
@@ -499,21 +499,24 @@ describe("lead uç noktaları ve dışa aktarma", () => {
     expect((await leadRoute.GET(req("GET", "/api/leads/999999"), params(999999))).status).toBe(404);
   });
 
-  it("Google kaynaklı veriler eskiyse 'bayat' işaretlenir", async () => {
+  it("lead ayrıntısı: Google verisi önbellekteyse gelir, silinince null olur; Maps bağlantısı yer kimliğinden üretilir", async () => {
     await seed();
     const row = (await json(await leadsRoute.GET(req("GET", "/api/leads?limit=1"), undefined)))
       .rows[0];
-    await setSetting(db, "google.cacheDays", 1);
-    const fetchedLongAgo = Date.now() - 3 * 86_400_000;
-    const { places } = await import("@/lib/db/schema");
-    await db
-      .update(places)
-      .set({ googleFetchedAt: fetchedLongAgo })
-      .where(eq(places.placeId, row.placeId));
-    const detail = await json(
+    const before = await json(
       await leadRoute.GET(req("GET", `/api/leads/${row.leadId}`), params(row.leadId)),
     );
-    expect(detail.googleDataStale).toBe(true);
+    expect(before.google.name).toBeTruthy();
+    expect(before.place.mapsUrl).toMatch(/^https:\/\/www\.google\.com\/maps/);
+    expect(before.place).not.toHaveProperty("name");
+
+    const { placeCache } = await import("@/lib/db/cache-schema");
+    await db.delete(placeCache);
+    const after = await json(
+      await leadRoute.GET(req("GET", `/api/leads/${row.leadId}`), params(row.leadId)),
+    );
+    expect(after.google).toBeNull();
+    expect(after.place.placeId).toBe(row.placeId);
   });
 
   it("CSV: varsayılan Google alanları içermez; google=1 ile içerir; indirme başlıkları doğru", async () => {

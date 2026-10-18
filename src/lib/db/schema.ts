@@ -129,28 +129,26 @@ export const scanUnits = sqliteTable(
   (t) => [index("scan_units_scan_status_idx").on(t.scanId, t.status, t.depth, t.id)],
 );
 
+/**
+ * Yerler: Google'ın SAKLANMASINA İZİN VERDİĞİ veya bizim türettiğimiz alanlar.
+ *  - place_id süresiz saklanabilir.
+ *  - lat/lng en fazla 30 gün saklanabilir; süre dolunca NULL'lanır (bkz. purgeExpiredGoogleData).
+ *  - was_future / is_closed / *_detected_at bizim türettiğimiz analiz bayraklarıdır.
+ * Ad, adres, telefon, web sitesi, tür, değerlendirme sayısı gibi Google içeriği BURADA TUTULMAZ; yalnızca uygulama
+ * açıkken geçici "oturum önbelleği"nde (gcache.place_cache, bkz. cache-schema.ts) bulunur ve kapanışta silinir.
+ */
 export const places = sqliteTable(
   "places",
   {
     placeId: text("place_id").primaryKey(),
     source: text("source").$type<"google" | "demo">().notNull(),
-    name: text("name").notNull(),
-    formattedAddress: text("formatted_address"),
-    lat: real("lat").notNull(),
-    lng: real("lng").notNull(),
-    countryCode: text("country_code"),
-    city: text("city"),
-    primaryType: text("primary_type"),
-    types: text("types", { mode: "json" }).$type<string[]>().notNull(),
-    businessStatus: text("business_status"),
-    openingDate: text("opening_date"),
-    website: text("website"),
-    phone: text("phone"),
-    intlPhone: text("intl_phone"),
-    userRatingCount: integer("user_rating_count"),
-    googleMapsUri: text("google_maps_uri"),
-    googleFetchedAt: integer("google_fetched_at").notNull(),
-    enrichedAt: integer("enriched_at"),
+    lat: real("lat"),
+    lng: real("lng"),
+    coordsFetchedAt: integer("coords_fetched_at").notNull(),
+    /** Son görülmede Google "yakında açılacak" (FUTURE_OPENING) bildirdi. Türetilmiş bayrak. */
+    wasFuture: integer("was_future", { mode: "boolean" }).notNull().default(false),
+    /** Google "kalıcı olarak kapalı" bildirdi. Türetilmiş bayrak. */
+    isClosed: integer("is_closed", { mode: "boolean" }).notNull().default(false),
     firstSeenScanId: integer("first_seen_scan_id"),
     lastSeenScanId: integer("last_seen_scan_id"),
     firstSeenAt: integer("first_seen_at").notNull(),
@@ -163,14 +161,10 @@ export const places = sqliteTable(
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
-  (t) => [
-    index("places_latlng_idx").on(t.lat, t.lng),
-    index("places_country_idx").on(t.countryCode, t.city),
-    index("places_status_idx").on(t.businessStatus),
-    index("places_source_idx").on(t.source),
-  ],
+  (t) => [index("places_latlng_idx").on(t.lat, t.lng), index("places_source_idx").on(t.source)],
 );
 
+/** Tarama karşılaştırması için yalnızca yer kimlikleri ve türetilmiş bir bayrak saklanır (Google içeriği değil). */
 export const placeSnapshots = sqliteTable(
   "place_snapshots",
   {
@@ -178,8 +172,7 @@ export const placeSnapshots = sqliteTable(
       .notNull()
       .references(() => scans.id, { onDelete: "cascade" }),
     placeId: text("place_id").notNull(),
-    businessStatus: text("business_status"),
-    userRatingCount: integer("user_rating_count"),
+    wasFuture: integer("was_future", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     primaryKey({ columns: [t.scanId, t.placeId] }),
@@ -203,6 +196,16 @@ export const leads = sqliteTable(
     id: integer("id").primaryKey({ autoIncrement: true }),
     placeId: text("place_id").references(() => places.placeId, { onDelete: "set null" }),
     source: text("source").$type<"google" | "registry" | "import" | "demo">().notNull(),
+    /**
+     * KENDİ kaydımız: işletmenin görünen adı. Kullanıcı girer veya (Faz 2) işletmenin kendi web sitesinden okunur.
+     * Google'dan gelen ad buraya KOPYALANMAZ.
+     */
+    displayName: text("display_name"),
+    /** Bizim veri setimizden (GeoNames) türetilen yaklaşık ülke/şehir; Google adres verisi değildir. */
+    countryCode: text("country_code"),
+    city: text("city"),
+    /** Bulan aramanın kategori anahtarı (kendi etiketimiz). */
+    categoryKey: text("category_key"),
     noveltyScore: integer("novelty_score").notNull().default(0),
     noveltyLabel: text("novelty_label").$type<NoveltyLabel>().notNull().default("low"),
     noveltySignals: text("novelty_signals", { mode: "json" })
@@ -224,6 +227,8 @@ export const leads = sqliteTable(
     index("leads_novelty_idx").on(t.noveltyScore),
     index("leads_status_idx").on(t.status),
     index("leads_source_idx").on(t.source),
+    index("leads_country_city_idx").on(t.countryCode, t.city),
+    index("leads_category_idx").on(t.categoryKey),
   ],
 );
 

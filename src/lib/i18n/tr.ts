@@ -98,6 +98,10 @@ export const tr = {
   "list.justOpened": "Yeni açıldı",
   "list.notFound": "Son taramada bulunamadı",
   "list.website": "Web sitesi",
+  "list.unnamed": "Ad yüklenmedi",
+  "list.uncached":
+    "{n} işletmenin Google verisi (ad, adres) yüklü değil. Bu veriler uygulama kapanınca silinir.",
+  "list.uncached.load": "Yükle",
   "list.empty.title": "Henüz işletme yok",
   "list.empty.body":
     "İlk taramanı başlat; bulunan işletmeler burada listelenir ve haritada görünür.",
@@ -109,18 +113,20 @@ export const tr = {
   // Ayrıntı paneli
   "detail.back": "Listeye dön",
   "detail.noPlace": "Bu lead için Google işletme kaydı yok.",
+  "detail.unnamed": "Ad yüklenmedi",
+  "detail.notLoaded": "Yüklü değil",
+  "detail.refresh": "Google verisini yükle",
+  "detail.noGoogle":
+    "Google'ın şartları gereği ad, adres, web sitesi ve telefon bilgileri uygulama kapandığında saklanmaz. Yükle'ye basarak bu bilgileri Google'dan yeniden alabilirsiniz; yenilik skoru, kategori, şehir, notlar ve durum bilgisi korunur.",
+  "detail.coordsExpired":
+    "Konum şu an kayıtlı değil (en çok 30 gün saklanır veya Google verileri silindi); bu işletme haritada görünmez. 'Google verisini yükle' ile konum yeniden alınır.",
+  "detail.displayName": "Görünen ad",
+  "detail.displayName.help":
+    "Kendi kaydınız. Google adı kalıcı saklanamadığı için, e-postalarda kullanmak üzere işletmenin adını buraya yazabilirsiniz (ileride işletmenin kendi web sitesinden de okunacak).",
+  "detail.displayName.placeholder": "İşletmenin adı",
   "detail.openMaps": "Google Haritalar'da aç",
   "detail.enrich": "Zenginleştir",
   "detail.enrich.again": "Yeniden zenginleştir",
-  "detail.enrich.title": "İşletmeyi zenginleştir",
-  "detail.enrich.body":
-    "Web sitesi, telefon ve değerlendirme sayısı Google'dan alınır (Place Details Enterprise). Bu çağrı ücretli kotanızdan düşer.",
-  "detail.enrich.places": "İşletme sayısı",
-  "detail.enrich.cost": "Tahmini maliyet",
-  "detail.enrich.free": "ücretsiz kota içinde",
-  "detail.enrich.remaining": "Kalan aylık bütçe",
-  "detail.enrich.confirm": "Zenginleştir",
-  "detail.enrich.queued": "Zenginleştirme kuyruğa alındı.",
   "detail.why": "Neden bu skor?",
   "detail.why.help":
     "Skor, işletmenin yeni açılmış olma ihtimalini gösterir. Birden çok ipucundan hesaplanır; kesin açılış tarihi değildir.",
@@ -135,8 +141,6 @@ export const tr = {
   "detail.ratings": "Değerlendirme",
   "detail.none": "Bulunamadı",
   "detail.notFetched": "Henüz alınmadı",
-  "detail.stale":
-    "Google'dan alınan veriler {days} günden eski. Google şartları gereği bayatlayabilir; güncel hâli için yeniden tarayın veya zenginleştirin.",
   "detail.manage": "Lead yönetimi",
   "detail.status": "Durum",
   "detail.tags": "Etiketler",
@@ -149,6 +153,21 @@ export const tr = {
   "detail.tl.new": "Yeni olarak işaretlendi",
   "detail.tl.opened": "Açıldığı görüldü",
   "detail.tl.enriched": "Zenginleştirildi",
+
+  // Google verisi yükleme penceresi
+  "load.refresh.title": "Google verisini yükle",
+  "load.refresh.body":
+    "Ad, adres, konum ve durum Google'dan yeniden alınır (Place Details Pro). Bu veriler yalnızca uygulama açıkken tutulur; kapanınca silinir.",
+  "load.enrich.title": "İşletmeyi zenginleştir",
+  "load.enrich.body":
+    "Web sitesi, telefon ve değerlendirme sayısı Google'dan alınır (Place Details Enterprise). Bu çağrı ücretli kotanızdan düşer.",
+  "load.places": "İşletme sayısı",
+  "load.cost": "Tahmini maliyet",
+  "load.free": "ücretsiz kota içinde",
+  "load.remaining": "Kalan aylık bütçe",
+  "load.confirm": "Başlat",
+  "load.queued": "İşlem kuyruğa alındı.",
+  "load.nothing": "Yüklenecek bir işletme yok.",
 
   // Harita
   "map.loading": "Harita yükleniyor…",
@@ -357,9 +376,16 @@ export const tr = {
   "settings.data.folder": "Veri klasörü",
   "settings.data.version": "Sürüm",
   "settings.data.consent": "Kullanım onayı",
-  "settings.data.cacheDays": "Google verisi yenileme uyarısı (gün)",
+  "settings.data.cacheDays": "Konum saklama süresi (gün, en çok 30)",
   "settings.data.googleNote":
-    "Google kaynaklı alanlar (ad, adres, web sitesi vb.) dışa aktarmada varsayılan olarak yer almaz ve belirtilen günden eskiyse 'bayat' uyarısı gösterilir. Google'ın güncel saklama ve kullanım şartlarını kontrol etmek sizin sorumluluğunuzdadır.",
+    "Google'ın şartları yalnızca yer kimliğinin süresiz, enlem/boylamın ise en çok 30 gün saklanmasına izin verir. Bu yüzden ad, adres, web sitesi ve telefon bilgileri diske kalıcı yazılmaz: yalnızca uygulama açıkken geçici bir dosyada tutulur ve kapanışta silinir. Konumlar belirlenen süre dolunca silinir. Yenilik skoru, kategori, şehir tahmini, notlar ve durumlarınız korunur. Google'ın güncel şartlarını kontrol etmek sizin sorumluluğunuzdadır.",
+  "settings.data.google.title": "Saklanan Google verisi",
+  "settings.data.google.summary":
+    "Şu an {cached} işletmenin bilgisi geçici önbellekte, {coords} işletmenin konumu kayıtlı.",
+  "settings.data.google.clear": "Google verilerini sil",
+  "settings.data.google.confirm":
+    "Önbellekteki tüm Google bilgileri ve kayıtlı konumlar silinecek. Yer kimlikleri, yenilik skorları, notlar ve durumlar korunur. Harita ve liste Google verisi yeniden yüklenene kadar boş görünür.",
+  "settings.data.google.cleared": "Google verileri silindi.",
   "settings.about.title": "Atıflar ve gizlilik",
   "settings.about.geonames":
     "Şehir listesi GeoNames (geonames.org) verisinden türetilmiştir, lisans: CC BY 4.0.",

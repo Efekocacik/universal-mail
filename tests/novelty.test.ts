@@ -8,12 +8,11 @@ describe("computeNovelty", () => {
   it("yakında açılacak işletme 100 puan ve mor etiket", () => {
     const r = computeNovelty({
       businessStatus: "FUTURE_OPENING",
-      openingDate: "2027-02-01",
       now: NOW,
     });
     expect(r.score).toBe(100);
     expect(r.label).toBe("future_opening");
-    expect(r.signals[0]?.reason).toContain("2027-02-01");
+    expect(r.signals[0]?.reason).toContain("yakında açılacak");
   });
 
   it("sinyal yoksa düşük", () => {

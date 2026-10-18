@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "55c2b334-9ed6-4982-aac5-6878cf45964c",
+  "id": "cf5b7449-0424-4da5-8a05-1472b023ed1a",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "api_usage": {
@@ -379,6 +379,34 @@
           "notNull": true,
           "autoincrement": false
         },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "country_code": {
+          "name": "country_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "city": {
+          "name": "city",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "category_key": {
+          "name": "category_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "novelty_score": {
           "name": "novelty_score",
           "type": "integer",
@@ -476,6 +504,21 @@
             "source"
           ],
           "isUnique": false
+        },
+        "leads_country_city_idx": {
+          "name": "leads_country_city_idx",
+          "columns": [
+            "country_code",
+            "city"
+          ],
+          "isUnique": false
+        },
+        "leads_category_idx": {
+          "name": "leads_category_idx",
+          "columns": [
+            "category_key"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -514,19 +557,13 @@
           "notNull": true,
           "autoincrement": false
         },
-        "business_status": {
-          "name": "business_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "user_rating_count": {
-          "name": "user_rating_count",
+        "was_future": {
+          "name": "was_future",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         }
       },
       "indexes": {
@@ -582,124 +619,42 @@
           "notNull": true,
           "autoincrement": false
         },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "formatted_address": {
-          "name": "formatted_address",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "lat": {
           "name": "lat",
           "type": "real",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "lng": {
           "name": "lng",
           "type": "real",
           "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "country_code": {
-          "name": "country_code",
-          "type": "text",
-          "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "city": {
-          "name": "city",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "primary_type": {
-          "name": "primary_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "types": {
-          "name": "types",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "business_status": {
-          "name": "business_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "opening_date": {
-          "name": "opening_date",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "website": {
-          "name": "website",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "phone": {
-          "name": "phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "intl_phone": {
-          "name": "intl_phone",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "user_rating_count": {
-          "name": "user_rating_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "google_maps_uri": {
-          "name": "google_maps_uri",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "google_fetched_at": {
-          "name": "google_fetched_at",
+        "coords_fetched_at": {
+          "name": "coords_fetched_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "enriched_at": {
-          "name": "enriched_at",
+        "was_future": {
+          "name": "was_future",
           "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "is_closed": {
+          "name": "is_closed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "first_seen_scan_id": {
           "name": "first_seen_scan_id",
@@ -764,21 +719,6 @@
           "columns": [
             "lat",
             "lng"
-          ],
-          "isUnique": false
-        },
-        "places_country_idx": {
-          "name": "places_country_idx",
-          "columns": [
-            "country_code",
-            "city"
-          ],
-          "isUnique": false
-        },
-        "places_status_idx": {
-          "name": "places_status_idx",
-          "columns": [
-            "business_status"
           ],
           "isUnique": false
         },

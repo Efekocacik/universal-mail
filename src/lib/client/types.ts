@@ -97,6 +97,10 @@ export interface LeadDetailResponse {
     id: number;
     placeId: string | null;
     source: string;
+    displayName: string | null;
+    countryCode: string | null;
+    city: string | null;
+    categoryKey: string | null;
     noveltyScore: number;
     noveltyLabel: NoveltyLabel;
     noveltySignals: NoveltySignal[];
@@ -107,15 +111,24 @@ export interface LeadDetailResponse {
     createdAt: number;
     updatedAt: number;
   };
+  /** Kalıcı kayıt: yer kimliği, en çok 30 günlük konum ve türetilmiş bayraklar. */
   place: {
     placeId: string;
     source: "google" | "demo";
+    lat: number | null;
+    lng: number | null;
+    wasFuture: boolean;
+    isClosed: boolean;
+    firstSeenAt: number;
+    newDetectedAt: number | null;
+    openedDetectedAt: number | null;
+    notFoundInScanId: number | null;
+    mapsUrl: string;
+  } | null;
+  /** Oturum önbelleğindeki Google içeriği; uygulama yeniden açıldığında null olur. */
+  google: {
     name: string;
     formattedAddress: string | null;
-    lat: number;
-    lng: number;
-    countryCode: string | null;
-    city: string | null;
     primaryType: string | null;
     types: string[];
     businessStatus: string | null;
@@ -124,16 +137,15 @@ export interface LeadDetailResponse {
     phone: string | null;
     intlPhone: string | null;
     userRatingCount: number | null;
-    googleMapsUri: string | null;
-    googleFetchedAt: number;
+    fetchedAt: number;
     enrichedAt: number | null;
-    firstSeenAt: number;
-    newDetectedAt: number | null;
-    openedDetectedAt: number | null;
-    notFoundInScanId: number | null;
   } | null;
-  googleDataStale: boolean;
-  googleCacheDays: number;
+}
+
+export interface GoogleDataSummary {
+  cachedPlaces: number;
+  storedCoordinates: number;
+  maxRetentionDays: number;
 }
 
 export interface SettingsResponse {

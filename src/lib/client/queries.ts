@@ -129,8 +129,12 @@ export const useLead = (id: number | null) =>
 export function usePatchLead(id: number | null) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (patch: { status?: string; notes?: string | null; tags?: string[] }) =>
-      api<LeadDetailResponse>(`/api/leads/${id}`, { method: "PATCH", json: patch }),
+    mutationFn: (patch: {
+      status?: string;
+      notes?: string | null;
+      tags?: string[];
+      displayName?: string | null;
+    }) => api<LeadDetailResponse>(`/api/leads/${id}`, { method: "PATCH", json: patch }),
     onSuccess: (data) => {
       qc.setQueryData(qk.lead(id), data);
       void qc.invalidateQueries({ queryKey: ["leads"] });

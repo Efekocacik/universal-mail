@@ -12,6 +12,20 @@ export function dbPath(): string {
   return process.env.UM_DB_PATH ?? path.join(dataDir(), "universal-mail.db");
 }
 
+/** Google oturum önbelleği dosya adı (geçici; açılışta ve kapanışta silinir). */
+export const SESSION_CACHE_FILENAME = "google-session.db";
+
+/** Verilen ana veritabanı dosyasıyla aynı klasördeki oturum önbelleği yolu (ana veritabanına ATTACH edilir). */
+export function cacheDbPathFor(mainDbFile: string): string {
+  return (
+    process.env.UM_CACHE_DB_PATH ?? path.join(path.dirname(mainDbFile), SESSION_CACHE_FILENAME)
+  );
+}
+
+export function cacheDbPath(): string {
+  return cacheDbPathFor(dbPath());
+}
+
 export function backupsDir(): string {
   const dir = path.join(dataDir(), "backups");
   fs.mkdirSync(dir, { recursive: true });

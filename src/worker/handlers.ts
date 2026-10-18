@@ -14,7 +14,10 @@ import { getSetting } from "@/lib/settings";
 import type { Db } from "@/lib/db/client";
 
 const scanPayload = z.object({ scanId: z.number().int() });
-const enrichPayload = z.object({ placeIds: z.array(z.string()).min(1).max(500) });
+const enrichPayload = z.object({
+  placeIds: z.array(z.string()).min(1).max(500),
+  mode: z.enum(["refresh", "enrich"]).default("enrich"),
+});
 
 /** Veri toplama işleri, kullanım onayı verilmeden çalışmaz (FR-SET-08). */
 async function requireConsent(db: Db): Promise<void> {
@@ -57,9 +60,9 @@ export function registerCoreHandlers(): void {
   });
 
   registerJobHandler("place.enrich", async (ctx: JobContext) => {
-    const { placeIds } = enrichPayload.parse(ctx.payload);
+    const { placeIds, mode } = enrichPayload.parse(ctx.payload);
     const deps = await sharedDeps(ctx.db);
-    const res = await enrichPlaces({ ...deps, shouldStop: ctx.shouldStop }, placeIds);
+    const res = await enrichPlaces({ ...deps, shouldStop: ctx.shouldStop }, placeIds, mode);
     ctx.log(
       `Zenginleştirme: ${res.enriched} tamam, ${res.skipped} atlandı${res.stoppedReason ? ` (${res.stoppedReason})` : ""}`,
     );

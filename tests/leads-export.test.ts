@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/db/client";
+import { placeCache } from "@/lib/db/cache-schema";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, categorySets, leads, places, scans } from "@/lib/db/schema";
 import { CSV_COLUMNS, csvCell, exportLeadsCsv, selectColumns } from "@/lib/export/csv";
@@ -80,7 +81,7 @@ describe("lead sorguları", () => {
     expect(scores).toEqual([...scores].sort((a, b) => b - a));
 
     const byName = await queryLeads(db, {}, { sort: "name", limit: 30 });
-    const names = byName.rows.map((r) => r.name.toLowerCase());
+    const names = byName.rows.map((r) => r.name!.toLowerCase());
     expect(names).toEqual([...names].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)));
   });
 
@@ -129,7 +130,7 @@ describe("lead sorguları", () => {
   it("metin araması özel karakterleri (%, _) düz metin sayar ve SQL enjeksiyonuna dayanıklıdır", async () => {
     await scanLondon(["cafe"]);
     const first = (await queryLeads(db, {}, { limit: 1 })).rows[0]!;
-    const word = first.name.split(" ")[0]!;
+    const word = first.name!.split(" ")[0]!;
     const hit = await queryLeads(db, { q: word.toUpperCase() });
     expect(hit.rows.some((r) => r.leadId === first.leadId)).toBe(true);
     expect((await queryLeads(db, { q: "%" })).total).toBe(0);
@@ -206,7 +207,7 @@ describe("CSV dışa aktarma", () => {
       expect(headers).not.toContain(c.header);
     expect(csv.startsWith("﻿")).toBe(true);
     // Ad ve adres sızmamalı
-    const sample = (await db.select().from(places).limit(1))[0]!;
+    const sample = (await db.select().from(placeCache).limit(1))[0]!;
     expect(csv).not.toContain(sample.name);
     expect(csv).not.toContain(sample.formattedAddress!);
   });
@@ -247,11 +248,11 @@ describe("CSV dışa aktarma", () => {
 
   it("zararlı bir işletme adı dışa aktarmada etkisizleştirilir", async () => {
     await scanLondon(["cafe"]);
-    const p = (await db.select().from(places).limit(1))[0]!;
+    const p = (await db.select().from(placeCache).limit(1))[0]!;
     await db
-      .update(places)
+      .update(placeCache)
       .set({ name: '=cmd|" /C calc"!A1' })
-      .where(eq(places.placeId, p.placeId));
+      .where(eq(placeCache.placeId, p.placeId));
     const csv = await collect(exportLeadsCsv(db, {}, { includeGoogleFields: true }));
     expect(csv).toContain(`"'=cmd|"" /C calc""!A1"`);
     expect(csv).not.toMatch(/(^|,)=cmd/m);

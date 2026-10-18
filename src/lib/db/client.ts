@@ -1,9 +1,11 @@
 import { createClient, type Client } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
-import { dbPath, toLibsqlUrl } from "@/lib/config/paths";
+import { cacheDbPathFor, dbPath, toLibsqlUrl } from "@/lib/config/paths";
+import { CACHE_DDL } from "./cache-schema";
+import * as cacheSchema from "./cache-schema";
 import * as schema from "./schema";
 
-export type Db = LibSQLDatabase<typeof schema>;
+export type Db = LibSQLDatabase<typeof schema & typeof cacheSchema>;
 
 interface Handle {
   client: Client;
@@ -13,6 +15,18 @@ interface Handle {
 const globalKey = "__umDbHandle";
 type GlobalWithDb = typeof globalThis & { [globalKey]?: Promise<Handle> };
 
+/**
+ * Google oturum önbelleğini `gcache` takma adıyla ekler (bkz. cache-schema.ts). Tek bağlantı kullanıldığı için
+ * ekleme bağlantı ömrü boyunca geçerlidir. Önbellek ana veritabanından AYRI bir dosyadır; böylece yedeklere
+ * ve ana veritabanı dosyasına Google içeriği karışmaz.
+ */
+export async function attachCache(client: Client, cacheFile: string): Promise<void> {
+  await client.execute({ sql: "ATTACH DATABASE ? AS gcache", args: [cacheFile] });
+  await client.execute("PRAGMA gcache.journal_mode = WAL");
+  await client.execute("PRAGMA gcache.synchronous = OFF"); // geçici veri: hız, dayanıklılık değil
+  await client.execute(CACHE_DDL);
+}
+
 async function open(path: string): Promise<Handle> {
   // concurrency=1: tek bağlantı. PRAGMA ayarları bağlantı başınadır; tek bağlantıyla tutarlı kalır.
   const client = createClient({ url: toLibsqlUrl(path), concurrency: 1, timeout: 8000 });
@@ -20,7 +34,8 @@ async function open(path: string): Promise<Handle> {
   await client.execute("PRAGMA foreign_keys = ON");
   await client.execute("PRAGMA busy_timeout = 8000");
   await client.execute("PRAGMA synchronous = NORMAL");
-  return { client, db: drizzle(client, { schema }) };
+  await attachCache(client, cacheDbPathFor(path));
+  return { client, db: drizzle(client, { schema: { ...schema, ...cacheSchema } }) };
 }
 
 /** İşlem başına tek bağlantı (Next.js sıcak yeniden yüklemesine dayanıklı). */
@@ -49,4 +64,4 @@ export async function closeDb(): Promise<void> {
   (await pending).client.close();
 }
 
-export { schema };
+export { schema, cacheSchema };
