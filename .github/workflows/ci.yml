@@ -37,7 +37,7 @@ jobs:
           npm ci 2>&1 | tee npm-ci.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            echo "::error title=npm ci başarısız (çıkış $code)::$(grep -E 'npm (error|warn)|Error|ERR|gyp|ENOENT|EACCES|checksum|404|ETARGET|ERESOLVE' npm-ci.log | tail -n 40 | tr '\n' '|' | cut -c1-3500)"
+            echo "::error title=npm ci başarısız (çıkış $code)::$(head -n 40 npm-ci.log | tr '\n' '|' | cut -c1-3500)"
           fi
           exit $code
       - run: npm run typecheck
@@ -62,7 +62,7 @@ jobs:
           npm ci 2>&1 | tee npm-ci.log
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
-            echo "::error title=npm ci başarısız (çıkış $code)::$(grep -E 'npm (error|warn)|Error|ERR|gyp|ENOENT|EACCES|checksum|404|ETARGET|ERESOLVE' npm-ci.log | tail -n 40 | tr '\n' '|' | cut -c1-3500)"
+            echo "::error title=npm ci başarısız (çıkış $code)::$(head -n 40 npm-ci.log | tr '\n' '|' | cut -c1-3500)"
           fi
           exit $code
       - run: npm run build
