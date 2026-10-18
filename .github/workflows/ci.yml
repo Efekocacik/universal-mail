@@ -1,11 +1,11 @@
 name: CI
 
-# Her push ve PR'da kalite denetimleri ve uçtan uca test çalışır.
+# Her dal itişinde ve PR'da kalite denetimleri ve uçtan uca test çalışır.
 # macOS ve Windows kurulum paketleri burada (bulutta) derlenir; geliştirici bilgisayarı yük almaz.
 # `v*` etiketi (örn. v0.1.0) itilince paketler bir GitHub Release olarak yayımlanır.
 on:
   push:
-    branches: [main]
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -30,7 +30,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - name: Bağımlılıkları kur
+        shell: bash
+        run: |
+          set +e
+          npm ci 2>&1 | tee npm-ci.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=npm ci başarısız (çıkış $code)::$(head -n 40 npm-ci.log | tr '\n' '|' | cut -c1-3500)"
+          fi
+          exit $code
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
@@ -46,7 +55,16 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - name: Bağımlılıkları kur
+        shell: bash
+        run: |
+          set +e
+          npm ci 2>&1 | tee npm-ci.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            echo "::error title=npm ci başarısız (çıkış $code)::$(head -n 40 npm-ci.log | tr '\n' '|' | cut -c1-3500)"
+          fi
+          exit $code
       - run: npm run build
       - run: npx playwright test
       - uses: actions/upload-artifact@v4
