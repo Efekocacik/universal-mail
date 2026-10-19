@@ -232,6 +232,101 @@ export const leads = sqliteTable(
   ],
 );
 
+/* ---------------------------------------------------------------------------
+ * Faz 2: e-posta bulma. Bu tablolardaki her şey BİZİM verimizdir: işletmenin kendi web sitesinden okunan
+ * e-posta adresleri, sosyal bağlantılar ve doğrulama sonuçları. Google'ın web sitesi adresi (websiteUri)
+ * burada SAKLANMAZ; yalnızca taramada bulunan sayfanın adresi (`source_url`) kaynak olarak tutulur.
+ * ------------------------------------------------------------------------- */
+
+export type EmailKind = "generic" | "personal" | "consumer";
+export type EmailSourceType =
+  "mailto" | "jsonld" | "cfemail" | "text" | "obfuscated" | "manual" | "external";
+export type VerifyStatus = "verified" | "unverified" | "invalid";
+/** SRS 4.5 `email_status`: bir lead'in e-posta durumunun özeti. */
+export type EmailStatus =
+  "found_verified" | "found_unverified" | "generic" | "not_found" | "invalid";
+export type EnrichmentStatus =
+  "queued" | "running" | "done" | "no_website" | "needs_google" | "blocked" | "failed";
+export type ContactType =
+  "instagram" | "facebook" | "linkedin" | "twitter" | "tiktok" | "youtube" | "contact_form";
+
+export const leadEmails = sqliteTable(
+  "lead_emails",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    /** Küçük harf; alan adı ASCII (punycode). */
+    email: text("email").notNull(),
+    domain: text("domain").notNull(),
+    kind: text("kind").$type<EmailKind>().notNull(),
+    /** E-postanın bulunduğu sayfa (işletmenin kendi sitesi). Elle eklenenlerde boştur. */
+    sourceUrl: text("source_url"),
+    sourceType: text("source_type").$type<EmailSourceType>().notNull(),
+    /** Adresin alan adı, taranan sitenin alan adıyla aynı mı? Farklıysa (ajans, grup adresi) sıralamada geriye düşer. */
+    siteMatch: integer("site_match", { mode: "boolean" }).notNull().default(true),
+    verifyStatus: text("verify_status").$type<VerifyStatus>().notNull().default("unverified"),
+    /** Doğrulama sonucunun kısa nedeni: ok, syntax, no_mx, null_mx, disposable, consumer_domain, dns_timeout... */
+    verifyReason: text("verify_reason"),
+    verifiedAt: integer("verified_at"),
+    isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+    /** Kullanıcı birincil adresi elle seçtiyse otomatik seçim onu değiştirmez. */
+    primaryPinned: integer("primary_pinned", { mode: "boolean" }).notNull().default(false),
+    foundAt: integer("found_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("lead_emails_lead_email_uq").on(t.leadId, t.email),
+    // Bir lead'in en fazla bir birincil adresi olabilir (liste sorguları buna güvenir).
+    uniqueIndex("lead_emails_primary_uq")
+      .on(t.leadId)
+      .where(sql`${t.isPrimary} = 1`),
+    index("lead_emails_email_idx").on(t.email),
+    index("lead_emails_domain_idx").on(t.domain),
+  ],
+);
+
+export const leadContacts = sqliteTable(
+  "lead_contacts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    type: text("type").$type<ContactType>().notNull(),
+    url: text("url").notNull(),
+    foundAt: integer("found_at").notNull(),
+  },
+  (t) => [uniqueIndex("lead_contacts_uq").on(t.leadId, t.type, t.url)],
+);
+
+/** Bir lead için e-posta bulma işleminin durumu (lead başına tek satır). */
+export const leadEnrichment = sqliteTable(
+  "lead_enrichment",
+  {
+    leadId: integer("lead_id")
+      .primaryKey()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    status: text("status").$type<EnrichmentStatus>().notNull(),
+    emailStatus: text("email_status").$type<EmailStatus>(),
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: integer("last_attempt_at"),
+    /** Yeniden deneme zamanı (yalnızca geçici hatalarda, en çok bir kez; FR-ENR-05). */
+    nextRetryAt: integer("next_retry_at"),
+    lastError: text("last_error"),
+    pagesFetched: integer("pages_fetched").notNull().default(0),
+    /** Yerel taramada bulunamayınca harici servis (Hunter) kullanıldı mı? */
+    externalUsed: integer("external_used", { mode: "boolean" }).notNull().default(false),
+    completedAt: integer("completed_at"),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("lead_enrichment_status_idx").on(t.status),
+    index("lead_enrichment_email_idx").on(t.emailStatus),
+  ],
+);
+
 export const apiUsage = sqliteTable(
   "api_usage",
   {

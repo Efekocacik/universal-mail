@@ -1,6 +1,12 @@
 import { database, HttpError, intParam, json, route, body } from "@/lib/api/http";
 import { getLeadDetail } from "@/lib/leads/query";
 import { leadPatchSchema, patchLead } from "@/lib/leads/mutations";
+import {
+  findDuplicates,
+  getEnrichmentMap,
+  getLeadContacts,
+  getLeadEmails,
+} from "@/lib/email/store";
 import { googleMapsUrl } from "@/lib/places/maps-url";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +20,15 @@ async function detail(id: number) {
   const row = await getLeadDetail(db, id);
   if (!row) throw new HttpError(404, "Lead bulunamadı.");
   const { place, cache } = row;
+  const emails = await getLeadEmails(db, id);
+  const enrichment = (await getEnrichmentMap(db, [id])).get(id) ?? null;
   return {
     lead: row.lead,
+    /** Faz 2: işletmenin kendi web sitesinden bulunan e-postalar, sosyal/iletişim bağlantıları ve işlem durumu. */
+    emails,
+    contacts: await getLeadContacts(db, id),
+    enrichment,
+    duplicates: await findDuplicates(db, id, emails),
     place: place
       ? {
           placeId: place.placeId,

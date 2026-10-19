@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
-import { leads, placeSnapshots, places } from "@/lib/db/schema";
+import { leadEmails, leadEnrichment, leads, placeSnapshots, places } from "@/lib/db/schema";
 import type { LeadStatus } from "@/lib/db/schema";
 import type { BBox, NoveltyLabel } from "@/lib/domain/types";
 
@@ -19,6 +19,11 @@ export interface LeadFilters {
   ratingMin?: number;
   ratingMax?: number;
   scanId?: number;
+  /**
+   * E-posta durumu (Faz 2): found_verified, found_unverified, generic, not_found, invalid (SRS email_status) ve
+   * işlem durumları unchecked, queued, running, no_website, needs_google, blocked, failed.
+   */
+  emailStatus?: string[];
   /** "Son taramada bulunamadı" işaretlileri göster (true) veya gizle (false). */
   notFound?: boolean;
 }
@@ -60,10 +65,24 @@ export interface LeadRow {
   enriched: boolean;
   /** Google verisi (ad, adres...) şu an önbellekte mi? */
   cached: boolean;
+  /** E-posta durumu özeti (bkz. LeadFilters.emailStatus). */
+  emailState: string;
+  /** Birincil e-posta adresi (işletmenin kendi sitesinden bulunan; bizim verimiz). */
+  primaryEmail: string | null;
+  primaryEmailKind: string | null;
 }
 
 /** Kalıcı bayraklardan türetilen iş durumu (önbellek boşken bile süzgeç ve sayımlar çalışsın diye). */
 const DERIVED_STATUS = sql<string>`CASE WHEN ${places.isClosed} THEN 'CLOSED_PERMANENTLY' WHEN ${places.wasFuture} THEN 'FUTURE_OPENING' ELSE 'OPERATIONAL' END`;
+/**
+ * Lead'in e-posta durumu: işlem sürüyorsa o, sonuç varsa SRS durumu, aksi halde işlem durumu; hiç denenmemişse "unchecked".
+ */
+const EMAIL_STATE = sql<string>`CASE
+  WHEN ${leadEnrichment.leadId} IS NULL THEN 'unchecked'
+  WHEN ${leadEnrichment.status} IN ('queued','running') THEN ${leadEnrichment.status}
+  WHEN ${leadEnrichment.emailStatus} IS NOT NULL THEN ${leadEnrichment.emailStatus}
+  ELSE ${leadEnrichment.status}
+END`;
 const DISPLAY_NAME = sql<string | null>`coalesce(${placeCache.name}, ${leads.displayName})`;
 
 const LIST_COLUMNS = {
@@ -94,6 +113,9 @@ const LIST_COLUMNS = {
   notFoundScan: places.notFoundInScanId,
   enrichedAt: placeCache.enrichedAt,
   fetchedAt: placeCache.fetchedAt,
+  emailState: EMAIL_STATE,
+  primaryEmail: leadEmails.email,
+  primaryEmailKind: leadEmails.kind,
 };
 
 function escapeLike(s: string): string {
@@ -144,6 +166,7 @@ export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefin
   }
   if (f.notFound === true) conds.push(sql`${places.notFoundInScanId} IS NOT NULL`);
   if (f.notFound === false) conds.push(sql`${places.notFoundInScanId} IS NULL`);
+  if (f.emailStatus?.length) conds.push(inArray(EMAIL_STATE, f.emailStatus));
   const real = conds.filter((c): c is SQL => c !== undefined);
   return real.length ? and(...real) : undefined;
 }
@@ -188,7 +211,9 @@ export async function queryLeads(
     .select(LIST_COLUMNS)
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
-    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId));
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
+    .leftJoin(leadEmails, and(eq(leadEmails.leadId, leads.id), eq(leadEmails.isPrimary, true)));
   const rows = await (where ? base.where(where) : base)
     .orderBy(...order)
     .limit(limit)
@@ -197,7 +222,8 @@ export async function queryLeads(
     .select({ n: sql<number>`count(*)` })
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
-    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId));
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   const total = Number((await (where ? countBase.where(where) : countBase))[0]?.n ?? 0);
   return { rows: rows.map(toRow), total };
 }
@@ -233,6 +259,7 @@ export async function queryPoints(
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
     .where(withCoords)
     .orderBy(desc(leads.noveltyScore), asc(leads.id))
     .limit(max + 1);
@@ -278,6 +305,8 @@ export interface Facets {
   novelty: Record<string, number>;
   leadStatus: Record<string, number>;
   businessStatus: Record<string, number>;
+  /** E-posta durumu → lead sayısı (Faz 2). */
+  emailStatus: Record<string, number>;
   total: number;
   /** Listedeki Google verisi yüklü olmayan (önbelleği boş) lead sayısı. */
   uncached: number;
@@ -314,22 +343,27 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     novelty: undefined,
     leadStatus: undefined,
     businessStatus: undefined,
+    emailStatus: undefined,
   });
   const group = async (
-    col: typeof leads.noveltyLabel | typeof leads.status | typeof DERIVED_STATUS,
+    col:
+      typeof leads.noveltyLabel | typeof leads.status | typeof DERIVED_STATUS | typeof EMAIL_STATE,
   ) => {
     const base = db
       .select({ k: col, n: sql<number>`count(*)` })
       .from(leads)
       .innerJoin(places, eq(leads.placeId, places.placeId))
-      .leftJoin(placeCache, eq(places.placeId, placeCache.placeId));
+      .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+      .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
     const rows = await (where ? base.where(where) : base).groupBy(col);
     return Object.fromEntries(rows.filter((r) => r.k).map((r) => [r.k as string, Number(r.n)]));
   };
-  const [novelty, leadStatus, businessStatus] = await Promise.all([
+  // E-posta durumu sayımı kendi süzgecini hariç tutar (seçenekler ve sayıları birlikte görünsün).
+  const [novelty, leadStatus, businessStatus, emailStatus] = await Promise.all([
     group(leads.noveltyLabel),
     group(leads.status),
     group(DERIVED_STATUS),
+    group(EMAIL_STATE),
   ]);
   const totalBase = db
     .select({
@@ -338,7 +372,8 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     })
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
-    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId));
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   const totals = (await (where ? totalBase.where(where) : totalBase))[0];
 
   return {
@@ -348,6 +383,7 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     novelty,
     leadStatus,
     businessStatus,
+    emailStatus,
     total: Number(totals?.n ?? 0),
     uncached: Number(totals?.uncached ?? 0),
   };
@@ -366,8 +402,24 @@ export async function queryUncachedPlaceIds(
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
     .where(where ? and(where, missing) : missing)
     .orderBy(desc(leads.noveltyScore), asc(leads.id))
     .limit(limit);
   return rows.map((r) => r.placeId);
+}
+
+/** Süzgece uyan lead kimlikleri (toplu işlemler için; en fazla `limit`). */
+export async function queryLeadIds(db: Db, filters: LeadFilters, limit = 2000): Promise<number[]> {
+  const where = await buildWhere(db, filters);
+  const base = db
+    .select({ id: leads.id })
+    .from(leads)
+    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
+  const rows = await (where ? base.where(where) : base)
+    .orderBy(desc(leads.noveltyScore), asc(leads.id))
+    .limit(limit);
+  return rows.map((r) => r.id);
 }

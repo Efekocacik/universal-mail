@@ -10,6 +10,7 @@ import type {
   BBox,
 } from "@/lib/domain/types";
 import type { LeadStatus } from "@/lib/db/schema";
+import type { LeadContactRow, LeadEmailRow, EnrichmentRow } from "@/lib/email/store";
 
 export type {
   BudgetStatus,
@@ -23,6 +24,9 @@ export type {
   ScanStatus,
   BBox,
   LeadStatus,
+  LeadContactRow,
+  LeadEmailRow,
+  EnrichmentRow,
 };
 
 export interface AppConfig {
@@ -111,6 +115,18 @@ export interface LeadDetailResponse {
     createdAt: number;
     updatedAt: number;
   };
+  /** Faz 2: işletmenin kendi web sitesinden bulunan e-postalar (kaynak sayfa, tür, doğrulama), bağlantılar ve işlem durumu. */
+  emails: LeadEmailRow[];
+  contacts: LeadContactRow[];
+  enrichment: EnrichmentRow | null;
+  /** Aynı e-postayı veya işletme alan adını paylaşan diğer lead'ler. */
+  duplicates: {
+    leadId: number;
+    reason: "same_email" | "same_domain";
+    value: string;
+    displayName: string | null;
+    city: string | null;
+  }[];
   /** Kalıcı kayıt: yer kimliği, en çok 30 günlük konum ve türetilmiş bayraklar. */
   place: {
     placeId: string;
@@ -160,8 +176,10 @@ export interface SettingsResponse {
     "google.cacheDays": number;
     "mock.epoch": number;
     "ui.language": "tr" | "en";
+    "enrichment.external": { enabled: boolean; provider: "hunter" };
+    "enrichment.concurrency": number;
   };
-  secrets: { placesKey: SecretInfo; mapsKey: SecretInfo };
+  secrets: { placesKey: SecretInfo; mapsKey: SecretInfo; hunterKey: SecretInfo };
   setup: SetupState;
   app: { version: string; dataDir: string };
 }
@@ -180,4 +198,23 @@ export interface CompanyProfile {
   contactName: string;
   contactTitle?: string;
   website?: string;
+}
+
+export interface FindEmailsPreview {
+  leads: number;
+  ready: number;
+  noWebsite: number;
+  needsGoogle: number;
+  alreadyDone: number;
+  optedOut: number;
+  willSearch: number;
+  google: { load: boolean; places: number; estimatedCostUsd: number; remainingBudgetUsd: number };
+  external: { enabled: boolean; configured: boolean; available: boolean };
+}
+
+export interface EnrichmentStatusResponse {
+  jobs: { queued: number; running: number; scheduled: number };
+  states: Record<string, number>;
+  external: { enabled: boolean; provider: "hunter"; configured: boolean };
+  concurrency: number;
 }

@@ -1,8 +1,8 @@
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import { placeCache } from "@/lib/db/cache-schema";
-import { leads, places } from "@/lib/db/schema";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { leadContacts, leadEmails, leadEnrichment, leads, places } from "@/lib/db/schema";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { buildWhere, type LeadFilters } from "@/lib/leads/query";
 import { googleMapsUrl } from "@/lib/places/maps-url";
 
@@ -38,6 +38,16 @@ export const CSV_COLUMNS: readonly CsvColumn[] = [
   { key: "city", header: "sehir_tahmini", origin: "own" },
   { key: "country", header: "ulke_tahmini", origin: "own" },
   { key: "maps_url", header: "google_haritalar_baglantisi", origin: "own" },
+  // Faz 2: işletmenin kendi web sitesinden bulunan bilgiler (bizim verimiz)
+  { key: "email", header: "eposta", origin: "own" },
+  { key: "email_status", header: "eposta_durumu", origin: "own" },
+  { key: "email_kind", header: "eposta_turu", origin: "own" },
+  { key: "email_source", header: "eposta_kaynagi", origin: "own" },
+  { key: "all_emails", header: "tum_epostalar", origin: "own" },
+  { key: "instagram", header: "instagram", origin: "own" },
+  { key: "facebook", header: "facebook", origin: "own" },
+  { key: "linkedin", header: "linkedin", origin: "own" },
+  { key: "contact_form", header: "iletisim_formu", origin: "own" },
   { key: "name", header: "ad", origin: "google" },
   { key: "address", header: "adres", origin: "google" },
   { key: "lat", header: "enlem", origin: "google" },
@@ -83,16 +93,36 @@ export async function* exportLeadsCsv(
   for (;;) {
     const cond = where ? and(where, gt(leads.id, lastId)) : gt(leads.id, lastId);
     const rows = await db
-      .select({ lead: leads, place: places, cache: placeCache })
+      .select({ lead: leads, place: places, cache: placeCache, enrichment: leadEnrichment })
       .from(leads)
       .innerJoin(places, eq(leads.placeId, places.placeId))
       .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+      .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
       .where(cond)
       .orderBy(asc(leads.id))
       .limit(1000);
     if (rows.length === 0) break;
+    const ids = rows.map((r) => r.lead.id);
+    const emailsBy = new Map<number, (typeof leadEmails.$inferSelect)[]>();
+    for (const e of await db
+      .select()
+      .from(leadEmails)
+      .where(inArray(leadEmails.leadId, ids))
+      .orderBy(asc(leadEmails.id)))
+      emailsBy.set(e.leadId, [...(emailsBy.get(e.leadId) ?? []), e]);
+    const contactsBy = new Map<number, (typeof leadContacts.$inferSelect)[]>();
+    for (const c of await db
+      .select()
+      .from(leadContacts)
+      .where(inArray(leadContacts.leadId, ids))
+      .orderBy(asc(leadContacts.id)))
+      contactsBy.set(c.leadId, [...(contactsBy.get(c.leadId) ?? []), c]);
     let chunk = "";
-    for (const { lead, place, cache } of rows) {
+    for (const { lead, place, cache, enrichment } of rows) {
+      const emails = emailsBy.get(lead.id) ?? [];
+      const primary = emails.find((e) => e.isPrimary);
+      const contact = (type: string) =>
+        contactsBy.get(lead.id)?.find((c) => c.type === type)?.url ?? "";
       const values: Record<string, unknown> = {
         lead_id: lead.id,
         place_id: place.placeId,
@@ -114,6 +144,18 @@ export async function* exportLeadsCsv(
           lat: place.lat,
           lng: place.lng,
         }),
+        email: primary?.email,
+        email_status: enrichment ? (enrichment.emailStatus ?? enrichment.status) : "unchecked",
+        email_kind: primary?.kind,
+        email_source: primary?.sourceUrl,
+        all_emails: emails
+          .filter((e) => e.verifyStatus !== "invalid")
+          .map((e) => e.email)
+          .join(";"),
+        instagram: contact("instagram"),
+        facebook: contact("facebook"),
+        linkedin: contact("linkedin"),
+        contact_form: contact("contact_form"),
         name: cache?.name,
         address: cache?.formattedAddress,
         lat: place.lat,

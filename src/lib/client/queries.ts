@@ -1,6 +1,7 @@
 "use client";
 
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { api, toSearchParams } from "./api";
 import type {
   AppConfig,
@@ -13,6 +14,7 @@ import type {
   LeadRow,
   ScanListItem,
   SettingsResponse,
+  EnrichmentStatusResponse,
 } from "./types";
 
 export const qk = {
@@ -27,6 +29,7 @@ export const qk = {
   points: (f: unknown) => ["points", f] as const,
   facets: (f: unknown) => ["facets", f] as const,
   lead: (id: number | null) => ["lead", id] as const,
+  enrichment: ["enrichment"] as const,
 };
 
 export const useConfig = () =>
@@ -142,4 +145,61 @@ export function usePatchLead(id: number | null) {
       void qc.invalidateQueries({ queryKey: ["facets"] });
     },
   });
+}
+
+/** E-posta bulma durumu; iş varken sık yoklanır ve ilgili görünümleri tazeler. */
+export function useEnrichmentStatus() {
+  const qc = useQueryClient();
+  const q = useQuery({
+    queryKey: qk.enrichment,
+    queryFn: () => api<EnrichmentStatusResponse>("/api/enrichment"),
+    refetchInterval: (query) => {
+      const j = query.state.data?.jobs;
+      return j && j.queued + j.running > 0 ? 2000 : 15_000;
+    },
+  });
+  const active = (q.data?.jobs.queued ?? 0) + (q.data?.jobs.running ?? 0) > 0;
+  const updatedAt = q.dataUpdatedAt;
+  useEffect(() => {
+    if (!active) return;
+    for (const key of ["lead", "leads", "points", "facets"])
+      void qc.invalidateQueries({ queryKey: [key] });
+  }, [active, updatedAt, qc]);
+  return { ...q, active };
+}
+
+export function useAddEmail(leadId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (email: string) =>
+      api(`/api/leads/${leadId}/emails`, { method: "POST", json: { email } }),
+    onSuccess: () => invalidateLead(qc, leadId),
+  });
+}
+
+export function useEmailAction(leadId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (a: {
+      emailId: number;
+      action: "primary" | "reverify" | "valid" | "invalid" | "delete";
+    }) =>
+      a.action === "delete"
+        ? api(`/api/leads/${leadId}/emails/${a.emailId}`, { method: "DELETE" })
+        : api(`/api/leads/${leadId}/emails/${a.emailId}`, {
+            method: "PATCH",
+            json:
+              a.action === "primary"
+                ? { primary: true }
+                : a.action === "reverify"
+                  ? { reverify: true }
+                  : { verifyStatus: a.action === "valid" ? "verified" : "invalid" },
+          }),
+    onSuccess: () => invalidateLead(qc, leadId),
+  });
+}
+
+function invalidateLead(qc: ReturnType<typeof useQueryClient>, leadId: number) {
+  void qc.invalidateQueries({ queryKey: qk.lead(leadId) });
+  for (const key of ["leads", "points", "facets"]) void qc.invalidateQueries({ queryKey: [key] });
 }

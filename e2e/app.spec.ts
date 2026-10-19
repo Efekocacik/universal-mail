@@ -159,6 +159,99 @@ test("ikinci tarama: demo zamanı ilerletilir, yeniden taranır, yeni işletmele
   await expect(page.getByText(/Yeni (tespit edildi|açıldı)/).first()).toBeVisible();
 });
 
+test("e-posta bulma: ayrıntıdan başlat (Google verisi + site taraması), elle ekle/sil; toplu arama ve süzgeç", async () => {
+  const leadIds = async (n: number) =>
+    (
+      (await (await page.request.get(`/api/leads?limit=${n}`)).json()).rows as { leadId: number }[]
+    ).map((r) => r.leadId);
+  const [first] = await leadIds(1);
+  const state = async (id: number) =>
+    (await (await page.request.get(`/api/leads/${id}`)).json()).enrichment?.status as
+      string | undefined;
+
+  // 1) Ayrıntı: henüz aranmamış; önizleme Google verisi gerektiğini söyler
+  await page.goto("/");
+  await page.locator("button[aria-current]").first().click();
+  await expect(page.getByRole("heading", { name: "E-postalar" })).toBeVisible();
+  await expect(page.getByText("Henüz aranmadı")).toBeVisible();
+  await page.getByRole("button", { name: "E-posta bul" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "E-postaları bul" })).toBeVisible();
+  await expect(dialog.getByText("Google verisi gerekli")).toBeVisible();
+  await dialog.getByLabel(/Web sitesi adresi olmayanlar için Google verisini/).click();
+  await expect(dialog.getByText("Aranacak")).toBeVisible();
+  await dialog.getByRole("button", { name: "Aramayı başlat" }).click();
+  await expect(page.getByText("E-posta araması kuyruğa alındı.")).toBeVisible();
+
+  // 2) İşçi: Google verisi → olay → site taraması; durum sonuçlanır
+  await expect
+    .poll(async () => state(first!), { timeout: 60_000, intervals: [500] })
+    .toMatch(/^(done|blocked|failed|no_website)$/);
+
+  // 3) Elle ekleme (doğrulanır, kaynak 'elle eklendi'), kopyalama ve silme
+  await page.goto("/");
+  await page.locator("button[aria-current]").first().click();
+  await page.getByLabel("E-posta adresi ekle").fill("satis@e2e-test.example");
+  await page.getByRole("button", { name: "Ekle", exact: true }).click();
+  await expect(page.getByText("satis@e2e-test.example")).toBeVisible();
+  await expect(page.getByText(/elle eklendi/)).toBeVisible();
+  await page.getByRole("button", { name: "Sil", exact: true }).first().click();
+  await expect(page.getByText("satis@e2e-test.example")).toBeHidden();
+  await page.keyboard.press("Escape");
+
+  // 4) Toplu: ilk 40 lead için API ile ara; bitince süzgeç ve liste rozeti
+  const ids = await leadIds(40);
+  const res = await page.request.post("/api/leads/find-emails", {
+    data: { leadIds: ids, loadGoogle: true },
+    headers: { Origin: "http://127.0.0.1:3210" },
+  });
+  expect(res.status()).toBe(202);
+  const facets = async () =>
+    (await (await page.request.get("/api/leads/facets")).json()).emailStatus as Record<
+      string,
+      number
+    >;
+  await expect
+    .poll(
+      async () => {
+        const f = await facets();
+        return (f.queued ?? 0) + (f.running ?? 0);
+      },
+      { timeout: 90_000, intervals: [1000] },
+    )
+    .toBe(0);
+  const f = await facets();
+  const found = (f.generic ?? 0) + (f.found_verified ?? 0) + (f.found_unverified ?? 0);
+  expect(found).toBeGreaterThan(5);
+
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: /^E-posta/ })
+    .first()
+    .click();
+  await page.getByText("Genel adres (info@…)").click();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Genel e-posta").first()).toBeVisible();
+  await expect
+    .poll(async () =>
+      Number(
+        (
+          (await page
+            .getByText(/^[\d.]+ işletme$/)
+            .first()
+            .textContent()) ?? ""
+        ).replace(/\D/g, ""),
+      ),
+    )
+    .toBe(f.generic ?? 0);
+
+  // 5) CSV: e-posta sütunları bizim veri olarak gelir
+  const header = (
+    await (await page.request.get("/api/export/leads?emailStatus=generic")).text()
+  ).split("\r\n")[0]!;
+  expect(header).toContain("eposta_kaynagi");
+});
+
 test("Google verisi silinince (yeniden açılış) liste adsız gelir; kalıcı bilgiler korunur; 'Yükle' ile geri gelir", async () => {
   const countOf = async () =>
     (await (await page.request.get("/api/leads?limit=1")).json()).total as number;

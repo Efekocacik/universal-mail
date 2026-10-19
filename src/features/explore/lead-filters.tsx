@@ -103,6 +103,21 @@ function MultiList({
 
 // Kalıcı bayraklardan türetilen durumlar; geçici kapalı gibi ayrıntılar yalnızca önbellekteki Google verisinde bulunur.
 const BUSINESS_STATUSES = ["OPERATIONAL", "FUTURE_OPENING", "CLOSED_PERMANENTLY"] as const;
+// Faz 2: e-posta durumu (SRS email_status) ve işlem durumları.
+const EMAIL_STATES = [
+  "found_verified",
+  "generic",
+  "found_unverified",
+  "invalid",
+  "not_found",
+  "unchecked",
+  "queued",
+  "running",
+  "no_website",
+  "needs_google",
+  "blocked",
+  "failed",
+] as const;
 const LEAD_STATUSES = [
   "new",
   "enriched",
@@ -126,6 +141,7 @@ export function LeadFilters() {
     novelty: undefined,
     status: undefined,
     businessStatus: undefined,
+    emailStatus: undefined,
   };
   const { data: facets } = useFacets(facetFilters);
   const { data: categories } = useCategories();
@@ -271,6 +287,22 @@ export function LeadFilters() {
             }))}
             selected={filters.businessStatus}
             onChange={(v) => set("businessStatus", v)}
+          />
+        </FilterButton>
+
+        <FilterButton
+          label={t("filters.emailStatus")}
+          active={filters.emailStatus.length > 0}
+          summary={summaryOf(filters.emailStatus.length)}
+        >
+          <MultiList
+            options={EMAIL_STATES.map((s) => ({
+              value: s,
+              label: t(`emailState.${s}`),
+              count: facets?.emailStatus?.[s] ?? 0,
+            }))}
+            selected={filters.emailStatus}
+            onChange={(v) => set("emailStatus", v)}
           />
         </FilterButton>
 

@@ -13,12 +13,13 @@ import { dataDir } from "@/lib/config/paths";
  *  - Geliştirmede: `.data/master.key` dosyası (yalnızca sahibi okur). Üretimde kullanılmaz.
  */
 
-export const SECRET_NAMES = ["google.placesKey", "google.mapsKey"] as const;
+export const SECRET_NAMES = ["google.placesKey", "google.mapsKey", "hunter.apiKey"] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 
 const ENV_FALLBACKS: Record<SecretName, string[]> = {
   "google.placesKey": ["GOOGLE_PLACES_API_KEY"],
   "google.mapsKey": ["GOOGLE_MAPS_BROWSER_KEY", "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY"],
+  "hunter.apiKey": ["HUNTER_API_KEY"],
 };
 
 interface SecretFile {

@@ -20,6 +20,7 @@ import { useLead, usePatchLead } from "@/lib/client/queries";
 import type { LeadDetailResponse } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { GoogleLoadButton } from "./google-load-button";
+import { LeadEmails } from "./lead-emails";
 import { useExplore } from "./state";
 
 const LEAD_STATUSES = [
@@ -281,6 +282,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
         )}
       </Section>
 
+      <LeadEmails data={data} />
+
       <Section title={t("detail.manage")}>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -369,6 +372,10 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             { at: place.newDetectedAt, label: t("detail.tl.new") },
             { at: place.openedDetectedAt, label: t("detail.tl.opened") },
             { at: g?.enrichedAt ?? null, label: t("detail.tl.enriched") },
+            {
+              at: data.emails.length > 0 ? Math.min(...data.emails.map((e) => e.foundAt)) : null,
+              label: t("detail.tl.emailFound"),
+            },
           ]
             .filter((e) => e.at)
             .sort((a, b) => (a.at ?? 0) - (b.at ?? 0))

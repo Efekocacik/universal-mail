@@ -64,6 +64,7 @@ export function parseLeadFilters(sp: URLSearchParams): LeadFilters {
     ratingMax: num(sp.get("ratingMax")),
     scanId: num(sp.get("scanId")),
     notFound: bool(sp.get("notFound")),
+    emailStatus: list(sp.get("emailStatus")),
   };
 }
 

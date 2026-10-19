@@ -21,6 +21,8 @@ const KEYS = [
   "google.cacheDays",
   "mock.epoch",
   "ui.language",
+  "enrichment.external",
+  "enrichment.concurrency",
 ] as const;
 
 export const GET = route(async () => {
@@ -31,6 +33,7 @@ export const GET = route(async () => {
     secrets: {
       placesKey: await secretStatus("google.placesKey"),
       mapsKey: await secretStatus("google.mapsKey"),
+      hunterKey: await secretStatus("hunter.apiKey"),
     },
     setup: await getSetupState(db),
     app: { version: pkg.version, dataDir: dataDir() },
@@ -47,6 +50,8 @@ const patchSchema = z
     "novelty.thresholds": settingSchemas["novelty.thresholds"].optional(),
     "google.cacheDays": settingSchemas["google.cacheDays"].optional(),
     "ui.language": settingSchemas["ui.language"].optional(),
+    "enrichment.external": settingSchemas["enrichment.external"].optional(),
+    "enrichment.concurrency": settingSchemas["enrichment.concurrency"].optional(),
   })
   .strict();
 
