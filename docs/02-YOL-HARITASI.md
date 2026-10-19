@@ -79,15 +79,15 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Hedef:** Seçilen lead'lerin web sitelerinden e-posta çıkar, doğrula, lead kartında göster.
 
-- [ ] Web tarayıcı modülü: aday sayfa listesi (çok dilli), `mailto:`, regex, JSON-LD; statik sayfalarda `cheerio`, gerektiğinde Electron'un mevcut tarayıcı altyapısı. Erişim engelleri aşılmaz.
-- [ ] Nezaket kuralları: robots.txt, site başına ≤ 6 istek, 1 sn aralık, kimliği belli User-Agent, 10 sn zaman aşımı.
-- [ ] Doğrulama: sözdizimi → MX → disposable listesi → (opsiyonel) SMTP denemesi.
-- [ ] Sosyal medya / iletişim formu yakalama.
-- [ ] `lead_emails`, `lead_contacts` tabloları; kaynak URL ile birlikte.
-- [ ] Toplu zenginleştirme (≤ 4 eşzamanlı), ilerleme, 24 saat sonra tek tekrar.
-- [ ] Lead detay paneli: zaman çizelgesi, e-postalar, düzenleme, not, etiket.
-- [ ] Yinelenen kayıt tespiti.
-- [ ] Birim testleri: e-posta çıkarma (20+ gerçek site örneği fikstürü), doğrulama.
+- [x] Web tarayıcı modülü: aday sayfa listesi (çok dilli), `mailto:`, düz metin, gizlenmiş yazım, Cloudflare koruması, JSON-LD; statik sayfalarda `cheerio`. Erişim engelleri aşılmaz. *(JavaScript ile oluşan sayfalar için Electron tarayıcısı Faz 2'de eklenmedi; bu sayfalar "JavaScript gerekli" notuyla işaretlenir.)*
+- [x] Nezaket kuralları: robots.txt, site başına ≤ 6 istek (robots.txt ve yönlendirmeler dahil), 1 sn aralık, kimliği belli User-Agent, 10 sn zaman aşımı; ayrıca iç ağ adreslerine (SSRF) bağlanma engeli.
+- [x] Doğrulama: sözdizimi → disposable listesi → MX (örtük A/AAAA dahil, null-MX). *(SMTP denemesi bilerek yapılmadı: IP itibarı ve kullanım koşulları riski.)*
+- [x] Sosyal medya / iletişim formu yakalama.
+- [x] `lead_emails`, `lead_contacts` (+ `lead_enrichment`) tabloları; kaynak URL ile birlikte.
+- [x] Toplu zenginleştirme (≤ 4 eşzamanlı), ilerleme, 24 saat sonra tek tekrar.
+- [x] Lead detay paneli: zaman çizelgesi, e-postalar, düzenleme, not, etiket.
+- [x] Yinelenen kayıt tespiti (aynı e-posta / aynı işletme alan adı).
+- [x] Birim testleri: e-posta çıkarma (25 sentetik site örneği — gerçek sitelerin kopyası değil), doğrulama, tarayıcı, robots, SSRF, hizmet.
 
 **Kabul:** 100 Londra kafesinin ≥ %40'ında e-posta bulunur; her e-postanın kaynağına tıklanınca ilgili sayfa açılır.
 
