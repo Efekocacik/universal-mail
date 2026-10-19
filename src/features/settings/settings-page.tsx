@@ -24,7 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input, Label, Textarea } from "@/components/ui/input";
+import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -87,7 +87,7 @@ function SecretRow({
   info,
   testable,
 }: {
-  name: "google.placesKey" | "google.mapsKey";
+  name: "google.placesKey" | "google.mapsKey" | "hunter.apiKey";
   label: string;
   help: string;
   info: SecretInfo;
@@ -617,6 +617,100 @@ export function CompanyFields({
   );
 }
 
+/* ------------------------------- E-posta bulma ------------------------------- */
+
+function EmailSection() {
+  const { data } = useSettings();
+  const save = useSave();
+  const [quota, setQuota] = useState<{ ok: boolean; message: string } | null>(null);
+  const test = useMutation({
+    mutationFn: () =>
+      api<{ ok: boolean; remaining: number | null }>("/api/enrichment/external/test", {
+        method: "POST",
+      }),
+    onSuccess: (r) =>
+      setQuota({
+        ok: true,
+        message:
+          r.remaining === null
+            ? t("settings.email.quotaUnknown")
+            : t("settings.email.quota", { n: fmtNumber(r.remaining) }),
+      }),
+    onError: (e: Error) => setQuota({ ok: false, message: e.message }),
+  });
+  if (!data) return <Skeleton className="h-48" />;
+  const ext = data.settings["enrichment.external"];
+  return (
+    <Section id="email" title={t("settings.email.title")} description={t("settings.email.desc")}>
+      <div className="space-y-1.5">
+        <Label htmlFor="email-concurrency">{t("settings.email.concurrency")}</Label>
+        <Select
+          id="email-concurrency"
+          value={String(data.settings["enrichment.concurrency"])}
+          onChange={(e) => save.mutate({ "enrichment.concurrency": Number(e.target.value) })}
+          className="w-28"
+        >
+          {[1, 2, 3, 4].map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </Select>
+        <p className="text-[12px] text-muted-foreground">{t("settings.email.concurrency.help")}</p>
+      </div>
+
+      <div className="space-y-3 rounded-lg border p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <Label htmlFor="email-external">{t("settings.email.external")}</Label>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              {t("settings.email.external.help")}
+            </p>
+          </div>
+          <Switch
+            id="email-external"
+            checked={ext.enabled}
+            onCheckedChange={(v) =>
+              save.mutate({ "enrichment.external": { ...ext, enabled: v === true } })
+            }
+          />
+        </div>
+        {ext.enabled && (
+          <>
+            <SecretRow
+              name="hunter.apiKey"
+              label={t("settings.email.hunterKey")}
+              help={t("settings.email.hunterKey.help")}
+              info={data.secrets.hunterKey}
+            />
+            {data.secrets.hunterKey.set && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => test.mutate()}
+                  disabled={test.isPending}
+                >
+                  {test.isPending ? <Loader2 className="animate-spin" /> : <FlaskConical />}{" "}
+                  {t("settings.email.test")}
+                </Button>
+                {quota && (
+                  <span
+                    className={`text-[13px] ${quota.ok ? "text-primary" : "text-destructive"}`}
+                    role="status"
+                  >
+                    {quota.message}
+                  </span>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 /* ------------------------------ Yenilik eşikleri ------------------------------ */
 
 function NoveltySection() {
@@ -931,6 +1025,7 @@ const SECTIONS = [
   { id: "markets", key: "settings.nav.markets" },
   { id: "company", key: "settings.nav.company" },
   { id: "categories", key: "settings.nav.categories" },
+  { id: "email", key: "settings.nav.email" },
   { id: "novelty", key: "settings.nav.novelty" },
   { id: "data", key: "settings.nav.data" },
 ] as const;
@@ -963,6 +1058,7 @@ export function SettingsPage() {
           <MarketsSection />
           <CompanySection />
           <CategoriesSection />
+          <EmailSection />
           <NoveltySection />
           <DataSection />
         </div>

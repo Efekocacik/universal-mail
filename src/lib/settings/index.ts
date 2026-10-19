@@ -30,6 +30,11 @@ const noveltySchema = z.object({
   newWindowDays: z.number().min(1).max(365),
 });
 
+const externalEmailSchema = z.object({
+  enabled: z.boolean(),
+  provider: z.literal("hunter"),
+});
+
 export const settingSchemas = {
   "setup.completed": z.boolean(),
   consent: consentSchema.nullable(),
@@ -42,6 +47,10 @@ export const settingSchemas = {
   "google.cacheDays": z.number().min(1).max(30),
   "mock.epoch": z.number().int().min(0).max(50),
   "ui.language": z.enum(["tr", "en"]),
+  /** Faz 2: harici e-posta bulma servisi (varsayılan kapalı; yalnızca yerel taramada bulunamayanlar için). */
+  "enrichment.external": externalEmailSchema,
+  /** Aynı anda taranan web sitesi sayısı (en çok 4; FR-ENR-05). */
+  "enrichment.concurrency": z.number().int().min(1).max(4),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -59,6 +68,8 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "google.cacheDays": 30,
   "mock.epoch": 0,
   "ui.language": "tr",
+  "enrichment.external": { enabled: false, provider: "hunter" },
+  "enrichment.concurrency": 4,
 };
 
 export async function getSetting<K extends SettingKey>(db: Db, key: K): Promise<SettingValue<K>> {

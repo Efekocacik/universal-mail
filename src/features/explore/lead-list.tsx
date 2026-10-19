@@ -1,7 +1,7 @@
 "use client";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Globe, Search, SearchX, Sparkles } from "lucide-react";
+import { Globe, Loader2, Mail, Search, SearchX, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NOVELTY_DOT } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
@@ -10,14 +10,37 @@ import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
 import { countryLabel, fmtNumber, fmtOpeningDate, typeLabel } from "@/lib/client/format";
-import { useFacets, useLeadsInfinite } from "@/lib/client/queries";
+import { useEnrichmentStatus, useFacets, useLeadsInfinite } from "@/lib/client/queries";
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { toSearchParams } from "@/lib/client/api";
+import { FindEmailsButton } from "./find-emails-button";
 import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
 
 const ROW_HEIGHT = 78;
+
+/** Satırdaki e-posta durumu rozeti: bulunduysa yeşil, sürüyorsa dönen simge, engelliyse uyarı; aksi halde görünmez. */
+function EmailBadge({ row }: { row: LeadRow }) {
+  const st = row.emailState;
+  if (st === "found_verified" || st === "generic" || st === "found_unverified")
+    return (
+      <Badge
+        variant={st === "found_unverified" ? "outline" : "high"}
+        title={row.primaryEmail ?? undefined}
+      >
+        <Mail className="size-3" /> {t(`list.email.${st}`)}
+      </Badge>
+    );
+  if (st === "running" || st === "queued")
+    return (
+      <Badge variant="outline">
+        <Loader2 className="size-3 animate-spin" /> {t(`list.email.${st}`)}
+      </Badge>
+    );
+  if (st === "blocked") return <Badge variant="warning">{t("list.email.blocked")}</Badge>;
+  return null;
+}
 
 function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onClick: () => void }) {
   const contacted = row.leadStatus !== "new" && row.leadStatus !== "enriched";
@@ -81,6 +104,7 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
             <Globe className="size-3" /> {t("list.website")}
           </Badge>
         )}
+        <EmailBadge row={row} />
         {row.source === "demo" && <Badge variant="outline">DEMO</Badge>}
         {contacted && <Badge variant="contacted">{t(`leadStatus.${row.leadStatus}`)}</Badge>}
       </div>
@@ -153,18 +177,24 @@ export function LeadList() {
         <p className="tabular text-[13px] text-muted-foreground" aria-live="polite">
           {q.isLoading ? t("common.loading") : t("list.count", { n: fmtNumber(total) })}
         </p>
-        <Select
-          aria-label={t("list.sort")}
-          value={sort}
-          onChange={(e) => setSort(e.target.value as typeof sort)}
-          className="h-8 w-auto py-0 pr-7 text-[13px]"
-        >
-          <option value="novelty">{t("list.sort.novelty")}</option>
-          <option value="recent">{t("list.sort.recent")}</option>
-          <option value="name">{t("list.sort.name")}</option>
-        </Select>
+        <div className="flex items-center gap-2">
+          {total > 0 && (
+            <FindEmailsButton target={{ filtersQuery: toSearchParams(ex.apiFilters).toString() }} />
+          )}
+          <Select
+            aria-label={t("list.sort")}
+            value={sort}
+            onChange={(e) => setSort(e.target.value as typeof sort)}
+            className="h-8 w-auto py-0 pr-7 text-[13px]"
+          >
+            <option value="novelty">{t("list.sort.novelty")}</option>
+            <option value="recent">{t("list.sort.recent")}</option>
+            <option value="name">{t("list.sort.name")}</option>
+          </Select>
+        </div>
       </div>
 
+      <EmailProgress />
       <UncachedBanner />
 
       <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto" tabIndex={-1}>
@@ -217,6 +247,24 @@ export function LeadList() {
         )}
       </div>
     </div>
+  );
+}
+
+/** E-posta araması sürerken ilerleme çubuğu (iş sayıları işçiden gelir). */
+function EmailProgress() {
+  const { data, active } = useEnrichmentStatus();
+  if (!active || !data) return null;
+  return (
+    <p
+      className="flex items-center gap-2 border-b bg-accent/50 px-4 py-1.5 text-[12px] text-muted-foreground"
+      aria-live="polite"
+    >
+      <Loader2 className="size-3.5 animate-spin" />
+      {t("findEmails.progress", {
+        running: data.states.running ?? 0,
+        queued: data.states.queued ?? 0,
+      })}
+    </p>
   );
 }
 

@@ -9,6 +9,8 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
 - [Faz 0 Kılavuzu](docs/04-FAZ0-KILAVUZU.md) — alan adı, Workspace, Google Cloud, kota, anahtarlar ve Gmail bağlantısı için adım adım hesap kurulumu
 - [Anlaşma Notu](docs/03-ANLASMA-NOTU.md) — müşteri şirketle yarım sayfalık, resmi olmayan mutabakat notu
+- [Faz 1 Notları](docs/05-FAZ1-NOTLARI.md) — keşif motoru, Google verisi saklama kararı, kalan işler
+- [Faz 2 Notları](docs/06-FAZ2-NOTLARI.md) — e-posta bulma: API uçları, veri modeli, kararlar, doğrulanmayanlar
 
 ## Kurulum modeli
 Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
@@ -28,6 +30,8 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 
 ## Durum
 **Faz 1 tamamlandı** (`feat/faz-1` dalı): şehir/harita seçimi, tarama, liste + harita, yeni işletme tespiti, CSV, kurulum sihirbazı ve masaüstü paketi. Demo sağlayıcıyla uçtan uca doğrulandı; gerçek Google anahtarıyla ilk deneme Faz 0 hesapları açılınca yapılacak. Ayrıntılar: [Faz 1 Notları](docs/05-FAZ1-NOTLARI.md).
+
+**Faz 2 (e-posta bulma) kodlandı** (`feat/faz-2` dalı): işletmenin kendi web sitesinden nazik tarama (robots.txt, site başına ≤ 6 istek), e-posta/sosyal bağlantı çıkarma, doğrulama, isteğe bağlı Hunter.io yedeği, lead ayrıntısında düzenleme. Demo ile doğrulandı; gerçek sitelerde bulma oranı gerçek anahtarla ölçülecek. Ayrıntılar: [Faz 2 Notları](docs/06-FAZ2-NOTLARI.md).
 
 ## Geliştirme
 ```bash

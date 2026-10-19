@@ -133,11 +133,19 @@ export async function requeueJob(db: Db, id: number, now: number = Date.now()): 
     .where(eq(jobs.id, id));
 }
 
-export async function countJobs(db: Db, status: JobStatus, type?: string): Promise<number> {
+export async function countJobs(
+  db: Db,
+  status: JobStatus,
+  type?: string,
+  opts: { dueOnly?: boolean; now?: number } = {},
+): Promise<number> {
+  const conds = [eq(jobs.status, status)];
+  if (type) conds.push(eq(jobs.type, type));
+  if (opts.dueOnly) conds.push(lte(jobs.runAt, opts.now ?? Date.now()));
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(jobs)
-    .where(type ? and(eq(jobs.status, status), eq(jobs.type, type)) : eq(jobs.status, status));
+    .where(and(...conds));
   return Number(rows[0]?.n ?? 0);
 }
 

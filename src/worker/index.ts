@@ -5,7 +5,7 @@ import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
-import { registerCoreHandlers } from "./handlers";
+import { bindEmailEvents, registerCoreHandlers, registerEmailHandlers } from "./handlers";
 import { Worker } from "./loop";
 
 /** Geliştirme: `.env.local` dosyasını yükle (üretimde Electron ortam değişkenlerini verir). */
@@ -27,6 +27,8 @@ async function main(): Promise<void> {
     console.log(`[worker] ${init.migrated.pending} şema geçişi uygulandı.`);
 
   registerCoreHandlers();
+  registerEmailHandlers();
+  bindEmailEvents();
   const db = await getDb();
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 

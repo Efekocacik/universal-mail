@@ -8,8 +8,16 @@ export interface AppEvents {
   "scan.completed": { scanId: number; newPlaces: number; totalPlaces: number };
   "scan.failed": { scanId: number; error: string };
   "place.discovered": { scanId: number; placeIds: string[] };
-  "place.enriched": { placeIds: string[] };
+  "place.enriched": {
+    placeIds: string[];
+    /** Zenginleştirme isteği e-posta bulmayı da istiyor. */
+    findEmails?: boolean;
+    /** E-posta aramasında (varsa) harici servis de kullanılsın. */
+    useExternal?: boolean;
+  };
   "lead.noveltyChanged": { leadIds: number[] };
+  /** Faz 2: en az bir kullanılabilir e-posta adresi bulunan lead'ler (Faz 3 kampanya adayları için). */
+  "lead.emailsFound": { leadIds: number[] };
 }
 
 type Handler<K extends keyof AppEvents> = (payload: AppEvents[K]) => void | Promise<void>;

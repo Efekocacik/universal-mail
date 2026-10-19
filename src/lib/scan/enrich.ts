@@ -53,6 +53,7 @@ export async function enrichPlaces(
   deps: EnrichDeps,
   placeIds: string[],
   mode: EnrichMode = "enrich",
+  opts: { findEmails?: boolean; useExternal?: boolean } = {},
 ): Promise<EnrichResult> {
   const { db, provider } = deps;
   const now = deps.now ?? Date.now;
@@ -126,7 +127,12 @@ export async function enrichPlaces(
 
   if (done.length > 0) {
     await recomputeNovelty(db, await deps.getNoveltyConfig(), { placeIds: done, now: now() });
-    if (mode === "enrich") await emitEvent("place.enriched", { placeIds: done });
+    if (mode === "enrich")
+      await emitEvent("place.enriched", {
+        placeIds: done,
+        findEmails: opts.findEmails,
+        useExternal: opts.useExternal,
+      });
   }
   return { enriched: done.length, skipped, stoppedReason };
 }

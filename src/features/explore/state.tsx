@@ -11,6 +11,7 @@ export interface UiFilters {
   novelty: NoveltyLabel[];
   leadStatus: LeadStatus[];
   businessStatus: string[];
+  emailStatus: string[];
   hasWebsite: "any" | "yes" | "no";
   scanId?: number;
   hideNotFound: boolean;
@@ -24,6 +25,7 @@ export const EMPTY_FILTERS: UiFilters = {
   novelty: [],
   leadStatus: [],
   businessStatus: [],
+  emailStatus: [],
   hasWebsite: "any",
   hideNotFound: false,
 };
@@ -92,6 +94,7 @@ export function toApiFilters(
     novelty: f.novelty,
     status: f.leadStatus,
     businessStatus: f.businessStatus,
+    emailStatus: f.emailStatus,
     hasWebsite: f.hasWebsite === "any" ? undefined : f.hasWebsite === "yes",
     scanId: f.scanId,
     notFound: f.hideNotFound ? false : undefined,
@@ -151,6 +154,7 @@ export function ExploreProvider({
     if (filters.novelty.length) n++;
     if (filters.leadStatus.length) n++;
     if (filters.businessStatus.length) n++;
+    if (filters.emailStatus.length) n++;
     if (filters.hasWebsite !== "any") n++;
     if (filters.scanId !== undefined) n++;
     if (filters.hideNotFound) n++;

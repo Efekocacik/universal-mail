@@ -16,6 +16,7 @@ export default defineConfig({
         "src/lib/scan/**",
         "src/lib/export/**",
         "src/lib/jobs/**",
+        "src/lib/email/**",
       ],
       thresholds: { lines: 80, functions: 80, statements: 80, branches: 70 },
     },

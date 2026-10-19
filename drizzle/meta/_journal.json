@@ -8,6 +8,13 @@
       "when": 1792361970231,
       "tag": "0000_faz1_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1792443492255,
+      "tag": "0001_faz2_email",
+      "breakpoints": true
     }
   ]
 }
