@@ -51,6 +51,14 @@ export const settingSchemas = {
   "enrichment.external": externalEmailSchema,
   /** Aynı anda taranan web sitesi sayısı (en çok 4; FR-ENR-05). */
   "enrichment.concurrency": z.number().int().min(1).max(4),
+  /**
+   * Faz 3: uygulanmış seed sürümleri (yalnızca içeride yazılır, ayarlar API'si değiştiremez). Bir kez eklenen hazır
+   * şablon ve demo posta kutusu, kullanıcı düzenlese, arşivlese veya silse de yeniden eklenmez.
+   */
+  "seed.faz3": z.object({
+    templates: z.number().int().min(0),
+    demoMailbox: z.number().int().min(0),
+  }),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -70,6 +78,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "ui.language": "tr",
   "enrichment.external": { enabled: false, provider: "hunter" },
   "enrichment.concurrency": 4,
+  "seed.faz3": { templates: 0, demoMailbox: 0 },
 };
 
 export async function getSetting<K extends SettingKey>(db: Db, key: K): Promise<SettingValue<K>> {
