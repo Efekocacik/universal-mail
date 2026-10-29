@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  check,
   index,
   integer,
   primaryKey,
@@ -219,11 +220,14 @@ export const leads = sqliteTable(
       .$type<string[]>()
       .notNull()
       .default(sql`'[]'`),
+    /** Faz 3: son giden kampanya iletisinin zamanı (liste sütunu için türetilmiş; asıl kaynak `messages`). */
+    lastContactedAt: integer("last_contacted_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
   },
   (t) => [
     uniqueIndex("leads_place_uq").on(t.placeId),
+    index("leads_last_contacted_idx").on(t.lastContactedAt),
     index("leads_novelty_idx").on(t.noveltyScore),
     index("leads_status_idx").on(t.status),
     index("leads_source_idx").on(t.source),
@@ -379,4 +383,429 @@ export const auditLog = sqliteTable(
     detail: text("detail", { mode: "json" }).$type<unknown>(),
   },
   (t) => [index("audit_at_idx").on(t.at)],
+);
+
+/* ---------------------------------------------------------------------------
+ * Faz 3: şablonlar, kampanya, gönderim geçmişi, suppression ve ülke politikası.
+ * Kurallar:
+ *  - Gizli bilgi (OAuth token, SMTP parolası) hiçbir tabloda tutulmaz; `mailboxes.credentials_ref` yalnızca
+ *    şifreli depodaki kaydın adıdır.
+ *  - Google içeriği (işletme adı, açılış tarihi) kalıcı tutulmaz: iletinin gövdesi saklanmaz, konu satırı
+ *    Google kaynaklı değişkenler maskelenmiş olarak (`subject_logged`) saklanır.
+ *  - Gönderim geçmişi olan lead, kampanya ve şablon silinemez (ON DELETE RESTRICT); kişisel veri silme talebi
+ *    satırı silmek yerine adres alanlarını boşaltıp `redacted_at` doldurur.
+ *  - Temas sınırları lead'e değil alıcı adresinin özetine (`peer_hash`) ve alan adına bağlıdır; lead silinse veya
+ *    yeniden eklense de korunur.
+ * ------------------------------------------------------------------------- */
+
+export type PolicyScope = "live" | "demo";
+export type PolicyMode = "blocked" | "generic_only" | "allowed";
+
+/**
+ * Ülke bazlı gönderim politikası. `live` (gerçek gönderim) ve `demo` kapsamları ayrıdır; hangisinin
+ * uygulanacağını kampanyanın posta kutusu belirler, kullanıcı seçmez.
+ * `live` satırları kilitlidir (`locked`) ve kilitliyken `blocked` dışına çıkamaz; kilit yalnızca hukuki onaydan
+ * sonra yeni bir yazılım sürümüyle açılır. Kilit açık olsa bile `blocked` dışı mod onay kaydı ister.
+ */
+export const countryPolicies = sqliteTable(
+  "country_policies",
+  {
+    scope: text("scope").$type<PolicyScope>().notNull(),
+    countryCode: text("country_code").notNull(),
+    mode: text("mode").$type<PolicyMode>().notNull(),
+    locked: integer("locked", { mode: "boolean" }).notNull().default(true),
+    /** Hukuki değerlendirme belgesinin referansı (gerçek gönderimi açmak için zorunlu). */
+    approvalRef: text("approval_ref"),
+    approvedBy: text("approved_by"),
+    approvedAt: integer("approved_at"),
+    note: text("note"),
+    /** Satırı oluşturan/güncelleyen yazılım varsayılanlarının sürümü. */
+    seedVersion: integer("seed_version").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.countryCode] }),
+    check("country_policies_scope_ck", sql`scope IN ('live', 'demo')`),
+    check("country_policies_mode_ck", sql`mode IN ('blocked', 'generic_only', 'allowed')`),
+    check("country_policies_code_ck", sql`length(country_code) = 2`),
+    check("country_policies_lock_ck", sql`scope = 'demo' OR locked = 0 OR mode = 'blocked'`),
+    check(
+      "country_policies_approval_ck",
+      sql`scope = 'demo' OR mode = 'blocked' OR (approval_ref IS NOT NULL AND approved_by IS NOT NULL AND approved_at IS NOT NULL)`,
+    ),
+  ],
+);
+
+export type MailboxProvider = "gmail" | "smtp" | "demo";
+export type MailboxStatus = "not_configured" | "connected" | "error" | "disabled";
+
+/** Gönderen posta kutusu. Gerçek hesaba bağlı alanlar boş olabilir; `demo` hesap gerektirmez ve ağa çıkmaz. */
+export const mailboxes = sqliteTable(
+  "mailboxes",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    provider: text("provider").$type<MailboxProvider>().notNull(),
+    label: text("label").notNull(),
+    address: text("address"),
+    /** Şifreli gizli bilgi deposundaki kaydın adı; token/parola burada TUTULMAZ. */
+    credentialsRef: text("credentials_ref"),
+    smtpHost: text("smtp_host"),
+    smtpPort: integer("smtp_port"),
+    smtpSecure: integer("smtp_secure", { mode: "boolean" }),
+    status: text("status").$type<MailboxStatus>().notNull().default("not_configured"),
+    /** SRS 4.6: başlangıç 20, üst sınır 80. */
+    dailyCap: integer("daily_cap").notNull().default(20),
+    /** Isınma: haftalık artış (en çok 10). */
+    warmupStep: integer("warmup_step").notNull().default(10),
+    warmupStartedAt: integer("warmup_started_at"),
+    connectedAt: integer("connected_at"),
+    /** Gelen kutusu okuma imleci (ör. Gmail historyId). */
+    syncCursor: text("sync_cursor"),
+    lastError: text("last_error"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("mailboxes_address_uq")
+      .on(t.provider, t.address)
+      .where(sql`${t.address} IS NOT NULL`),
+    check("mailboxes_provider_ck", sql`provider IN ('gmail', 'smtp', 'demo')`),
+    check(
+      "mailboxes_status_ck",
+      sql`status IN ('not_configured', 'connected', 'error', 'disabled')`,
+    ),
+    check("mailboxes_cap_ck", sql`daily_cap BETWEEN 1 AND 80`),
+    check("mailboxes_warmup_ck", sql`warmup_step BETWEEN 0 AND 10`),
+    check(
+      "mailboxes_connected_ck",
+      sql`status <> 'connected' OR (address IS NOT NULL AND (provider = 'demo' OR credentials_ref IS NOT NULL))`,
+    ),
+  ],
+);
+
+export type TemplateKind = "initial" | "followup";
+
+/** E-posta şablonu. Zorunlu footer (unvan, adres, çıkış bağlantısı) burada saklanmaz; gönderimde eklenir. */
+export const templates = sqliteTable(
+  "templates",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    language: text("language").notNull(),
+    /** Boş = tüm kategoriler. */
+    categoryKey: text("category_key"),
+    kind: text("kind").$type<TemplateKind>().notNull(),
+    subject: text("subject").notNull(),
+    bodyHtml: text("body_html").notNull(),
+    bodyText: text("body_text").notNull(),
+    builtIn: integer("built_in", { mode: "boolean" }).notNull().default(false),
+    /** Her düzenlemede artar; gönderilen ileti hangi sürümle gittiğini saklar. */
+    version: integer("version").notNull().default(1),
+    /** Kullanılmış şablon silinmez, arşivlenir. */
+    archivedAt: integer("archived_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("templates_lookup_idx")
+      .on(t.language, t.categoryKey, t.kind)
+      .where(sql`${t.archivedAt} IS NULL`),
+    check("templates_kind_ck", sql`kind IN ('initial', 'followup')`),
+  ],
+);
+
+export type CampaignStatus =
+  "draft" | "ready" | "running" | "paused" | "completed" | "cancelled" | "stopped";
+
+export interface SendWindow {
+  /** ISO hafta günleri (1 = Pazartesi). */
+  days: number[];
+  /** Alıcının yerel saatiyle "HH:MM". */
+  start: string;
+  end: string;
+}
+
+/** Kampanya. Gönderim yalnızca kullanıcı "Başlat" dediğinde (`start_confirmed_at`) başlar (FR-CMP-04). */
+export const campaigns = sqliteTable(
+  "campaigns",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    status: text("status").$type<CampaignStatus>().notNull().default("draft"),
+    mailboxId: integer("mailbox_id").references(() => mailboxes.id, { onDelete: "restrict" }),
+    /** Hedef seçimi: {leadIds} veya {filters}; eklendiği andaki görüntü. */
+    selection: text("selection", { mode: "json" }).$type<unknown>().notNull(),
+    sendWindow: text("send_window", { mode: "json" }).$type<SendWindow>().notNull(),
+    dailyCap: integer("daily_cap").notNull().default(20),
+    minGapS: integer("min_gap_s").notNull().default(90),
+    maxGapS: integer("max_gap_s").notNull().default(240),
+    pauseReason: text("pause_reason"),
+    startConfirmedAt: integer("start_confirmed_at"),
+    startedAt: integer("started_at"),
+    pausedAt: integer("paused_at"),
+    finishedAt: integer("finished_at"),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("campaigns_status_idx").on(t.status),
+    check(
+      "campaigns_status_ck",
+      sql`status IN ('draft', 'ready', 'running', 'paused', 'completed', 'cancelled', 'stopped')`,
+    ),
+    check("campaigns_cap_ck", sql`daily_cap BETWEEN 1 AND 80`),
+    check("campaigns_gap_ck", sql`min_gap_s >= 90 AND max_gap_s >= min_gap_s`),
+    check("campaigns_mailbox_ck", sql`status IN ('draft', 'cancelled') OR mailbox_id IS NOT NULL`),
+    check(
+      "campaigns_start_ck",
+      sql`status NOT IN ('running', 'paused', 'completed', 'stopped') OR start_confirmed_at IS NOT NULL`,
+    ),
+  ],
+);
+
+/** Kampanyanın adımları: ilk e-posta + en çok 2 takip (SRS 5.6.1), dil başına bir şablon. */
+export const campaignSteps = sqliteTable(
+  "campaign_steps",
+  {
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    stepIndex: integer("step_index").notNull(),
+    language: text("language").notNull(),
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => templates.id, { onDelete: "restrict" }),
+    delayDays: integer("delay_days").notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ columns: [t.campaignId, t.stepIndex, t.language] }),
+    check("campaign_steps_index_ck", sql`step_index BETWEEN 0 AND 2`),
+    check("campaign_steps_delay_ck", sql`step_index = 0 OR delay_days >= 5`),
+  ],
+);
+
+export type CampaignLeadStatus =
+  | "pending"
+  | "excluded"
+  | "scheduled"
+  | "in_flight"
+  | "waiting_next"
+  | "completed"
+  | "replied"
+  | "bounced"
+  | "unsubscribed"
+  | "removed"
+  | "cancelled"
+  | "failed";
+
+/** Bir lead'in bir kampanyadaki iletişim dizisi (lead başına tek satır). Gönderim kuyruğu `next_send_at`'tir. */
+export const campaignLeads = sqliteTable(
+  "campaign_leads",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "restrict" }),
+    emailId: integer("email_id").references(() => leadEmails.id, { onDelete: "set null" }),
+    /** Eklendiği andaki alıcı (küçük harf, punycode). Silme talebinde boşaltılır. */
+    recipientEmail: text("recipient_email"),
+    recipientHash: text("recipient_hash"),
+    recipientDomain: text("recipient_domain"),
+    countryCode: text("country_code"),
+    language: text("language"),
+    status: text("status").$type<CampaignLeadStatus>().notNull().default("pending"),
+    /** Uygunluk kontrolünün hariç tutma gerekçeleri (FR-CMP-02). */
+    exclusionReasons: text("exclusion_reasons", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    nextStep: integer("next_step").notNull().default(0),
+    nextSendAt: integer("next_send_at"),
+    lastSentAt: integer("last_sent_at"),
+    attempts: integer("attempts").notNull().default(0),
+    lastError: text("last_error"),
+    redactedAt: integer("redacted_at"),
+    addedAt: integer("added_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("campaign_leads_uq").on(t.campaignId, t.leadId),
+    index("campaign_leads_queue_idx").on(t.status, t.nextSendAt),
+    index("campaign_leads_hash_idx").on(t.recipientHash),
+    index("campaign_leads_domain_idx").on(t.recipientDomain),
+    index("campaign_leads_lead_idx").on(t.leadId),
+    check(
+      "campaign_leads_status_ck",
+      sql`status IN ('pending', 'excluded', 'scheduled', 'in_flight', 'waiting_next', 'completed', 'replied', 'bounced', 'unsubscribed', 'removed', 'cancelled', 'failed')`,
+    ),
+    check("campaign_leads_step_ck", sql`next_step BETWEEN 0 AND 3`),
+    check(
+      "campaign_leads_recipient_ck",
+      sql`recipient_email IS NOT NULL OR redacted_at IS NOT NULL OR status IN ('pending', 'excluded')`,
+    ),
+  ],
+);
+
+export type MessageDirection = "out" | "in";
+export type MessagePurpose = "campaign" | "test" | "inbound";
+/**
+ * Giden ileti durumları:
+ *  - `queued`  : henüz sağlayıcıya verilmedi.
+ *  - `sending` : sağlayıcı çağrısından HEMEN ÖNCE yazılır.
+ *  - `sent`    : sağlayıcı kabul etti.
+ *  - `failed`  : sağlayıcıya KESİNLİKLE ulaşmadı (ör. bağlantı kurulamadı, yerel doğrulama hatası); güvenle
+ *                yeniden denenebilir.
+ *  - `unknown` : sonuç belirsiz (çökme, zaman aşımı); OTOMATİK YENİDEN GÖNDERİLMEZ, kullanıcı/uzlaştırma karar verir.
+ */
+export type OutboundStatus = "queued" | "sending" | "sent" | "failed" | "unknown";
+export type InboundStatus = "received" | "matched" | "unmatched" | "ignored";
+export type DeliveryStatus = "bounced_soft" | "bounced_hard";
+export type MessageClassification =
+  "reply" | "bounce" | "auto_reply" | "unsubscribe" | "negative" | "other";
+
+/** Gönderim geçmişi (giden ve gelen). İleti gövdesi saklanmaz; yalnızca özeti (`body_sha256`). */
+export const messages = sqliteTable(
+  "messages",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    direction: text("direction").$type<MessageDirection>().notNull(),
+    purpose: text("purpose").$type<MessagePurpose>().notNull(),
+    campaignId: integer("campaign_id").references(() => campaigns.id, { onDelete: "restrict" }),
+    campaignLeadId: integer("campaign_lead_id").references(() => campaignLeads.id, {
+      onDelete: "restrict",
+    }),
+    leadId: integer("lead_id").references(() => leads.id, { onDelete: "restrict" }),
+    mailboxId: integer("mailbox_id")
+      .notNull()
+      .references(() => mailboxes.id, { onDelete: "restrict" }),
+    templateId: integer("template_id").references(() => templates.id, { onDelete: "restrict" }),
+    templateVersion: integer("template_version"),
+    stepIndex: integer("step_index"),
+    /** Giden kampanya iletisi için "cl:{campaign_lead_id}:s:{step}". */
+    idempotencyKey: text("idempotency_key"),
+    /** RFC 5322 Message-ID; sağlayıcı çağrısından ÖNCE üretilip yazılır. */
+    rfcMessageId: text("rfc_message_id"),
+    providerMessageId: text("provider_message_id"),
+    threadId: text("thread_id"),
+    inReplyTo: text("in_reply_to"),
+    references: text("references", { mode: "json" }).$type<string[]>(),
+    fromAddress: text("from_address"),
+    toAddress: text("to_address"),
+    /** Karşı tarafın (giden: alıcı, gelen: gönderen) adres özeti ve alan adı; temas sınırları bunlarla hesaplanır. */
+    peerHash: text("peer_hash").notNull(),
+    peerDomain: text("peer_domain").notNull(),
+    /** Gönderimin UTC günü "YYYY-MM-DD" (alan adı başına günde bir ileti kuralı). */
+    sendDay: text("send_day"),
+    /** Konu satırı; Google kaynaklı değişkenler maskelenmiş. */
+    subjectLogged: text("subject_logged"),
+    bodySha256: text("body_sha256"),
+    status: text("status").$type<OutboundStatus | InboundStatus>().notNull(),
+    deliveryStatus: text("delivery_status").$type<DeliveryStatus>(),
+    classification: text("classification").$type<MessageClassification>(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at").notNull(),
+    sentAt: integer("sent_at"),
+    receivedAt: integer("received_at"),
+    redactedAt: integer("redacted_at"),
+  },
+  (t) => [
+    // Aynı adım iki kez gönderilemez. Yalnızca sağlayıcıya kesinlikle ulaşmamış (`failed`) deneme yeniden açılabilir;
+    // `unknown` anahtarı tutmaya devam eder.
+    uniqueIndex("messages_idempotency_uq")
+      .on(t.idempotencyKey)
+      .where(sql`${t.idempotencyKey} IS NOT NULL AND ${t.status} <> 'failed'`),
+    uniqueIndex("messages_rfc_uq")
+      .on(t.rfcMessageId, t.direction)
+      .where(sql`${t.rfcMessageId} IS NOT NULL`),
+    // SRS 5.6.1: aynı alan adına günde en fazla bir kampanya iletisi. Bounce `status`'u değiştirmez, gün dolu kalır.
+    uniqueIndex("messages_domain_day_uq")
+      .on(t.peerDomain, t.sendDay)
+      .where(
+        sql`${t.direction} = 'out' AND ${t.purpose} = 'campaign' AND ${t.status} IN ('sending', 'sent', 'unknown')`,
+      ),
+    index("messages_peer_hash_idx").on(t.peerHash, t.sentAt),
+    index("messages_peer_domain_idx").on(t.peerDomain, t.sentAt),
+    index("messages_campaign_idx").on(t.campaignId, t.status),
+    index("messages_lead_idx").on(t.leadId),
+    index("messages_thread_idx").on(t.threadId),
+    index("messages_in_reply_to_idx").on(t.inReplyTo),
+    check("messages_direction_ck", sql`direction IN ('out', 'in')`),
+    check("messages_purpose_ck", sql`purpose IN ('campaign', 'test', 'inbound')`),
+    check(
+      "messages_status_ck",
+      sql`(direction = 'out' AND status IN ('queued', 'sending', 'sent', 'failed', 'unknown')) OR (direction = 'in' AND status IN ('received', 'matched', 'unmatched', 'ignored'))`,
+    ),
+    check(
+      "messages_delivery_ck",
+      sql`delivery_status IS NULL OR (direction = 'out' AND delivery_status IN ('bounced_soft', 'bounced_hard'))`,
+    ),
+    check(
+      "messages_classification_ck",
+      sql`classification IS NULL OR classification IN ('reply', 'bounce', 'auto_reply', 'unsubscribe', 'negative', 'other')`,
+    ),
+    check(
+      "messages_campaign_ck",
+      sql`direction <> 'out' OR purpose <> 'campaign' OR (campaign_id IS NOT NULL AND campaign_lead_id IS NOT NULL AND send_day IS NOT NULL AND idempotency_key IS NOT NULL)`,
+    ),
+    check(
+      "messages_recipient_ck",
+      sql`direction <> 'out' OR to_address IS NOT NULL OR redacted_at IS NOT NULL`,
+    ),
+  ],
+);
+
+export type SuppressionScope = "email" | "domain";
+export type SuppressionReason =
+  "unsubscribe" | "bounce_hard" | "complaint" | "manual" | "negative_reply" | "erasure";
+export type SuppressionSource = "manual" | "csv" | "link" | "inbox" | "bounce" | "system";
+
+/**
+ * Gönderim engelleri. Açık metin e-posta adresi TUTULMAZ: eşleştirme özetle (`email_hash`), gösterim maskeli
+ * adresle yapılır. Kayıt silinmez; geçerli kaldırma talebinde `lifted_at` doldurulur.
+ */
+export const suppressions = sqliteTable(
+  "suppressions",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    scope: text("scope").$type<SuppressionScope>().notNull(),
+    emailHash: text("email_hash"),
+    /** Özet yöntemi (ör. "sha256-v1"); normalleştirme değişirse eski kayıtlar ayırt edilir. */
+    hashAlg: text("hash_alg"),
+    emailMasked: text("email_masked"),
+    domain: text("domain").notNull(),
+    reason: text("reason").$type<SuppressionReason>().notNull(),
+    source: text("source").$type<SuppressionSource>().notNull(),
+    messageId: integer("message_id").references(() => messages.id, { onDelete: "set null" }),
+    note: text("note"),
+    addedAt: integer("added_at").notNull(),
+    liftedAt: integer("lifted_at"),
+    liftedReason: text("lifted_reason"),
+  },
+  (t) => [
+    uniqueIndex("suppressions_email_uq")
+      .on(t.emailHash)
+      .where(sql`${t.scope} = 'email' AND ${t.liftedAt} IS NULL`),
+    uniqueIndex("suppressions_domain_uq")
+      .on(t.domain)
+      .where(sql`${t.scope} = 'domain' AND ${t.liftedAt} IS NULL`),
+    index("suppressions_domain_idx").on(t.domain),
+    check("suppressions_scope_ck", sql`scope IN ('email', 'domain')`),
+    check(
+      "suppressions_reason_ck",
+      sql`reason IN ('unsubscribe', 'bounce_hard', 'complaint', 'manual', 'negative_reply', 'erasure')`,
+    ),
+    check(
+      "suppressions_source_ck",
+      sql`source IN ('manual', 'csv', 'link', 'inbox', 'bounce', 'system')`,
+    ),
+    check(
+      "suppressions_key_ck",
+      sql`scope = 'domain' OR (email_hash IS NOT NULL AND hash_alg IS NOT NULL)`,
+    ),
+    check("suppressions_lift_ck", sql`lifted_at IS NULL OR lifted_reason IS NOT NULL`),
+  ],
 );
