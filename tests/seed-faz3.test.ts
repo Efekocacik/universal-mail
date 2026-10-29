@@ -239,4 +239,31 @@ describe("seed bayrakları ve diğer ayarlar", () => {
     expect(await getSetting(db, "budget.monthlyUsd")).toBe(55);
     expect(await getSetting(db, "targets.countries")).toEqual(["GB", "NL"]);
   });
+
+  it.each([
+    ["bozuk JSON değeri", `'{"templates":"x"}'`],
+    ["yanlış tip", `'"bozuk"'`],
+    ["silinmiş bayrak", null],
+  ])("bayrak okunamazsa (%s) hazır şablon ve demo kutusu ikinci kez eklenmez", async (_, raw) => {
+    await seedBuiltinTemplates(db, NOW);
+    await seedDemoMailbox(db, NOW);
+    if (raw === null) await client.execute("DELETE FROM settings WHERE key = 'seed.faz3'");
+    else await client.execute(`UPDATE settings SET value = ${raw} WHERE key = 'seed.faz3'`);
+    expect(await getSetting(db, "seed.faz3")).toEqual({ templates: 0, demoMailbox: 0 });
+
+    expect(await seedBuiltinTemplates(db, NOW + 1)).toBe(0);
+    expect(await seedDemoMailbox(db, NOW + 1)).toBe(0);
+    expect(await db.select().from(templates)).toHaveLength(BUILTIN_TEMPLATES.length);
+    expect(await db.select().from(mailboxes)).toHaveLength(1);
+    // Bayrak onarılır.
+    expect(await getSetting(db, "seed.faz3")).toEqual({ templates: 1, demoMailbox: 1 });
+  });
+
+  it("bayrak bozukken arşivlenmiş hazır şablon da tekrar eklemeyi engeller", async () => {
+    await seedBuiltinTemplates(db, NOW);
+    await db.update(templates).set({ archivedAt: NOW + 1 });
+    await client.execute("DELETE FROM settings WHERE key = 'seed.faz3'");
+    expect(await seedBuiltinTemplates(db, NOW + 2)).toBe(0);
+    expect(await db.select().from(templates)).toHaveLength(BUILTIN_TEMPLATES.length);
+  });
 });

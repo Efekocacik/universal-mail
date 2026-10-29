@@ -67,7 +67,38 @@ export async function seedCountryPolicies(db: Db, now = Date.now()): Promise<num
   return inserted.length;
 }
 
-export type PolicyBlockReason = "unknown_country" | "live_disabled" | "no_policy" | "locked" | null;
+export const POLICY_MODES: readonly PolicyMode[] = ["blocked", "generic_only", "allowed"];
+
+export function isPolicyMode(value: unknown): value is PolicyMode {
+  return typeof value === "string" && (POLICY_MODES as readonly string[]).includes(value);
+}
+
+/** Kısıtlayıcılık sırası: büyük olan daha sıkıdır (allowed < generic_only < blocked). */
+export function policyStrictness(mode: PolicyMode): number {
+  return mode === "blocked" ? 2 : mode === "generic_only" ? 1 : 0;
+}
+
+/**
+ * Kampanyanın posta kutusuna göre uygulanacak kapsam. Kapsamı kullanıcı seçemez: yalnızca `demo` sağlayıcısı
+ * (ağa çıkmayan) demo politikalarını kullanır; diğer her sağlayıcı, bilinmeyen değerler dahil, `live`'dır.
+ */
+export function policyScopeForMailbox(provider: string | null | undefined): PolicyScope {
+  return provider === "demo" ? "demo" : "live";
+}
+
+export function normalizeCountryCode(countryCode: string | null | undefined): string | null {
+  const code = countryCode?.trim().toUpperCase() ?? "";
+  return /^[A-Z]{2}$/.test(code) ? code : null;
+}
+
+export type PolicyBlockReason =
+  | "unknown_scope"
+  | "unknown_country"
+  | "live_disabled"
+  | "no_policy"
+  | "locked"
+  | "invalid_policy"
+  | null;
 
 export interface ResolvedPolicy {
   mode: PolicyMode;
@@ -81,8 +112,9 @@ export async function resolveCountryPolicy(
   scope: PolicyScope,
   countryCode: string | null | undefined,
 ): Promise<ResolvedPolicy> {
-  const code = countryCode?.trim().toUpperCase() ?? "";
-  if (!/^[A-Z]{2}$/.test(code)) return { mode: "blocked", reason: "unknown_country" };
+  if (scope !== "live" && scope !== "demo") return { mode: "blocked", reason: "unknown_scope" };
+  const code = normalizeCountryCode(countryCode);
+  if (!code) return { mode: "blocked", reason: "unknown_country" };
   if (scope === "live" && !LIVE_SENDING_ENABLED)
     return { mode: "blocked", reason: "live_disabled" };
 
@@ -93,5 +125,7 @@ export async function resolveCountryPolicy(
     .limit(1);
   if (!row) return { mode: "blocked", reason: "no_policy" };
   if (scope === "live" && row.locked) return { mode: "blocked", reason: "locked" };
+  // Veritabanı kısıtı geçersiz değeri engeller; yine de okunan değer beklenmedikse gevşek yorumlanmaz.
+  if (!isPolicyMode(row.mode)) return { mode: "blocked", reason: "invalid_policy" };
   return { mode: row.mode, reason: null };
 }
