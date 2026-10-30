@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { Db } from "@/lib/db/client";
+import type { DbExecutor } from "@/lib/db/client";
 import { leads } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import type { SenderProfile } from "./footer";
@@ -53,7 +53,7 @@ export class RenderContextError extends Error {
 }
 
 export async function buildRenderContext(
-  db: Db,
+  db: DbExecutor,
   leadId: number,
   language: TemplateLanguage,
 ): Promise<RenderContext> {

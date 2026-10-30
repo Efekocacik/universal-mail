@@ -1,5 +1,5 @@
 import { and, eq } from "drizzle-orm";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { countryPolicies, type PolicyMode, type PolicyScope } from "@/lib/db/schema";
 import { COUNTRY_CODES } from "@/lib/geo/countries";
 
@@ -108,7 +108,7 @@ export interface ResolvedPolicy {
 
 /** Bir ülkenin geçerli gönderim modu. Belirsiz her durumda `blocked` döner (güvenli varsayılan). */
 export async function resolveCountryPolicy(
-  db: Db,
+  db: DbExecutor,
   scope: PolicyScope,
   countryCode: string | null | undefined,
 ): Promise<ResolvedPolicy> {

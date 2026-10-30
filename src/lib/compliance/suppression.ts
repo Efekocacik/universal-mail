@@ -3,7 +3,7 @@ import { domainToASCII } from "node:url";
 import { and, eq, inArray, isNull, or } from "drizzle-orm";
 import { parse as parseHost } from "tldts";
 import { z } from "zod";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import {
   auditLog,
   suppressions,
@@ -131,7 +131,7 @@ export interface SuppressionCheck {
  * Merkezi kontrol: adres, kendi özetiyle veya alan adıyla (üst alan adları dahil: `mail.cafe.example` için
  * `cafe.example` engeli de geçerlidir) engelli mi? Çözümlenemeyen adres engelli sayılır.
  */
-export async function checkSuppression(db: Db, email: string): Promise<SuppressionCheck> {
+export async function checkSuppression(db: DbExecutor, email: string): Promise<SuppressionCheck> {
   const parsed = parseEmail(email);
   if (!parsed) return { suppressed: true, invalidAddress: true, matches: [] };
   const rows = await db
@@ -158,7 +158,7 @@ export async function checkSuppression(db: Db, email: string): Promise<Suppressi
 }
 
 /** Alan adı engeli kontrolü (adres bilinmeden, ör. web sitesi alan adı için). */
-export async function isDomainSuppressed(db: Db, rawDomain: string): Promise<boolean> {
+export async function isDomainSuppressed(db: DbExecutor, rawDomain: string): Promise<boolean> {
   const domain = normalizeDomain(rawDomain);
   if (!domain) return true;
   const rows = await db

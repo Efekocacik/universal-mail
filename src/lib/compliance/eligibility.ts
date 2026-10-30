@@ -1,5 +1,5 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
-import type { Db } from "@/lib/db/client";
+import type { DbExecutor } from "@/lib/db/client";
 import {
   campaignLeads,
   campaigns,
@@ -147,7 +147,7 @@ class Collector {
 
 /** Bir lead bu kampanyaya eklenebilir mi? Lead'in birincil e-posta adresi değerlendirilir. */
 export async function evaluateEnrollment(
-  db: Db,
+  db: DbExecutor,
   input: { campaignId: number; leadId: number },
   opts: EligibilityOptions = {},
 ): Promise<EligibilityResult> {
@@ -228,7 +228,7 @@ export async function evaluateEnrollment(
 
 /** Bir kampanya dizisinin `stepIndex` adımı ŞU AN gönderilebilir mi? Sağlayıcı çağrısından hemen önce çağrılır. */
 export async function evaluateSend(
-  db: Db,
+  db: DbExecutor,
   input: { campaignLeadId: number; stepIndex: number },
   opts: EligibilityOptions = {},
 ): Promise<EligibilityResult> {
@@ -403,20 +403,24 @@ function resolveLimits(opts: EligibilityOptions, c: Collector): FrequencyLimits 
 }
 
 /** Kullanım onayı ve eksiksiz gönderen firma profili olmadan ticari ileti olmaz (FR-SET-07/08, FR-CMPL-08). */
-async function checkSender(db: Db, c: Collector) {
+async function checkSender(db: DbExecutor, c: Collector) {
   const s = await getSettings(db, ["consent", "company.profile"] as const);
   if (!s.consent) c.add("consent_missing");
   if (!s["company.profile"]) c.add("sender_profile_incomplete");
 }
 
-async function loadCampaign(db: Db, id: number, c: Collector) {
+async function loadCampaign(db: DbExecutor, id: number, c: Collector) {
   const [row] = await db.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
   if (!row) c.add("campaign_not_found");
   return row ?? null;
 }
 
 /** Posta kutusu kapsamı belirler. Demo dışı her sağlayıcı `live`'dır ve bu sürümde gönderemez. */
-async function checkMailbox(db: Db, mailboxId: number | null, c: Collector): Promise<PolicyScope> {
+async function checkMailbox(
+  db: DbExecutor,
+  mailboxId: number | null,
+  c: Collector,
+): Promise<PolicyScope> {
   if (mailboxId === null) {
     c.add("mailbox_missing");
     return "live";
@@ -432,7 +436,7 @@ async function checkMailbox(db: Db, mailboxId: number | null, c: Collector): Pro
   return scope;
 }
 
-async function loadLead(db: Db, id: number, c: Collector) {
+async function loadLead(db: DbExecutor, id: number, c: Collector) {
   const [row] = await db
     .select({ id: leads.id, status: leads.status, countryCode: leads.countryCode })
     .from(leads)
@@ -448,7 +452,7 @@ async function loadLead(db: Db, id: number, c: Collector) {
 
 /** Adres niteliği, ülke politikası ve suppression. Adres çözümlenemezse null döner. */
 async function checkRecipient(
-  db: Db,
+  db: DbExecutor,
   c: Collector,
   scope: PolicyScope,
   countryCode: string | null,
@@ -491,7 +495,7 @@ async function checkRecipient(
  * Dizi kaydı bulunamayan veya çelişkili geçmiş, güvenli tarafta "yanıtsız tamamlandı" sayılır.
  */
 async function checkHistory(
-  db: Db,
+  db: DbExecutor,
   c: Collector,
   hash: string,
   now: number,

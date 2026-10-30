@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import * as cheerio from "cheerio";
 import { and, eq, isNull } from "drizzle-orm";
 import { LIVE_SENDING_ENABLED } from "@/lib/compliance/policies";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { auditLog, categorySets, templates } from "@/lib/db/schema";
 import { checkContent, type ContentIssue } from "./content-check";
 import { buildFooter, FooterError, type FooterMode } from "./footer";
@@ -197,6 +197,23 @@ export interface ComposeIssue {
   detail?: string;
 }
 
+/**
+ * İçerik özetinin (`messages.body_sha256`) tanım sürümü.
+ *
+ * Sürüm 1: `sha256(JSON.stringify([subject, text, html]))`, UTF-8, küçük harf onaltılık. Alıcının gördüğü konu, düz
+ * metin ve HTML'in TAMAMINI kapsar; MIME'nin rastgele ayracından ve `Date`/`Message-ID` başlıklarından bağımsızdır
+ * (aynı içerik → aynı özet). JSON dizisi alan sınırlarını korur ("ab"+"c" ile "a"+"bc" farklı özet verir).
+ * Tanım değişirse eski kayıtlarla karşılaştırılamaz; sürüm artırılmalı ve veritabanında ayrıca belirtilmelidir.
+ */
+export const CONTENT_HASH_VERSION = 1;
+
+export function contentSha256(subject: string, text: string, html: string): string {
+  return crypto
+    .createHash("sha256")
+    .update(JSON.stringify([subject, text, html]), "utf8")
+    .digest("hex");
+}
+
 export interface ComposedEmail {
   /** Gönderilebilir mi? `send` amacında hata yoksa true. Bu sürümde live hiçbir zaman gönderilebilir değildir. */
   sendable: boolean;
@@ -210,7 +227,7 @@ export interface ComposedEmail {
   subjectLogged: string;
   html: string;
   text: string;
-  /** İçerik kanıtı (`messages.body_sha256`); gövde saklanmaz. */
+  /** İçerik kanıtı (`messages.body_sha256`, tanım: `CONTENT_HASH_VERSION`); gövde saklanmaz. */
   bodySha256: string | null;
   missing: string[];
 }
@@ -222,7 +239,7 @@ export interface ComposedEmail {
  * Hiçbir durumda veritabanına yazmaz ve ileti göndermez.
  */
 export async function composeEmail(
-  db: Db,
+  db: DbExecutor,
   input: {
     templateId: number;
     leadId: number;
@@ -324,7 +341,7 @@ export async function composeEmail(
     subjectLogged: body.subject,
     html,
     text,
-    bodySha256: crypto.createHash("sha256").update(html, "utf8").digest("hex"),
+    bodySha256: contentSha256(body.subject, text, html),
     missing: body.missing,
   };
 }

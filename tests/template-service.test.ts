@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
@@ -15,6 +16,8 @@ import { seedBuiltinTemplates } from "@/lib/mail/seed";
 import {
   archiveTemplate,
   composeEmail,
+  CONTENT_HASH_VERSION,
+  contentSha256,
   createTemplate,
   TemplateServiceError,
   updateTemplate,
@@ -258,6 +261,28 @@ describe("ön izleme ve gönderim çıktısı", () => {
     expect(a.sendable).toBe(true);
     const b = await composeEmail(db, { templateId, leadId, mode: "demo", purpose: "send" });
     expect(b.bodySha256).toBe(a.bodySha256);
+  });
+
+  it("içerik özeti (sürüm 1) konu, düz metin ve HTML'i kapsar; konu değişince özet değişir", async () => {
+    expect(CONTENT_HASH_VERSION).toBe(1);
+    const leadId = await addLead();
+    const templateId = await builtinId("en");
+    const a = await composeEmail(db, { templateId, leadId, mode: "demo", purpose: "send" });
+    expect(a.bodySha256).toBe(
+      crypto
+        .createHash("sha256")
+        .update(JSON.stringify([a.subject, a.text, a.html]), "utf8")
+        .digest("hex"),
+    );
+    expect(a.bodySha256).toBe(contentSha256(a.subject, a.text, a.html));
+
+    await updateTemplate(db, templateId, { subject: "A different subject line" });
+    const b = await composeEmail(db, { templateId, leadId, mode: "demo", purpose: "send" });
+    expect(b.html).toBe(a.html); // gövde aynı
+    expect(b.bodySha256).not.toBe(a.bodySha256); // yalnızca konu farklı
+
+    // Alan sınırları korunur: içerik kaydırıldığında özet farklıdır.
+    expect(contentSha256("ab", "c", "")).not.toBe(contentSha256("a", "bc", ""));
   });
 
   it("eksik değişken gönderimi engeller; ön izlemede işaretlenir; yedek metin varsa geçer", async () => {

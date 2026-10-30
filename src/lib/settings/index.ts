@@ -1,6 +1,6 @@
 import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { Db } from "@/lib/db/client";
+import type { DbExecutor } from "@/lib/db/client";
 import { settings } from "@/lib/db/schema";
 import { DEFAULT_EXCLUDED_COUNTRIES } from "@/lib/geo/countries";
 
@@ -81,7 +81,10 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "seed.faz3": { templates: 0, demoMailbox: 0 },
 };
 
-export async function getSetting<K extends SettingKey>(db: Db, key: K): Promise<SettingValue<K>> {
+export async function getSetting<K extends SettingKey>(
+  db: DbExecutor,
+  key: K,
+): Promise<SettingValue<K>> {
   const rows = await db.select().from(settings).where(eq(settings.key, key)).limit(1);
   const row = rows[0];
   if (!row) return SETTING_DEFAULTS[key];
@@ -90,7 +93,7 @@ export async function getSetting<K extends SettingKey>(db: Db, key: K): Promise<
 }
 
 export async function getSettings<K extends SettingKey>(
-  db: Db,
+  db: DbExecutor,
   keys: readonly K[],
 ): Promise<{ [P in K]: SettingValue<P> }> {
   const rows = await db
@@ -108,7 +111,7 @@ export async function getSettings<K extends SettingKey>(
 }
 
 export async function setSetting<K extends SettingKey>(
-  db: Db,
+  db: DbExecutor,
   key: K,
   value: SettingValue<K>,
 ): Promise<void> {

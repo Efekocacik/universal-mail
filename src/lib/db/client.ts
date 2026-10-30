@@ -1,11 +1,18 @@
-import { createClient, type Client } from "@libsql/client";
+import { createClient, type Client, type ResultSet } from "@libsql/client";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
+import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { cacheDbPathFor, dbPath, toLibsqlUrl } from "@/lib/config/paths";
 import { CACHE_DDL } from "./cache-schema";
 import * as cacheSchema from "./cache-schema";
 import * as schema from "./schema";
 
 export type Db = LibSQLDatabase<typeof schema & typeof cacheSchema>;
+
+/**
+ * Sorgu yürütücüsü: veritabanı bağlantısı (`Db`) veya `db.transaction(...)` içindeki işlem nesnesi. Bir işlem
+ * içinde de çağrılması gereken (ör. gönderimden hemen önceki uygunluk kontrolü) fonksiyonlar bunu kabul eder.
+ */
+export type DbExecutor = BaseSQLiteDatabase<"async", ResultSet, typeof schema & typeof cacheSchema>;
 
 interface Handle {
   client: Client;
