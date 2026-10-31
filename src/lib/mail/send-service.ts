@@ -1,9 +1,14 @@
-import { and, asc, count, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { evaluateSend, type IneligibleReason } from "@/lib/compliance/eligibility";
-import { DEFAULT_FREQUENCY_LIMITS, utcDay, type FrequencyLimits } from "@/lib/compliance/frequency";
+import {
+  DAY_MS,
+  DEFAULT_FREQUENCY_LIMITS,
+  utcDay,
+  type FrequencyLimits,
+} from "@/lib/compliance/frequency";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { hashEmail } from "@/lib/compliance/suppression";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import {
   campaignLeads,
   campaigns,
@@ -21,19 +26,30 @@ import {
   type MailProvider,
   type ProviderResult,
 } from "./provider/provider";
+import { retryDelayMs } from "./scheduler/retry";
+import { effectiveMailboxCap, gapMs, nextUtcDayStart, warmupCeiling } from "./scheduler/throttle";
+import {
+  effectiveWindow,
+  isInWindow,
+  nextWindowStart,
+  timeZonesForCountry,
+} from "./scheduler/window";
 import { composeEmail, type ComposeIssue } from "./template-service";
 
 /**
- * Tek kampanya adımının gönderimi (TEK deneme). Zamanlama, yeniden deneme zamanı/sayısı ve işçi entegrasyonu
- * Aşama 9'dadır.
+ * Tek kampanya adımının gönderimi (TEK deneme).
  *
  * 1. AYIRMA (tek işlem; libsql'in varsayılan işlem modu `BEGIN IMMEDIATE`: yazma kilidi baştan alınır, eşzamanlı ikinci
- *    çağrı bekler ve sonra güncel durumu görür): uygunluk kontrolü → posta kutusu günlük tavanı → içerik → MIME →
- *    `messages` kaydı `sending` + dizi `in_flight`. İşlem başarısızsa sağlayıcı ÇAĞRILMAZ.
+ *    çağrı (aynı veya başka süreçten) bekler ve sonra güncel durumu görür): uygunluk kontrolü → zamanlama kapısı
+ *    (planlanan zaman, alıcının yerel saat penceresi, posta kutusu/ısınma ve kampanya günlük tavanları, gönderimler
+ *    arası bekleme) → içerik → MIME → `messages` kaydı `sending` + dizi `in_flight`. İşlem başarısızsa sağlayıcı
+ *    ÇAĞRILMAZ.
  * 2. GÖNDERİM: işlem DIŞINDA, zaman aşımıyla. Çağrı başladıktan sonraki her beklenmeyen hata, iptal ve zaman aşımı
  *    `unknown` sayılır.
- * 3. KAYIT (ayrı işlem): accepted → `sent`; rejected → `failed` (yalnızca bu yeniden denenebilir); unknown → `unknown`.
- *    Bu işlem başarısız olursa ileti YENİDEN GÖNDERİLMEZ: kayıt `sending` kalır, uzlaştırma onu `unknown` yapar.
+ * 3. KAYIT (ayrı işlem): accepted → `sent` ve sonraki adımın zamanı; rejected → `failed` ve yeniden deneme planı
+ *    (yalnızca geçici retler, sınırlı sayıda); unknown → `unknown`. Bu işlem başarısız olursa ileti YENİDEN
+ *    GÖNDERİLMEZ: yalnızca kayıt yeniden denenir (`retryPendingRecord`); olmazsa kayıt `sending` kalır ve uzlaştırma
+ *    onu `unknown` yapar.
  *
  * Gerçek gönderim kapalıdır: yalnızca demo posta kutusu ve demo sağlayıcısı çalışır. Ham ileti kalıcı saklanmaz.
  */
@@ -41,17 +57,44 @@ import { composeEmail, type ComposeIssue } from "./template-service";
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
 /** Bu süreden eski `sending` kayıtları uzlaştırmada `unknown` olur. */
 export const STALE_SENDING_MS = 10 * 60_000;
+/**
+ * Sağlayıcı zaman aşımı üst sınırı. Uzlaştırma eşiğinin yarısından kısa tutulur: süren bir gönderim hiçbir zaman
+ * eşik dolmadan bitmemiş olamaz, yani aktif bir gönderim yanlışlıkla `unknown` yapılmaz.
+ */
+export const MAX_PROVIDER_TIMEOUT_MS = STALE_SENDING_MS / 2;
 
 export type NotSendableCode =
   | "provider_unavailable"
   | "mailbox_daily_cap"
+  | "campaign_daily_cap"
+  | "mailbox_gap"
+  | "not_due"
+  | "outside_window"
+  | "invalid_send_window"
+  | "timezone_unknown"
   | "step_template_missing"
   | "compose_failed"
   | "build_failed";
 
+/** Gönderim kaydı yazılamadığında yeniden denemek için gereken asgari bilgi (ham ileti ve alıcı İÇERMEZ). */
+export interface PendingRecord {
+  rowId: number;
+  campaignLeadId: number;
+  stepIndex: number;
+  previousStatus: CampaignLeadStatus;
+  result: ProviderResult;
+}
+
 export type SendStepOutcome =
   | { outcome: "ineligible"; reasons: IneligibleReason[] }
-  | { outcome: "not_sendable"; code: NotSendableCode; detail?: string; errors?: ComposeIssue[] }
+  | {
+      outcome: "not_sendable";
+      code: NotSendableCode;
+      detail?: string;
+      errors?: ComposeIssue[];
+      /** Kapının tekrar açılabileceği en erken an (zamanlama kodlarında). */
+      retryAt?: number;
+    }
   /** Aynı adım için kayıt başka bir çağrı tarafından açılmış. Gönderim yok. */
   | { outcome: "already_reserved" }
   /**
@@ -67,6 +110,8 @@ export type SendStepOutcome =
       code?: string;
       /** Sonuç kaydedilemedi: kayıt `sending` kaldı, uzlaştırmada `unknown` olacak. Yeniden gönderilmez. */
       recordError?: boolean;
+      /** `recordError` ise: yalnızca kaydı yeniden denemek için (`retryPendingRecord`). */
+      pendingRecord?: PendingRecord;
     };
 
 export interface SendStepOptions {
@@ -98,6 +143,8 @@ function errorMatches(e: unknown, pattern: RegExp): boolean {
 const isUniqueViolation = (e: unknown) => errorMatches(e, /UNIQUE constraint failed/i);
 const isBusy = (e: unknown) =>
   errorMatches(e, /TRANSACTION_ACTIVE|SQLITE_BUSY|database is locked/i);
+/** Veritabanı başka bir işlemle meşgul mü (aynı süreç: `TRANSACTION_ACTIVE`, başka süreç: `SQLITE_BUSY`)? */
+export const isBusyError = isBusy;
 
 const CONTACTED = ["sending", "sent", "unknown"] as const;
 
@@ -155,22 +202,9 @@ export async function sendCampaignStep(
         throw new Abort({ outcome: "not_sendable", code: "provider_unavailable" });
       }
 
-      // Posta kutusu günlük tavanı (son güvence; planlama Aşama 9'da).
-      const [{ n } = { n: 0 }] = await tx
-        .select({ n: count() })
-        .from(messages)
-        .where(
-          and(
-            eq(messages.mailboxId, mailbox.id),
-            eq(messages.direction, "out"),
-            eq(messages.purpose, "campaign"),
-            eq(messages.sendDay, utcDay(now)),
-            inArray(messages.status, [...CONTACTED]),
-          ),
-        );
-      if (n >= mailbox.dailyCap) {
-        throw new Abort({ outcome: "not_sendable", code: "mailbox_daily_cap" });
-      }
+      // Zamanlama kapısı: aynı işlemde (eşzamanlı ikinci çağrı sınırı aşamaz).
+      const gate = await checkPacing(tx, { cl, campaign, mailbox, now });
+      if (gate) throw new Abort(gate);
 
       // Adımın şablonu (dizinin dili).
       const steps = await tx
@@ -290,7 +324,11 @@ export async function sendCampaignStep(
   }
 
   /* 2. Gönderim (işlem dışında) ------------------------------------------------------------------ */
-  const result = await callProvider(r, opts.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS);
+  const timeoutMs = Math.min(
+    opts.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT_MS,
+    MAX_PROVIDER_TIMEOUT_MS,
+  );
+  const result = await callProvider(r, timeoutMs);
 
   /* 3. Kayıt ------------------------------------------------------------------------------------- */
   const base = { messageRowId: r.rowId, rfcMessageId: r.rfcMessageId };
@@ -300,19 +338,132 @@ export async function sendCampaignStep(
       : result.status === "rejected"
         ? { outcome: "failed", ...base, code: result.code }
         : { outcome: "unknown", ...base, code: result.code };
+  const pending: PendingRecord = {
+    rowId: r.rowId,
+    campaignLeadId: input.campaignLeadId,
+    stepIndex: input.stepIndex,
+    previousStatus: r.previousStatus,
+    result,
+  };
   // Yalnızca veritabanı KAYDI yeniden denenir (meşgulse); ileti asla yeniden gönderilmez.
   for (let attempt = 0; ; attempt++) {
     try {
-      await recordResult(db, r, input, result, clock(), limits);
+      await recordResult(db, pending, clock(), limits);
       return outcome;
     } catch (e) {
-      if (!isBusy(e) || attempt >= RECORD_RETRIES) return { ...outcome, recordError: true };
+      if (!isBusy(e) || attempt >= RECORD_RETRIES) {
+        return { ...outcome, recordError: true, pendingRecord: pending };
+      }
       await new Promise((res) => setTimeout(res, 25 * (attempt + 1)));
     }
   }
 }
 
 const RECORD_RETRIES = 8;
+
+/**
+ * Yazılamamış bir gönderim sonucunu YALNIZCA veritabanına yeniden kaydetmeyi dener; sağlayıcıyı çağırmaz.
+ * Kayıt bu arada uzlaştırmayla `unknown` olduysa hiçbir şey değişmez (sonuç inceleme akışında kalır).
+ */
+export async function retryPendingRecord(
+  db: Db,
+  pending: PendingRecord,
+  opts: { now?: number; limits?: FrequencyLimits } = {},
+): Promise<"recorded" | "busy" | "error"> {
+  try {
+    await recordResult(
+      db,
+      pending,
+      opts.now ?? Date.now(),
+      opts.limits ?? DEFAULT_FREQUENCY_LIMITS,
+    );
+    return "recorded";
+  } catch (e) {
+    return isBusy(e) ? "busy" : "error";
+  }
+}
+
+type GateInput = {
+  cl: typeof campaignLeads.$inferSelect;
+  campaign: typeof campaigns.$inferSelect;
+  mailbox: typeof mailboxes.$inferSelect;
+  now: number;
+};
+
+/**
+ * Gönderimden hemen önceki zamanlama kapısı (ayırma işleminin içinde). Gönderime izin varsa `null`, yoksa kodu ve
+ * kapının en erken açılacağı anı döndürür.
+ */
+async function checkPacing(
+  tx: DbExecutor,
+  { cl, campaign, mailbox, now }: GateInput,
+): Promise<Extract<SendStepOutcome, { outcome: "not_sendable" }> | null> {
+  const ns = (code: NotSendableCode, retryAt?: number, detail?: string) => ({
+    outcome: "not_sendable" as const,
+    code,
+    ...(retryAt !== undefined ? { retryAt } : {}),
+    ...(detail !== undefined ? { detail } : {}),
+  });
+
+  // Planlanan zaman (takip aralığı, yeniden deneme beklemesi).
+  if (cl.nextSendAt !== null && cl.nextSendAt > now) return ns("not_due", cl.nextSendAt);
+
+  // Alıcının yerel saat penceresi.
+  const window = effectiveWindow(campaign.sendWindow);
+  if (!window) return ns("invalid_send_window");
+  const [lead] = await tx
+    .select({ countryCode: leads.countryCode })
+    .from(leads)
+    .where(eq(leads.id, cl.leadId));
+  const zones = timeZonesForCountry(lead?.countryCode ?? cl.countryCode);
+  if (!zones) return ns("timezone_unknown");
+  if (!isInWindow(now, window, zones)) {
+    return ns("outside_window", nextWindowStart(now, window, zones) ?? now + DAY_MS);
+  }
+
+  // Günlük tavanlar (UTC günü): posta kutusu (ısınma dahil, tüm kampanyalar) ve kampanya.
+  const today = utcDay(now);
+  const contactedToday = and(
+    eq(messages.direction, "out"),
+    eq(messages.purpose, "campaign"),
+    eq(messages.sendDay, today),
+    inArray(messages.status, [...CONTACTED]),
+  );
+  const [{ n: mailboxToday } = { n: 0 }] = await tx
+    .select({ n: count() })
+    .from(messages)
+    .where(and(eq(messages.mailboxId, mailbox.id), contactedToday));
+  if (mailboxToday >= effectiveMailboxCap(mailbox, now)) {
+    const warm = warmupCeiling(mailbox, now) < mailbox.dailyCap;
+    return ns("mailbox_daily_cap", nextUtcDayStart(now), warm ? "warmup" : undefined);
+  }
+  const [{ n: campaignToday } = { n: 0 }] = await tx
+    .select({ n: count() })
+    .from(messages)
+    .where(and(eq(messages.campaignId, campaign.id), contactedToday));
+  if (campaignToday >= campaign.dailyCap) {
+    return ns("campaign_daily_cap", nextUtcDayStart(now));
+  }
+
+  // Aynı kutudan gönderimler arası bekleme (başarısız denemeler de sağlayıcıya ulaştığı için sayılır).
+  const [last] = await tx
+    .select({ id: messages.id, createdAt: messages.createdAt })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.mailboxId, mailbox.id),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+      ),
+    )
+    .orderBy(desc(messages.createdAt), desc(messages.id))
+    .limit(1);
+  if (last) {
+    const until = last.createdAt + gapMs(last.id, campaign.minGapS, campaign.maxGapS);
+    if (now < until) return ns("mailbox_gap", until);
+  }
+  return null;
+}
 
 /** Sağlayıcıyı zaman aşımıyla çağırır. Çağrı başladıktan sonraki her beklenmeyen durum `unknown`'dur. */
 async function callProvider(r: Reservation, timeoutMs: number): Promise<ProviderResult> {
@@ -351,16 +502,15 @@ function isProviderResult(v: unknown): v is ProviderResult {
 
 async function recordResult(
   db: Db,
-  r: Reservation,
-  input: { campaignLeadId: number; stepIndex: number },
-  result: ProviderResult,
+  p: PendingRecord,
   now: number,
   limits: FrequencyLimits,
 ): Promise<void> {
+  const { result } = p;
   await db.transaction(async (tx) => {
-    const own = and(eq(messages.id, r.rowId), eq(messages.status, "sending"));
+    const own = and(eq(messages.id, p.rowId), eq(messages.status, "sending"));
     const inFlight = and(
-      eq(campaignLeads.id, input.campaignLeadId),
+      eq(campaignLeads.id, p.campaignLeadId),
       eq(campaignLeads.status, "in_flight"),
     );
 
@@ -369,26 +519,37 @@ async function recordResult(
         .update(messages)
         .set({ status: "sent", sentAt: now, providerMessageId: result.providerMessageId })
         .where(own)
-        .returning({ id: messages.id });
+        .returning({ id: messages.id, mailboxId: messages.mailboxId });
       // Arada uzlaştırma kaydı `unknown` yaptıysa ona dokunulmaz.
       if (updated.length === 0) return;
       const [cl] = await tx
         .select({ campaignId: campaignLeads.campaignId, leadId: campaignLeads.leadId })
         .from(campaignLeads)
-        .where(eq(campaignLeads.id, input.campaignLeadId));
-      const [{ steps } = { steps: 0 }] = await tx
-        .select({ steps: sql<number>`count(distinct ${campaignSteps.stepIndex})` })
+        .where(eq(campaignLeads.id, p.campaignLeadId));
+      const stepRows = await tx
+        .select({ stepIndex: campaignSteps.stepIndex, delayDays: campaignSteps.delayDays })
         .from(campaignSteps)
         .where(eq(campaignSteps.campaignId, cl!.campaignId));
-      const total = Math.min(Number(steps), limits.maxMessagesPerSequence);
-      const nextStep = input.stepIndex + 1;
+      const total = Math.min(
+        new Set(stepRows.map((s) => s.stepIndex)).size,
+        limits.maxMessagesPerSequence,
+      );
+      const nextStep = p.stepIndex + 1;
+      // Sonraki adımın en erken zamanı: adım gecikmesi ve takip aralığı alt sınırının büyüğü. Pencereye kaydırma
+      // gönderim anında yapılır.
+      const delayDays = Math.max(
+        limits.minFollowupGapDays,
+        ...stepRows.filter((s) => s.stepIndex === nextStep).map((s) => s.delayDays),
+      );
+      const done = nextStep >= total;
       await tx
         .update(campaignLeads)
         .set({
           nextStep,
-          status: nextStep >= total ? "completed" : "waiting_next",
+          status: done ? "completed" : "waiting_next",
           lastSentAt: now,
-          nextSendAt: null,
+          nextSendAt: done ? null : now + delayDays * DAY_MS,
+          attempts: 0,
           lastError: null,
           updatedAt: now,
         })
@@ -401,6 +562,11 @@ async function recordResult(
           updatedAt: now,
         })
         .where(eq(leads.id, cl!.leadId));
+      // Isınma, kutunun ilk başarılı gönderimiyle başlar.
+      await tx
+        .update(mailboxes)
+        .set({ warmupStartedAt: now, updatedAt: now })
+        .where(and(eq(mailboxes.id, updated[0]!.mailboxId), isNull(mailboxes.warmupStartedAt)));
       return;
     }
 
@@ -415,11 +581,23 @@ async function recordResult(
         .where(own)
         .returning({ id: messages.id });
       if (updated.length === 0) return;
+      // Bu adımın başarısız deneme sayısı (az önceki dahil). Kalıcı ret veya hak bitti: dizi `failed`.
+      const [{ n: failedAttempts } = { n: 0 }] = await tx
+        .select({ n: count() })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.idempotencyKey, `cl:${p.campaignLeadId}:s:${p.stepIndex}`),
+            eq(messages.status, "failed"),
+          ),
+        );
+      const delay = retryDelayMs(failedAttempts, result.permanent, result.retryAfterMs);
       await tx
         .update(campaignLeads)
         .set({
-          status: r.previousStatus,
-          attempts: sql`${campaignLeads.attempts} + 1`,
+          status: delay === null ? "failed" : p.previousStatus,
+          nextSendAt: delay === null ? null : now + delay,
+          attempts: failedAttempts,
           lastError: result.code,
           updatedAt: now,
         })
@@ -427,7 +605,7 @@ async function recordResult(
       return;
     }
 
-    // unknown: dizi `in_flight` kalır; insan değerlendirmesi/uzlaştırma gerekir.
+    // unknown: dizi `in_flight` kalır; insan değerlendirmesi gerekir (otomatik yeniden gönderim yok).
     await tx.update(messages).set({ status: "unknown", errorCode: result.code }).where(own);
     await tx.update(campaignLeads).set({ lastError: result.code, updatedAt: now }).where(inFlight);
   });

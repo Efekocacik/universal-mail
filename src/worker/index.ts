@@ -3,9 +3,15 @@ import path from "node:path";
 import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
+import { isDemoSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
-import { bindEmailEvents, registerCoreHandlers, registerEmailHandlers } from "./handlers";
+import {
+  bindEmailEvents,
+  registerCoreHandlers,
+  registerEmailHandlers,
+  registerMailHandlers,
+} from "./handlers";
 import { Worker } from "./loop";
 
 /** Geliştirme: `.env.local` dosyasını yükle (üretimde Electron ortam değişkenlerini verir). */
@@ -30,6 +36,15 @@ async function main(): Promise<void> {
   registerEmailHandlers();
   bindEmailEvents();
   const db = await getDb();
+  // Faz 3 demo zamanlayıcısı: varsayılan KAPALI (FAZ3_DEMO_SCHEDULER_ENABLED). Kapalıyken veritabanına yazmaz.
+  const schedulerEnabled = isDemoSchedulerEnabled(process.env);
+  registerMailHandlers({ enabled: schedulerEnabled, db });
+  const mailScheduler = await startMailScheduler(db, {
+    env: process.env,
+    log: (m) => console.log(`[worker] ${m}`),
+  });
+  if (mailScheduler.enabled)
+    console.log("[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).");
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 
   // Zamanla sona eren yenilik sinyallerini (ör. "son 60 gün") düzenli yenile.
@@ -63,6 +78,7 @@ async function main(): Promise<void> {
   const shutdown = () => {
     console.log("[worker] kapanış isteği alındı; iş güvenle durduruluyor...");
     worker.stop();
+    mailScheduler.stop();
     clearInterval(interval);
     setTimeout(() => process.exit(0), 20_000).unref();
   };

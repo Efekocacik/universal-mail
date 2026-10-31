@@ -6,10 +6,12 @@ import {
   type JobContext,
 } from "@/lib/jobs/registry";
 import { createEmailDeps } from "@/lib/email/deps";
+import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
+import { createMailSendHandler, MAIL_SEND_JOB } from "@/lib/mail/scheduler/job";
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
 import { onEvent } from "@/lib/events";
-import { getDb } from "@/lib/db/client";
+import { getDb, recoverDbConnection } from "@/lib/db/client";
 import { createProvider } from "@/lib/places/factory";
 import { enrichPlaces } from "@/lib/scan/enrich";
 import { runScan } from "@/lib/scan/runner";
@@ -111,6 +113,19 @@ export function registerEmailHandlers(): void {
         `${res.noWebsite} sitesiz, ${res.needsGoogle} Google verisi bekliyor`,
     );
   });
+}
+
+/**
+ * Faz 3: `mail.send` (demo kampanya dağıtıcısı). İşleyici her zaman kayıtlıdır ama `enabled` (ortam bayrağı
+ * `FAZ3_DEMO_SCHEDULER_ENABLED`) kapalıysa hiçbir şey göndermez ve veritabanında kampanya durumunu değiştirmez.
+ */
+export function registerMailHandlers(opts: { enabled: boolean; db: Db }): MailDispatcher {
+  const dispatcher = new MailDispatcher(opts.db);
+  registerJobHandler(
+    MAIL_SEND_JOB,
+    createMailSendHandler({ enabled: opts.enabled, dispatcher, onBusy: recoverDbConnection }),
+  );
+  return dispatcher;
 }
 
 let emailEventsBound = false;

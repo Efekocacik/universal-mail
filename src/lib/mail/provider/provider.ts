@@ -22,7 +22,8 @@ export interface ProviderSendInput {
 
 export type ProviderResult =
   | { status: "accepted"; providerMessageId: string; acceptedAt: number }
-  | { status: "rejected"; code: string; permanent: boolean }
+  /** `retryAfterMs`: sağlayıcının bildirdiği bekleme süresi (ör. 429); geçici retlerde bundan önce denenmez. */
+  | { status: "rejected"; code: string; permanent: boolean; retryAfterMs?: number }
   | { status: "unknown"; code: string };
 
 export interface MailProvider {

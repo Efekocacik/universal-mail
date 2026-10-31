@@ -228,7 +228,8 @@ describe("başarılı gönderim (demo)", () => {
     const r = await sendCampaignStep(
       db,
       { campaignLeadId: cl, stepIndex: 1 },
-      { provider: p, now: at(T0 + 5 * DAY) },
+      // Takip en erken 5 gün sonra; T0 + 5 gün cumartesi (pencere dışı), bu yüzden pazartesi.
+      { provider: p, now: at(T0 + 7 * DAY) },
     );
     expect(r.outcome).toBe("sent");
     const parsed = parseMessage(p.outbox[1]!.raw);
@@ -260,12 +261,22 @@ describe("kesin başarısız (rejected → failed)", () => {
       attempts: 1,
       lastError: "mailbox_full",
       nextStep: 0,
+      nextSendAt: T0 + 15 * 60_000,
     });
+
+    // Bekleme süresi dolmadan yeniden denenmez.
+    expect(
+      await sendCampaignStep(
+        db,
+        { campaignLeadId: cl, stepIndex: 0 },
+        { provider: p, now: at(T0 + 60_000) },
+      ),
+    ).toMatchObject({ outcome: "not_sendable", code: "not_due", retryAt: T0 + 15 * 60_000 });
 
     const retry = await sendCampaignStep(
       db,
       { campaignLeadId: cl, stepIndex: 0 },
-      { provider: p, now: at(T0 + 60_000) },
+      { provider: p, now: at(T0 + 15 * 60_000) },
     );
     expect(retry.outcome).toBe("sent");
     expect((await rows()).map((m) => m.status)).toEqual(["failed", "sent"]);
@@ -453,6 +464,7 @@ describe("işlem güvenliği ve eşzamanlılık", () => {
     ).toEqual({
       outcome: "not_sendable",
       code: "mailbox_daily_cap",
+      retryAt: Date.UTC(2026, 10, 3),
     });
     expect(p.calls).toBe(1);
     expect(await rows()).toHaveLength(1);
@@ -537,12 +549,12 @@ describe("kayıt hatası ve uzlaştırma", () => {
     await sendCampaignStep(
       db,
       { campaignLeadId: cl, stepIndex: 0 },
-      { provider: fake([{ kind: "reject" }]), now: at(T0) },
+      { provider: fake([{ kind: "reject", permanent: false }]), now: at(T0) },
     );
     await sendCampaignStep(
       db,
       { campaignLeadId: cl, stepIndex: 0 },
-      { provider: fake(), now: at(T0 + 1) },
+      { provider: fake(), now: at(T0 + 15 * 60_000) },
     );
     expect(await reconcileStaleSending(db, { now: T0 + 10 * STALE_SENDING_MS })).toBe(0);
     expect((await rows()).map((m) => m.status)).toEqual(["failed", "sent"]);

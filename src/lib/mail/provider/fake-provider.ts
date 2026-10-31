@@ -15,7 +15,7 @@ import type { MailProvider, ProviderResult, ProviderSendInput } from "./provider
 
 export type FakeStep =
   | { kind: "accept"; delayMs?: number }
-  | { kind: "reject"; code?: string; permanent?: boolean }
+  | { kind: "reject"; code?: string; permanent?: boolean; retryAfterMs?: number }
   /** İleti saklanmadan bağlantı koptu: gönderilmemiş olabilir ama sağlayıcı kesinlik vermiyor. */
   | { kind: "unknown-before" }
   /** İleti saklandı (gerçekte gitti) ama yanıt alınamadı. */
@@ -94,6 +94,7 @@ export class FakeMailProvider implements MailProvider {
           status: "rejected",
           code: step.code ?? "rejected",
           permanent: step.permanent ?? true,
+          ...(step.retryAfterMs !== undefined ? { retryAfterMs: step.retryAfterMs } : {}),
         };
       case "unknown-before":
         return { status: "unknown", code: "connection_lost" };
