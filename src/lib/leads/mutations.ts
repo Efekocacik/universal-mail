@@ -1,5 +1,6 @@
 import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
+import { purgeDemoCampaignData } from "@/lib/campaigns/purge";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import { placeCache } from "@/lib/db/cache-schema";
@@ -56,7 +57,14 @@ export async function patchLead(db: Db, leadId: number, patch: LeadPatch): Promi
  * Demo verilerini siler: demo işletmeler, bunlara ait lead'ler, demo sağlayıcıyla yapılmış taramalar ve
  * demo kullanım kayıtları. Gerçek (Google) kayıtlara dokunulmaz.
  */
-export async function purgeDemoData(db: Db): Promise<{ places: number; scans: number }> {
+/**
+ * Demo verilerini temizler. Önce demo kampanyaları (yalnızca demo posta kutulu) tek işlemde temizlenir; demo ve gerçek
+ * kayıtlar birbirine bağlıysa HİÇBİR ŞEY silinmeden `conflict` hatası verilir (bkz. campaigns/purge.ts).
+ */
+export async function purgeDemoData(
+  db: Db,
+): Promise<{ places: number; scans: number; campaigns: number }> {
+  const demoCampaigns = await purgeDemoCampaignData(db);
   const demoPlaces = await db
     .select({ id: places.placeId })
     .from(places)
@@ -85,6 +93,8 @@ export async function purgeDemoData(db: Db): Promise<{ places: number; scans: nu
   await audit(db, "demo.purged", undefined, undefined, {
     places: demoPlaces.length,
     scans: scanIds.length,
+    campaigns: demoCampaigns.campaigns,
+    messages: demoCampaigns.messages,
   });
-  return { places: demoPlaces.length, scans: scanIds.length };
+  return { places: demoPlaces.length, scans: scanIds.length, campaigns: demoCampaigns.campaigns };
 }

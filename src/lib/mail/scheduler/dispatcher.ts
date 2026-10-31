@@ -1,6 +1,7 @@
 import { and, asc, eq, exists, gt, inArray, isNull, lte, min, not, or, sql } from "drizzle-orm";
 import type { IneligibleCode, IneligibleReason } from "@/lib/compliance/eligibility";
 import { DAY_MS, type FrequencyLimits } from "@/lib/compliance/frequency";
+import { bumpUpdatedAt } from "@/lib/campaigns/errors";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes, type CampaignLeadStatus } from "@/lib/db/schema";
 import type { MailProvider } from "../provider/provider";
@@ -351,7 +352,7 @@ export class MailDispatcher {
         status: "paused",
         pausedAt: now,
         pauseReason: `auto:${codesText(codes)}`,
-        updatedAt: now,
+        updatedAt: bumpUpdatedAt(now),
       })
       .where(and(eq(campaigns.id, id), eq(campaigns.status, "running")))
       .returning({ id: campaigns.id });
@@ -372,7 +373,7 @@ export class MailDispatcher {
         );
     const rows = await this.db
       .update(campaigns)
-      .set({ status: "completed", finishedAt: now, updatedAt: now })
+      .set({ status: "completed", finishedAt: now, updatedAt: bumpUpdatedAt(now) })
       .where(
         and(
           eq(campaigns.status, "running"),

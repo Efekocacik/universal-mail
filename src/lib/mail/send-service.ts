@@ -562,6 +562,7 @@ async function recordResult(
           updatedAt: now,
         })
         .where(eq(leads.id, cl!.leadId));
+      await settleIfCancelled(tx, p.campaignLeadId, now);
       // Isınma, kutunun ilk başarılı gönderimiyle başlar.
       await tx
         .update(mailboxes)
@@ -602,6 +603,7 @@ async function recordResult(
           updatedAt: now,
         })
         .where(inFlight);
+      await settleIfCancelled(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -609,6 +611,26 @@ async function recordResult(
     await tx.update(messages).set({ status: "unknown", errorCode: result.code }).where(own);
     await tx.update(campaignLeads).set({ lastError: result.code, updatedAt: now }).where(inFlight);
   });
+}
+
+/**
+ * Gönderim sürerken kampanya iptal edildiyse (ayrılmış ileti tamamlanabilir; bkz. campaigns/lifecycle.ts), sonucu
+ * kaydedilen dizi bekleyen durumda kalmaz, `cancelled` olur. Tamamlanmış dizi (`completed`) olduğu gibi kalır.
+ */
+async function settleIfCancelled(tx: DbExecutor, campaignLeadId: number, now: number) {
+  await tx
+    .update(campaignLeads)
+    .set({ status: "cancelled", nextSendAt: null, updatedAt: now })
+    .where(
+      and(
+        eq(campaignLeads.id, campaignLeadId),
+        inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
+        inArray(
+          campaignLeads.campaignId,
+          tx.select({ id: campaigns.id }).from(campaigns).where(eq(campaigns.status, "cancelled")),
+        ),
+      ),
+    );
 }
 
 /**

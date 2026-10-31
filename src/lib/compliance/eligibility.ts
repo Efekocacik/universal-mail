@@ -104,6 +104,11 @@ export interface EligibilityOptions {
   now?: number;
   /** `tightenFrequencyLimits` ile üretilmiş, varsayılandan gevşek olmayan sınırlar. */
   limits?: FrequencyLimits;
+  /**
+   * Yalnızca `evaluateEnrollment`: kampanyadaki bu dizinin KENDİSİ "zaten kampanyada" sayılmaz. Kampanya başlatılırken
+   * `pending` dizilerin yeniden denetlenmesi için kullanılır; diğer bütün kontroller aynen uygulanır.
+   */
+  ignoreCampaignLeadId?: number;
 }
 
 /** Bu lead durumlarında yeni temas yapılmaz. */
@@ -182,8 +187,9 @@ export async function evaluateEnrollment(
 
     // Aynı kampanyada aynı lead/adres veya aynı alan adı (alan adı başına tek dizi → en çok 3 ileti).
     if (campaign) {
-      const inCampaign = await db
+      const inCampaignAll = await db
         .select({
+          id: campaignLeads.id,
           leadId: campaignLeads.leadId,
           hash: campaignLeads.recipientHash,
           domain: campaignLeads.recipientDomain,
@@ -191,6 +197,7 @@ export async function evaluateEnrollment(
         })
         .from(campaignLeads)
         .where(eq(campaignLeads.campaignId, campaign.id));
+      const inCampaign = inCampaignAll.filter((r) => r.id !== opts.ignoreCampaignLeadId);
       if (inCampaign.some((r) => r.leadId === lead.id || r.hash === recipient.hash)) {
         c.add("already_in_campaign");
       } else if (
