@@ -14,6 +14,7 @@ import { useEnrichmentStatus, useFacets, useLeadsInfinite } from "@/lib/client/q
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { toSearchParams } from "@/lib/client/api";
+import { AddToCampaignButton } from "@/features/campaigns/add-to-campaign-button";
 import { FindEmailsButton } from "./find-emails-button";
 import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
@@ -180,6 +181,12 @@ export function LeadList() {
         <div className="flex items-center gap-2">
           {total > 0 && (
             <FindEmailsButton target={{ filtersQuery: toSearchParams(ex.apiFilters).toString() }} />
+          )}
+          {total > 0 && (
+            <AddToCampaignButton
+              filterQuery={toSearchParams(ex.apiFilters).toString()}
+              total={total}
+            />
           )}
           <Select
             aria-label={t("list.sort")}

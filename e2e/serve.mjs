@@ -23,6 +23,9 @@ const env = {
   UM_DATA_DIR: data,
   UM_MIGRATIONS_DIR: path.join(dir, "drizzle"),
   UM_STATIC_DATA_DIR: path.join(dir, "data"),
+  // Yalnızca E2E: demo gönderim zamanlayıcısı açılır (geçici veri klasörü). Yalnızca demo posta kutusu ve bellekteki
+  // demo sağlayıcı kullanılabilir; gerçek gönderim kodda kapalıdır (LIVE_SENDING_ENABLED=false, canlı sağlayıcı yok).
+  FAZ3_DEMO_SCHEDULER_ENABLED: "1",
 };
 const mig = spawnSync(process.execPath, [path.join(dir, "migrate.cjs")], {
   cwd: dir,

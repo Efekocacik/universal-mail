@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Layers, Settings } from "lucide-react";
+import { Compass, Layers, Mail, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Toaster } from "sonner";
@@ -12,16 +12,17 @@ import { fmtUsd } from "@/lib/client/format";
 import { useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
 
-/** Gezinme öğeleri: sonraki fazlar (Şablonlar, Kampanyalar, Kuyruk, Suppression) buraya eklenir. */
+/** Gezinme öğeleri: sonraki fazlar (Şablonlar, Suppression) buraya eklenir. */
 export const NAV_ITEMS = [
   { href: "/", key: "nav.explore", icon: Compass },
   { href: "/scans", key: "nav.scans", icon: Layers },
+  { href: "/campaigns", key: "nav.campaigns", icon: Mail },
   { href: "/settings", key: "nav.settings", icon: Settings },
 ] as const;
 
 function BudgetPill() {
   const { data } = useStatus();
-  if (!data) return <div className="h-8 w-36 animate-pulse rounded-full bg-muted" />;
+  if (!data) return <div className="h-8 w-24 animate-pulse rounded-full bg-muted sm:w-36" />;
   const b = data.budget;
   const tone = b.level === "blocked" ? "danger" : b.level === "warning" ? "warning" : "primary";
   return (
@@ -41,12 +42,12 @@ function BudgetPill() {
         className="flex h-8 items-center gap-2.5 rounded-full border bg-card px-3 text-[12px] hover:bg-accent"
         aria-label={t("budget.label")}
       >
-        <span className="text-muted-foreground">{t("budget.label")}</span>
+        <span className="hidden text-muted-foreground sm:inline">{t("budget.label")}</span>
         <span className="tabular font-semibold">
           {fmtUsd(b.spentUsd)}{" "}
           <span className="font-normal text-muted-foreground">/ {fmtUsd(b.monthlyUsd)}</span>
         </span>
-        <Progress value={b.pct} tone={tone} className="w-12" />
+        <Progress value={b.pct} tone={tone} className="hidden w-12 sm:block" />
       </Link>
     </Tip>
   );
