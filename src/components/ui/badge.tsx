@@ -15,6 +15,8 @@ const badgeVariants = cva(
         likely: "border-transparent bg-nov-likely/16 text-[#8a6700]",
         low: "border-transparent bg-nov-low/18 text-[#5b6168]",
         contacted: "border-transparent bg-contacted/12 text-contacted",
+        success: "border-transparent bg-success/12 text-success",
+        info: "border-transparent bg-info/10 text-info",
         danger: "border-transparent bg-destructive/10 text-destructive",
         warning: "border-transparent bg-nov-likely/16 text-[#8a6700]",
       },
