@@ -4,6 +4,7 @@ import { CircleHelp } from "lucide-react";
 import { Tooltip as TooltipPrimitive } from "radix-ui";
 import * as React from "react";
 import { cn } from "@/lib/cn";
+import { t } from "@/lib/i18n";
 
 export const TooltipProvider = TooltipPrimitive.Provider;
 
@@ -23,7 +24,7 @@ export function Tip({
         <TooltipPrimitive.Content
           side={side}
           sideOffset={6}
-          className="z-[60] max-w-72 rounded-md bg-foreground px-2.5 py-1.5 text-[12px] leading-snug text-background shadow-lg"
+          className="z-[60] max-w-72 rounded-md bg-foreground px-2.5 py-1.5 text-[12px] leading-snug text-background shadow-lg data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:duration-150"
         >
           {content}
         </TooltipPrimitive.Content>
@@ -45,10 +46,10 @@ export function HelpTip({
       <button
         type="button"
         className={cn(
-          "inline-flex size-4 items-center justify-center rounded-full text-muted-foreground hover:text-foreground",
+          "relative inline-flex size-4 items-center justify-center rounded-full after:absolute after:-inset-2 after:content-[''] text-muted-foreground transition-colors duration-150 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2",
           className,
         )}
-        aria-label="Bu nedir?"
+        aria-label={t("common.whatIsThis")}
       >
         <CircleHelp className="size-3.5" />
       </button>

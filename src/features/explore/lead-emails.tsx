@@ -15,8 +15,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label } from "@/components/ui/input";
-import { HelpTip } from "@/components/ui/tooltip";
+import { HelpTip, Tip } from "@/components/ui/tooltip";
 import { fmtDate } from "@/lib/client/format";
 import { useAddEmail, useEmailAction } from "@/lib/client/queries";
 import type { LeadDetailResponse, LeadEmailRow } from "@/lib/client/types";
@@ -44,8 +45,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-2 border-b px-4 py-4">
-      <h3 className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <section className="um-enter mx-4 my-3 space-y-3 rounded-xl border bg-card p-4 shadow-xs">
+      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
         {title}
         {hint}
       </h3>
@@ -61,42 +62,74 @@ function EmailItem({ row, leadId }: { row: LeadEmailRow; leadId: number }) {
   const run = (action: Parameters<typeof act.mutate>[0]["action"]) =>
     act.mutate({ emailId: row.id, action }, { onError: (e: Error) => toast.error(e.message) });
   const source = safeHttpUrl(row.sourceUrl);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const remove = async () => {
+    try {
+      await act.mutateAsync({ emailId: row.id, action: "delete" });
+      toast.success(t("detail.emails.removed"));
+    } catch (e) {
+      toast.error((e as Error).message);
+      throw e;
+    }
+  };
   return (
-    <li className="space-y-1.5 rounded-lg border p-2.5">
+    <li className="space-y-2 rounded-lg border bg-background p-3 transition-colors hover:border-foreground/20">
       <div className="flex items-center gap-1.5">
-        {row.isPrimary && (
-          <Star
-            className="size-3.5 shrink-0 fill-current text-[#b88a00]"
-            aria-label={t("detail.emails.primary")}
-          />
-        )}
         <span className="min-w-0 flex-1 break-all text-[13px] font-medium">{row.email}</span>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("common.copy")}
-          onClick={() =>
-            void navigator.clipboard
-              ?.writeText(row.email)
-              .then(() => toast.success(t("common.copied")))
-          }
-        >
-          <Copy />
-        </Button>
+        {row.isPrimary && (
+          <Badge variant="warning">
+            <Star className="size-3 fill-current" aria-hidden /> {t("detail.emails.primary")}
+          </Badge>
+        )}
+        <Tip content={t("common.copy")}>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label={t("common.copy")}
+            onClick={() =>
+              void navigator.clipboard
+                ?.writeText(row.email)
+                .then(() => toast.success(t("common.copied")))
+            }
+          >
+            <Copy />
+          </Button>
+        </Tip>
+        <Tip content={t("detail.emails.remove")}>
+          <Button
+            variant="dangerGhost"
+            size="icon"
+            aria-label={t("detail.emails.remove")}
+            onClick={() => setConfirmOpen(true)}
+            disabled={act.isPending}
+          >
+            <Trash2 />
+          </Button>
+        </Tip>
       </div>
+      <ConfirmDialog
+        open={confirmOpen}
+        onOpenChange={setConfirmOpen}
+        tone="danger"
+        title={t("detail.emails.removeTitle")}
+        description={t("detail.emails.removeBody")}
+        confirmLabel={t("detail.emails.remove")}
+        onConfirm={remove}
+      />
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="outline">{t(`emailKind.${row.kind}`)}</Badge>
         <Badge
           variant={VERIFY_VARIANT[row.verifyStatus]}
           title={row.verifyReason ? t(`emailReason.${row.verifyReason}` as never) : undefined}
         >
+          {row.verifyStatus === "verified" && <ShieldCheck className="size-3" aria-hidden />}
           {t(`emailVerify.${row.verifyStatus}`)}
           {row.verifyReason && row.verifyStatus !== "verified"
             ? ` · ${t(`emailReason.${row.verifyReason}` as never)}`
             : ""}
         </Badge>
         {!row.siteMatch && <Badge variant="warning">{t("detail.emails.otherDomain")}</Badge>}
-        <span className="text-[11px] text-muted-foreground">
+        <span className="text-xs text-muted-foreground">
           {t(`emailSource.${row.sourceType}`)} · {fmtDate(row.foundAt)}
         </span>
       </div>
@@ -109,31 +142,46 @@ function EmailItem({ row, leadId }: { row: LeadEmailRow; leadId: number }) {
           </Button>
         )}
         {!row.isPrimary && row.verifyStatus !== "invalid" && (
-          <Button variant="ghost" size="sm" onClick={() => run("primary")} disabled={act.isPending}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => run("primary")}
+            disabled={act.isPending}
+            loading={act.isPending && act.variables?.action === "primary"}
+          >
             <Star /> {t("detail.emails.makePrimary")}
-          </Button>
-        )}
-        <Button variant="ghost" size="sm" onClick={() => run("reverify")} disabled={act.isPending}>
-          <RefreshCw /> {t("detail.emails.reverify")}
-        </Button>
-        {row.verifyStatus === "invalid" ? (
-          <Button variant="ghost" size="sm" onClick={() => run("valid")} disabled={act.isPending}>
-            <ShieldCheck /> {t("detail.emails.markValid")}
-          </Button>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={() => run("invalid")} disabled={act.isPending}>
-            <ShieldX /> {t("detail.emails.markInvalid")}
           </Button>
         )}
         <Button
           variant="ghost"
-          size="icon"
-          aria-label={t("detail.emails.remove")}
-          onClick={() => run("delete")}
+          size="sm"
+          onClick={() => run("reverify")}
           disabled={act.isPending}
+          loading={act.isPending && act.variables?.action === "reverify"}
         >
-          <Trash2 />
+          <RefreshCw /> {t("detail.emails.reverify")}
         </Button>
+        {row.verifyStatus === "invalid" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => run("valid")}
+            disabled={act.isPending}
+            loading={act.isPending && act.variables?.action === "valid"}
+          >
+            <ShieldCheck /> {t("detail.emails.markValid")}
+          </Button>
+        ) : (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => run("invalid")}
+            disabled={act.isPending}
+            loading={act.isPending && act.variables?.action === "invalid"}
+          >
+            <ShieldX /> {t("detail.emails.markInvalid")}
+          </Button>
+        )}
       </div>
     </li>
   );
@@ -145,9 +193,15 @@ export function LeadEmails({ data }: { data: LeadDetailResponse }) {
   const { lead, emails, contacts, enrichment, duplicates, google } = data;
   const add = useAddEmail(lead.id);
   const [value, setValue] = useState("");
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = () => {
     const v = value.trim();
     if (!v) return;
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+      setFieldError(t("detail.emails.invalidFormat"));
+      return;
+    }
+    setFieldError(null);
     add.mutate(v, {
       onSuccess: () => {
         setValue("");
@@ -189,7 +243,9 @@ export function LeadEmails({ data }: { data: LeadDetailResponse }) {
         )}
 
         {emails.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t("detail.emails.none")}</p>
+          <p className="rounded-lg border border-dashed px-3 py-4 text-center text-[13px] text-muted-foreground">
+            {t("detail.emails.none")}
+          </p>
         ) : (
           <ul className="space-y-2">
             {emails.map((e) => (
@@ -203,6 +259,7 @@ export function LeadEmails({ data }: { data: LeadDetailResponse }) {
             target={{ leadIds: [lead.id] }}
             label={settled ? t("detail.emails.again") : t("detail.emails.find")}
             initialForce={settled}
+            variant={emails.length === 0 && !busy && google ? "default" : "outline"}
           />
         </div>
 
@@ -213,8 +270,13 @@ export function LeadEmails({ data }: { data: LeadDetailResponse }) {
               id="add-email"
               type="email"
               value={value}
+              aria-invalid={fieldError ? true : undefined}
+              aria-describedby={fieldError ? "add-email-error" : undefined}
               placeholder={t("detail.emails.addPlaceholder")}
-              onChange={(e) => setValue(e.target.value)}
+              onChange={(e) => {
+                setValue(e.target.value);
+                if (fieldError) setFieldError(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
                   e.preventDefault();
@@ -223,10 +285,17 @@ export function LeadEmails({ data }: { data: LeadDetailResponse }) {
               }}
               maxLength={254}
             />
-            <Button variant="outline" onClick={submit} disabled={add.isPending || !value.trim()}>
-              {add.isPending && <Loader2 className="animate-spin" />} {t("detail.emails.add")}
+            <Button onClick={submit} loading={add.isPending} disabled={!value.trim()}>
+              {t("detail.emails.add")}
             </Button>
           </div>
+          <p
+            id="add-email-error"
+            role={fieldError ? "alert" : undefined}
+            className={`min-h-4 text-[12px] ${fieldError ? "text-destructive" : "text-muted-foreground"}`}
+          >
+            {fieldError ?? t("detail.emails.addHint")}
+          </p>
         </div>
       </Section>
 

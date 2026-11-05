@@ -1,9 +1,10 @@
 "use client";
 
-import { Loader2, Send } from "lucide-react";
+import { CheckCircle2, Send } from "lucide-react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,6 +35,7 @@ export function AddToCampaignButton({
   total: number;
 }) {
   const sp = useSearchParams();
+  const router = useRouter();
   const preset = Number(sp.get("campaign")) || null;
   const [open, setOpen] = useState(false);
   const [campaignId, setCampaignId] = useState<number | null>(preset);
@@ -46,7 +48,16 @@ export function AddToCampaignButton({
   }, [preset]);
 
   const add = useSafeMutation(() => campaignApi.addLeads(campaignId!, { filterQuery }), {
-    onSuccess: (r) => setResult(r),
+    onSuccess: (r) => {
+      setResult(r);
+      const target = campaignId;
+      toast.success(t("addToCampaign.toast", { added: fmtNumber(r.added) }), {
+        action: {
+          label: t("addToCampaign.open"),
+          onClick: () => router.push(`/campaigns/${target}/edit?step=leads`),
+        },
+      });
+    },
   });
 
   const reasons = new Map<string, number>();
@@ -77,13 +88,16 @@ export function AddToCampaignButton({
             </DialogDescription>
           </DialogHeader>
           {result ? (
-            <div className="space-y-2 text-[13px]">
-              <p>
-                {t("addToCampaign.result", {
-                  added: fmtNumber(result.added),
-                  excluded: fmtNumber(result.excluded.length),
-                  duplicates: fmtNumber(result.duplicates.length),
-                })}
+            <div className="um-enter space-y-2 text-[13px]">
+              <p className="flex items-start gap-2 font-medium">
+                <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
+                <span>
+                  {t("addToCampaign.result", {
+                    added: fmtNumber(result.added),
+                    excluded: fmtNumber(result.excluded.length),
+                    duplicates: fmtNumber(result.duplicates.length),
+                  })}
+                </span>
               </p>
               {reasons.size > 0 && (
                 <ul className="space-y-0.5">
@@ -113,12 +127,15 @@ export function AddToCampaignButton({
                   </option>
                 ))}
               </Select>
+              {!campaignId && (
+                <p className="text-[12px] text-muted-foreground">{t("addToCampaign.pick")}</p>
+              )}
             </div>
           )}
           <DialogFooter>
             {result ? (
               <>
-                <Button variant="ghost" onClick={() => setOpen(false)}>
+                <Button variant="outline" onClick={() => setOpen(false)}>
                   {t("common.close")}
                 </Button>
                 <Button asChild>
@@ -129,14 +146,14 @@ export function AddToCampaignButton({
               </>
             ) : (
               <>
-                <Button variant="ghost" onClick={() => setOpen(false)}>
+                <Button variant="outline" onClick={() => setOpen(false)} disabled={add.isPending}>
                   {t("common.cancel")}
                 </Button>
                 <Button
                   onClick={() => add.mutate(undefined)}
-                  disabled={!campaignId || add.isPending || total === 0}
+                  disabled={!campaignId || total === 0}
+                  loading={add.isPending}
                 >
-                  {add.isPending && <Loader2 className="animate-spin" />}{" "}
                   {t("addToCampaign.confirm")}
                 </Button>
               </>

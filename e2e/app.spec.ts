@@ -95,7 +95,7 @@ test("liste, harita ve ayrıntı: yakında açılacak işletmeler mor, seçim se
   await expect(page.getByText(/Açılış:/).first()).toBeVisible();
   await expect(page.getByText("Şematik demo görünümü")).toBeVisible();
 
-  await page.locator("button[aria-current]").first().click();
+  await page.locator("button[data-lead-row]").first().click();
   await expect(page.getByRole("heading", { name: "Neden bu skor?" })).toBeVisible();
   await expect(page.getByText("+100")).toBeVisible();
   await page.keyboard.press("Escape");
@@ -171,14 +171,14 @@ test("e-posta bulma: ayrıntıdan başlat (Google verisi + site taraması), elle
 
   // 1) Ayrıntı: henüz aranmamış; önizleme Google verisi gerektiğini söyler
   await page.goto("/");
-  await page.locator("button[aria-current]").first().click();
+  await page.locator("button[data-lead-row]").first().click();
   await expect(page.getByRole("heading", { name: "E-postalar" })).toBeVisible();
   await expect(page.getByText("Henüz aranmadı")).toBeVisible();
   await page.getByRole("button", { name: "E-posta bul" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "E-postaları bul" })).toBeVisible();
   await expect(dialog.getByText("Google verisi gerekli")).toBeVisible();
-  await dialog.getByLabel(/Web sitesi adresi olmayanlar için Google verisini/).click();
+  await dialog.getByLabel(/Web sitesi bilinmeyen işletmelerin sitesini de Google/).click();
   await expect(dialog.getByText("Aranacak")).toBeVisible();
   await dialog.getByRole("button", { name: "Aramayı başlat" }).click();
   await expect(page.getByText("E-posta araması kuyruğa alındı.")).toBeVisible();
@@ -190,12 +190,16 @@ test("e-posta bulma: ayrıntıdan başlat (Google verisi + site taraması), elle
 
   // 3) Elle ekleme (doğrulanır, kaynak 'elle eklendi'), kopyalama ve silme
   await page.goto("/");
-  await page.locator("button[aria-current]").first().click();
+  await page.locator("button[data-lead-row]").first().click();
   await page.getByLabel("E-posta adresi ekle").fill("satis@e2e-test.example");
   await page.getByRole("button", { name: "Ekle", exact: true }).click();
   await expect(page.getByText("satis@e2e-test.example")).toBeVisible();
   await expect(page.getByText(/elle eklendi/)).toBeVisible();
   await page.getByRole("button", { name: "Sil", exact: true }).first().click();
+  // Silme geri alınamaz: kırmızı onay penceresi açılır (varsayılan odak "Vazgeç"te).
+  const confirm = page.getByRole("alertdialog").or(page.getByRole("dialog"));
+  await expect(confirm.getByText("Bu e-posta adresi silinsin mi?")).toBeVisible();
+  await confirm.getByRole("button", { name: "Sil", exact: true }).click();
   await expect(page.getByText("satis@e2e-test.example")).toBeHidden();
   await page.keyboard.press("Escape");
 
@@ -276,9 +280,9 @@ test("Google verisi silinince (yeniden açılış) liste adsız gelir; kalıcı 
   await expect(page.getByText(/yüklü değil\. Bu veriler uygulama kapanınca silinir/)).toBeVisible();
 
   // Ayrıntıda da uyarı ve yükleme düğmesi görünür
-  await page.locator("button[aria-current]").first().click();
+  await page.locator("button[data-lead-row]").first().click();
   await expect(
-    page.getByText(/ad, adres, web sitesi ve telefon bilgileri uygulama kapandığında/),
+    page.getByText(/Google'ın kuralları gereği uygulama kapanınca silinir/),
   ).toBeVisible();
   await page.keyboard.press("Escape");
 

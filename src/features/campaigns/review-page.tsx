@@ -1,8 +1,10 @@
 "use client";
 
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/misc";
+import { EmptyState, PageHeader } from "@/components/ui/page";
 import { useReview } from "@/lib/client/campaigns";
 import { fmtDateTime } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
@@ -16,35 +18,38 @@ import { LoadError, Notice } from "./parts";
 export function ReviewPage() {
   const q = useReview();
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="um-scroll min-h-0 flex-1">
       <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
         <Link
           href="/campaigns"
-          className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" /> {t("campaigns.title")}
         </Link>
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{t("review.title")}</h1>
-          <p className="mt-1 text-[13px] text-muted-foreground">{t("review.subtitle")}</p>
-        </div>
+        <PageHeader title={t("review.title")} description={t("review.subtitle")} />
         <Notice tone="warning">{t("review.noResend")}</Notice>
         {q.isLoading ? (
-          <Skeleton className="h-24" />
+          <div className="space-y-2" aria-busy>
+            <Skeleton className="h-16" />
+            <Skeleton className="h-16" />
+          </div>
         ) : q.isError ? (
           <LoadError error={q.error} onRetry={() => void q.refetch()} />
         ) : !q.data || q.data.length === 0 ? (
-          <p className="rounded-xl border border-dashed bg-card p-10 text-center text-[13px] text-muted-foreground">
-            {t("review.empty")}
-          </p>
+          <EmptyState
+            className="rounded-xl border border-dashed bg-card p-10"
+            icon={CheckCircle2}
+            title={t("review.empty")}
+          />
         ) : (
-          <ul className="divide-y rounded-lg border bg-card" aria-label={t("review.title")}>
+          <ul
+            className="um-enter divide-y rounded-lg border bg-card"
+            aria-label={t("review.title")}
+          >
             {q.data.map((r) => (
               <li key={r.messageId} className="space-y-1 p-3 text-[13px]">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded bg-nov-likely/16 px-1.5 text-[11px] font-medium text-[#8a6700]">
-                    {t(`messageStatus.${r.status}`)}
-                  </span>
+                  <Badge variant="warning">{t(`messageStatus.${r.status}`)}</Badge>
                   <span className="font-medium">{r.recipientMasked ?? r.peerDomain}</span>
                   {r.stepIndex !== null && (
                     <span className="text-muted-foreground">

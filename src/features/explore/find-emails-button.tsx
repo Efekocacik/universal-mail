@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/misc";
 import { api, ApiError } from "@/lib/client/api";
 import { fmtNumber, fmtUsd } from "@/lib/client/format";
 import { qk } from "@/lib/client/queries";
@@ -90,12 +91,15 @@ export function FindEmailsButton({
             <DialogDescription>{t("findEmails.body")}</DialogDescription>
           </DialogHeader>
           {!p ? (
-            <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> {t("common.loading")}
-            </p>
+            <div className="space-y-3" role="status" aria-live="polite">
+              <Skeleton className="h-[148px] w-full" />
+              <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> {t("common.loading")}
+              </p>
+            </div>
           ) : (
-            <div className="space-y-3">
-              <dl className="rounded-lg bg-muted p-3 text-[13px]">
+            <div className="um-enter space-y-3">
+              <dl className="divide-y rounded-lg border bg-muted/50 px-3 py-1 text-[13px]">
                 <Row label={t("findEmails.leads")}>{fmtNumber(p.leads)}</Row>
                 <Row label={t("findEmails.ready")}>{fmtNumber(p.ready)}</Row>
                 {p.needsGoogle > 0 && (
@@ -115,37 +119,59 @@ export function FindEmailsButton({
                 </Row>
               </dl>
               {p.needsGoogle > 0 && (
-                <Option checked={loadGoogle} onChange={setLoadGoogle} id="fe-google">
+                <Option
+                  checked={loadGoogle}
+                  onChange={setLoadGoogle}
+                  id="fe-google"
+                  help={t("findEmails.loadGoogle.help")}
+                >
                   {t("findEmails.loadGoogle", {
                     cost: fmtUsd(p.google.estimatedCostUsd),
                   })}
                 </Option>
               )}
               {p.external.available && (
-                <Option checked={useExternal} onChange={setUseExternal} id="fe-external">
+                <Option
+                  checked={useExternal}
+                  onChange={setUseExternal}
+                  id="fe-external"
+                  help={t("findEmails.useExternal.help")}
+                >
                   {t("findEmails.useExternal")}
                 </Option>
               )}
               {(p.alreadyDone > 0 || force) && (
-                <Option checked={force} onChange={setForce} id="fe-force">
+                <Option
+                  checked={force}
+                  onChange={setForce}
+                  id="fe-force"
+                  help={t("findEmails.force.help")}
+                >
                   {t("findEmails.force")}
                 </Option>
               )}
             </div>
           )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={start.isPending}>
               {t("common.cancel")}
             </Button>
             <Button
+              variant="success"
               onClick={() => start.mutate()}
-              disabled={!p || p.willSearch === 0 || start.isPending}
+              loading={start.isPending}
+              disabled={!p || p.willSearch === 0}
             >
-              {start.isPending && <Loader2 className="animate-spin" />} {t("findEmails.start")}
+              {t("findEmails.start")}
             </Button>
           </DialogFooter>
           {p && p.willSearch === 0 && (
             <p className="text-[12px] text-muted-foreground">{t("findEmails.nothing")}</p>
+          )}
+          {p && loadGoogle && p.needsGoogle > 0 && (
+            <p className="tabular text-[12px] font-medium">
+              {t("findEmails.cost", { cost: fmtUsd(p.google.estimatedCostUsd) })}
+            </p>
           )}
         </DialogContent>
       </Dialog>
@@ -155,7 +181,7 @@ export function FindEmailsButton({
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[170px_1fr] gap-2 py-1">
+    <div className="grid grid-cols-[170px_1fr] gap-2 py-1.5">
       <dt className="text-muted-foreground">{label}</dt>
       <dd>{children}</dd>
     </div>
@@ -167,11 +193,13 @@ function Option({
   checked,
   onChange,
   children,
+  help,
 }: {
   id: string;
   checked: boolean;
   onChange: (v: boolean) => void;
   children: React.ReactNode;
+  help?: string;
 }) {
   return (
     <div className="flex items-start gap-2 text-[13px]">
@@ -181,9 +209,12 @@ function Option({
         onCheckedChange={(v) => onChange(v === true)}
         className="mt-0.5"
       />
-      <label htmlFor={id} className="leading-snug">
-        {children}
-      </label>
+      <div>
+        <label htmlFor={id} className="cursor-pointer leading-snug">
+          {children}
+        </label>
+        {help && <p className="mt-0.5 text-[12px] text-muted-foreground">{help}</p>}
+      </div>
     </div>
   );
 }

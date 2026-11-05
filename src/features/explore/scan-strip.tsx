@@ -32,9 +32,9 @@ export function ScanStrip() {
   const running = scan.status === "running" || scan.status === "queued";
 
   return (
-    <div className="space-y-2 border-b bg-accent/50 px-4 py-3" role="status">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-[13px] font-medium">
+    <div className="um-enter space-y-2 border-b bg-accent/50 px-4 py-3" role="status">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="min-w-0 text-[13px] font-medium">
           {running
             ? t("strip.running", { id: scan.id })
             : scan.status === "budget_stopped"
@@ -46,29 +46,32 @@ export function ScanStrip() {
             <Button
               size="sm"
               variant="outline"
-              className="h-7"
               onClick={() => control.mutate({ id: scan.id, action: "pause" })}
+              loading={control.isPending}
             >
               <Pause /> {t("scans.pause")}
             </Button>
           ) : scan.status === "budget_stopped" ? (
-            <Button size="sm" variant="outline" className="h-7" asChild>
+            <Button size="sm" variant="outline" asChild>
               <Link href="/settings#budget">{t("strip.raiseBudget")}</Link>
             </Button>
           ) : null}
           {scan.status === "paused" && (
             <Button
               size="sm"
-              className="h-7"
               onClick={() => control.mutate({ id: scan.id, action: "resume" })}
-              disabled={control.isPending}
+              loading={control.isPending}
             >
               <Play /> {t("scans.resume")}
             </Button>
           )}
         </div>
       </div>
-      <Progress value={running ? Math.max(pct, 2) : pct} tone={running ? "primary" : "warning"} />
+      <Progress
+        value={running ? Math.max(pct, 2) : pct}
+        tone={running ? "primary" : "warning"}
+        label={t("scans.units")}
+      />
       <p className="tabular text-[12px] text-muted-foreground">
         {t("strip.stats", {
           found: fmtNumber(p.placesFound ?? 0),

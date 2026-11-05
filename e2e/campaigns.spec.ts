@@ -110,7 +110,7 @@ test("sihirbaz: temel ayarlar ve ilk e-posta adımı", async () => {
 });
 
 test("Keşif'ten kampanyaya lead ekleme; gerekçeler ve maskeli kuyruk", async () => {
-  await page.getByRole("link", { name: "Keşif'ten lead ekle" }).click();
+  await page.getByRole("link", { name: "Keşif'ten işletme ekle" }).click();
   await expect(page).toHaveURL(new RegExp(`\\?campaign=${campaignId}$`));
   await page.getByRole("button", { name: "Kampanyaya ekle" }).click();
   const dialog = page.getByRole("dialog");
@@ -136,6 +136,10 @@ test("başlatma öncesi özet: onay vermeden Başlat kapalı; başlat, duraklat,
   await page.getByRole("checkbox", { name: /Özeti ve önizlemeleri inceledim/ }).click();
   await expect(start).toBeEnabled();
   await start.click();
+  // Başlatma yeşil onay penceresinden geçer: kime, hangi saatlerde, günde en fazla kaç e-posta gideceği özetlenir.
+  const startDialog = page.getByRole("dialog", { name: "Kampanya başlatılsın mı?" });
+  await expect(startDialog).toContainText("günlük en fazla");
+  await startDialog.getByRole("button", { name: "Başlat", exact: true }).click();
   await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}$`));
   await expect(page.getByText("Çalışıyor", { exact: true }).first()).toBeVisible();
 
@@ -156,7 +160,7 @@ test("gönderim günlüğü ve inceleme ekranı salt okunur; tam adres yok", asy
   await expect(page.getByText(/info@kampanya-e2e/)).toHaveCount(0);
   await page.goto("/campaigns/review");
   await expect(page.getByRole("heading", { name: "İnceleme bekleyenler" })).toBeVisible();
-  await expect(page.getByText(/otomatik olarak yeniden gönderilmezler/)).toBeVisible();
+  await expect(page.getByText(/otomatik yeniden gönderilmez/)).toBeVisible();
   await expect(page.getByRole("button", { name: /yeniden gönder/i })).toHaveCount(0);
 });
 

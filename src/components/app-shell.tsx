@@ -22,9 +22,10 @@ export const NAV_ITEMS = [
 
 function BudgetPill() {
   const { data } = useStatus();
-  if (!data) return <div className="h-8 w-24 animate-pulse rounded-full bg-muted sm:w-36" />;
+  if (!data) return <div className="h-8 w-24 animate-pulse rounded-full bg-muted sm:w-40" />;
   const b = data.budget;
   const tone = b.level === "blocked" ? "danger" : b.level === "warning" ? "warning" : "primary";
+  const text = t("budget.pill", { spent: fmtUsd(b.spentUsd), limit: fmtUsd(b.monthlyUsd) });
   return (
     <Tip
       content={
@@ -39,15 +40,21 @@ function BudgetPill() {
     >
       <Link
         href="/settings#budget"
-        className="flex h-8 items-center gap-2.5 rounded-full border bg-card px-3 text-[12px] hover:bg-accent"
-        aria-label={t("budget.label")}
+        className={cn(
+          "flex h-8 items-center gap-2.5 rounded-full border bg-card px-3 text-[12px] transition-colors duration-150 hover:bg-accent",
+          tone === "warning" && "border-nov-likely/60 bg-nov-likely/10",
+          tone === "danger" && "border-destructive/50 bg-destructive/10",
+        )}
+        aria-label={text}
       >
-        <span className="hidden text-muted-foreground sm:inline">{t("budget.label")}</span>
         <span className="tabular font-semibold">
-          {fmtUsd(b.spentUsd)}{" "}
-          <span className="font-normal text-muted-foreground">/ {fmtUsd(b.monthlyUsd)}</span>
+          <span className="hidden sm:inline">{text}</span>
+          <span className="sm:hidden">
+            {fmtUsd(b.spentUsd)}
+            <span className="font-normal text-muted-foreground"> / {fmtUsd(b.monthlyUsd)}</span>
+          </span>
         </span>
-        <Progress value={b.pct} tone={tone} className="hidden w-12 sm:block" />
+        <Progress value={b.pct} tone={tone} label={text} className="hidden w-12 sm:block" />
       </Link>
     </Tip>
   );
@@ -58,7 +65,7 @@ function ProviderBadge() {
   if (data?.provider !== "mock") return null;
   return (
     <Tip content={t("provider.demo.tip")}>
-      <Badge variant="future" className="cursor-help">
+      <Badge variant="future" className="cursor-help" tabIndex={0}>
         {t("provider.demo")}
       </Badge>
     </Tip>
@@ -70,31 +77,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <TooltipProvider>
       <div className="flex h-dvh flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-4">
-          <Link href="/" className="flex items-center gap-2 font-semibold tracking-tight">
-            <span className="flex size-6 items-center justify-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground">
+        <a
+          href="#icerik"
+          className="sr-only z-[70] rounded-md bg-card px-3 py-2 text-sm font-medium shadow-lg focus:not-sr-only focus:fixed focus:left-3 focus:top-3"
+        >
+          {t("a11y.skip")}
+        </a>
+        <header className="relative z-30 flex h-12 shrink-0 items-center gap-3 border-b bg-card/90 px-4 shadow-[0_1px_8px_rgb(0_0_0/0.04)] backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-4">
+          <Link
+            href="/"
+            className="flex items-center gap-2 rounded-md font-semibold tracking-tight"
+            aria-label="Universal Mail"
+          >
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-[13px] font-bold text-primary-foreground shadow-sm">
               U
             </span>
-            <span className="hidden sm:inline">Universal Mail</span>
+            <span className="hidden lg:inline">Universal Mail</span>
           </Link>
           <nav className="flex items-center gap-1" aria-label={t("nav.label")}>
             {NAV_ITEMS.map(({ href, key, icon: Icon }) => {
               const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
               return (
-                <Link
-                  key={href}
-                  href={href}
-                  aria-current={active ? "page" : undefined}
-                  className={cn(
-                    "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium transition-colors",
-                    active
-                      ? "bg-accent text-accent-foreground"
-                      : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="size-4" />
-                  <span className="hidden md:inline">{t(key)}</span>
-                </Link>
+                <Tip key={href} content={t(key)} side="bottom">
+                  <Link
+                    href={href}
+                    aria-current={active ? "page" : undefined}
+                    aria-label={t(key)}
+                    className={cn(
+                      "relative flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium transition-colors duration-150",
+                      active
+                        ? "bg-accent text-accent-foreground after:absolute after:inset-x-2.5 after:-bottom-[9px] after:h-0.5 after:rounded-full after:bg-primary"
+                        : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+                    )}
+                  >
+                    <Icon className="size-4" aria-hidden />
+                    <span className="hidden md:inline">{t(key)}</span>
+                  </Link>
+                </Tip>
               );
             })}
           </nav>
@@ -103,8 +122,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <BudgetPill />
           </div>
         </header>
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-        <Toaster position="bottom-right" richColors closeButton />
+        <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+          {children}
+        </main>
+        <Toaster position="bottom-right" richColors closeButton duration={8000} />
       </div>
     </TooltipProvider>
   );

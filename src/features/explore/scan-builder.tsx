@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Check,
   CircleAlert,
   Loader2,
   MapPinned,
@@ -17,16 +18,9 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select } from "@/components/ui/input";
-import { Progress } from "@/components/ui/misc";
+import { Progress, Skeleton } from "@/components/ui/misc";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { HelpTip } from "@/components/ui/tooltip";
@@ -45,6 +39,26 @@ interface EstimateResponse {
   exceedsBudget: boolean;
   country: { countryCode: string | null; blocked: boolean; message?: string };
   disclaimer: string;
+}
+
+function StepHeader({ n, title, done }: { n: number; title: string; done: boolean }) {
+  return (
+    <h3 className="flex items-center gap-2.5 text-sm font-semibold">
+      <span
+        className={cn(
+          "flex size-6 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold transition-colors duration-150",
+          done ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground",
+        )}
+      >
+        {done ? <Check className="size-3.5" aria-hidden /> : n}
+        {done && <span className="sr-only">{t("builder.stepDone")}</span>}
+      </span>
+      <span>
+        <span className="sr-only">{n}. </span>
+        {title}
+      </span>
+    </h3>
+  );
 }
 
 export function ScanBuilder() {
@@ -177,10 +191,23 @@ export function ScanBuilder() {
   const est = estimate.data;
   const planError = estimate.error instanceof ApiError ? estimate.error.message : null;
   const canStart = !!request && !!est && !est.country.blocked && !planError && !start.isPending;
+  const regionDone = !!draft;
+  const catsDone = selectedCats.length > 0 || keywords.length > 0;
+  const inFree = !!est && est.estimate.costUsd.expected === 0;
+  const blockedMsg = est?.country.blocked ? est.country.message : null;
+  const startReason = canStart
+    ? null
+    : !regionDone
+      ? t("builder.need.region")
+      : !catsDone
+        ? t("builder.need.cats")
+        : planError || blockedMsg
+          ? t("builder.need.fix")
+          : t("builder.need.estimate");
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <div className="space-y-5 p-4">
+    <div className="um-scroll flex min-h-0 flex-1 flex-col">
+      <div className="um-enter space-y-6 p-4">
         <div>
           <h2 className="text-base font-semibold">{t("builder.title")}</h2>
           <p className="mt-0.5 text-[13px] text-muted-foreground">{t("builder.subtitle")}</p>
@@ -188,14 +215,13 @@ export function ScanBuilder() {
 
         {/* 1. Bölge */}
         <section className="space-y-3">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("builder.region")}
-          </h3>
+          <StepHeader n={1} title={t("builder.step1")} done={regionDone} />
           <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
             {(["city", "draw"] as const).map((m) => (
               <button
                 key={m}
                 type="button"
+                aria-pressed={mode === m}
                 onClick={() => switchMode(m)}
                 className={cn(
                   "flex h-8 items-center justify-center gap-1.5 rounded-md text-[13px] font-medium transition-colors",
@@ -302,14 +328,18 @@ export function ScanBuilder() {
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <Button
-                  variant={ex.drawMode === "rect" ? "default" : "outline"}
+                  variant="outline"
+                  aria-pressed={ex.drawMode === "rect"}
+                  className={ex.drawMode === "rect" ? "border-primary bg-accent" : undefined}
                   size="sm"
                   onClick={() => ex.setDrawMode(ex.drawMode === "rect" ? null : "rect")}
                 >
                   <Square /> {t("builder.draw.rect")}
                 </Button>
                 <Button
-                  variant={ex.drawMode === "circle" ? "default" : "outline"}
+                  variant="outline"
+                  aria-pressed={ex.drawMode === "circle"}
+                  className={ex.drawMode === "circle" ? "border-primary bg-accent" : undefined}
                   size="sm"
                   onClick={() => ex.setDrawMode(ex.drawMode === "circle" ? null : "circle")}
                 >
@@ -344,15 +374,13 @@ export function ScanBuilder() {
 
         {/* 2. Kategoriler */}
         <section className="space-y-2">
-          <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
-            {t("builder.categories")}
-          </h3>
+          <StepHeader n={2} title={t("builder.step2")} done={catsDone} />
           <ul className="space-y-0.5">
             {(categories ?? []).map((c) => {
               const on = selectedCats.includes(c.id);
               return (
                 <li key={c.id}>
-                  <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent/60">
+                  <label className="flex min-h-9 cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-accent/60">
                     <Checkbox checked={on} onCheckedChange={(v) => toggleCat(c.id, v === true)} />
                     <span className="flex-1">{c.name}</span>
                     <span className="tabular text-[12px] text-muted-foreground">
@@ -431,24 +459,65 @@ export function ScanBuilder() {
 
         {/* 4. Tahmin */}
         <section aria-live="polite" className="space-y-3 rounded-xl border bg-card p-4 shadow-xs">
-          <h3 className="flex items-center gap-1.5 text-sm font-semibold">
-            {t("builder.estimate")} <HelpTip>{t("builder.estimate.help")}</HelpTip>
-          </h3>
+          <div className="flex items-center gap-1.5">
+            <StepHeader n={3} title={t("builder.step3")} done={canStart} />
+            <HelpTip>{t("builder.estimate.help")}</HelpTip>
+          </div>
           {!request && (
             <p className="text-[13px] text-muted-foreground">{t("builder.estimate.empty")}</p>
           )}
           {request && estimate.isLoading && (
-            <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> {t("common.loading")}
-            </p>
+            <div className="space-y-2" aria-busy="true">
+              <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> {t("common.loading")}
+              </p>
+              <Skeleton className="h-16" />
+            </div>
           )}
           {planError && (
-            <p className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-              <CircleAlert className="mt-0.5 size-4 shrink-0" /> {planError}
-            </p>
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
+            >
+              <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+              <span>{planError}</span>
+            </div>
+          )}
+          {estimate.isError && !planError && (
+            <div
+              role="alert"
+              className="space-y-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
+            >
+              <p>{t("builder.estimate.fail")}</p>
+              <Button size="sm" variant="outline" onClick={() => void estimate.refetch()}>
+                {t("builder.estimate.retry")}
+              </Button>
+            </div>
           )}
           {est && (
             <>
+              <div
+                className={cn(
+                  "flex items-start gap-2 rounded-md px-3 py-2 text-[13px]",
+                  inFree ? "bg-success/10 text-success" : "bg-muted text-foreground",
+                )}
+              >
+                {inFree ? (
+                  <Check className="mt-0.5 size-4 shrink-0" aria-hidden />
+                ) : (
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+                )}
+                <div>
+                  <p className="font-medium">
+                    {inFree
+                      ? t("builder.estimate.inFree")
+                      : t("builder.estimate.paid", { v: fmtUsd(est.estimate.costUsd.expected) })}
+                  </p>
+                  <p className={inFree ? "text-[12px]" : "text-[12px] text-muted-foreground"}>
+                    {inFree ? t("builder.estimate.inFree.body") : t("builder.estimate.plain")}
+                  </p>
+                </div>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <p className="text-[12px] text-muted-foreground">{t("builder.estimate.calls")}</p>
@@ -491,6 +560,7 @@ export function ScanBuilder() {
                 </div>
               </dl>
               <Progress
+                label={t("builder.estimate.budget")}
                 value={
                   est.budget.monthlyUsd > 0
                     ? (est.budget.spentUsd / est.budget.monthlyUsd) * 100
@@ -510,8 +580,12 @@ export function ScanBuilder() {
                 </p>
               ))}
               {est.country.blocked && (
-                <p className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-                  <CircleAlert className="mt-0.5 size-4 shrink-0" /> {est.country.message}
+                <p
+                  role="alert"
+                  className="flex items-start gap-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
+                >
+                  <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />{" "}
+                  {est.country.message}
                 </p>
               )}
               <p className="text-[11px] leading-snug text-muted-foreground">{est.disclaimer}</p>
@@ -521,27 +595,35 @@ export function ScanBuilder() {
             className="w-full"
             size="lg"
             disabled={!canStart}
+            loading={start.isPending}
+            aria-describedby="b-start-help"
             onClick={() => start.mutate(false)}
           >
-            {start.isPending ? <Loader2 className="animate-spin" /> : <Play />} {t("builder.start")}
+            {!start.isPending && <Play />} {t("builder.start")}
           </Button>
+          <p
+            id="b-start-help"
+            className={cn(
+              "text-center text-[12px]",
+              startReason ? "text-muted-foreground" : "text-success",
+            )}
+          >
+            {startReason ?? t("builder.ready")}
+          </p>
         </section>
       </div>
 
-      <Dialog open={ack !== null} onOpenChange={(o) => !o && setAck(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("builder.ack.title")}</DialogTitle>
-            <DialogDescription>{ack}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setAck(null)}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={() => start.mutate(true)}>{t("builder.ack.confirm")}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={ack !== null}
+        onOpenChange={(o) => !o && setAck(null)}
+        tone="warning"
+        title={t("builder.ack.title")}
+        description={ack}
+        confirmLabel={t("builder.ack.confirm")}
+        onConfirm={async () => {
+          await start.mutateAsync(true);
+        }}
+      />
     </div>
   );
 }

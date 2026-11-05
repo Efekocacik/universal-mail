@@ -14,6 +14,7 @@ import { ExploreProvider, useExplore } from "./state";
 
 const MIN_W = 340;
 const MAX_W = 760;
+const TABS = ["list", "scan"] as const;
 const STORAGE_KEY = "um.explore.panelWidth";
 
 function useMediaQuery(query: string): boolean {
@@ -84,18 +85,33 @@ function LeftPanel() {
         role="tablist"
         aria-label={t("explore.panel")}
       >
-        {(["list", "scan"] as const).map((tab) => (
+        {TABS.map((tab) => (
           <button
             key={tab}
+            id={`explore-tab-${tab}`}
             role="tab"
             type="button"
             aria-selected={ex.tab === tab}
+            aria-controls="explore-tabpanel"
+            tabIndex={ex.tab === tab ? 0 : -1}
+            onKeyDown={(e) => {
+              const i = TABS.indexOf(tab);
+              let next = -1;
+              if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
+              else if (e.key === "ArrowLeft") next = (i - 1 + TABS.length) % TABS.length;
+              else if (e.key === "Home") next = 0;
+              else if (e.key === "End") next = TABS.length - 1;
+              if (next < 0) return;
+              e.preventDefault();
+              ex.setTab(TABS[next]!);
+              document.getElementById(`explore-tab-${TABS[next]}`)?.focus();
+            }}
             onClick={() => ex.setTab(tab)}
             className={cn(
-              "relative -mb-px rounded-t-md px-3 py-2 text-[13px] font-medium transition-colors",
+              "relative -mb-px min-h-10 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium transition-colors duration-150",
               ex.tab === tab
-                ? "border-b-2 border-primary text-foreground"
-                : "text-muted-foreground hover:text-foreground",
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
             )}
           >
             {t(`explore.tab.${tab}`)}
@@ -103,16 +119,23 @@ function LeftPanel() {
         ))}
       </div>
       <ScanStrip />
-      {ex.tab === "scan" ? (
-        <ScanBuilder />
-      ) : showDetail ? (
-        <LeadDetail id={ex.selectedId!} />
-      ) : (
-        <>
-          <LeadFilters />
-          <LeadList />
-        </>
-      )}
+      <div
+        id="explore-tabpanel"
+        role="tabpanel"
+        aria-labelledby={`explore-tab-${ex.tab}`}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        {ex.tab === "scan" ? (
+          <ScanBuilder />
+        ) : showDetail ? (
+          <LeadDetail id={ex.selectedId!} />
+        ) : (
+          <>
+            <LeadFilters />
+            <LeadList />
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -131,10 +154,13 @@ function Layout() {
             <button
               key={p}
               type="button"
+              aria-pressed={pane === p}
               onClick={() => setPane(p)}
               className={cn(
-                "flex h-8 items-center justify-center gap-1.5 rounded-md text-[13px] font-medium",
-                pane === p ? "bg-accent text-accent-foreground" : "text-muted-foreground",
+                "flex h-9 items-center justify-center gap-1.5 rounded-md text-[13px] font-medium transition-colors duration-150",
+                pane === p
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:bg-accent/50",
               )}
             >
               {p === "list" ? <List className="size-4" /> : <MapIcon className="size-4" />}
@@ -156,8 +182,11 @@ function Layout() {
         role="separator"
         aria-orientation="vertical"
         aria-label={t("explore.resize")}
+        aria-valuenow={width}
+        aria-valuemin={MIN_W}
+        aria-valuemax={MAX_W}
         tabIndex={0}
-        className="group relative z-10 -ml-1 w-2 shrink-0 cursor-col-resize touch-none"
+        className="group relative z-10 -ml-1 w-3 shrink-0 cursor-col-resize touch-none"
         onPointerDown={(e) => {
           drag.current = { startX: e.clientX, startW: width };
           (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -167,15 +196,26 @@ function Layout() {
         }}
         onPointerUp={() => (drag.current = null)}
         onKeyDown={(e) => {
-          if (e.key === "ArrowLeft") setWidth(width - 24);
-          if (e.key === "ArrowRight") setWidth(width + 24);
+          const step =
+            e.key === "ArrowLeft"
+              ? width - 24
+              : e.key === "ArrowRight"
+                ? width + 24
+                : e.key === "Home"
+                  ? MIN_W
+                  : e.key === "End"
+                    ? MAX_W
+                    : null;
+          if (step === null) return;
+          e.preventDefault();
+          setWidth(step);
         }}
       >
         <div className="mx-auto h-full w-px bg-transparent transition-colors group-hover:bg-primary/60 group-focus-visible:bg-primary" />
       </div>
-      <main className="min-h-0 min-w-0 flex-1" aria-label={t("explore.map")}>
+      <section className="min-h-0 min-w-0 flex-1" aria-label={t("explore.map")}>
         <MapPanel />
-      </main>
+      </section>
     </div>
   );
 }

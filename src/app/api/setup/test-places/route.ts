@@ -28,7 +28,7 @@ export const POST = route(async () => {
       includeFutureOpening: false,
     });
     await recordUsage(db, "google", res.sku, 1);
-    return json({ ok: true, message: "Anahtar çalışıyor. Places API (New) erişilebilir." });
+    return json({ ok: true, message: "Anahtar çalışıyor." });
   } catch (e) {
     if (e instanceof PlacesApiError) return json({ ok: false, kind: e.kind, message: e.message });
     throw e;

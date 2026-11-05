@@ -28,6 +28,7 @@
   --color-info: var(--info);
   --color-border: var(--border);
   --color-input: var(--input);
+  --color-control: var(--control);
   --color-ring: var(--ring);
   --color-nov-future: var(--nov-future);
   --color-nov-high: var(--nov-high);
@@ -70,6 +71,7 @@
   --info: #1d4ed8;
   --border: #e1e1da;
   --input: #d6d6cd;
+  --control: #8b8f98;
   --ring: #15803d;
   --nov-future: #7c3aed;
   --nov-high: #16a34a;

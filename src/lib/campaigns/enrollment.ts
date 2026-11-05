@@ -49,7 +49,11 @@ export async function addLeadsToCampaign(
 ): Promise<AddLeadsResult> {
   const now = opts.now ?? Date.now();
   const ids = [...new Set(leadIds)].filter((n) => Number.isInteger(n) && n > 0);
-  if (ids.length === 0) throw new CampaignError("invalid_input", "Eklenecek lead seçilmedi.");
+  if (ids.length === 0)
+    throw new CampaignError(
+      "invalid_input",
+      "Eklenecek işletme seçilmedi. Keşif ekranında süzgeçleri uygulayıp yeniden deneyin.",
+    );
   if (ids.length > MAX_ADD_BATCH) {
     throw new CampaignError(
       "invalid_input",
@@ -63,7 +67,7 @@ export async function addLeadsToCampaign(
     if (!ADDABLE.includes(c.status)) {
       throw new CampaignError(
         "not_editable",
-        "Lead yalnızca taslak veya hazır kampanyaya eklenebilir.",
+        "İşletme yalnızca taslak veya hazır kampanyaya eklenebilir.",
         {
           status: c.status,
         },
@@ -175,7 +179,7 @@ export async function removeCampaignLead(
     const [c] = await tx.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
     if (!c) throw new CampaignError("not_found", "Kampanya bulunamadı.");
     if (["completed", "cancelled", "stopped"].includes(c.status)) {
-      throw new CampaignError("not_editable", "Kapanmış kampanyadan lead çıkarılamaz.", {
+      throw new CampaignError("not_editable", "Kapanmış kampanyadan alıcı çıkarılamaz.", {
         status: c.status,
       });
     }
@@ -203,7 +207,9 @@ export async function removeCampaignLead(
           "Bu dizinin gönderimi sürüyor veya sonucu inceleme bekliyor; çıkarılamaz.",
         );
       }
-      throw new CampaignError("not_editable", "Bu dizi artık çıkarılamaz.", { status: cur.status });
+      throw new CampaignError("not_editable", "Bu alıcının e-postaları artık değiştirilemez.", {
+        status: cur.status,
+      });
     }
     await tx
       .update(campaigns)

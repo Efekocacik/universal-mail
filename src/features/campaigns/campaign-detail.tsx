@@ -1,17 +1,11 @@
 "use client";
 
-import { ArrowLeft, Loader2, Pause, Pencil, Play, ShieldAlert, Square } from "lucide-react";
+import { ArrowLeft, Pause, Pencil, Play, ShieldAlert, Square } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -23,24 +17,42 @@ import {
 } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
-import { allowedActions, dayLabel, pauseReasonText, progressOf, SEQUENCE_STATUSES } from "./model";
+import {
+  allowedActions,
+  dayLabel,
+  pauseReasonText,
+  plainCounts,
+  progressOf,
+  progressTone,
+  SEQUENCE_STATUSES,
+} from "./model";
 import { CampaignStatusBadge, DemoBadge, LoadError, Notice, Stat } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { MessagesTable, QueueTable } from "./queue-table";
 import { useSafeMutation } from "./use-safe-mutation";
 
+const DONE_MESSAGE: Record<CampaignAction, string | null> = {
+  pause: t("campaign.paused.done"),
+  resume: t("campaign.resumed.done"),
+  cancel: t("campaign.cancelled.done"),
+  draft: null,
+  ready: null,
+  start: null,
+};
+
 function Actions({ c }: { c: CampaignDetail }) {
   const a = allowedActions(c.status);
   const [confirmCancel, setConfirmCancel] = useState(false);
   const control = useSafeMutation((action: CampaignAction) => campaignApi.control(c.id, action), {
-    onSuccess: (r, action) => {
-      if (action === "cancel") setConfirmCancel(false);
-      void r;
+    onSuccess: (_r, action) => {
+      const msg = DONE_MESSAGE[action];
+      if (msg) toast.success(msg);
     },
   });
   const busy = control.isPending;
+  const pendingAction = busy ? control.variables : null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
       {a.edit || a.backToDraft ? (
         <Button size="sm" variant="outline" asChild>
           <Link href={`/campaigns/${c.id}/edit`}>
@@ -49,48 +61,67 @@ function Actions({ c }: { c: CampaignDetail }) {
         </Button>
       ) : null}
       {a.pause && (
-        <Button size="sm" variant="outline" onClick={() => control.mutate("pause")} disabled={busy}>
-          <Pause /> {t("campaign.pause")}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => control.mutate("pause")}
+          disabled={busy}
+          loading={pendingAction === "pause"}
+        >
+          {pendingAction !== "pause" && <Pause />} {t("campaign.pause")}
         </Button>
       )}
       {a.resume && (
-        <Button size="sm" onClick={() => control.mutate("resume")} disabled={busy}>
-          <Play /> {t("campaign.resume")}
+        <Button
+          size="sm"
+          onClick={() => control.mutate("resume")}
+          disabled={busy}
+          loading={pendingAction === "resume"}
+        >
+          {pendingAction !== "resume" && <Play />} {t("campaign.resume")}
         </Button>
       )}
       {a.cancel && (
-        <Button size="sm" variant="ghost" onClick={() => setConfirmCancel(true)} disabled={busy}>
+        <Button
+          size="sm"
+          variant="dangerOutline"
+          onClick={() => setConfirmCancel(true)}
+          disabled={busy}
+        >
           <Square /> {t("campaign.cancel")}
         </Button>
       )}
-      <Dialog open={confirmCancel} onOpenChange={setConfirmCancel}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("campaign.cancel.title")}</DialogTitle>
-            <DialogDescription>{t("campaign.cancel.body")}</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmCancel(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={() => control.mutate("cancel")} disabled={busy}>
-              {busy && <Loader2 className="animate-spin" />} {t("campaign.cancel.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmCancel}
+        onOpenChange={setConfirmCancel}
+        tone="danger"
+        title={t("campaign.cancel.title")}
+        description={t("campaign.cancel.body")}
+        confirmLabel={t("campaign.cancel.confirm")}
+        onConfirm={async () => {
+          await control.mutateAsync("cancel");
+        }}
+      />
     </div>
   );
 }
 
 function Overview({ c }: { c: CampaignDetail }) {
   const p = progressOf(c.counts);
+  const plain = plainCounts(c.counts);
   const templates = useTemplates();
   const tplName = (id: number) => templates.data?.find((x) => x.id === id)?.name ?? `#${id}`;
   return (
-    <div className="space-y-4">
+    <div className="um-enter space-y-4">
       <div className="space-y-1.5 rounded-lg border bg-card p-4">
-        <Progress value={p.pct} tone={c.status === "running" ? "primary" : "warning"} />
+        <Progress value={p.pct} tone={progressTone(c.status)} label={c.name} />
+        <p className="tabular text-[14px] font-medium">
+          {t("campaign.progress.plain", {
+            sent: fmtNumber(plain.sent),
+            queued: fmtNumber(plain.queued),
+            failed: fmtNumber(plain.failed),
+          })}
+        </p>
         <p className="tabular text-[12px] text-muted-foreground">
           {t("campaign.progress", {
             done: fmtNumber(p.finished),
@@ -153,7 +184,10 @@ export function CampaignDetailPage({ id }: { id: number }) {
   const q = useCampaign(id);
   if (q.isLoading) {
     return (
-      <div className="mx-auto max-w-4xl p-6">
+      <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="h-14" />
+        <Skeleton className="h-9 w-72" />
         <Skeleton className="h-48" />
       </div>
     );
@@ -173,7 +207,7 @@ export function CampaignDetailPage({ id }: { id: number }) {
   const showPreflight = c.status === "draft" || c.status === "ready";
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="um-scroll min-h-0 flex-1">
       <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
         <Link
           href="/campaigns"
@@ -190,6 +224,14 @@ export function CampaignDetailPage({ id }: { id: number }) {
             </div>
             <p className="mt-1 text-[13px] text-muted-foreground">
               {t("campaign.updated", { at: fmtDateTime(c.updatedAt) })}
+              {" · "}
+              <span className="tabular">
+                {t("campaign.progress.plain", {
+                  sent: fmtNumber(plainCounts(c.counts).sent),
+                  queued: fmtNumber(plainCounts(c.counts).queued),
+                  failed: fmtNumber(plainCounts(c.counts).failed),
+                })}
+              </span>
             </p>
           </div>
           <Actions c={c} />
@@ -214,18 +256,18 @@ export function CampaignDetailPage({ id }: { id: number }) {
             <TabsTrigger value="queue">{t("campaign.tab.queue")}</TabsTrigger>
             <TabsTrigger value="messages">{t("campaign.tab.messages")}</TabsTrigger>
           </TabsList>
-          <TabsContent value="overview">
+          <TabsContent value="overview" className="mt-3">
             <Overview c={c} />
           </TabsContent>
           {showPreflight && (
-            <TabsContent value="preflight">
+            <TabsContent value="preflight" className="mt-3">
               <PreflightPanel campaign={c} />
             </TabsContent>
           )}
-          <TabsContent value="queue">
+          <TabsContent value="queue" className="mt-3">
             <QueueTable campaignId={c.id} canRemove={a.removeLeads} running={running} />
           </TabsContent>
-          <TabsContent value="messages">
+          <TabsContent value="messages" className="mt-3">
             <MessagesTable campaignId={c.id} running={running} />
           </TabsContent>
         </Tabs>

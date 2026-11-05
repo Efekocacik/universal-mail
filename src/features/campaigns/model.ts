@@ -35,13 +35,28 @@ export const SEQUENCE_STATUSES: readonly CampaignLeadStatus[] = [
 
 export const STATUS_VARIANT: Record<CampaignStatus, BadgeProps["variant"]> = {
   draft: "outline",
-  ready: "default",
-  running: "primary",
+  ready: "info",
+  running: "success",
   paused: "warning",
-  completed: "high",
-  cancelled: "outline",
+  completed: "default",
+  cancelled: "low",
   stopped: "danger",
 };
+
+/** İlerleme çubuğu rengi: yalnızca duraklatılmış sarı, durdurulan kırmızı; taslak/hazır/iptal nötr. */
+export function progressTone(status: CampaignStatus): "primary" | "warning" | "danger" | "neutral" {
+  switch (status) {
+    case "running":
+    case "completed":
+      return "primary";
+    case "stopped":
+      return "danger";
+    case "paused":
+      return "warning";
+    default:
+      return "neutral";
+  }
+}
 
 export const SEQUENCE_VARIANT: Record<CampaignLeadStatus, BadgeProps["variant"]> = {
   pending: "outline",
@@ -49,8 +64,8 @@ export const SEQUENCE_VARIANT: Record<CampaignLeadStatus, BadgeProps["variant"]>
   scheduled: "default",
   in_flight: "warning",
   waiting_next: "default",
-  completed: "high",
-  replied: "contacted",
+  completed: "success",
+  replied: "info",
   bounced: "danger",
   unsubscribed: "low",
   removed: "low",
@@ -131,6 +146,23 @@ export function progressOf(counts: Partial<Record<CampaignLeadStatus, number>>):
   };
 }
 
+export interface PlainCounts {
+  sent: number;
+  queued: number;
+  failed: number;
+}
+
+/** Düz dille ilerleme: gönderilen / sırada bekleyen / hatalı. Hariç tutulanlar ve çıkarılanlar sayılmaz. */
+export function plainCounts(counts: Partial<Record<CampaignLeadStatus, number>>): PlainCounts {
+  const sum = (keys: readonly CampaignLeadStatus[]) =>
+    keys.reduce((a, k) => a + (counts[k] ?? 0), 0);
+  return {
+    sent: sum(["completed", "replied", "waiting_next", "unsubscribed"]),
+    queued: sum(["pending", "scheduled", "in_flight"]),
+    failed: sum(["failed", "bounced"]),
+  };
+}
+
 /* Gönderim penceresi: yalnızca varsayılan (hafta içi 09.00–17.00) daraltılabilir. ----------------- */
 
 export const WINDOW_DAYS = [1, 2, 3, 4, 5] as const;
@@ -163,6 +195,12 @@ export function reasonLabel(code: string): string {
 export function blockerLabel(code: string): string {
   const key = `blocker.${code}`;
   return has(key) ? t(key) : code;
+}
+
+/** Engelin "ne yapmalıyım" cümlesi; sözlükte yoksa boş döner. */
+export function blockerHint(code: string): string | null {
+  const key = `blocker.hint.${code}`;
+  return has(key) ? t(key) : null;
 }
 
 /** `user` → kullanıcı; `auto:a,b` → sistemin otomatik duraklatma nedenleri. */

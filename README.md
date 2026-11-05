@@ -10,6 +10,7 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Faz 0 Kılavuzu](docs/04-FAZ0-KILAVUZU.md) — alan adı, Workspace, Google Cloud, kota, anahtarlar ve Gmail bağlantısı için adım adım hesap kurulumu
 - [Anlaşma Notu](docs/03-ANLASMA-NOTU.md) — müşteri şirketle yarım sayfalık, resmi olmayan mutabakat notu
 - [Faz 1 Notları](docs/05-FAZ1-NOTLARI.md) — keşif motoru, Google verisi saklama kararı, kalan işler
+- [Arayüz Rehberi](docs/07-UI-REHBERI.md) — renk dili (yeşil kaydet/onayla, kırmızı sil), düğme ve onay kalıpları, kullanılabilirlik kuralları
 - [Faz 2 Notları](docs/06-FAZ2-NOTLARI.md) — e-posta bulma: API uçları, veri modeli, kararlar, doğrulanmayanlar
 
 ## Kurulum modeli

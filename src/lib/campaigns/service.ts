@@ -68,7 +68,7 @@ export async function assertDemoMailbox(db: DbExecutor, mailboxId: number): Prom
 function validateSettings(input: CampaignSettingsInput, base: CampaignRow | null) {
   const name = input.name !== undefined ? input.name.trim() : base?.name;
   if (!name || name.length > 120) {
-    throw new CampaignError("invalid_input", "Kampanya adı 1–120 karakter olmalıdır.");
+    throw new CampaignError("invalid_input", "Kampanya adı 1 ile 120 karakter arasında olsun.");
   }
   const sendWindow = input.sendWindow ??
     base?.sendWindow ?? { ...DEFAULT_SEND_WINDOW, days: [...DEFAULT_SEND_WINDOW.days] };
@@ -80,7 +80,7 @@ function validateSettings(input: CampaignSettingsInput, base: CampaignRow | null
   }
   const dailyCap = input.dailyCap ?? base?.dailyCap ?? 20;
   if (!Number.isInteger(dailyCap) || dailyCap < 1 || dailyCap > 80) {
-    throw new CampaignError("invalid_input", "Günlük tavan 1–80 arasında olmalıdır.");
+    throw new CampaignError("invalid_input", "Günlük e-posta sayısı 1 ile 80 arasında olsun.");
   }
   const minGapS = input.minGapS ?? base?.minGapS ?? MIN_GAP_S;
   const maxGapS = input.maxGapS ?? base?.maxGapS ?? 240;
@@ -167,9 +167,13 @@ async function casDraft(
   const [cur] = await tx.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
   if (!cur) throw new CampaignError("not_found", "Kampanya bulunamadı.");
   if (cur.status !== "draft") {
-    throw new CampaignError("not_editable", "Kampanya yalnızca taslak durumunda düzenlenebilir.", {
-      status: cur.status,
-    });
+    throw new CampaignError(
+      "not_editable",
+      "Kampanya başlatıldıktan sonra düzenlenemez. Önce taslağa döndürün.",
+      {
+        status: cur.status,
+      },
+    );
   }
   throw new CampaignError(
     "conflict",

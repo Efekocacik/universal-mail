@@ -1,21 +1,25 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Eye, Loader2, Pause, Play, RefreshCw, Square } from "lucide-react";
+import {
+  ChevronDown,
+  Eye,
+  Loader2,
+  Pause,
+  Play,
+  Plus,
+  RefreshCw,
+  ScanSearch,
+  Square,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { api } from "@/lib/client/api";
 import { countryLabel, fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
@@ -27,11 +31,11 @@ import { t } from "@/lib/i18n";
 const STATUS_VARIANT: Record<ScanStatus, BadgeProps["variant"]> = {
   draft: "outline",
   queued: "default",
-  running: "primary",
+  running: "success",
   paused: "warning",
-  completed: "high",
+  completed: "default",
   failed: "danger",
-  cancelled: "outline",
+  cancelled: "low",
   budget_stopped: "warning",
 };
 
@@ -54,6 +58,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [confirmRerun, setConfirmRerun] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const active = scan.status === "running" || scan.status === "queued";
   const p = scan.progress;
   const pct = p.unitsTotal ? Math.round(((p.unitsDone ?? 0) / p.unitsTotal) * 100) : 0;
@@ -73,13 +78,15 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
   const control = useMutation({
     mutationFn: (action: "pause" | "resume" | "cancel") =>
       api(`/api/scans/${scan.id}/control`, { method: "POST", json: { action } }),
-    onSuccess: refresh,
+    onSuccess: (_r, action) => {
+      if (action === "cancel") toast.success(t("scans.cancelled"));
+      refresh();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
   const rerun = useMutation({
     mutationFn: () => api<{ scanId: number }>(`/api/scans/${scan.id}/rerun`, { method: "POST" }),
     onSuccess: (r) => {
-      setConfirmRerun(false);
       toast.success(t("builder.started", { id: r.scanId }));
       refresh();
     },
@@ -94,7 +101,10 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
             <h2 className="text-base font-semibold">
               #{scan.id} · {scan.regionName}
             </h2>
-            <Badge variant={STATUS_VARIANT[scan.status]}>{t(`scanStatus.${scan.status}`)}</Badge>
+            <Badge variant={STATUS_VARIANT[scan.status]}>
+              {scan.status === "running" && <Loader2 className="size-3 animate-spin" aria-hidden />}
+              {t(`scanStatus.${scan.status}`)}
+            </Badge>
             {scan.provider === "mock" && <Badge variant="future">DEMO</Badge>}
             {scan.status === "completed" &&
               (scan.isBaseline ? (
@@ -121,20 +131,27 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
               variant="outline"
               onClick={() => control.mutate("pause")}
               disabled={control.isPending}
+              loading={control.isPending && control.variables === "pause"}
             >
               <Pause /> {t("scans.pause")}
             </Button>
           )}
           {(scan.status === "paused" || scan.status === "budget_stopped") && (
-            <Button size="sm" onClick={() => control.mutate("resume")} disabled={control.isPending}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => control.mutate("resume")}
+              disabled={control.isPending}
+              loading={control.isPending && control.variables === "resume"}
+            >
               <Play /> {t("scans.resume")}
             </Button>
           )}
           {(active || scan.status === "paused" || scan.status === "budget_stopped") && (
             <Button
               size="sm"
-              variant="ghost"
-              onClick={() => control.mutate("cancel")}
+              variant="dangerOutline"
+              onClick={() => setConfirmCancel(true)}
               disabled={control.isPending}
             >
               <Square /> {t("scans.cancel")}
@@ -157,7 +174,11 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
 
       {(active || scan.status === "paused" || scan.status === "budget_stopped") && (
         <div className="mt-3 space-y-1.5">
-          <Progress value={active ? Math.max(pct, 2) : pct} tone={active ? "primary" : "warning"} />
+          <Progress
+            value={active ? Math.max(pct, 2) : pct}
+            tone={active ? "primary" : "warning"}
+            label={t("scans.units")}
+          />
           <p className="tabular text-[12px] text-muted-foreground">
             {fmtNumber(p.unitsDone ?? 0)} / {fmtNumber(p.unitsTotal ?? 0)} {t("scans.units")} · %
             {pct}
@@ -169,9 +190,12 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
           {scan.pauseReason}
         </p>
       )}
-      {scan.error && (
-        <p className="mt-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive">
-          {scan.error}
+      {(scan.error || scan.status === "failed") && (
+        <p
+          role="alert"
+          className="mt-2 rounded-md bg-destructive/10 px-3 py-2 text-[13px] text-destructive"
+        >
+          {t("scans.failed.explain")}
         </p>
       )}
 
@@ -198,7 +222,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="mt-3 flex items-center gap-1 text-[12px] font-medium text-muted-foreground hover:text-foreground"
+        className="mt-3 flex min-h-8 items-center gap-1 rounded text-[12px] font-medium text-muted-foreground transition-colors hover:text-foreground"
         aria-expanded={open}
       >
         <ChevronDown className={`size-3.5 transition-transform ${open ? "rotate-180" : ""}`} />{" "}
@@ -240,59 +264,92 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
               </ul>
             </div>
           )}
+          {scan.error && (
+            <p className="text-[12px] text-muted-foreground">
+              {t("scans.detail.raw")}: {scan.error}
+            </p>
+          )}
           <p className="text-[12px] text-muted-foreground">{t("scans.compare.note")}</p>
         </div>
       )}
 
-      <Dialog open={confirmRerun} onOpenChange={setConfirmRerun}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("scans.rerun.title")}</DialogTitle>
-            <DialogDescription>
-              {t("scans.rerun.body", { calls: fmtNumber(calls), cost: fmtUsd(scan.costUsd) })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirmRerun(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button onClick={() => rerun.mutate()} disabled={rerun.isPending}>
-              {rerun.isPending && <Loader2 className="animate-spin" />} {t("scans.rerun.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ConfirmDialog
+        open={confirmRerun}
+        onOpenChange={setConfirmRerun}
+        tone="success"
+        title={t("scans.rerun.title")}
+        description={t("scans.rerun.body", { calls: fmtNumber(calls), cost: fmtUsd(scan.costUsd) })}
+        confirmLabel={t("scans.rerun.confirm")}
+        onConfirm={async () => {
+          await rerun.mutateAsync();
+        }}
+      />
+      <ConfirmDialog
+        open={confirmCancel}
+        onOpenChange={setConfirmCancel}
+        tone="danger"
+        title={t("scans.cancel.title")}
+        description={t("scans.cancel.body")}
+        confirmLabel={t("scans.cancel")}
+        onConfirm={async () => {
+          await control.mutateAsync("cancel");
+        }}
+      />
     </article>
   );
 }
 
 export function ScansPage() {
-  const { data, isLoading } = useScans(true);
+  const { data, isLoading, isError, refetch, isFetching } = useScans(true);
+  const hasScans = !!data && data.length > 0;
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-4xl space-y-4 p-6">
-        <div className="flex items-end justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">{t("scans.title")}</h1>
-            <p className="mt-1 text-[13px] text-muted-foreground">{t("scans.subtitle")}</p>
-          </div>
-          <Button asChild>
-            <Link href="/">{t("scans.new")}</Link>
-          </Button>
-        </div>
+    <div className="um-scroll min-h-0 flex-1">
+      <div className="um-enter mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+        <PageHeader
+          title={t("scans.title")}
+          description={t("scans.subtitle")}
+          actions={
+            hasScans && (
+              <Button asChild>
+                <Link href="/">
+                  <Plus /> {t("scans.new")}
+                </Link>
+              </Button>
+            )
+          }
+        />
         {isLoading ? (
-          <Skeleton className="h-40" />
-        ) : data && data.length > 0 ? (
+          <div className="space-y-4" aria-busy="true">
+            <Skeleton className="h-52" />
+            <Skeleton className="h-52" />
+          </div>
+        ) : isError ? (
+          <div className="rounded-xl border bg-card">
+            <EmptyState
+              icon={ScanSearch}
+              title={t("scans.error.title")}
+              body={t("scans.error.body")}
+              action={
+                <Button variant="outline" loading={isFetching} onClick={() => void refetch()}>
+                  <RefreshCw /> {t("scans.refresh")}
+                </Button>
+              }
+            />
+          </div>
+        ) : hasScans ? (
           data.map((s) => <ScanCard key={s.id} scan={s} />)
         ) : (
-          <div className="rounded-xl border border-dashed bg-card p-10 text-center">
-            <p className="text-sm font-semibold">{t("scans.empty.title")}</p>
-            <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">
-              {t("scans.empty.body")}
-            </p>
-            <Button asChild className="mt-4">
-              <Link href="/">{t("scans.empty.cta")}</Link>
-            </Button>
+          <div className="rounded-xl border border-dashed bg-card">
+            <EmptyState
+              icon={ScanSearch}
+              title={t("scans.empty.title")}
+              body={t("scans.empty.body")}
+              action={
+                <Button asChild>
+                  <Link href="/">{t("scans.empty.cta")}</Link>
+                </Button>
+              }
+            />
           </div>
         )}
       </div>

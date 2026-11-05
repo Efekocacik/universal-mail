@@ -1,11 +1,13 @@
 "use client";
 
-import { ArrowLeft, CircleAlert, ExternalLink, Globe, MapPin, Phone, X } from "lucide-react";
+import { ArrowLeft, Check, CircleAlert, ExternalLink, Globe, MapPin, Phone, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { NoveltyBadge } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
+import { Kbd } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/misc";
 import { HelpTip } from "@/components/ui/tooltip";
 import {
@@ -54,8 +56,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="space-y-2 border-b px-4 py-4">
-      <h3 className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+    <section className="um-enter mx-4 my-3 space-y-3 rounded-xl border bg-card p-4 shadow-xs">
+      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold">
         {title}
         {hint}
       </h3>
@@ -78,21 +80,29 @@ export function LeadDetail({ id }: { id: number }) {
   const { data, isLoading, error } = useLead(id);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="um-scroll flex min-h-0 flex-1 flex-col overflow-y-auto bg-muted/30">
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-card px-3 py-2">
-        <Button variant="ghost" size="sm" onClick={() => ex.select(null)}>
+        <Button variant="outline" size="sm" onClick={() => ex.select(null)}>
           <ArrowLeft /> {t("detail.back")}
         </Button>
-        <span className="ml-auto text-[11px] text-muted-foreground">Esc</span>
+        <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+          <Kbd>Esc</Kbd>
+        </span>
       </div>
       {isLoading && (
-        <div className="space-y-3 p-4">
-          <Skeleton className="h-7 w-2/3" />
-          <Skeleton className="h-24" />
-          <Skeleton className="h-40" />
+        <div className="space-y-3 p-4" role="status" aria-busy="true">
+          <Skeleton className="h-[148px] w-full" />
+          <Skeleton className="h-[120px] w-full" />
+          <Skeleton className="h-[220px] w-full" />
+          <Skeleton className="h-[260px] w-full" />
         </div>
       )}
-      {error && <p className="p-4 text-sm text-destructive">{(error as Error).message}</p>}
+      {error && (
+        <div className="m-4 space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+          <p className="font-medium text-destructive">{(error as Error).message}</p>
+          <p className="text-[13px] text-muted-foreground">{t("detail.loadError")}</p>
+        </div>
+      )}
       {data && <DetailBody data={data} />}
     </div>
   );
@@ -113,18 +123,21 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
     setDisplayName(lead.displayName ?? "");
   }, [lead.id, lead.displayName]);
 
+  const save = (vars: Parameters<typeof patch.mutate>[0]) =>
+    patch.mutate(vars, {
+      onSuccess: () => setSaved(true),
+      onError: (e: Error) => toast.error(e.message),
+    });
+
   const commitDisplayName = () => {
     const v = displayName.trim();
     if ((lead.displayName ?? "") === v) return;
-    patch.mutate({ displayName: v === "" ? null : v });
+    save({ displayName: v === "" ? null : v });
   };
 
   const commitNotes = () => {
     if ((lead.notes ?? "") === notes) return;
-    patch.mutate(
-      { notes: notes.trim() === "" ? null : notes },
-      { onSuccess: () => setSaved(true) },
-    );
+    save({ notes: notes.trim() === "" ? null : notes });
   };
   useEffect(() => {
     if (!saved) return;
@@ -135,7 +148,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
   const addTag = () => {
     const v = tag.trim();
     if (!v || lead.tags.includes(v)) return setTag("");
-    patch.mutate({ tags: [...lead.tags, v] });
+    save({ tags: [...lead.tags, v] });
     setTag("");
   };
 
@@ -152,7 +165,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
 
   return (
     <>
-      <div className="space-y-2 border-b px-4 py-4">
+      <div className="um-enter mx-4 mt-4 space-y-2 rounded-xl border bg-card p-4 shadow-xs">
         <div className="flex items-start gap-2">
           <h2
             className={`min-w-0 flex-1 text-lg font-semibold leading-snug ${title ? "" : "text-muted-foreground"}`}
@@ -284,7 +297,21 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
 
       <LeadEmails data={data} />
 
-      <Section title={t("detail.manage")}>
+      <Section
+        title={t("detail.manage")}
+        hint={
+          <span
+            className="ml-auto flex items-center gap-1 text-[12px] font-medium text-success"
+            aria-live="polite"
+          >
+            {saved && (
+              <span className="um-enter inline-flex items-center gap-1">
+                <Check className="size-3.5" aria-hidden /> {t("common.saved")}
+              </span>
+            )}
+          </span>
+        }
+      >
         <div className="space-y-3">
           <div className="space-y-1.5">
             <Label htmlFor="lead-display-name" className="flex items-center gap-1">
@@ -306,7 +333,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             <Select
               id="lead-status"
               value={lead.status}
-              onChange={(e) => patch.mutate({ status: e.target.value })}
+              onChange={(e) => save({ status: e.target.value })}
             >
               {LEAD_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -324,8 +351,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
                   <button
                     type="button"
                     aria-label={t("detail.removeTag", { tag: x })}
-                    onClick={() => patch.mutate({ tags: lead.tags.filter((y) => y !== x) })}
-                    className="rounded-full p-0.5 hover:bg-black/10"
+                    onClick={() => save({ tags: lead.tags.filter((y) => y !== x) })}
+                    className="rounded-full p-0.5 transition-colors hover:bg-destructive/15 hover:text-destructive"
                   >
                     <X className="size-3" />
                   </button>
@@ -347,12 +374,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             />
           </div>
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="lead-notes">{t("detail.notes")}</Label>
-              <span className="text-[12px] text-primary" aria-live="polite">
-                {saved ? t("common.saved") : ""}
-              </span>
-            </div>
+            <Label htmlFor="lead-notes">{t("detail.notes")}</Label>
             <Textarea
               id="lead-notes"
               value={notes}

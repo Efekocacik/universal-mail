@@ -36,7 +36,7 @@ export function route<C = unknown>(handler: Handler<C>): Handler<C> {
       if (e instanceof ZodError) {
         return json(
           {
-            error: "Geçersiz istek.",
+            error: "Girilen bilgilerde bir sorun var. Alanları kontrol edip yeniden deneyin.",
             issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
           },
           { status: 400 },
@@ -77,7 +77,10 @@ export function route<C = unknown>(handler: Handler<C>): Handler<C> {
         );
       }
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);
-      return json({ error: "Beklenmeyen bir hata oluştu." }, { status: 500 });
+      return json(
+        { error: "Beklenmeyen bir hata oluştu. Yeniden deneyin; sürerse uygulamayı kapatıp açın." },
+        { status: 500 },
+      );
     }
   };
 }
@@ -87,7 +90,7 @@ export async function body<T>(req: Request, schema: ZodType<T>): Promise<T> {
   try {
     raw = await req.json();
   } catch {
-    throw new HttpError(400, "İstek gövdesi geçerli JSON değil.");
+    throw new HttpError(400, "Bilgiler gönderilemedi. Sayfayı yenileyip yeniden deneyin.");
   }
   return schema.parse(raw);
 }

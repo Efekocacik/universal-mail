@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, Check, Compass, Loader2, Undo2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Compass, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input, Label, Select } from "@/components/ui/input";
+import { FieldError, Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
 import {
@@ -70,6 +70,7 @@ function BasicsStep({
   const [minGapS, setMinGap] = useState(campaign?.minGapS ?? 90);
   const [maxGapS, setMaxGap] = useState(campaign?.maxGapS ?? 240);
   const [issues, setIssues] = useState<MutationErrorInfo | null>(null);
+  const [nameTouched, setNameTouched] = useState(false);
 
   // Varsayılan: tek uygun (demo) posta kutusu.
   useEffect(() => {
@@ -97,15 +98,11 @@ function BasicsStep({
   );
 
   const windowOk = isValidWindow(win);
-  const valid =
-    name.trim().length > 0 &&
-    name.length <= 120 &&
-    windowOk &&
-    dailyCap >= 1 &&
-    dailyCap <= 80 &&
-    minGapS >= 90 &&
-    maxGapS >= minGapS &&
-    maxGapS <= 3600;
+  const nameOk = name.trim().length > 0 && name.length <= 120;
+  const capOk = dailyCap >= 1 && dailyCap <= 80;
+  const gapMinOk = minGapS >= 90;
+  const gapMaxOk = maxGapS >= minGapS && maxGapS <= 3600;
+  const valid = nameOk && windowOk && capOk && gapMinOk && gapMaxOk;
   const readOnly = campaign !== undefined && campaign.status !== "draft";
 
   return (
@@ -123,9 +120,11 @@ function BasicsStep({
           value={name}
           maxLength={120}
           onChange={(e) => setName(e.target.value)}
+          onBlur={() => setNameTouched(true)}
           disabled={readOnly}
-          aria-invalid={name.trim().length === 0 ? undefined : name.length > 120}
+          aria-invalid={(nameTouched && !nameOk) || name.length > 120 ? true : undefined}
         />
+        {nameTouched && !nameOk && <FieldError>{t("wizard.err.name")}</FieldError>}
         <FieldIssues info={issues} path="name" />
       </div>
 
@@ -204,7 +203,7 @@ function BasicsStep({
           </Select>
           <span className="text-muted-foreground">{t("wizard.window.local")}</span>
         </div>
-        {!windowOk && <p className="text-[12px] text-destructive">{t("wizard.window.invalid")}</p>}
+        {!windowOk && <FieldError>{t("wizard.window.invalid")}</FieldError>}
         <p className="text-[12px] text-muted-foreground">{t("wizard.window.note")}</p>
       </fieldset>
 
@@ -219,7 +218,9 @@ function BasicsStep({
             value={dailyCap}
             onChange={(e) => setDailyCap(Number(e.target.value))}
             disabled={readOnly}
+            aria-invalid={capOk ? undefined : true}
           />
+          {!capOk && <FieldError>{t("wizard.err.cap")}</FieldError>}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="cw-min">{t("wizard.gap.min")}</Label>
@@ -231,7 +232,9 @@ function BasicsStep({
             value={minGapS}
             onChange={(e) => setMinGap(Number(e.target.value))}
             disabled={readOnly}
+            aria-invalid={gapMinOk ? undefined : true}
           />
+          {!gapMinOk && <FieldError>{t("wizard.err.gapMin")}</FieldError>}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="cw-max">{t("wizard.gap.max")}</Label>
@@ -243,16 +246,27 @@ function BasicsStep({
             value={maxGapS}
             onChange={(e) => setMaxGap(Number(e.target.value))}
             disabled={readOnly}
+            aria-invalid={gapMaxOk ? undefined : true}
           />
+          {!gapMaxOk && <FieldError>{t("wizard.err.gapMax")}</FieldError>}
         </div>
       </div>
       <p className="text-[12px] text-muted-foreground">{t("wizard.limits.note")}</p>
 
       {!readOnly && (
-        <Button type="submit" disabled={!valid || save.isPending}>
-          {save.isPending && <Loader2 className="animate-spin" />}{" "}
-          {campaign ? t("common.save") : t("wizard.create")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" disabled={!valid} loading={save.isPending}>
+            {campaign ? t("common.save") : t("wizard.create")}
+          </Button>
+          {!campaign && (
+            <Button variant="outline" asChild>
+              <Link href="/campaigns">{t("wizard.cancelNew")}</Link>
+            </Button>
+          )}
+          {!valid && (
+            <span className="text-[12px] text-muted-foreground">{t("wizard.invalid")}</span>
+          )}
+        </div>
       )}
     </form>
   );
@@ -434,9 +448,14 @@ function StepsStep({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: (
       </fieldset>
       {issues?.kind === "validation" && <Notice tone="danger">{issues.message}</Notice>}
       {!readOnly && (
-        <Button onClick={() => save.mutate(undefined)} disabled={!valid || save.isPending}>
-          {save.isPending && <Loader2 className="animate-spin" />} {t("common.save")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={() => save.mutate(undefined)} disabled={!valid} loading={save.isPending}>
+            {t("common.save")}
+          </Button>
+          {!valid && (
+            <span className="text-[12px] text-muted-foreground">{t("wizard.steps.invalid")}</span>
+          )}
+        </div>
       )}
     </div>
   );
@@ -459,7 +478,7 @@ function LeadsStep({ campaign }: { campaign: CampaignDetail }) {
           })}
         </span>
         {canAdd && (
-          <Button size="sm" asChild>
+          <Button size="sm" variant="outline" asChild>
             <Link href={`/?campaign=${campaign.id}`}>
               <Compass /> {t("wizard.leads.fromExplore")}
             </Link>
@@ -468,6 +487,97 @@ function LeadsStep({ campaign }: { campaign: CampaignDetail }) {
       </div>
       <QueueTable campaignId={campaign.id} canRemove={canAdd} running={false} />
     </div>
+  );
+}
+
+/* Özet paneli ------------------------------------------------------------------------------------ */
+
+/** Her adımda görünen "ne gönderilecek" özeti: kullanıcı hiçbir şeyi hatırlamak zorunda kalmaz. */
+function WizardSummary({ campaign }: { campaign: CampaignDetail }) {
+  const mailboxes = useMailboxes();
+  const p = progressOf(campaign.counts);
+  const mailbox = mailboxes.data?.find((m) => m.id === campaign.mailboxId);
+  const langs = [...new Set(campaign.steps.map((x) => x.language.toUpperCase()))];
+  const emailCount = campaign.steps.length
+    ? Math.max(...campaign.steps.map((x) => x.stepIndex)) + 1
+    : 0;
+  const missing = (v: string) => <span className="text-[#8a6700]">{v}</span>;
+  const rows: [string, React.ReactNode][] = [
+    [
+      t("wizard.summary.recipients"),
+      p.active > 0 ? (
+        <>
+          <span className="tabular font-semibold">{fmtNumber(p.active)}</span>
+          {p.excluded > 0 && (
+            <span className="block text-[12px] font-normal text-muted-foreground">
+              {t("wizard.summary.recipientsExcluded", { n: fmtNumber(p.excluded) })}
+            </span>
+          )}
+        </>
+      ) : (
+        missing(t("wizard.summary.none"))
+      ),
+    ],
+    [
+      t("wizard.summary.sender"),
+      mailbox ? (
+        <>
+          {mailbox.label}
+          {mailbox.address && (
+            <span className="block truncate text-[12px] text-muted-foreground">
+              {mailbox.address}
+            </span>
+          )}
+        </>
+      ) : campaign.mailboxId ? (
+        "…"
+      ) : (
+        missing(t("wizard.summary.missing"))
+      ),
+    ],
+    [
+      t("wizard.summary.languages"),
+      langs.length > 0 ? langs.join(", ") : missing(t("wizard.summary.missing")),
+    ],
+    [
+      t("wizard.summary.emails"),
+      emailCount > 0
+        ? t("wizard.summary.emailsValue", { n: emailCount })
+        : missing(t("wizard.summary.missing")),
+    ],
+    [
+      t("wizard.summary.cap"),
+      <span key="cap" className="tabular">
+        {t("wizard.summary.capValue", { n: fmtNumber(campaign.dailyCap) })}
+      </span>,
+    ],
+    [
+      t("wizard.summary.window"),
+      <span key="win" className="tabular">
+        {campaign.sendWindow.days.map(dayLabel).join(", ")} · {campaign.sendWindow.start}–
+        {campaign.sendWindow.end}
+      </span>,
+    ],
+  ];
+  return (
+    <aside
+      aria-label={t("wizard.summary.title")}
+      className="um-enter rounded-xl border bg-card p-4 shadow-xs lg:sticky lg:top-4 lg:self-start"
+    >
+      <h2 className="text-sm font-semibold">{t("wizard.summary.title")}</h2>
+      <p className="mt-0.5 text-[12px] text-muted-foreground">{t("wizard.summary.hint")}</p>
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 text-[13px] sm:grid-cols-3 lg:grid-cols-1">
+        {rows.map(([k, v]) => (
+          <div key={k} className="min-w-0">
+            <dt className="text-[11px] uppercase tracking-wide text-muted-foreground">{k}</dt>
+            <dd className="mt-0.5 font-medium">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="mt-3 border-t pt-2 text-[12px] text-muted-foreground">
+        {t("wizard.summary.demo")}
+      </p>
+    </aside>
   );
 }
 
@@ -481,12 +591,17 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
   const enabled = id !== undefined;
   const q = useCampaign(id ?? 0, enabled);
   const campaign = enabled ? q.data : undefined;
-  const back = useSafeMutation(() => campaignApi.control(id!, "draft"));
+  const back = useSafeMutation(() => campaignApi.control(id!, "draft"), {
+    successMessage: t("preflight.backToDraft.done"),
+  });
 
   if (enabled && q.isLoading) {
     return (
-      <div className="mx-auto max-w-3xl p-6">
-        <Skeleton className="h-64" />
+      <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
+        <Skeleton className="h-5 w-32" />
+        <Skeleton className="h-9 w-64" />
+        <Skeleton className="h-12" />
+        <Skeleton className="h-72" />
       </div>
     );
   }
@@ -502,13 +617,20 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
     setStep(s);
     if (campaign) router.replace(`/campaigns/${campaign.id}/edit?step=${s}`);
   };
+  const stepIndex = STEPS.indexOf(step);
+  const done: Record<Step, boolean> = {
+    basics: !!campaign,
+    steps: (campaign?.steps.length ?? 0) > 0,
+    leads: campaign ? progressOf(campaign.counts).active > 0 : false,
+    review: !!campaign && !["draft", "ready"].includes(campaign.status),
+  };
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto max-w-3xl space-y-5 p-4 sm:p-6">
+    <div className="um-scroll min-h-0 flex-1">
+      <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
         <Link
           href={campaign ? `/campaigns/${campaign.id}` : "/campaigns"}
-          className="inline-flex items-center gap-1 text-[13px] text-muted-foreground hover:text-foreground"
+          className="inline-flex items-center gap-1 text-[13px] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="size-3.5" /> {campaign ? campaign.name : t("campaigns.title")}
         </Link>
@@ -524,6 +646,7 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
             {STEPS.map((s, i) => {
               const disabled = !campaign && s !== "basics";
               const current = s === step;
+              const isDone = done[s] && !current;
               return (
                 <li key={s}>
                   <button
@@ -532,16 +655,28 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
                     aria-current={current ? "step" : undefined}
                     onClick={() => go(s)}
                     className={cn(
-                      "flex w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] disabled:opacity-50",
+                      "flex min-h-11 w-full items-center gap-2 rounded-md border px-3 py-2 text-left text-[13px] transition-colors duration-150 disabled:opacity-50",
                       current
                         ? "border-primary bg-accent font-medium"
                         : "bg-card hover:bg-accent/60",
                     )}
                   >
-                    <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[11px] tabular">
-                      {i + 1}
+                    <span
+                      className={cn(
+                        "tabular flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] transition-colors duration-150",
+                        isDone
+                          ? "bg-success text-success-foreground"
+                          : current
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted",
+                      )}
+                    >
+                      {isDone ? <Check className="size-3" aria-hidden /> : i + 1}
                     </span>
-                    {t(`wizard.step.${s}`)}
+                    <span className="min-w-0">
+                      {t(`wizard.step.${s}`)}
+                      {isDone && <span className="sr-only"> ({t("wizard.stepDone")})</span>}
+                    </span>
                   </button>
                 </li>
               );
@@ -558,41 +693,59 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
               variant="outline"
               className="mt-2"
               onClick={() => back.mutate(undefined)}
-              disabled={back.isPending}
+              loading={back.isPending}
             >
-              <Undo2 /> {t("preflight.backToDraft")}
+              {!back.isPending && <Undo2 />} {t("preflight.backToDraft")}
             </Button>
           </Notice>
         )}
 
-        <section className="rounded-xl border bg-card p-4 sm:p-5">
-          {step === "basics" && (
-            <BasicsStep
-              key={campaign?.updatedAt ?? "new"}
-              campaign={campaign}
-              onCreated={(newId) => {
-                if (!campaign) router.replace(`/campaigns/${newId}/edit?step=steps`);
-                else go("steps");
-              }}
-            />
-          )}
-          {step === "steps" && campaign && (
-            <StepsStep key={campaign.updatedAt} campaign={campaign} onSaved={() => go("leads")} />
-          )}
-          {step === "leads" && campaign && <LeadsStep campaign={campaign} />}
-          {step === "review" && campaign && <PreflightPanel campaign={campaign} />}
-        </section>
+        <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_16rem]">
+          <div className="min-w-0 space-y-4">
+            <section key={step} className="um-enter rounded-xl border bg-card p-4 sm:p-5">
+              {step === "basics" && (
+                <BasicsStep
+                  key={campaign?.updatedAt ?? "new"}
+                  campaign={campaign}
+                  onCreated={(newId) => {
+                    if (!campaign) router.replace(`/campaigns/${newId}/edit?step=steps`);
+                    else go("steps");
+                  }}
+                />
+              )}
+              {step === "steps" && campaign && (
+                <StepsStep
+                  key={campaign.updatedAt}
+                  campaign={campaign}
+                  onSaved={() => go("leads")}
+                />
+              )}
+              {step === "leads" && campaign && <LeadsStep campaign={campaign} />}
+              {step === "review" && campaign && <PreflightPanel campaign={campaign} />}
+            </section>
 
-        {campaign && step !== "review" && (
-          <div className="flex justify-end">
-            <Button
-              variant="outline"
-              onClick={() => go(STEPS[STEPS.indexOf(step) + 1] ?? "review")}
-            >
-              <Check /> {t("wizard.next")}
-            </Button>
+            {campaign && (
+              <div className="flex items-center justify-between gap-2">
+                {stepIndex > 0 ? (
+                  <Button variant="outline" onClick={() => go(STEPS[stepIndex - 1]!)}>
+                    <ArrowLeft /> {t("wizard.back")}
+                  </Button>
+                ) : (
+                  <span />
+                )}
+                {step !== "review" && (
+                  <Button
+                    variant={step === "leads" ? "default" : "outline"}
+                    onClick={() => go(STEPS[stepIndex + 1] ?? "review")}
+                  >
+                    {t("wizard.next")} <ArrowRight />
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
-        )}
+          {campaign && <WizardSummary campaign={campaign} />}
+        </div>
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ import { t } from "@/lib/i18n";
 /**
  * Tek tip onay penceresi (docs/07-UI-REHBERI.md).
  *  - tone "danger": geri alınamaz eylemler. Onay düğmesi KIRMIZI, varsayılan odak "Vazgeç"te (yanlışlıkla Enter ile silinmez).
+ *  - tone "warning": maliyet/bütçe gibi uyarılı ama zararsız başlatmalar. Sarı simge, YEŞİL onay düğmesi, odak "Vazgeç"te.
  *  - tone "success": önemli ama zararsız onaylar (örn. kampanyayı başlat). Onay düğmesi YEŞİL ve varsayılan odakta.
  * Başarısız olursa pencere açık kalır (onConfirm hata fırlatırsa); sonuç bildirimini çağıran yapar.
  */
@@ -37,13 +38,14 @@ export function ConfirmDialog({
   description?: React.ReactNode;
   confirmLabel: string;
   cancelLabel?: string;
-  tone?: "danger" | "success";
+  tone?: "danger" | "success" | "warning";
   onConfirm: () => void | Promise<void>;
   pending?: boolean;
   children?: React.ReactNode;
 }) {
   const danger = tone === "danger";
-  const Icon = danger ? AlertTriangle : CheckCircle2;
+  const warning = tone === "warning";
+  const Icon = danger || warning ? AlertTriangle : CheckCircle2;
   const [busy, setBusy] = React.useState(false);
   const run = async () => {
     setBusy(true);
@@ -60,7 +62,7 @@ export function ConfirmDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         onOpenAutoFocus={(e) => {
-          if (!danger) return;
+          if (!danger && !warning) return;
           e.preventDefault();
           (e.currentTarget as HTMLElement).querySelector<HTMLElement>("[data-cancel]")?.focus();
         }}
@@ -68,7 +70,7 @@ export function ConfirmDialog({
         <DialogHeader>
           <div className="flex items-start gap-3">
             <span
-              className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${danger ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}
+              className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${danger ? "bg-destructive/10 text-destructive" : warning ? "bg-nov-likely/20 text-[#8a6700]" : "bg-success/10 text-success"}`}
               aria-hidden
             >
               <Icon className="size-5" />
