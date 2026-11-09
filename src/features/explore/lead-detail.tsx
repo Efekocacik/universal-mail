@@ -22,6 +22,7 @@ import { useLead, usePatchLead } from "@/lib/client/queries";
 import type { LeadDetailResponse } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { GoogleLoadButton } from "./google-load-button";
+import { LeadCampaigns } from "./lead-campaigns";
 import { LeadEmails } from "./lead-emails";
 import { useExplore } from "./state";
 
@@ -296,6 +297,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
       </Section>
 
       <LeadEmails data={data} />
+
+      <LeadCampaigns leadId={lead.id} />
 
       <Section
         title={t("detail.manage")}

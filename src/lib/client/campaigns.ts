@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { IneligibleCode } from "@/lib/compliance/eligibility";
 import type { CampaignStatus, CampaignLeadStatus, SendWindow } from "@/lib/db/schema";
 import type { ReviewItem } from "@/lib/mail/scheduler/review";
+import type { TemplateListItem } from "@/lib/mail/template-service";
 import type { AddLeadsResult, QueueItem } from "@/lib/campaigns/enrollment";
 import type { CampaignMessageItem } from "@/lib/campaigns/messages";
 import type { BlockerCode, PreflightReport } from "@/lib/campaigns/preflight";
@@ -49,17 +50,8 @@ export interface MailboxItem {
   sendable: boolean;
 }
 
-export interface TemplateItem {
-  id: number;
-  name: string;
-  language: string;
-  kind: "initial" | "followup";
-  categoryKey: string | null;
-  builtIn: boolean;
-  version: number;
-  subject: string;
-  archived: boolean;
-}
+/** Şablon listesi öğesi (gövde yok); `lockedBy` > 0 ise içerik değiştirilemez. */
+export type TemplateItem = TemplateListItem;
 
 export const ck = {
   all: ["campaigns"] as const,

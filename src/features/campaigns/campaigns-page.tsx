@@ -12,6 +12,7 @@ import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import { CAMPAIGN_STATUSES, pauseReasonText, plainCounts, progressOf, progressTone } from "./model";
 import { CampaignStatusBadge, LoadError, Notice } from "./parts";
+import { CampaignsSubnav } from "./subnav";
 
 function CampaignCard({ c }: { c: CampaignSummary }) {
   const p = progressOf(c.counts);
@@ -73,6 +74,7 @@ export function CampaignsPage() {
   return (
     <div className="um-scroll min-h-0 flex-1">
       <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+        <CampaignsSubnav />
         <PageHeader
           title={t("campaigns.title")}
           description={t("campaigns.subtitle")}

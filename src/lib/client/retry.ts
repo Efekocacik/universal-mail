@@ -58,6 +58,18 @@ const BLOCKED_CODES = new Set([
   "NOT_FOUND",
   "INVALID_STEPS",
   "INVALID_INPUT",
+  // Şablon ve uyum uçları (Aşama 12)
+  "BUILT_IN",
+  "IN_USE",
+  "ARCHIVED",
+  "INVALID_TEMPLATE",
+  "UNKNOWN_CATEGORY",
+  "LIVE_LOCKED",
+  "LOOSENING_FORBIDDEN",
+  "NO_POLICY",
+  "PROTECTED",
+  "ALREADY_LIFTED",
+  "UNCONFIRMED",
 ]);
 
 export function classifyMutationError(error: unknown): MutationErrorInfo {

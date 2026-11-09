@@ -1,30 +1,25 @@
-import { asc } from "drizzle-orm";
-import { database, json, route } from "@/lib/api/http";
-import { templates } from "@/lib/db/schema";
+import { body, database, json } from "@/lib/api/http";
+import { domainRoute } from "@/lib/api/domain-route";
+import { createTemplate, listTemplates } from "@/lib/mail/template-service";
+import { requireConsent } from "../campaigns/schema";
+import { templateDraftSchema } from "./schema";
 
 export const dynamic = "force-dynamic";
 
-/** Kampanya adımları için şablon listesi (salt okunur; gövde döndürülmez). Düzenleme uçları Aşama 11'dedir. */
-export const GET = route(async (req: Request) => {
+/**
+ * Şablon listesi (gövde yok): kampanya adımları ve şablon ekranı için. `lockedBy` > 0 ise şablon hazır, çalışan veya
+ * duraklatılmış kampanyalarda kullanılıyordur ve içeriği değiştirilemez.
+ */
+export const GET = domainRoute(async (req: Request) => {
   const db = await database();
   const includeArchived = new URL(req.url).searchParams.get("archived") === "1";
-  const rows = await db
-    .select()
-    .from(templates)
-    .orderBy(asc(templates.language), asc(templates.kind), asc(templates.id));
-  return json({
-    items: rows
-      .filter((t) => includeArchived || t.archivedAt === null)
-      .map((t) => ({
-        id: t.id,
-        name: t.name,
-        language: t.language,
-        kind: t.kind,
-        categoryKey: t.categoryKey,
-        builtIn: t.builtIn,
-        version: t.version,
-        subject: t.subject,
-        archived: t.archivedAt !== null,
-      })),
-  });
+  return json({ items: await listTemplates(db, { includeArchived }) });
+});
+
+/** Yeni şablon (her zaman kullanıcı şablonudur; yerleşik olarak oluşturulamaz). */
+export const POST = domainRoute(async (req: Request) => {
+  const db = await database();
+  const draft = await body(req, templateDraftSchema);
+  await requireConsent(db);
+  return json(await createTemplate(db, draft), { status: 201 });
 });

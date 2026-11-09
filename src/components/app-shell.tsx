@@ -12,13 +12,21 @@ import { fmtUsd } from "@/lib/client/format";
 import { useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
 
-/** Gezinme öğeleri: sonraki fazlar (Şablonlar, Suppression) buraya eklenir. */
+/**
+ * Gezinme öğeleri (docs/07-UI-REHBERI.md: 4 sabit öğe). Şablonlar ve Uyum ekranları "Kampanyalar" altındadır
+ * (sayfa içi alt gezinme); bu yüzden o yollarda "Kampanyalar" etkin görünür.
+ */
 export const NAV_ITEMS = [
   { href: "/", key: "nav.explore", icon: Compass },
   { href: "/scans", key: "nav.scans", icon: Layers },
-  { href: "/campaigns", key: "nav.campaigns", icon: Mail },
+  { href: "/campaigns", key: "nav.campaigns", icon: Mail, also: ["/templates", "/compliance"] },
   { href: "/settings", key: "nav.settings", icon: Settings },
-] as const;
+] as const satisfies readonly {
+  href: string;
+  key: string;
+  icon: unknown;
+  also?: readonly string[];
+}[];
 
 function BudgetPill() {
   const { data } = useStatus();
@@ -95,8 +103,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="hidden lg:inline">Universal Mail</span>
           </Link>
           <nav className="flex items-center gap-1" aria-label={t("nav.label")}>
-            {NAV_ITEMS.map(({ href, key, icon: Icon }) => {
-              const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            {NAV_ITEMS.map((item) => {
+              const { href, key, icon: Icon } = item;
+              const also: readonly string[] = "also" in item ? item.also : [];
+              const active =
+                href === "/"
+                  ? pathname === "/"
+                  : [href, ...also].some((p) => pathname === p || pathname.startsWith(`${p}/`));
               return (
                 <Tip key={href} content={t(key)} side="bottom">
                   <Link

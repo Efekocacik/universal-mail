@@ -1,10 +1,17 @@
 import crypto from "node:crypto";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { evaluateEnrollment, type IneligibleCode } from "@/lib/compliance/eligibility";
 import type { FrequencyLimits } from "@/lib/compliance/frequency";
 import { maskEmail } from "@/lib/compliance/suppression";
 import type { DbExecutor } from "@/lib/db/client";
-import { campaignLeads, campaigns, campaignSteps, leadEmails, mailboxes } from "@/lib/db/schema";
+import {
+  campaignLeads,
+  campaigns,
+  campaignSteps,
+  leadEmails,
+  mailboxes,
+  templates,
+} from "@/lib/db/schema";
 import { pickTemplateLanguage, suggestLanguage } from "@/lib/mail/language";
 import { isDemoSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
@@ -145,6 +152,24 @@ export async function computeStartPlan(
   }
   if (eligible.length === 0) blockers.push("no_eligible_leads");
 
+  // Onaylanan içerik: kullanılan şablonların SÜRÜMLERİ ve gönderen profili (alt bilgiyi belirler). Bunlar
+  // başlatma özeti alındıktan sonra değişirse belirteç eskir ve başlatma `preflight_stale` ile reddedilir.
+  const templateIds = [...new Set(steps.map((s) => s.templateId))].sort((a, b) => a - b);
+  const templateVersions =
+    templateIds.length === 0
+      ? []
+      : await db
+          .select({ id: templates.id, version: templates.version })
+          .from(templates)
+          .where(inArray(templates.id, templateIds))
+          .orderBy(asc(templates.id));
+  const profile = (await getSettings(db, ["company.profile"] as const))["company.profile"];
+  const profileDigest = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(profile ?? null))
+    .digest("hex")
+    .slice(0, 16);
+
   const token = crypto
     .createHash("sha256")
     .update(
@@ -152,6 +177,8 @@ export async function computeStartPlan(
         c.id,
         c.updatedAt,
         steps.map((s) => [s.stepIndex, s.language, s.templateId, s.delayDays]),
+        templateVersions.map((t) => [t.id, t.version]),
+        profileDigest,
         eligible.map((e) => [e.id, e.language]),
         ineligible.map((i) => [i.id, i.reasons]),
       ]),

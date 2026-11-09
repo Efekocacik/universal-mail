@@ -1,15 +1,16 @@
 import crypto from "node:crypto";
 import * as cheerio from "cheerio";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { LIVE_SENDING_ENABLED } from "@/lib/compliance/policies";
 import type { Db, DbExecutor } from "@/lib/db/client";
-import { auditLog, categorySets, templates } from "@/lib/db/schema";
+import { auditLog, campaigns, campaignSteps, categorySets, templates } from "@/lib/db/schema";
 import { checkContent, type ContentIssue } from "./content-check";
 import { buildFooter, FooterError, type FooterMode } from "./footer";
 import { htmlToText } from "./html";
 import { isSupportedLanguage, type TemplateLanguage } from "./language";
 import { buildRenderContext, RenderContextError } from "./render-context";
 import {
+  NAME_MAX,
   renderTemplate,
   TemplateRenderError,
   validateTemplate,
@@ -26,15 +27,54 @@ import {
  */
 
 export type TemplateServiceErrorKind =
-  "invalid_template" | "unknown_category" | "not_found" | "archived" | "conflict";
+  | "invalid_template"
+  | "unknown_category"
+  | "not_found"
+  | "archived"
+  | "conflict"
+  /** Yerleşik şablon salt okunurdur (kopyası düzenlenir). */
+  | "built_in"
+  /** Hazır, çalışan veya duraklatılmış bir kampanyanın adımında kullanılıyor: onaylanan içerik değişemez. */
+  | "in_use";
 
 export class TemplateServiceError extends Error {
   constructor(
     readonly kind: TemplateServiceErrorKind,
     readonly issues: (TemplateIssue | ContentIssue)[] = [],
+    /** Kişisel veri İÇERMEYEN makine bilgisi (ör. kilitleyen kampanyalar, güncel sürüm). */
+    readonly detail: Record<string, unknown> = {},
   ) {
     super(kind);
   }
+}
+
+/** Şablonu kilitleyen kampanya durumları: bu durumlarda adımlardaki şablonun içeriği değiştirilemez. */
+export const TEMPLATE_LOCKING_STATUSES = ["ready", "running", "paused"] as const;
+
+export interface TemplateCampaignRef {
+  id: number;
+  name: string;
+  status: string;
+}
+
+/** Şablonu adımlarında kullanan kampanyalar (kimliğe göre). */
+async function campaignsUsing(db: DbExecutor, templateId: number): Promise<TemplateCampaignRef[]> {
+  const rows = await db
+    .select({ id: campaigns.id, name: campaigns.name, status: campaigns.status })
+    .from(campaignSteps)
+    .innerJoin(campaigns, eq(campaigns.id, campaignSteps.campaignId))
+    .where(eq(campaignSteps.templateId, templateId))
+    .orderBy(asc(campaigns.id));
+  const seen = new Set<number>();
+  return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+}
+
+/** Kilitleyen bir kampanya varsa `in_use` fırlatır. Güncelleme/arşivleme işleminin İÇİNDE çağrılır (yarışa karşı). */
+async function assertNotLocked(tx: DbExecutor, templateId: number): Promise<void> {
+  const locking = (await campaignsUsing(tx, templateId)).filter((c) =>
+    (TEMPLATE_LOCKING_STATUSES as readonly string[]).includes(c.status),
+  );
+  if (locking.length > 0) throw new TemplateServiceError("in_use", [], { campaigns: locking });
 }
 
 export interface TemplateDraft {
@@ -122,10 +162,16 @@ export async function updateTemplate(
   id: number,
   patch: Partial<TemplateDraft>,
   now = Date.now(),
+  /** `expectedVersion`: istemcinin ekranda gördüğü sürüm. Farklıysa başkasının değişikliği ezilmez (`conflict`). */
+  opts: { expectedVersion?: number } = {},
 ): Promise<{ version: number; warnings: (TemplateIssue | ContentIssue)[] }> {
   const [current] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
   if (!current) throw new TemplateServiceError("not_found");
   if (current.archivedAt !== null) throw new TemplateServiceError("archived");
+  if (current.builtIn) throw new TemplateServiceError("built_in");
+  if (opts.expectedVersion !== undefined && opts.expectedVersion !== current.version) {
+    throw new TemplateServiceError("conflict", [], { currentVersion: current.version });
+  }
   const p = await prepare(db, {
     name: patch.name ?? current.name,
     language: patch.language ?? current.language,
@@ -135,6 +181,7 @@ export async function updateTemplate(
     bodyHtml: patch.bodyHtml ?? current.bodyHtml,
   });
   return db.transaction(async (tx) => {
+    await assertNotLocked(tx, id);
     const updated = await tx
       .update(templates)
       .set({ ...p.fields, version: current.version + 1, updatedAt: now })
@@ -160,11 +207,21 @@ export async function updateTemplate(
 }
 
 /** Şablon silinmez, arşivlenir (gönderilmiş iletiler sürümüne başvurur). */
-export async function archiveTemplate(db: Db, id: number, now = Date.now()): Promise<void> {
+export async function archiveTemplate(
+  db: Db,
+  id: number,
+  now = Date.now(),
+  opts: { expectedVersion?: number } = {},
+): Promise<void> {
   await db.transaction(async (tx) => {
     const [row] = await tx.select().from(templates).where(eq(templates.id, id)).limit(1);
     if (!row) throw new TemplateServiceError("not_found");
     if (row.archivedAt !== null) throw new TemplateServiceError("archived");
+    if (row.builtIn) throw new TemplateServiceError("built_in");
+    if (opts.expectedVersion !== undefined && opts.expectedVersion !== row.version) {
+      throw new TemplateServiceError("conflict", [], { currentVersion: row.version });
+    }
+    await assertNotLocked(tx, id);
     await tx.update(templates).set({ archivedAt: now, updatedAt: now }).where(eq(templates.id, id));
     await tx.insert(auditLog).values({
       at: now,
@@ -174,6 +231,119 @@ export async function archiveTemplate(db: Db, id: number, now = Date.now()): Pro
       detail: { version: row.version },
     });
   });
+}
+
+/** Yerleşik veya kullanıcı şablonunun düzenlenebilir kopyasını oluşturur ("Çoğalt ve düzenle"). */
+export async function duplicateTemplate(
+  db: Db,
+  id: number,
+  now = Date.now(),
+): Promise<{ id: number; version: number; warnings: (TemplateIssue | ContentIssue)[] }> {
+  const [src] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
+  if (!src) throw new TemplateServiceError("not_found");
+  if (src.archivedAt !== null) throw new TemplateServiceError("archived");
+  const suffix = " (kopya)";
+  const created = await createTemplate(
+    db,
+    {
+      name: `${src.name.slice(0, NAME_MAX - suffix.length)}${suffix}`,
+      language: src.language,
+      kind: src.kind,
+      categoryKey: src.categoryKey,
+      subject: src.subject,
+      bodyHtml: src.bodyHtml,
+    },
+    now,
+  );
+  await db.insert(auditLog).values({
+    at: now,
+    action: "template.duplicated",
+    entity: "template",
+    entityId: String(created.id),
+    detail: { from: id, fromVersion: src.version },
+  });
+  return created;
+}
+
+export interface TemplateListItem {
+  id: number;
+  name: string;
+  language: string;
+  kind: "initial" | "followup";
+  categoryKey: string | null;
+  builtIn: boolean;
+  version: number;
+  subject: string;
+  archived: boolean;
+  updatedAt: number;
+  /** Kilitleyen (hazır/çalışan/duraklatılmış) kampanya sayısı; sıfırdan büyükse içerik değiştirilemez. */
+  lockedBy: number;
+}
+
+/** Şablon listesi (gövde yok). */
+export async function listTemplates(
+  db: DbExecutor,
+  opts: { includeArchived?: boolean } = {},
+): Promise<TemplateListItem[]> {
+  const rows = await db
+    .select()
+    .from(templates)
+    .orderBy(asc(templates.language), asc(templates.kind), asc(templates.id));
+  const locks = await db
+    .select({ templateId: campaignSteps.templateId, campaignId: campaigns.id })
+    .from(campaignSteps)
+    .innerJoin(campaigns, eq(campaigns.id, campaignSteps.campaignId))
+    .where(inArray(campaigns.status, [...TEMPLATE_LOCKING_STATUSES]));
+  const lockSets = new Map<number, Set<number>>();
+  for (const l of locks) {
+    const set = lockSets.get(l.templateId) ?? new Set<number>();
+    set.add(l.campaignId);
+    lockSets.set(l.templateId, set);
+  }
+  return rows
+    .filter((t) => opts.includeArchived || t.archivedAt === null)
+    .map((t) => ({
+      id: t.id,
+      name: t.name,
+      language: t.language,
+      kind: t.kind,
+      categoryKey: t.categoryKey,
+      builtIn: t.builtIn,
+      version: t.version,
+      subject: t.subject,
+      archived: t.archivedAt !== null,
+      updatedAt: t.updatedAt,
+      lockedBy: lockSets.get(t.id)?.size ?? 0,
+    }));
+}
+
+export interface TemplateDetail extends Omit<TemplateListItem, "lockedBy"> {
+  bodyHtml: string;
+  createdAt: number;
+  campaigns: TemplateCampaignRef[];
+  locked: boolean;
+}
+
+export async function getTemplateDetail(db: DbExecutor, id: number): Promise<TemplateDetail> {
+  const [t] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
+  if (!t) throw new TemplateServiceError("not_found");
+  const used = await campaignsUsing(db, id);
+  return {
+    id: t.id,
+    name: t.name,
+    language: t.language,
+    kind: t.kind,
+    categoryKey: t.categoryKey,
+    builtIn: t.builtIn,
+    version: t.version,
+    subject: t.subject,
+    archived: t.archivedAt !== null,
+    updatedAt: t.updatedAt,
+    bodyHtml: t.bodyHtml,
+    createdAt: t.createdAt,
+    campaigns: used,
+    locked: used.some((c) => (TEMPLATE_LOCKING_STATUSES as readonly string[]).includes(c.status)),
+  };
 }
 
 /* ------------------------------------------------------------------------------------------------
@@ -238,15 +408,32 @@ export interface ComposedEmail {
  *  - `purpose: "send"`: eksik değişken, alt bilgi eksikliği veya içerik hatası `sendable`'ı false yapar.
  * Hiçbir durumda veritabanına yazmaz ve ileti göndermez.
  */
-export async function composeEmail(
+export async function composeEmail(db: DbExecutor, input: ComposeInput): Promise<ComposedEmail> {
+  const [tpl] = await db
+    .select()
+    .from(templates)
+    .where(eq(templates.id, input.templateId))
+    .limit(1);
+  return composeCore(db, tpl ?? null, input);
+}
+
+interface ComposeInput {
+  templateId: number;
+  leadId: number;
+  mode: FooterMode;
+  purpose: "preview" | "send";
+  unsubscribeUrl?: string | null;
+}
+
+type ComposeSource = Pick<
+  typeof templates.$inferSelect,
+  "id" | "version" | "language" | "subject" | "bodyHtml" | "archivedAt"
+>;
+
+async function composeCore(
   db: DbExecutor,
-  input: {
-    templateId: number;
-    leadId: number;
-    mode: FooterMode;
-    purpose: "preview" | "send";
-    unsubscribeUrl?: string | null;
-  },
+  tpl: ComposeSource | null,
+  input: ComposeInput,
 ): Promise<ComposedEmail> {
   const errors: ComposeIssue[] = [];
   const warnings: (TemplateIssue | ContentIssue)[] = [];
@@ -268,11 +455,6 @@ export async function composeEmail(
   if (input.mode === "live" && !LIVE_SENDING_ENABLED)
     errors.push({ code: "live_sending_disabled" });
 
-  const [tpl] = await db
-    .select()
-    .from(templates)
-    .where(eq(templates.id, input.templateId))
-    .limit(1);
   if (!tpl) {
     errors.push({ code: "template_not_found" });
     return empty;
@@ -344,4 +526,35 @@ export async function composeEmail(
     bodySha256: contentSha256(body.subject, text, html),
     missing: body.missing,
   };
+}
+
+export type DraftPreview =
+  | { ok: false; errors: TemplateIssue[]; warnings: TemplateIssue[] }
+  | { ok: true; composed: ComposedEmail; warnings: TemplateIssue[]; variables: string[] };
+
+/**
+ * Kaydedilmemiş bir taslağın gerçek bir lead üzerinden ön izlemesi (FR-TPL-04). Hiçbir şey yazılmaz, ileti
+ * gönderilmez; yalnızca demo kipinde (zorunlu alt bilgi `[DEMO]` işaretlidir). Geçersiz taslakta doğrulama hataları
+ * döner.
+ */
+export async function previewTemplateDraft(
+  db: DbExecutor,
+  draft: TemplateDraft,
+  leadId: number,
+): Promise<DraftPreview> {
+  const v = validateTemplate(draft);
+  if (!v.ok) return { ok: false, errors: v.errors, warnings: v.warnings };
+  const composed = await composeCore(
+    db,
+    {
+      id: 0,
+      version: 0,
+      language: draft.language,
+      subject: draft.subject.trim(),
+      bodyHtml: v.sanitizedHtml,
+      archivedAt: null,
+    },
+    { templateId: 0, leadId, mode: "demo", purpose: "preview" },
+  );
+  return { ok: true, composed, warnings: v.warnings, variables: v.variables };
 }

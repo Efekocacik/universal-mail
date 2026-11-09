@@ -15,6 +15,7 @@ import { buildRenderContext, CATEGORY_LABELS, categoryLabel } from "@/lib/mail/r
 import { seedBuiltinTemplates } from "@/lib/mail/seed";
 import {
   archiveTemplate,
+  duplicateTemplate,
   composeEmail,
   CONTENT_HASH_VERSION,
   contentSha256,
@@ -74,6 +75,11 @@ async function addLead(o: Partial<typeof leads.$inferInsert> = {}): Promise<numb
 async function builtinId(language: "tr" | "en"): Promise<number> {
   const [t] = await db.select().from(templates).where(eq(templates.language, language));
   return t!.id;
+}
+
+/** Yerleşik şablonlar salt okunurdur; değiştirilen/arşivlenen şablon, yerleşikten türetilmiş bir kopyadır. */
+async function userCopyId(language: "tr" | "en"): Promise<number> {
+  return (await duplicateTemplate(db, await builtinId(language), NOW)).id;
 }
 
 /** Şablon tablosu ve tüm sayaçların anlık görüntüsü (yan etki denetimi için). */
@@ -196,11 +202,11 @@ describe("şablon kaydetme", () => {
   });
 
   it("güncelleme sürümü artırır ve denetime yazar; arşivlenen şablon güncellenemez", async () => {
-    const id = await builtinId("tr");
+    const id = await userCopyId("tr");
     const r = await updateTemplate(db, id, { subject: "Yeni konu satırı" }, NOW + 1);
     expect(r.version).toBe(2);
     const [row] = await db.select().from(templates).where(eq(templates.id, id));
-    expect(row).toMatchObject({ subject: "Yeni konu satırı", version: 2, builtIn: true });
+    expect(row).toMatchObject({ subject: "Yeni konu satırı", version: 2, builtIn: false });
     expect(
       await db.select().from(auditLog).where(eq(auditLog.action, "template.updated")),
     ).toHaveLength(1);
@@ -219,7 +225,7 @@ describe("şablon kaydetme", () => {
   });
 
   it("geçersiz güncelleme kaydedilmez", async () => {
-    const id = await builtinId("en");
+    const id = await userCopyId("en");
     const before = await snapshot();
     await expect(
       updateTemplate(db, id, { bodyHtml: "<p>{{bilinmeyen}}</p>" }),
@@ -266,7 +272,7 @@ describe("ön izleme ve gönderim çıktısı", () => {
   it("içerik özeti (sürüm 1) konu, düz metin ve HTML'i kapsar; konu değişince özet değişir", async () => {
     expect(CONTENT_HASH_VERSION).toBe(1);
     const leadId = await addLead();
-    const templateId = await builtinId("en");
+    const templateId = await userCopyId("en");
     const a = await composeEmail(db, { templateId, leadId, mode: "demo", purpose: "send" });
     expect(a.bodySha256).toBe(
       crypto
@@ -404,7 +410,7 @@ describe("ön izleme ve gönderim çıktısı", () => {
 
   it("arşivlenmiş şablon gönderilemez; olmayan şablon ve lead raporlanır", async () => {
     const leadId = await addLead();
-    const id = await builtinId("en");
+    const id = await userCopyId("en");
     await archiveTemplate(db, id);
     const r = await composeEmail(db, { templateId: id, leadId, mode: "demo", purpose: "send" });
     expect(r.sendable).toBe(false);
