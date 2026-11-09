@@ -179,7 +179,10 @@ test("e-posta bulma: ayrıntıdan başlat (Google verisi + site taraması), elle
   await expect(dialog.getByRole("heading", { name: "E-postaları bul" })).toBeVisible();
   await expect(dialog.getByText("Google verisi gerekli")).toBeVisible();
   await dialog.getByLabel(/Web sitesi bilinmeyen işletmelerin sitesini de Google/).click();
-  await expect(dialog.getByText("Aranacak")).toBeVisible();
+  // Google seçeneği açılınca önizleme yenilenir; o ana kadar eski durumdaki
+  // "Aranacak işletme yok…" notu da ekranda olabilir (iki öğe eşleşir).
+  await expect(dialog.getByText("Aranacak işletme yok")).toBeHidden();
+  await expect(dialog.getByText("Aranacak", { exact: true })).toBeVisible();
   await dialog.getByRole("button", { name: "Aramayı başlat" }).click();
   await expect(page.getByText("E-posta araması kuyruğa alındı.")).toBeVisible();
 
