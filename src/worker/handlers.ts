@@ -8,6 +8,7 @@ import {
 import { createEmailDeps } from "@/lib/email/deps";
 import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
 import { createMailSendHandler, MAIL_SEND_JOB } from "@/lib/mail/scheduler/job";
+import { createInboxSyncHandler, INBOX_SYNC_JOB } from "@/lib/mail/scheduler/inbox-job";
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
 import { onEvent } from "@/lib/events";
@@ -119,11 +120,20 @@ export function registerEmailHandlers(): void {
  * Faz 3: `mail.send` (demo kampanya dağıtıcısı). İşleyici her zaman kayıtlıdır ama `enabled` (ortam bayrağı
  * `FAZ3_DEMO_SCHEDULER_ENABLED`) kapalıysa hiçbir şey göndermez ve veritabanında kampanya durumunu değiştirmez.
  */
-export function registerMailHandlers(opts: { enabled: boolean; db: Db }): MailDispatcher {
+export function registerMailHandlers(opts: {
+  enabled: boolean;
+  inboxEnabled?: boolean;
+  db: Db;
+}): MailDispatcher {
   const dispatcher = new MailDispatcher(opts.db);
   registerJobHandler(
     MAIL_SEND_JOB,
     createMailSendHandler({ enabled: opts.enabled, dispatcher, onBusy: recoverDbConnection }),
+  );
+  // Aşama 13: demo gelen kutusu işi. Kendi bayrağı (FAZ3_DEMO_INBOX_ENABLED) kapalıyken hiçbir ileti okunmaz.
+  registerJobHandler(
+    INBOX_SYNC_JOB,
+    createInboxSyncHandler({ enabled: opts.inboxEnabled === true }),
   );
   return dispatcher;
 }

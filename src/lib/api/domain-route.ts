@@ -1,5 +1,8 @@
+import { AutoStopError } from "@/lib/campaigns/auto-stop";
 import { PolicyChangeError } from "@/lib/compliance/policy-service";
 import { SuppressionError } from "@/lib/compliance/suppression";
+import { ReviewError } from "@/lib/mail/inbound/process";
+import { TestSendError } from "@/lib/mail/test-send";
 import { TemplateServiceError } from "@/lib/mail/template-service";
 import { json, route } from "./http";
 
@@ -83,8 +86,45 @@ export function mapDomainError(e: unknown): Mapped | null {
       body: { error: e.message, code: e.kind.toUpperCase() },
     };
   }
+  if (e instanceof AutoStopError) {
+    return {
+      status: AUTO_STOP_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
+  if (e instanceof ReviewError) {
+    return {
+      status: REVIEW_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
+  if (e instanceof TestSendError) {
+    return {
+      status: TEST_SEND_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
   return null;
 }
+
+const AUTO_STOP_STATUS: Record<AutoStopError["kind"], number> = {
+  invalid_input: 400,
+  live_locked: 409,
+  loosening_forbidden: 409,
+  below_floor: 400,
+};
+const REVIEW_STATUS: Record<ReviewError["kind"], number> = {
+  not_found: 404,
+  not_reviewable: 409,
+  cannot_apply: 409,
+};
+const TEST_SEND_STATUS: Record<TestSendError["kind"], number> = {
+  mailbox_not_found: 404,
+  live_scope: 409,
+  mailbox_not_ready: 409,
+  rate_limited: 429,
+  build_failed: 409,
+};
 
 /** `route()` + alan hatası eşlemesi. */
 export function domainRoute<C = unknown>(handler: Handler<C>): Handler<C> {

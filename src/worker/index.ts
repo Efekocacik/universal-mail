@@ -4,6 +4,7 @@ import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { isDemoSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
+import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import {
@@ -38,7 +39,10 @@ async function main(): Promise<void> {
   const db = await getDb();
   // Faz 3 demo zamanlayıcısı: varsayılan KAPALI (FAZ3_DEMO_SCHEDULER_ENABLED). Kapalıyken veritabanına yazmaz.
   const schedulerEnabled = isDemoSchedulerEnabled(process.env);
-  registerMailHandlers({ enabled: schedulerEnabled, db });
+  const inboxEnabled = isDemoInboxEnabled(process.env);
+  registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });
+  const inbox = await startInboxScheduler(db, { env: process.env });
+  if (inbox.enabled) console.log("[worker] demo gelen kutusu açık (yalnızca demo).");
   const mailScheduler = await startMailScheduler(db, {
     env: process.env,
     log: (m) => console.log(`[worker] ${m}`),

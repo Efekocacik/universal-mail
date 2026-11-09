@@ -19,7 +19,12 @@ import { t } from "@/lib/i18n";
 export const NAV_ITEMS = [
   { href: "/", key: "nav.explore", icon: Compass },
   { href: "/scans", key: "nav.scans", icon: Layers },
-  { href: "/campaigns", key: "nav.campaigns", icon: Mail, also: ["/templates", "/compliance"] },
+  {
+    href: "/campaigns",
+    key: "nav.campaigns",
+    icon: Mail,
+    also: ["/templates", "/compliance", "/mail-log"],
+  },
   { href: "/settings", key: "nav.settings", icon: Settings },
 ] as const satisfies readonly {
   href: string;

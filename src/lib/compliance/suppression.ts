@@ -221,6 +221,19 @@ export async function suppressEmail(
   return db.transaction((tx) => addEmailInTx(tx, parsed, input, now));
 }
 
+/** `suppressEmail`'in, çağıranın açık işlemi içinde çalışan sürümü (gelen ileti işleme gibi atomik akışlar için). */
+export async function suppressEmailInTx(
+  tx: Tx,
+  input: AddEmailInput,
+  now = Date.now(),
+): Promise<AddResult> {
+  const parsed = parseEmail(input.email);
+  if (!parsed) throw new SuppressionError("invalid_email", "Geçersiz e-posta adresi.");
+  if (!(input.reason in SUPPRESSION_REASON_STRENGTH))
+    throw new SuppressionError("invalid_reason", "Geçersiz engelleme nedeni.");
+  return addEmailInTx(tx, parsed, input, now);
+}
+
 /** Bir alan adının tamamını (alt alan adları dahil) engeller. Silme talebi kişiye özgü olduğundan alan adına uygulanmaz. */
 export async function suppressDomain(
   db: Db,

@@ -26,6 +26,8 @@ const env = {
   // Yalnızca E2E: demo gönderim zamanlayıcısı açılır (geçici veri klasörü). Yalnızca demo posta kutusu ve bellekteki
   // demo sağlayıcı kullanılabilir; gerçek gönderim kodda kapalıdır (LIVE_SENDING_ENABLED=false, canlı sağlayıcı yok).
   FAZ3_DEMO_SCHEDULER_ENABLED: "1",
+  // Yalnızca E2E: demo gelen kutusu simülatörü açılır (ağa çıkmaz; tasdik "demo_simulated"dır, gerçek doğrulama değildir).
+  FAZ3_DEMO_INBOX_ENABLED: "1",
 };
 const mig = spawnSync(process.execPath, [path.join(dir, "migrate.cjs")], {
   cwd: dir,

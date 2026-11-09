@@ -1,0 +1,100 @@
+import { z } from "zod";
+import { HttpError } from "@/lib/api/http";
+
+/** Gönderim günlüğü, işlem günlüğü ve gelen kutusu uçlarının giriş şemaları (hepsi `.strict()`). */
+
+export const autoStopSchema = z
+  .object({
+    minRecipients: z.number().optional(),
+    minBounces: z.number().optional(),
+    minRateBp: z.number().optional(),
+  })
+  .strict();
+
+export const reviewDecisionSchema = z.object({ decision: z.enum(["apply", "ignore"]) }).strict();
+
+export const testSendSchema = z
+  .object({ templateId: z.number().int().min(1), leadId: z.number().int().min(1) })
+  .strict();
+
+export const dnsCheckSchema = z
+  .object({
+    selector: z.string().trim().max(63).optional(),
+  })
+  .strict();
+
+export const devInboxSchema = z
+  .object({
+    campaignLeadId: z.number().int().min(1),
+    scenario: z.enum([
+      "hard_bounce",
+      "hard_bounce_unattested",
+      "soft_bounce",
+      "reply",
+      "reply_unattested",
+      "unsubscribe",
+      "negative",
+      "auto_reply",
+      "unsubscribe_link",
+    ]),
+  })
+  .strict();
+
+/** Bilinmeyen sorgu parametresini REDDEDER (ör. tam adres isteyen `full=1` sessizce yok sayılmaz). */
+export function strictParams(sp: URLSearchParams, allowed: readonly string[]): void {
+  for (const k of sp.keys()) {
+    if (!allowed.includes(k))
+      throw new HttpError(400, "Geçersiz sorgu parametresi.", { code: "INVALID_PARAM" });
+  }
+}
+
+const intOpt = z.coerce.number().int().min(0);
+
+export const mailLogQuerySchema = z
+  .object({
+    direction: z.enum(["out", "in"]).optional(),
+    purpose: z.enum(["campaign", "test", "inbound"]).optional(),
+    campaignId: intOpt.optional(),
+    status: z
+      .enum([
+        "queued",
+        "sending",
+        "sent",
+        "failed",
+        "unknown",
+        "received",
+        "matched",
+        "unmatched",
+        "ignored",
+      ])
+      .optional(),
+    from: intOpt.optional(),
+    to: intOpt.optional(),
+    beforeId: intOpt.optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+export const MAIL_LOG_PARAMS = [
+  "direction",
+  "purpose",
+  "campaignId",
+  "status",
+  "from",
+  "to",
+  "beforeId",
+  "limit",
+] as const;
+export const AUDIT_PARAMS = ["prefix", "beforeId", "limit"] as const;
+
+export const auditQuerySchema = z
+  .object({
+    prefix: z.string().max(40).optional(),
+    beforeId: intOpt.optional(),
+    limit: z.coerce.number().int().min(1).max(200).optional(),
+  })
+  .strict();
+
+export function paramsObject(sp: URLSearchParams): Record<string, string> {
+  return Object.fromEntries(sp.entries());
+}

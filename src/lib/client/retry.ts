@@ -70,6 +70,18 @@ const BLOCKED_CODES = new Set([
   "PROTECTED",
   "ALREADY_LIFTED",
   "UNCONFIRMED",
+  // Gönderim operasyonları (Aşama 13)
+  "BELOW_FLOOR",
+  "CANNOT_APPLY",
+  "NOT_REVIEWABLE",
+  "NOT_SENDABLE",
+  "RATE_LIMITED",
+  "MAILBOX_NOT_READY",
+  "BUILD_FAILED",
+  "INVALID_PARAM",
+  "INVALID_DOMAIN",
+  "INVALID_SELECTOR",
+  "NO_DOMAIN",
 ]);
 
 export function classifyMutationError(error: unknown): MutationErrorInfo {

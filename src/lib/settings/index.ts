@@ -55,6 +55,15 @@ export const settingSchemas = {
    * Faz 3: uygulanmış seed sürümleri (yalnızca içeride yazılır, ayarlar API'si değiştiremez). Bir kez eklenen hazır
    * şablon ve demo posta kutusu, kullanıcı düzenlese, arşivlese veya silse de yeniden eklenmez.
    */
+  /**
+   * Faz 3 (Aşama 13): demo otomatik durdurma eşikleri. Yalnızca içeride yazılır (ayarlar API'si değiştiremez);
+   * kullanıcı eşikleri yalnızca `tightenAutoStop` ile SIKILAŞTIRABİLİR. Okurken varsayılandan gevşek değerler
+   * varsayılana sıkıştırılır (bkz. campaigns/auto-stop).
+   */
+  "mail.autoStop": z.object({
+    minRecipients: z.number().int(),
+    minRateBp: z.number().int(),
+  }),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -79,6 +88,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "enrichment.external": { enabled: false, provider: "hunter" },
   "enrichment.concurrency": 4,
   "seed.faz3": { templates: 0, demoMailbox: 0 },
+  "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
 };
 
 export async function getSetting<K extends SettingKey>(

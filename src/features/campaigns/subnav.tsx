@@ -1,19 +1,20 @@
 "use client";
 
-import { FileText, Mail, ShieldCheck } from "lucide-react";
+import { FileText, Mail, ScrollText, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 
 /**
- * Kampanya alanının alt gezinmesi: Kampanyalar · Şablonlar · Uyum. Üst çubuk (docs/07-UI-REHBERI.md) 4 sabit
- * öğede kalır; bu üç ekran "Kampanyalar" altında bulunur ve üst çubukta "Kampanyalar" etkin görünür.
+ * Kampanya alanının alt gezinmesi: Kampanyalar · Şablonlar · Uyum · Günlük. Üst çubuk (docs/07-UI-REHBERI.md) 4 sabit
+ * öğede kalır; bu dört ekran "Kampanyalar" altında bulunur ve üst çubukta "Kampanyalar" etkin görünür.
  */
 export const SUBNAV = [
   { href: "/campaigns", key: "subnav.campaigns", icon: Mail },
   { href: "/templates", key: "subnav.templates", icon: FileText },
   { href: "/compliance", key: "subnav.compliance", icon: ShieldCheck },
+  { href: "/mail-log", key: "subnav.mailLog", icon: ScrollText },
 ] as const;
 
 export function CampaignsSubnav() {
