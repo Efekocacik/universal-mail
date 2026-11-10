@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { policyScopeForMailbox } from "@/lib/compliance/policies";
+import { LIVE_INBOX_READING_ENABLED, policyScopeForMailbox } from "@/lib/compliance/policies";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { mailboxes } from "@/lib/db/schema";
@@ -17,10 +17,14 @@ export interface InboxFetchResult {
   items: InboundEnvelope[];
   /** Bir sonraki turun başlangıç imleci; yoksa null. */
   nextCursor: string | null;
+  /** Okuyucunun ön elemesi (yalnızca sayılar): ilgisiz, çok büyük, silinmiş, ayrıştırılamayan iletiler. */
+  skipped?: { unrelated: number; oversize: number; gone: number; unparseable: number };
+  /** Sağlayıcı imleci geçersiz saydı (ör. Gmail historyId süresi doldu); sonraki tur baştan eşitler. */
+  resynced?: boolean;
 }
 
 export interface InboxReader {
-  readonly id: "demo";
+  readonly id: "demo" | "gmail";
   fetch(mailboxId: number, cursor: string | null, limit: number): Promise<InboxFetchResult>;
 }
 
@@ -35,6 +39,11 @@ export interface SyncSummary {
   needsReview: number;
   effects: number;
   floodGuard: boolean;
+  /** Okuyucunun ön elemesi (ilgisiz/çok büyük/silinmiş/ayrıştırılamayan); bunlar saklanmaz. */
+  skipped: number;
+  resynced: boolean;
+  /** Okuyucu hata verdiyse güvenli hata kodu. İmleç İLERLETİLMEZ, hiçbir ileti kaybolmaz. */
+  error: string | null;
 }
 
 const hasEffect = (e: InboundEffects) =>
@@ -44,7 +53,13 @@ export async function syncInbox(
   db: Db,
   reader: InboxReader,
   mailboxId: number,
-  opts: { now?: () => number; maxMessages?: number; maxEffects?: number } = {},
+  opts: {
+    now?: () => number;
+    maxMessages?: number;
+    maxEffects?: number;
+    /** Yalnızca testte: gerçek gelen kutusu okuma kilidini geçersiz kılar (üretimde yok sayılır). */
+    liveInboxEnabled?: () => boolean;
+  } = {},
 ): Promise<SyncSummary> {
   const clock = opts.now ?? Date.now;
   const maxMessages = Math.min(opts.maxMessages ?? MAX_MESSAGES_PER_SYNC, MAX_MESSAGES_PER_SYNC);
@@ -56,25 +71,60 @@ export async function syncInbox(
     needsReview: 0,
     effects: 0,
     floodGuard: false,
+    skipped: 0,
+    resynced: false,
+    error: null,
   };
 
   const [mailbox] = await db.select().from(mailboxes).where(eq(mailboxes.id, mailboxId)).limit(1);
-  if (
-    !mailbox ||
-    mailbox.status !== "connected" ||
-    policyScopeForMailbox(mailbox.provider) !== "demo"
-  ) {
-    return summary;
+  if (!mailbox || mailbox.status !== "connected") return summary;
+  // Okuyucu ve kutu türü eşleşmeli; gerçek (Gmail) kutu yalnızca gelen kutusu okuma kilidi açıkken eşitlenir.
+  const demoBox = policyScopeForMailbox(mailbox.provider) === "demo";
+  if (demoBox) {
+    if (reader.id !== "demo") return summary;
+  } else {
+    const live = opts.liveInboxEnabled ?? (() => LIVE_INBOX_READING_ENABLED);
+    if (mailbox.provider !== "gmail" || reader.id !== "gmail" || !live()) return summary;
   }
 
-  const { items, nextCursor } = await reader.fetch(mailboxId, mailbox.syncCursor, maxMessages);
-  const batch = items.slice(0, maxMessages);
+  let fetched: Awaited<ReturnType<InboxReader["fetch"]>>;
+  try {
+    fetched = await reader.fetch(mailboxId, mailbox.syncCursor, maxMessages);
+  } catch (e) {
+    // Ağ/kimlik/biçim hatası: imleç ilerlemez, hiçbir şey işlenmez; sonraki tur aynı yerden devam eder.
+    summary.error =
+      typeof (e as { code?: unknown })?.code === "string"
+        ? (e as { code: string }).code
+        : "fetch_failed";
+    return summary;
+  }
+  const { items, nextCursor } = fetched;
+  if (items.length > maxMessages) {
+    // Sözleşme ihlali: fazlası sessizce atlanıp imleç ilerletilirse veri kaybolur. İlerletme.
+    summary.error = "reader_contract_violation";
+    return summary;
+  }
+  const batch = items;
   summary.fetched = batch.length;
+  if (fetched.skipped) {
+    const k = fetched.skipped;
+    summary.skipped = k.unrelated + k.oversize + k.gone + k.unparseable;
+  }
+  summary.resynced = fetched.resynced === true;
 
   for (const env of batch) {
     const allowEffects = summary.effects < maxEffects;
     if (!allowEffects) summary.floodGuard = true;
-    const r = await processInbound(db, { ...env, mailboxId }, { now: clock(), allowEffects });
+    const r = await processInbound(
+      db,
+      { ...env, mailboxId },
+      { now: clock(), allowEffects, allowGmail: !demoBox },
+    );
+    if (r.outcome === "rejected") {
+      // İleti işlenemedi (kutu pasif, kapsam reddi...): imleci İLERLETME; aksi halde ileti sonsuza dek kaybolur.
+      summary.error = `rejected_${r.code}`;
+      return summary;
+    }
     if (r.outcome === "duplicate") summary.duplicates++;
     else if (r.outcome === "processed") {
       summary.processed++;

@@ -49,12 +49,18 @@ export interface InboundEnvelope {
   receivedAt: number;
   /** Sağlayıcı bağdaştırıcısının İLETİNİN DIŞINDAN verdiği tasdik; yoksa null (otomatik etki yok). */
   attestation: Attestation | null;
+  /** Sağlayıcının konuşma kimliği (Gmail threadId). Yalnızca ek eşleştirme ipucudur, tek başına kanıt değildir. */
+  threadId?: string | null;
+  /** Sağlayıcının ileti kimliği (Gmail message id); izlenebilirlik için saklanır. */
+  providerMessageId?: string | null;
 }
 
 export interface ProcessOptions {
   now?: number;
   /** Sel koruması: false ise ileti yalnızca kayda alınır, otomatik etki üretmez. */
   allowEffects?: boolean;
+  /** Gmail kutularına izin verir. YALNIZCA eşitleme turu (gelen kutusu okuma kilidi açıkken) verir. */
+  allowGmail?: boolean;
 }
 
 export interface InboundEffects {
@@ -107,6 +113,7 @@ async function findMatch(
   ids: string[],
   mailboxId: number,
   fallbackPeerHash: string | null,
+  threadId: string | null = null,
 ): Promise<OutboundMatch | null> {
   const cols = {
     id: messages.id,
@@ -127,6 +134,24 @@ async function findMatch(
       .orderBy(desc(messages.sentAt))
       .limit(1);
     if (rows[0]) return rows[0] as OutboundMatch;
+  }
+  if (threadId) {
+    // Sağlayıcı Message-ID'yi yeniden yazmış olabilir: aynı posta kutusunda, aynı konuşmadaki kabul edilmiş
+    // kampanya iletisi — yalnızca TAM BİR aday varsa (belirsizlikte eşleşme YOK). L2/L3/L4 yine gerekir.
+    const rows = await tx
+      .select(cols)
+      .from(messages)
+      .where(
+        and(
+          eq(messages.direction, "out"),
+          eq(messages.purpose, "campaign"),
+          eq(messages.status, "sent"),
+          eq(messages.mailboxId, mailboxId),
+          eq(messages.threadId, threadId),
+        ),
+      )
+      .limit(2);
+    if (rows.length === 1) return rows[0] as OutboundMatch;
   }
   if (fallbackPeerHash) {
     const rows = await tx
@@ -232,8 +257,10 @@ export async function processInbound(
         .where(eq(mailboxes.id, env.mailboxId))
         .limit(1);
       if (!mailbox) return { outcome: "rejected", code: "mailbox_not_found" };
-      if (policyScopeForMailbox(mailbox.provider) !== "demo")
-        return { outcome: "rejected", code: "live_scope" };
+      const scopeOk =
+        policyScopeForMailbox(mailbox.provider) === "demo" ||
+        (mailbox.provider === "gmail" && opts.allowGmail === true);
+      if (!scopeOk) return { outcome: "rejected", code: "live_scope" };
       if (mailbox.status !== "connected") return { outcome: "rejected", code: "mailbox_inactive" };
 
       const dup = await tx
@@ -283,6 +310,7 @@ export async function processInbound(
         refIds,
         mailbox.id,
         kind === "unsubscribe" ? fromHash : null,
+        env.threadId ?? null,
       );
 
       const ev = evaluateEvidence({
@@ -307,6 +335,8 @@ export async function processInbound(
           leadId: plan.link ? match!.leadId : null,
           mailboxId: mailbox.id,
           rfcMessageId: syntheticId,
+          providerMessageId: env.providerMessageId ?? null,
+          threadId: env.threadId ?? null,
           inReplyTo: kind.startsWith("bounce")
             ? (parsed.dsn?.originalMessageId ?? null)
             : (parsed.inReplyTo[0] ?? null),

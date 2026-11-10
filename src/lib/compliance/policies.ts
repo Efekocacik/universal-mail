@@ -16,6 +16,24 @@ import { COUNTRY_CODES } from "@/lib/geo/countries";
 /** Bu sürümde gerçek gönderim yoktur. Yalnızca hukuki onaydan sonra çıkacak yeni bir sürümde değişebilir. */
 export const LIVE_SENDING_ENABLED = false;
 
+/**
+ * Gerçek (Gmail) gelen kutusunu OKUMA kilidi (Aşama 15.5). Gönderim kilidinden ayrıdır ve varsayılan KAPALIDIR:
+ * kapalıyken Gmail okuyucusu hiçbir ağ isteği atmaz, hiçbir ileti işlenmez. Hukuki onay ve pilot öncesi değişmez.
+ */
+export const LIVE_INBOX_READING_ENABLED = false;
+
+/**
+ * Gmail başlıklarına (Authentication-Results, Return-Path, Delivered-To) dayalı kimlik tasdikine GÜVEN kilidi
+ * (Aşama 15.5). Varsayılan KAPALIDIR: kapalıyken hiçbir Gmail ileti başlığı tasdik ÜRETMEZ; ileti yalnızca inceleme
+ * için kaydedilir, doğrulanmış bounce/suppression/otomatik durdurma doğmaz.
+ *
+ * Neden: Gönderen, iletinin kendi başlıklarını kontrol eder. Gmail'in eklediği başlıkları gönderenin eklediklerinden
+ * YALNIZCA başlık sırası/biçimi ile ayırt etmek, gerçek bir Gmail hesabında gözlenip doğrulanmadan kanıt değildir.
+ * Yalnızca docs/09-FAZ3-CANLI-DOGRULAMA.md'deki Gmail başlık doğrulama adımları gerçek hesapla tamamlandıktan sonra
+ * (ve bilinçli bir sürüm değişikliğiyle) true yapılabilir. Test ortamında yalnızca testlerde geçersiz kılınır.
+ */
+export const GMAIL_HEADER_TRUST_VERIFIED = false;
+
 /** Varsayılanların sürümü. Seed mevcut satırların ÜZERİNE YAZMAZ; yalnızca eksik ülkeleri ekler. */
 export const POLICY_SEED_VERSION = 1;
 
