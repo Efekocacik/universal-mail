@@ -1,6 +1,7 @@
 import { AutoStopError } from "@/lib/campaigns/auto-stop";
 import { ErasureError } from "@/lib/compliance/erasure";
 import { MailboxHealthError } from "@/lib/mail/mailbox-health";
+import { OAuthError } from "@/lib/mail/gmail/oauth";
 import { MailboxServiceError } from "@/lib/mail/mailbox-service";
 import { PolicyChangeError } from "@/lib/compliance/policy-service";
 import { SuppressionError } from "@/lib/compliance/suppression";
@@ -107,6 +108,9 @@ export function mapDomainError(e: unknown): Mapped | null {
       body: { error: e.message, code: e.kind.toUpperCase() },
     };
   }
+  if (e instanceof OAuthError) {
+    return { status: OAUTH_STATUS[e.kind], body: { error: e.message, code: e.kind.toUpperCase() } };
+  }
   if (e instanceof MailboxServiceError) {
     return {
       status: MAILBOX_SERVICE_STATUS[e.kind],
@@ -173,6 +177,26 @@ const MAILBOX_SERVICE_STATUS: Record<MailboxServiceError["kind"], number> = {
   not_editable: 409,
   in_use: 409,
   invalid_status: 409,
+};
+
+const OAUTH_STATUS: Record<OAuthError["kind"], number> = {
+  client_not_configured: 409,
+  mailbox_not_found: 404,
+  not_gmail: 409,
+  invalid_status: 409,
+  invalid_state: 400,
+  expired: 400,
+  access_denied: 400,
+  scope_missing: 409,
+  scope_excess: 409,
+  account_mismatch: 409,
+  token_exchange_failed: 502,
+  invalid_response: 502,
+  no_refresh_token: 502,
+  not_connected: 409,
+  reauthorization_required: 409,
+  transient: 503,
+  unconfirmed: 400,
 };
 
 /** `route()` + alan hatası eşlemesi. */

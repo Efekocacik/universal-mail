@@ -12,7 +12,26 @@ export interface GmailClientStatus {
   secretConfigured: boolean;
 }
 
-export const mbk = { gmailClient: ["mailboxes", "gmail-client"] as const };
+export interface OAuthStatus {
+  connected: boolean;
+  send: boolean;
+  read: boolean;
+  reauthorizationRequired: boolean;
+}
+
+export const mbk = {
+  gmailClient: ["mailboxes", "gmail-client"] as const,
+  oauth: (id: number) => ["mailboxes", "oauth", id] as const,
+};
+
+export const useOAuthStatus = (id: number, enabled: boolean) =>
+  useQuery({
+    queryKey: mbk.oauth(id),
+    enabled,
+    queryFn: () => api<OAuthStatus>(`/api/mailboxes/${id}/oauth`),
+    retry: shouldRetryQuery,
+    retryDelay: queryRetryDelay,
+  });
 
 export const useGmailClient = () =>
   useQuery({
@@ -31,5 +50,15 @@ export const mailboxApi = {
   remove: (id: number) => api<{ ok: true }>(`/api/mailboxes/${id}`, { method: "DELETE" }),
   setClient: (input: { clientId: string; clientSecret?: string }) =>
     api<GmailClientStatus>("/api/mailboxes/gmail-client", { method: "PUT", json: input }),
+  oauthStart: (id: number, level: "send" | "send_read") =>
+    api<{ authUrl: string; expiresAt: number }>(`/api/mailboxes/${id}/oauth/start`, {
+      method: "POST",
+      json: { level },
+    }),
+  oauthDisconnect: (id: number) =>
+    api<{ revoked: boolean }>(`/api/mailboxes/${id}/oauth/disconnect`, {
+      method: "POST",
+      json: { confirm: true },
+    }),
   clearClient: () => api<GmailClientStatus>("/api/mailboxes/gmail-client", { method: "DELETE" }),
 };

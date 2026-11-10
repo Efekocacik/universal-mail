@@ -1,7 +1,9 @@
 "use client";
 
+import { useQueryClient } from "@tanstack/react-query";
 import { Mail, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,8 +13,19 @@ import { Skeleton } from "@/components/ui/misc";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import { ck, useMailboxes, type MailboxItem } from "@/lib/client/campaigns";
-import { mailboxApi, mbk, useGmailClient } from "@/lib/client/mailboxes";
-import { t } from "@/lib/i18n";
+import { mailboxApi, mbk, useGmailClient, useOAuthStatus } from "@/lib/client/mailboxes";
+import { t, type TrKey } from "@/lib/i18n";
+
+const KNOWN_REASONS = [
+  "invalid_state",
+  "expired",
+  "access_denied",
+  "account_mismatch",
+  "scope_missing",
+  "scope_excess",
+  "no_refresh_token",
+  "transient",
+];
 
 const INVALIDATE = [ck.mailboxes, mbk.gmailClient] as const;
 
@@ -23,7 +36,135 @@ function statusBadge(m: MailboxItem) {
   return <Badge variant="warning">{t("mbx.status.not_configured")}</Badge>;
 }
 
-function MailboxRow({ m }: { m: MailboxItem }) {
+/** Google izin sayfası açıldıktan sonra durumu 3 sn aralıkla yeniler (en çok 10 dk). */
+function useWaitForConnection(active: boolean, done: boolean, onStop: () => void) {
+  const qc = useQueryClient();
+  useEffect(() => {
+    if (!active) return;
+    if (done) {
+      onStop();
+      return;
+    }
+    const id = setInterval(() => void qc.invalidateQueries({ queryKey: ["mailboxes"] }), 3000);
+    const stop = setTimeout(onStop, 10 * 60_000);
+    return () => {
+      clearInterval(id);
+      clearTimeout(stop);
+    };
+  }, [active, done, onStop, qc]);
+}
+
+function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean }) {
+  const oauth = useOAuthStatus(m.id, true);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [level, setLevel] = useState<"send" | "send_read">("send");
+  const [readConfirm, setReadConfirm] = useState(false);
+  const [discConfirm, setDiscConfirm] = useState(false);
+  const o = oauth.data;
+  const connected = o?.connected === true;
+  useWaitForConnection(authUrl !== null, connected && (level === "send" || o?.read === true), () =>
+    setAuthUrl(null),
+  );
+  const start = useSafeMutation(
+    (lv: "send" | "send_read") => {
+      setLevel(lv);
+      return mailboxApi.oauthStart(m.id, lv);
+    },
+    {
+      invalidate: [...INVALIDATE, mbk.oauth(m.id)],
+      onSuccess: (r) => setAuthUrl(r.authUrl),
+    },
+  );
+  const disconnect = useSafeMutation(() => mailboxApi.oauthDisconnect(m.id), {
+    invalidate: [...INVALIDATE, mbk.oauth(m.id)],
+    onSuccess: (r) =>
+      r.revoked
+        ? toast.success(t("mbx.oauth.disconnected"))
+        : toast.warning(t("mbx.oauth.disconnected.norevoke")),
+  });
+  return (
+    <div className="basis-full space-y-2 border-t pt-2">
+      {o?.reauthorizationRequired && <Notice tone="danger">{t("mbx.oauth.reauth")}</Notice>}
+      {connected ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge variant={o?.send ? "success" : "outline"}>{t("mbx.oauth.perm.send")}</Badge>
+          <Badge variant={o?.read ? "success" : "warning"}>
+            {o?.read ? t("mbx.oauth.perm.read") : t("mbx.oauth.perm.readOff")}
+          </Badge>
+          {!o?.read && (
+            <Button size="sm" variant="outline" onClick={() => setReadConfirm(true)}>
+              {t("mbx.oauth.read.enable")}
+            </Button>
+          )}
+          <Button size="sm" variant="dangerOutline" onClick={() => setDiscConfirm(true)}>
+            {t("mbx.oauth.disconnect")}
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-1">
+          <Button
+            size="sm"
+            loading={start.isPending}
+            disabled={!clientReady || m.status === "disabled"}
+            onClick={() => start.mutate("send")}
+          >
+            {t("mbx.oauth.connect")}
+          </Button>
+          <p className="text-[12px] text-muted-foreground">
+            {clientReady ? t("mbx.oauth.connect.help") : t("mbx.oauth.needClient")}
+          </p>
+        </div>
+      )}
+      {authUrl && (
+        <Notice>
+          <p className="font-medium">{t("mbx.oauth.link.title")}</p>
+          <p className="text-[12px]">{t("mbx.oauth.link.body")}</p>
+          <a
+            className="mt-1 inline-block font-medium underline"
+            href={authUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="oauth-link"
+          >
+            {t("mbx.oauth.link.open")}
+          </a>
+        </Notice>
+      )}
+      <ConfirmDialog
+        open={readConfirm}
+        onOpenChange={setReadConfirm}
+        tone="warning"
+        title={t("mbx.oauth.read.title")}
+        description={t("mbx.oauth.read.body")}
+        confirmLabel={t("mbx.oauth.read.confirm")}
+        onConfirm={async () => {
+          try {
+            await start.mutateAsync("send_read");
+          } catch {
+            /* useSafeMutation kullanıcıya bildirir */
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={discConfirm}
+        onOpenChange={setDiscConfirm}
+        tone="danger"
+        title={t("mbx.oauth.disconnect.title")}
+        description={t("mbx.oauth.disconnect.body")}
+        confirmLabel={t("mbx.oauth.disconnect")}
+        onConfirm={async () => {
+          try {
+            await disconnect.mutateAsync(undefined);
+          } catch {
+            /* useSafeMutation kullanıcıya bildirir */
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+function MailboxRow({ m, clientReady }: { m: MailboxItem; clientReady: boolean }) {
   const [confirm, setConfirm] = useState(false);
   const remove = useSafeMutation(() => mailboxApi.remove(m.id), {
     invalidate: INVALIDATE,
@@ -78,6 +219,7 @@ function MailboxRow({ m }: { m: MailboxItem }) {
           />
         </>
       )}
+      {m.provider === "gmail" && <GmailAccess m={m} clientReady={clientReady} />}
     </li>
   );
 }
@@ -222,6 +364,26 @@ function GmailClientForm() {
 /** Gönderim hesabı (FR-SET-02): kutu kayıtları ve Google OAuth istemcisi. Hiçbir dış servise bağlanmaz. */
 export function MailboxSettingsSection() {
   const q = useMailboxes();
+  const client = useGmailClient();
+  const clientReady =
+    client.data?.clientIdConfigured === true && client.data?.secretConfigured === true;
+  const [result, setResult] = useState<{
+    ok: boolean;
+    reason: string | null;
+    readDenied: boolean;
+  } | null>(null);
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const g = sp.get("gmail");
+    if (g === "ok" || g === "error") {
+      setResult({
+        ok: g === "ok",
+        reason: sp.get("reason"),
+        readDenied: sp.get("read") === "denied",
+      });
+      window.history.replaceState(null, "", `${window.location.pathname}#mailbox`);
+    }
+  }, []);
   return (
     <Card className="um-enter">
       <CardHeader>
@@ -232,6 +394,17 @@ export function MailboxSettingsSection() {
       </CardHeader>
       <CardContent className="space-y-4 pt-3">
         <Notice>{t("mbx.note")}</Notice>
+        {result && (
+          <Notice tone={result.ok ? "info" : "danger"}>
+            {result.ok
+              ? result.readDenied
+                ? t("mbx.oauth.result.readDenied")
+                : t("mbx.oauth.result.ok")
+              : t(
+                  `mbx.oauth.reason.${KNOWN_REASONS.includes(result.reason ?? "") ? result.reason : "other"}` as TrKey,
+                )}
+          </Notice>
+        )}
         {q.isLoading ? (
           <Skeleton className="h-24 rounded-lg" />
         ) : q.isError || !q.data ? (
@@ -239,7 +412,7 @@ export function MailboxSettingsSection() {
         ) : (
           <ul className="divide-y rounded-lg border" aria-label={t("mbx.title")}>
             {q.data.map((m) => (
-              <MailboxRow key={m.id} m={m} />
+              <MailboxRow key={m.id} m={m} clientReady={clientReady} />
             ))}
           </ul>
         )}

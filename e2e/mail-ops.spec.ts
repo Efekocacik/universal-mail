@@ -307,6 +307,13 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
   await section.getByLabel("Gmail / Workspace adresi").fill("satis-e2e@firma-ornek.com");
   await section.getByRole("button", { name: "Kutu ekle" }).click();
   const row = section.getByRole("listitem").filter({ hasText: "Satış hesabı E2E" });
+  const rowId = async () => {
+    const items = (await (await page.request.get("/api/mailboxes")).json()).items as {
+      id: number;
+      label: string;
+    }[];
+    return items.find((i) => i.label === "Satış hesabı E2E")!.id;
+  };
   await expect(row).toContainText("Yapılandırılmadı");
   await expect(row).not.toContainText("Bağlı");
 
@@ -330,6 +337,36 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
   const status = await (await page.request.get("/api/mailboxes/gmail-client")).text();
   expect(status).not.toContain(secret);
   expect(status).not.toContain("e2eabcdefghijkl");
+
+  // OAuth bağlantısı: yalnızca yetki ADRESİ üretilir (en az yetki); bağlantı açılmaz, Google'a istek atılmaz.
+  await row.getByRole("button", { name: "Gmail'e bağlan (yalnızca gönderim)" }).click();
+  const link = row.getByTestId("oauth-link");
+  await expect(link).toBeVisible();
+  const href = (await link.getAttribute("href")) ?? "";
+  const u = new URL(href);
+  expect(u.origin + u.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+  expect(u.searchParams.get("scope")!.split(" ").sort()).toEqual([
+    "email",
+    "https://www.googleapis.com/auth/gmail.send",
+    "openid",
+  ]);
+  expect(u.searchParams.get("code_challenge_method")).toBe("S256");
+  expect(u.searchParams.get("redirect_uri")).toMatch(
+    /^http:\/\/(127\.0\.0\.1|localhost):\d+\/api\/oauth\/gmail\/callback$/,
+  );
+  expect(href).not.toContain(secret);
+  expect(href).not.toContain("gmail.readonly");
+  expect(href).not.toContain("gmail.modify");
+  // Henüz bağlı değil: izin rozetleri ve okuma düğmesi yok; kutu hâlâ yapılandırılmadı.
+  await expect(row).toContainText("Yapılandırılmadı");
+  await expect(row.getByText("Gelen kutusu okuma kapalı")).toHaveCount(0);
+  const oauth = await (await page.request.get(`/api/mailboxes/${await rowId()}/oauth`)).json();
+  expect(oauth).toEqual({
+    connected: false,
+    send: false,
+    read: false,
+    reauthorizationRequired: false,
+  });
 
   // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz.
   const r = await (await page.request.get("/api/compliance/live-readiness")).json();

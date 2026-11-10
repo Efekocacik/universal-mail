@@ -93,6 +93,17 @@ const BLOCKED_CODES = new Set([
   "RESERVED_DOMAIN",
   "INVALID_STATUS",
   "INVALID_CLIENT",
+  // Aşama 15.3
+  "CLIENT_NOT_CONFIGURED",
+  "NOT_GMAIL",
+  "INVALID_STATE",
+  "EXPIRED",
+  "ACCESS_DENIED",
+  "SCOPE_MISSING",
+  "SCOPE_EXCESS",
+  "ACCOUNT_MISMATCH",
+  "NOT_CONNECTED",
+  "REAUTHORIZATION_REQUIRED",
 ]);
 
 export function classifyMutationError(error: unknown): MutationErrorInfo {

@@ -50,6 +50,10 @@ export const gmailClientSchema = z
   .object({ clientId: z.string().max(200), clientSecret: z.string().max(300).optional() })
   .strict();
 
+export const oauthStartSchema = z.object({ level: z.enum(["send", "send_read"]) }).strict();
+
+export const oauthDisconnectSchema = z.object({ confirm: z.boolean() }).strict();
+
 export const reviewDecisionSchema = z.object({ decision: z.enum(["apply", "ignore"]) }).strict();
 
 export const testSendSchema = z

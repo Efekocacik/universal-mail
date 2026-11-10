@@ -89,6 +89,11 @@ export const settingSchemas = {
   }),
   /** Gmail OAuth istemci kimliği (gizli DEĞİL; sırrı gizli depodadır). Yalnızca posta kutusu servisi yazar. */
   "mail.gmailOAuth": z.object({ clientId: z.string() }),
+  /** Kutu başına verilen Gmail izinleri (belirteç DEĞİL; yalnızca hangi işlevlerin açık olduğu). */
+  "mail.gmailGrants": z.record(
+    z.string(),
+    z.object({ send: z.boolean(), read: z.boolean(), at: z.number().int() }),
+  ),
   "mail.mailboxHalts": z.record(
     z.string(),
     z.object({
@@ -126,6 +131,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
   "mail.mailboxHalts": {},
   "mail.gmailOAuth": { clientId: "" },
+  "mail.gmailGrants": {},
 };
 
 export async function getSetting<K extends SettingKey>(

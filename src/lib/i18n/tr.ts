@@ -1556,6 +1556,8 @@ export const tr = {
   "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda kapalı)",
   "ready.item.consent": "Kullanım onayı",
   "ready.item.company_profile": "Gönderen firma profili",
+  "ready.item.inbox_access":
+    "Gelen kutusu okuma izni (bounce ve yanıt koruması için gmail.readonly)",
   "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
   "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı)",
   "ready.item.https_unsubscribe": "Genel HTTPS tek tıklamalı çıkış uç noktası",
@@ -1650,4 +1652,42 @@ export const tr = {
   "mbx.client.saved": "İstemci bilgisi kaydedildi.",
   "mbx.client.clear": "İstemci bilgisini sil",
   "mbx.client.cleared": "İstemci bilgisi silindi.",
+
+  "mbx.oauth.connect": "Gmail'e bağlan (yalnızca gönderim)",
+  "mbx.oauth.connect.help":
+    "Yalnızca ileti göndermek için “gmail.send” izni istenir. Gelen kutusunu okuma izni ayrıdır ve ayrıca etkinleştirilir.",
+  "mbx.oauth.needClient": "Önce Google OAuth istemci kimliğini ve sırrını kaydedin.",
+  "mbx.oauth.link.title": "Google izin sayfası hazır",
+  "mbx.oauth.link.body":
+    "Bağlantıyı açıp izni onaylayın. Bu sayfa bağlantı kurulunca güncellenir. İstek 10 dakika geçerlidir.",
+  "mbx.oauth.link.open": "Google izin sayfasını aç",
+  "mbx.oauth.perm.send": "Gönderim izni",
+  "mbx.oauth.perm.read": "Gelen kutusu okuma izni",
+  "mbx.oauth.perm.readOff": "Gelen kutusu okuma kapalı",
+  "mbx.oauth.read.enable": "Gelen kutusu okumayı etkinleştir",
+  "mbx.oauth.read.title": "Gelen kutusu okuma izni istensin mi?",
+  "mbx.oauth.read.body":
+    "Bounce ve yanıt tespiti için Google'dan “gmail.readonly” izni istenir. Bu izin posta kutunuzdaki tüm iletileri okuma yetkisi verir (kısıtlı kapsam). Yalnızca gerekiyorsa verin; gönderim izni bundan bağımsızdır. Gerçek gönderim bu sürümde kapalıdır.",
+  "mbx.oauth.read.confirm": "İzni iste",
+  "mbx.oauth.disconnect": "Bağlantıyı kes",
+  "mbx.oauth.disconnect.title": "Gmail bağlantısı kesilsin mi?",
+  "mbx.oauth.disconnect.body":
+    "Kayıtlı yenileme belirteci silinir ve Google'daki yetki iptal edilmeye çalışılır. Kutu “yapılandırılmadı” durumuna döner.",
+  "mbx.oauth.disconnected": "Bağlantı kesildi.",
+  "mbx.oauth.disconnected.norevoke":
+    "Bağlantı kesildi, ancak Google'daki yetki iptal edilemedi; Google hesap ayarlarından kaldırabilirsiniz.",
+  "mbx.oauth.reauth": "Yetki geçersiz veya iptal edilmiş; yeniden bağlanmanız gerekir.",
+  "mbx.oauth.result.ok": "Gmail kutusu bağlandı. Gerçek gönderim yine de kapalıdır.",
+  "mbx.oauth.result.readDenied":
+    "Gelen kutusu okuma izni verilmedi; kutu yalnızca gönderim izniyle bağlandı.",
+  "mbx.oauth.result.error": "Bağlantı kurulamadı.",
+  "mbx.oauth.reason.invalid_state": "İstek geçersiz veya süresi dolmuş; yeniden başlatın.",
+  "mbx.oauth.reason.expired": "İstek geçersiz veya süresi dolmuş; yeniden başlatın.",
+  "mbx.oauth.reason.access_denied": "İzin verilmedi.",
+  "mbx.oauth.reason.account_mismatch": "Seçilen Google hesabı kutunun adresiyle aynı değil.",
+  "mbx.oauth.reason.scope_missing": "Gönderim izni verilmedi.",
+  "mbx.oauth.reason.scope_excess": "Beklenmeyen izinler verildi; bağlantı reddedildi.",
+  "mbx.oauth.reason.no_refresh_token": "Google kalıcı yetki vermedi; yeniden deneyin.",
+  "mbx.oauth.reason.transient": "Google'a ulaşılamadı; daha sonra yeniden deneyin.",
+  "mbx.oauth.reason.other": "Google yetkilendirmeyi tamamlayamadı.",
 } as const;

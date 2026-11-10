@@ -19,6 +19,7 @@ export type ReadinessKey =
   | "consent"
   | "company_profile"
   | "real_mailbox"
+  | "inbox_access"
   | "dns_auth"
   | "https_unsubscribe"
   | "live_country_policies"
@@ -63,6 +64,10 @@ export async function getLiveReadiness(db: DbExecutor): Promise<LiveReadiness> {
     (m) => policyScopeForMailbox(m.provider) === "live" && m.status === "connected",
   );
 
+  // Gelen kutusu okuma izni (bounce/yanıt koruması için): bağlı bir gerçek kutuda gmail.readonly verilmiş olmalı.
+  const grants = await getSetting(db, "mail.gmailGrants");
+  const inboxOk = realConnected.some((m) => grants[String(m.id)]?.read === true);
+
   const [nonBlockedLive] = await db
     .select({ n: sql<number>`count(*)` })
     .from(countryPolicies)
@@ -74,6 +79,7 @@ export async function getLiveReadiness(db: DbExecutor): Promise<LiveReadiness> {
     { key: "company_profile", status: profile.success ? "ok" : "blocked", owner: "company" },
     { key: "real_mailbox", status: realConnected.length > 0 ? "ok" : "blocked", owner: "external" },
     // Alan adı denetimi yalnızca gerçek posta kutusu varken ve kullanıcı istediğinde yapılır; sonucu saklanmaz.
+    { key: "inbox_access", status: inboxOk ? "ok" : "blocked", owner: "external" },
     { key: "dns_auth", status: "unknown", owner: "external" },
     {
       key: "https_unsubscribe",
