@@ -21,13 +21,13 @@ export interface ProviderSendInput {
 }
 
 export type ProviderResult =
-  | { status: "accepted"; providerMessageId: string; acceptedAt: number }
+  | { status: "accepted"; providerMessageId: string; acceptedAt: number; threadId?: string }
   /** `retryAfterMs`: sağlayıcının bildirdiği bekleme süresi (ör. 429); geçici retlerde bundan önce denenmez. */
   | { status: "rejected"; code: string; permanent: boolean; retryAfterMs?: number }
   | { status: "unknown"; code: string };
 
 export interface MailProvider {
-  readonly id: "demo";
+  readonly id: "demo" | "gmail";
   send(input: ProviderSendInput): Promise<ProviderResult>;
 }
 

@@ -500,7 +500,12 @@ async function callProvider(r: Reservation, timeoutMs: number): Promise<Provider
 function isProviderResult(v: unknown): v is ProviderResult {
   const o = v as ProviderResult | null;
   if (!o || typeof o !== "object") return false;
-  if (o.status === "accepted") return typeof o.providerMessageId === "string";
+  if (o.status === "accepted") {
+    return (
+      typeof o.providerMessageId === "string" &&
+      (o.threadId === undefined || typeof o.threadId === "string")
+    );
+  }
   if (o.status === "rejected")
     return typeof o.code === "string" && typeof o.permanent === "boolean";
   return o.status === "unknown" && typeof o.code === "string";
@@ -523,7 +528,13 @@ async function recordResult(
     if (result.status === "accepted") {
       const updated = await tx
         .update(messages)
-        .set({ status: "sent", sentAt: now, providerMessageId: result.providerMessageId })
+        .set({
+          status: "sent",
+          sentAt: now,
+          providerMessageId: result.providerMessageId,
+          // Sağlayıcının konuşma kimliği (yanıt eşleştirme için; yoksa değişmez).
+          ...(result.threadId ? { threadId: result.threadId } : {}),
+        })
         .where(own)
         .returning({ id: messages.id, mailboxId: messages.mailboxId });
       // Arada uzlaştırma kaydı `unknown` yaptıysa ona dokunulmaz.

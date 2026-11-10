@@ -163,6 +163,11 @@ function mem(): Memory {
     inflight: new Map(),
   }) as Memory;
 }
+/** Önbellekteki erişim belirtecini unutur (401 sonrası kontrollü yenileme için). */
+export function forgetAccessToken(mailboxId: number): void {
+  mem().access.delete(mailboxId);
+}
+
 export function resetOAuthMemoryForTests(): void {
   const m = mem();
   m.pending.clear();
