@@ -1,4 +1,6 @@
 import { AutoStopError } from "@/lib/campaigns/auto-stop";
+import { ErasureError } from "@/lib/compliance/erasure";
+import { MailboxHealthError } from "@/lib/mail/mailbox-health";
 import { PolicyChangeError } from "@/lib/compliance/policy-service";
 import { SuppressionError } from "@/lib/compliance/suppression";
 import { ReviewError } from "@/lib/mail/inbound/process";
@@ -98,6 +100,18 @@ export function mapDomainError(e: unknown): Mapped | null {
       body: { error: e.message, code: e.kind.toUpperCase() },
     };
   }
+  if (e instanceof ErasureError) {
+    return {
+      status: ERASURE_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
+  if (e instanceof MailboxHealthError) {
+    return {
+      status: MAILBOX_HEALTH_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
   if (e instanceof TestSendError) {
     return {
       status: TEST_SEND_STATUS[e.kind],
@@ -124,6 +138,21 @@ const TEST_SEND_STATUS: Record<TestSendError["kind"], number> = {
   mailbox_not_ready: 409,
   rate_limited: 429,
   build_failed: 409,
+};
+
+const ERASURE_STATUS: Record<ErasureError["kind"], number> = {
+  invalid_input: 400,
+  invalid_email: 400,
+  unconfirmed: 400,
+  in_flight: 409,
+  not_approved: 409,
+};
+const MAILBOX_HEALTH_STATUS: Record<MailboxHealthError["kind"], number> = {
+  not_found: 404,
+  not_halted: 409,
+  still_exceeded: 409,
+  unconfirmed: 400,
+  invalid_input: 400,
 };
 
 /** `route()` + alan hatası eşlemesi. */

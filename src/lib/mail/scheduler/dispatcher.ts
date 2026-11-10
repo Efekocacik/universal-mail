@@ -238,6 +238,7 @@ export class MailDispatcher {
       if (out.outcome !== "not_sendable") continue;
       switch (out.code) {
         case "mailbox_gap":
+        case "mailbox_halted":
         case "mailbox_daily_cap":
           blockedMailboxes.add(c.mailboxId);
           wakeCandidates.push(out.retryAt ?? now + MAX_WAKE_MS);

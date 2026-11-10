@@ -11,6 +11,30 @@ export const autoStopSchema = z
   })
   .strict();
 
+export const mailboxLimitsSchema = z
+  .object({
+    bounceBp: z.number().optional(),
+    minRecipients: z.number().optional(),
+    guardBounces: z.number().optional(),
+  })
+  .strict();
+
+export const reenableSchema = z
+  .object({ confirm: z.boolean(), justification: z.string().max(500) })
+  .strict();
+
+export const erasurePreviewSchema = z.object({ email: z.string().trim().min(3).max(254) }).strict();
+
+export const erasureSchema = z
+  .object({
+    email: z.string().trim().min(3).max(254),
+    requestedAt: z.number().int(),
+    justification: z.string().max(500),
+    confirm: z.boolean(),
+    clearNotes: z.boolean().optional(),
+  })
+  .strict();
+
 export const reviewDecisionSchema = z.object({ decision: z.enum(["apply", "ignore"]) }).strict();
 
 export const testSendSchema = z

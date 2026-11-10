@@ -64,6 +64,24 @@ export const settingSchemas = {
     minRecipients: z.number().int(),
     minRateBp: z.number().int(),
   }),
+  /**
+   * Faz 3 (Aşama 14): posta kutusu düzeyi eşikler (SRS 5.6.1) ve durdurulmuş kutular. Yalnızca içeride yazılır;
+   * eşikler yalnızca sıkılaştırılabilir, durdurma yalnızca açık onay ve gerekçeyle kaldırılır.
+   */
+  "mail.mailboxLimits": z.object({
+    bounceBp: z.number().int(),
+    minRecipients: z.number().int(),
+    guardBounces: z.number().int(),
+  }),
+  "mail.mailboxHalts": z.record(
+    z.string(),
+    z.object({
+      at: z.number().int(),
+      recipients: z.number().int(),
+      bounced: z.number().int(),
+      reason: z.string(),
+    }),
+  ),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -89,6 +107,8 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "enrichment.concurrency": 4,
   "seed.faz3": { templates: 0, demoMailbox: 0 },
   "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
+  "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
+  "mail.mailboxHalts": {},
 };
 
 export async function getSetting<K extends SettingKey>(

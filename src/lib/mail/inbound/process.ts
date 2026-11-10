@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { autoPauseIfNeeded } from "@/lib/campaigns/auto-stop";
+import { enforceMailboxHealth } from "../mailbox-health";
 import { hashEmail, suppressEmailInTx } from "@/lib/compliance/suppression";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { audit } from "@/lib/db/audit";
@@ -430,6 +431,8 @@ async function applyEffect(
     await audit(tx, "inbound.bounce_hard", "message", c.inboundId, detail, now);
     if (match.campaignId !== null)
       effects.campaignPaused = await autoPauseIfNeeded(tx, match.campaignId, now);
+    // Posta kutusu düzeyi (SRS 5.6.1): eşik aşıldıysa kutu durdurulur, çalışan kampanyalar duraklar.
+    if (await enforceMailboxHealth(tx, match.mailboxId, now)) effects.campaignPaused = true;
     return effects;
   }
 

@@ -5,12 +5,14 @@ import type { MailLogItem } from "@/lib/mail/mail-log";
 import type { AuditItem } from "@/lib/audit-list";
 import type { ReviewItem } from "@/lib/mail/inbound/review-list";
 import type { DnsReport } from "@/lib/mail/dns-check";
+import type { MailboxHealthView } from "@/lib/mail/mailbox-health";
+import type { LiveReadiness } from "@/lib/compliance/live-readiness";
 import { api } from "./api";
 import { queryRetryDelay, shouldRetryQuery } from "./retry";
 
 /** Gönderim günlüğü, inceleme kuyruğu, işlem kaydı ve gönderim sağlığı istemcisi (Aşama 13). */
 
-export type { AuditItem, DnsReport, MailLogItem, ReviewItem };
+export type { AuditItem, DnsReport, LiveReadiness, MailLogItem, MailboxHealthView, ReviewItem };
 
 export interface AutoStopResponse {
   config: { minRecipients: number; minBounces: number; minRateBp: number };
@@ -28,6 +30,8 @@ export const mk = {
   review: ["mail-ops", "review"] as const,
   audit: (prefix: string) => ["mail-ops", "audit", prefix] as const,
   autoStop: ["mail-ops", "auto-stop"] as const,
+  health: (id: number) => ["mail-ops", "health", id] as const,
+  readiness: ["mail-ops", "readiness"] as const,
 };
 
 const getOpts = { retry: shouldRetryQuery, retryDelay: queryRetryDelay } as const;
@@ -78,6 +82,21 @@ export const useReviewQueue = () =>
     ...getOpts,
   });
 
+export const useMailboxHealth = (mailboxId: number | undefined) =>
+  useQuery({
+    queryKey: mk.health(mailboxId ?? 0),
+    enabled: mailboxId !== undefined,
+    queryFn: () => api<MailboxHealthView>(`/api/mailboxes/${mailboxId}/health`),
+    ...getOpts,
+  });
+
+export const useLiveReadiness = () =>
+  useQuery({
+    queryKey: mk.readiness,
+    queryFn: () => api<LiveReadiness>("/api/compliance/live-readiness"),
+    ...getOpts,
+  });
+
 export const useAutoStop = () =>
   useQuery({
     queryKey: mk.autoStop,
@@ -97,7 +116,21 @@ export const mailOpsApi = {
       method: "PATCH",
       json: input,
     }),
-  dnsCheck: (mailboxId: number, input: { domain?: string; selector?: string }) =>
+  reenableMailbox: (mailboxId: number, justification: string) =>
+    api<{ ok: true }>(`/api/mailboxes/${mailboxId}/health/reenable`, {
+      method: "POST",
+      json: { confirm: true, justification },
+    }),
+  tightenMailboxLimits: (input: {
+    bounceBp?: number;
+    minRecipients?: number;
+    guardBounces?: number;
+  }) =>
+    api<{ limits: MailboxHealthView["limits"] }>("/api/compliance/mailbox-limits", {
+      method: "PATCH",
+      json: input,
+    }),
+  dnsCheck: (mailboxId: number, input: { selector?: string }) =>
     api<DnsReport>(`/api/mailboxes/${mailboxId}/dns-check`, { method: "POST", json: input }),
   testSend: (mailboxId: number, input: { templateId: number; leadId: number }) =>
     api<{ outcome: "sent" | "failed" | "unknown"; messageRowId: number }>(

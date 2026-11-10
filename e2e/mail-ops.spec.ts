@@ -116,9 +116,10 @@ test("işlem kaydı: test gönderimi ve dışa aktarma kayıt altında, kişisel
 test("otomatik durdurma: sıkılaştırılır, gevşetme reddedilir, görünüm güncellenir", async () => {
   await page.goto("/mail-log?tab=health");
   await expect(page.getByTestId("autostop-current")).toContainText("en az 20 alıcıda");
-  await page.getByLabel("Asgari alıcı sayısı").fill("15");
-  await page.getByLabel("Asgari oran (%)").fill("3");
-  await page.getByRole("button", { name: "Sıkılaştır" }).click();
+  const autostop = page.locator('section[aria-labelledby="autostop-title"]');
+  await autostop.getByLabel("Asgari alıcı sayısı").fill("15");
+  await autostop.getByLabel("Asgari oran (%)").fill("3");
+  await autostop.getByRole("button", { name: "Sıkılaştır" }).click();
   await expect(page.getByText("Eşik sıkılaştırıldı.")).toBeVisible();
   await expect(page.getByTestId("autostop-current")).toContainText("en az 15 alıcıda");
   await expect(page.getByTestId("autostop-current")).toContainText("%3 oran");
@@ -168,3 +169,93 @@ test("demo çıkış sayfası: geçersiz bağlantı güvenli mesaj verir; GET i�
     .items as unknown[];
   expect(Array.isArray(sup)).toBe(true);
 });
+
+test("posta kutusu sağlığı ve canlı gönderime hazırlık: gerçek duruma bakar, hiçbir şeyi açmaz", async () => {
+  await page.goto("/mail-log?tab=health");
+  await expect(page.getByRole("heading", { name: "Posta kutusu sağlığı" })).toBeVisible();
+  await expect(page.getByTestId("mbh-rate")).toContainText("Yetersiz veri");
+  await expect(page.getByText(/Şikâyet oranı: ölçülemiyor/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Canlı gönderime hazırlık" })).toBeVisible();
+  await expect(page.getByTestId("ready-summary")).toContainText("engel");
+  await expect(page.getByText("Gerçek gönderim kapalıdır ve bu ekrandan açılamaz.")).toBeVisible();
+  // Hukuki maddeler hiçbir koşulda 'Tamam' değildir.
+  const legal = page.getByRole("listitem").filter({ hasText: "Hukuk" });
+  await expect(legal.first()).toContainText("Engel var");
+  const r = await (await page.request.get("/api/compliance/live-readiness")).json();
+  expect(r.allOk).toBe(false);
+  expect(r.liveSendingEnabled).toBe(false);
+});
+
+test("silme talebi: önizleme sayı gösterir, uygulama geri alınamaz onayıyla yapılır, adres hiçbir yerde kalmaz", async () => {
+  const rows = (await (await page.request.get("/api/leads?limit=1")).json()).rows as {
+    leadId: number;
+  }[];
+  const leadId = rows[0]!.leadId;
+  const email = `info@silme-e2e-${leadId}.example`;
+  expect(
+    (await page.request.post(`/api/leads/${leadId}/emails`, { headers, data: { email } })).status(),
+  ).toBe(201);
+
+  await page.goto("/compliance?tab=erasure");
+  await page.getByLabel("E-posta adresi").fill(email);
+  await page
+    .getByLabel("Gerekçe / talep kaydı")
+    .fill("Alıcı yazılı olarak silme talep etti (E2E).");
+  await page.getByRole("button", { name: "Önizle" }).click();
+  const preview = page.getByTestId("erasure-preview");
+  await expect(preview).toContainText("Kayıtlı e-posta: 1");
+  await expect(preview).toContainText("Hukuki değerlendirme bekleyen");
+  await expect(preview).toContainText("hukuki dayanağı henüz onaylanmadı");
+  await expect(preview).not.toContainText(email);
+
+  await page.getByRole("button", { name: "Silmeyi uygula" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("geri alınamaz");
+  await dialog.getByRole("button", { name: "Silmeyi uygula" }).click();
+  await expect(page.getByTestId("erasure-result")).toContainText("Temizlendi: 1 e-posta");
+
+  // Hiçbir uçta adres kalmaz.
+  const detail = await (await page.request.get(`/api/leads/${leadId}`)).text();
+  expect(detail).not.toContain(email);
+  expect(await (await page.request.get("/api/export/leads")).text()).not.toContain(email);
+  expect(await (await page.request.get("/api/mail-log/export")).text()).not.toContain(email);
+  expect(await (await page.request.get("/api/audit/export")).text()).not.toContain(email);
+  expect(
+    await (await page.request.get("/api/compliance/suppressions?state=active")).text(),
+  ).not.toContain(email);
+  // Engel kaydı kalır: aynı adres tekrar eklenemez gönderime alınamaz (eklenebilir ama engelli kalır).
+  const sup = (
+    await (
+      await page.request.get("/api/compliance/suppressions?state=active&reason=erasure")
+    ).json()
+  ).items as unknown[];
+  expect(sup.length).toBeGreaterThan(0);
+  await expect(page.getByText(/Son talepler/)).toBeVisible();
+});
+
+for (const width of [760, 800]) {
+  test(`dar pencere (${width} px): başlık ve yeni ekranlarda yatay taşma yok`, async () => {
+    await page.setViewportSize({ width, height: 800 });
+    for (const path of [
+      "/",
+      "/campaigns",
+      "/templates",
+      "/compliance",
+      "/compliance?tab=erasure",
+      "/mail-log",
+      "/mail-log?tab=health",
+    ]) {
+      await page.goto(path);
+      await page.waitForLoadState("networkidle");
+      const over = await page.evaluate(() => ({
+        doc: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        header: (() => {
+          const h = document.querySelector("header");
+          return h ? h.scrollWidth - h.clientWidth : 0;
+        })(),
+      }));
+      expect(over, `${path} @${width}`).toEqual({ doc: 0, header: 0 });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+  });
+}

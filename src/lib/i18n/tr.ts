@@ -1083,6 +1083,7 @@ export const tr = {
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
+  "reason.mailbox_halted": "Posta kutusu bounce oranı nedeniyle durduruldu",
   "reason.not_due": "Planlanan zaman gelmedi",
   "reason.outside_window": "Alıcının gönderim penceresi dışında",
   "reason.invalid_send_window": "Gönderim penceresi geçersiz",
@@ -1510,4 +1511,96 @@ export const tr = {
   "unsub.error": "İşlem şimdi tamamlanamadı. Lütfen daha sonra yeniden deneyin.",
   "unsub.demo":
     "Bu sayfa yalnızca demo içindir; alıcılara sunulan gerçek bir çıkış hizmeti değildir.",
+
+  "compliance.tab.erasure": "Silme talepleri",
+  "health.mb.title": "Posta kutusu sağlığı",
+  "health.mb.help":
+    "Son {days} günde bu kutudan ileti alan farklı alıcılar üzerinden doğrulanmış kalıcı teslim hatası oranı. Oran %{rate}'ü aşarsa gönderim durdurulur.",
+  "health.mb.rate": "Oran: {bounced}/{recipients} alıcı (%{pct})",
+  "health.mb.state.insufficient":
+    "Yetersiz veri: {recipients} alıcı (istatistiksel yeterlilik için en az {min}). Küçük örneklemde de {guard} doğrulanmış hata gönderimi durdurur.",
+  "health.mb.state.ok": "Uygun: oran eşiğin altında.",
+  "health.mb.state.exceeded.rate": "Eşik aşıldı: gönderim durduruldu.",
+  "health.mb.state.exceeded.small_sample_guard": "Küçük örneklem freni: gönderim durduruldu.",
+  "health.mb.halted": "Bu posta kutusundan gönderim durduruldu. Çalışan kampanyalar duraklatıldı.",
+  "health.mb.reenable": "Gönderimi yeniden etkinleştir",
+  "health.mb.reenable.title": "Gönderim yeniden etkinleştirilsin mi?",
+  "health.mb.reenable.body":
+    "Bounce oranı eşiğin altında olmalıdır; aksi halde işlem reddedilir. Duraklatılmış kampanyalar kendiliğinden devam etmez.",
+  "health.mb.reenable.justification": "Gerekçe (en az 10 karakter)",
+  "health.mb.reenable.done": "Gönderim yeniden etkinleştirildi.",
+  "health.mb.reenable.error":
+    "Bounce oranı hâlâ eşiğin üzerinde olduğu için yeniden etkinleştirilemedi.",
+  "health.mb.complaint":
+    "Şikâyet oranı: ölçülemiyor (sağlayıcıdan şikâyet verisi yok). Elle girilen şikâyet kaydı: {n}; bu kayıtlar orana katılmaz.",
+  "health.mb.limits.bounce": "Asgari bounce oranı (%)",
+  "health.mb.limits.recipients": "Yeterli veri için alıcı sayısı",
+  "health.mb.limits.guard": "Küçük örneklem freni (bounce sayısı)",
+  "health.mb.limits.hint":
+    "Yalnızca düşürülebilir. En düşük: %{rate}, {recipients} alıcı, {guard} bounce.",
+  "health.mb.limits.save": "Sıkılaştır",
+  "health.mb.limits.saved": "Eşik sıkılaştırıldı.",
+  "health.mb.limits.current":
+    "Şu an: %{rate} üzeri, en az {recipients} alıcıda; daha azında {guard} doğrulanmış hata.",
+  "ready.title": "Canlı gönderime hazırlık",
+  "ready.help":
+    "Gerçek gönderim kapalıdır ve bu ekrandan açılamaz. Maddeler gerçek duruma bakılarak hesaplanır; hiçbiri varsayımla tamamlanmış sayılmaz.",
+  "ready.summary": "{blocked} engel, {unknown} doğrulanmamış madde",
+  "ready.status.ok": "Tamam",
+  "ready.status.blocked": "Engel var",
+  "ready.status.unknown": "Doğrulanmadı",
+  "ready.owner.software": "Yazılım",
+  "ready.owner.company": "Şirket",
+  "ready.owner.legal": "Hukuk",
+  "ready.owner.external": "Dış hesap/hizmet",
+  "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda kapalı)",
+  "ready.item.consent": "Kullanım onayı",
+  "ready.item.company_profile": "Gönderen firma profili",
+  "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
+  "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı)",
+  "ready.item.https_unsubscribe": "Genel HTTPS tek tıklamalı çıkış uç noktası",
+  "ready.item.live_country_policies": "Canlı ülke politikaları (kilitli)",
+  "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi) onayı",
+  "ready.item.legal_uyum": "UYUM belgesinin hukuk onayı",
+  "ready.item.legal_live_countries": "Canlı ülke politikası kilidi için yazılı hukuki onay",
+  "ready.item.legal_erasure_records":
+    "Gönderilmiş ileti kayıtlarının silinmesi: hukuki değerlendirme",
+  "ready.item.legal_suppression_hash":
+    "Engel listesinde e-posta özetinin saklanması: hukuki dayanak",
+  "ready.item.pilot": "Pilot (günde en çok 20 e-posta, ilk hafta)",
+  "erasure.title": "Kişisel veri silme talebi",
+  "erasure.help":
+    "Bir kişinin talebi üzerine o e-posta adresine ait veriler temizlenir. İşlem GERİ ALINAMAZ.",
+  "erasure.email": "E-posta adresi",
+  "erasure.requestedAt": "Talebin alındığı tarih",
+  "erasure.justification": "Gerekçe / talep kaydı",
+  "erasure.justification.hint":
+    "En az 10 karakter. Denetim kaydına yalnızca uzunluğu yazılır; hukuki onay yerine geçmez.",
+  "erasure.clearNotes": "Etkilenen işletmelerin tüm notlarını da sil",
+  "erasure.preview": "Önizle",
+  "erasure.preview.safe": "Hemen temizlenecek",
+  "erasure.preview.pending": "Hukuki değerlendirme bekleyen (şimdilik silinmeyecek)",
+  "erasure.count.leadEmails": "Kayıtlı e-posta: {n}",
+  "erasure.count.sequences": "Kampanya dizisi: {n}",
+  "erasure.count.messages": "İleti kaydı: {n}",
+  "erasure.count.notes": "Notlarında adres geçen işletme: {n} (otomatik silinmez)",
+  "erasure.pending.body":
+    "Gerçek bir posta kutusundan fiilen iletilmiş {messages} ileti ve {sequences} dizi kaydı yasal saklama yükümlülükleriyle çakışabilir. Hukuki değerlendirme tamamlanana kadar bu kayıtlar korunur; iletişim yine de durdurulur.",
+  "erasure.legal.suppression":
+    "Silme sonrası yeniden iletişimi önlemek için e-posta özeti ve alan adı engel listesinde saklanır. Bu saklamanın hukuki dayanağı henüz onaylanmadı (hukuki değerlendirme bekliyor).",
+  "erasure.backup":
+    "Yedekler: şema güncellemesi öncesi alınan en çok 5 yedek dosyası eski veriyi taşıyabilir. Bu işlem onları değiştirmez; döngüde silinene kadar kalırlar.",
+  "erasure.exists": "Bu adres için silme kaydı zaten var.",
+  "erasure.confirm.title": "Silme talebi uygulansın mı?",
+  "erasure.confirm.body":
+    "Bu işlem geri alınamaz. Adres ve ilgili kayıtlar temizlenecek, kişi iletişim listesinden kalıcı olarak çıkarılacak.",
+  "erasure.apply": "Silmeyi uygula",
+  "erasure.done": "Silme talebi uygulandı.",
+  "erasure.cleared": "Temizlendi: {leadEmails} e-posta, {sequences} dizi, {messages} ileti.",
+  "erasure.cleared.pending": "Bekleyen: {messages} ileti, {sequences} dizi (hukuki değerlendirme).",
+  "erasure.overdue": "72 saatlik hedef aşıldı",
+  "erasure.history": "Son talepler",
+  "erasure.history.empty": "Henüz silme talebi yok",
+  "erasure.history.row": "Talep: {requested} · işlem: {executed}",
+  "erasure.pendingTotal": "Hukuki değerlendirme bekleyen kayıt: {messages} ileti, {sequences} dizi",
 } as const;

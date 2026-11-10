@@ -15,6 +15,7 @@ import { mailOpsApi, mk, useAutoStop, type DnsReport } from "@/lib/client/mail-o
 import { queryRetryDelay, shouldRetryQuery } from "@/lib/client/retry";
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
+import { MailboxHealthCard, ReadinessCard } from "./mailbox-health-card";
 import { bpToPercent, dnsCodeLabel, dnsStatusLabel, dnsStatusVariant, percentToBp } from "./model";
 
 function useDebounced<T>(value: T, ms: number): T {
@@ -282,9 +283,11 @@ export function HealthPanel() {
   return (
     <div className="space-y-4">
       <Notice>{t("health.demoNote")}</Notice>
+      {demo && <MailboxHealthCard mailboxId={demo.id} />}
       <AutoStopCard />
       {demo && <DnsCard mailboxId={demo.id} />}
       {demo && <TestSendCard mailboxId={demo.id} />}
+      <ReadinessCard />
     </div>
   );
 }

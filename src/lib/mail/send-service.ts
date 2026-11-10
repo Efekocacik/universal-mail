@@ -19,6 +19,7 @@ import {
   type CampaignLeadStatus,
 } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
+import { mailboxSendBlock } from "./mailbox-health";
 import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import {
   getProvider,
@@ -68,6 +69,7 @@ export type NotSendableCode =
   | "mailbox_daily_cap"
   | "campaign_daily_cap"
   | "mailbox_gap"
+  | "mailbox_halted"
   | "not_due"
   | "outside_window"
   | "invalid_send_window"
@@ -404,6 +406,10 @@ async function checkPacing(
     ...(retryAt !== undefined ? { retryAt } : {}),
     ...(detail !== undefined ? { detail } : {}),
   });
+
+  // Posta kutusu düzeyi sağlık (SRS 5.6.1): durdurulmuş veya oranı eşiği aşan kutudan gönderilmez.
+  if ((await mailboxSendBlock(tx, mailbox.id, now)).blocked)
+    return ns("mailbox_halted", now + 5 * 60_000);
 
   // Planlanan zaman (takip aralığı, yeniden deneme beklemesi).
   if (cl.nextSendAt !== null && cl.nextSendAt > now) return ns("not_due", cl.nextSendAt);
