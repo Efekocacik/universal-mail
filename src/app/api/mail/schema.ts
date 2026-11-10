@@ -35,6 +35,21 @@ export const erasureSchema = z
   })
   .strict();
 
+export const createMailboxSchema = z
+  .object({ label: z.string().max(200), address: z.string().trim().min(3).max(254) })
+  .strict();
+
+export const updateMailboxSchema = z
+  .object({
+    label: z.string().max(200).optional(),
+    status: z.enum(["not_configured", "disabled"]).optional(),
+  })
+  .strict();
+
+export const gmailClientSchema = z
+  .object({ clientId: z.string().max(200), clientSecret: z.string().max(300).optional() })
+  .strict();
+
 export const reviewDecisionSchema = z.object({ decision: z.enum(["apply", "ignore"]) }).strict();
 
 export const testSendSchema = z

@@ -87,6 +87,8 @@ export const settingSchemas = {
     minRecipients: z.number().int(),
     guardBounces: z.number().int(),
   }),
+  /** Gmail OAuth istemci kimliği (gizli DEĞİL; sırrı gizli depodadır). Yalnızca posta kutusu servisi yazar. */
+  "mail.gmailOAuth": z.object({ clientId: z.string() }),
   "mail.mailboxHalts": z.record(
     z.string(),
     z.object({
@@ -123,6 +125,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
   "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
   "mail.mailboxHalts": {},
+  "mail.gmailOAuth": { clientId: "" },
 };
 
 export async function getSetting<K extends SettingKey>(

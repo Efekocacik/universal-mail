@@ -87,6 +87,12 @@ const BLOCKED_CODES = new Set([
   "NOT_HALTED",
   "NOT_APPROVED",
   "INVALID_EMAIL",
+  // Aşama 15.2
+  "DUPLICATE",
+  "LIMIT",
+  "RESERVED_DOMAIN",
+  "INVALID_STATUS",
+  "INVALID_CLIENT",
 ]);
 
 export function classifyMutationError(error: unknown): MutationErrorInfo {

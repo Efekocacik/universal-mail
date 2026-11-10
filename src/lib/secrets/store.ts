@@ -14,9 +14,40 @@ import { dataDir } from "@/lib/config/paths";
  */
 
 export const SECRET_NAMES = ["google.placesKey", "google.mapsKey", "hunter.apiKey"] as const;
-export type SecretName = (typeof SECRET_NAMES)[number];
+/**
+ * Gmail OAuth istemci sırrı (Aşama 15.2). Genel `/api/secrets` ucunun listesinde (SECRET_NAMES) DEĞİLDİR: yalnızca
+ * posta kutusu servisi yazar; maskeli değer bile döndürülmez, ortam değişkeninden de okunmaz.
+ */
+export const OAUTH_CLIENT_SECRET = "gmail.oauthClientSecret" as const;
+/** Posta kutusu başına yenileme belirteci adı (Aşama 15.3'te yazılır); değer SQLite'a ASLA yazılmaz. */
+export type MailboxSecretName = `gmail.refreshToken.${number}`;
+const MAILBOX_SECRET_RE = /^gmail\.refreshToken\.[1-9]\d{0,8}$/;
+export type SecretName =
+  (typeof SECRET_NAMES)[number] | typeof OAUTH_CLIENT_SECRET | MailboxSecretName;
 
-const ENV_FALLBACKS: Record<SecretName, string[]> = {
+export function mailboxRefreshTokenName(mailboxId: number): MailboxSecretName {
+  if (!Number.isInteger(mailboxId) || mailboxId < 1 || mailboxId > 999_999_999) {
+    throw new Error("Geçersiz posta kutusu kimliği.");
+  }
+  return `gmail.refreshToken.${mailboxId}`;
+}
+
+function assertKnownName(name: string): void {
+  if (
+    (SECRET_NAMES as readonly string[]).includes(name) ||
+    name === OAUTH_CLIENT_SECRET ||
+    MAILBOX_SECRET_RE.test(name)
+  ) {
+    return;
+  }
+  throw new Error("Bilinmeyen gizli bilgi adı.");
+}
+
+function envNames(name: SecretName): string[] {
+  return name in ENV_FALLBACKS ? ENV_FALLBACKS[name as keyof typeof ENV_FALLBACKS] : [];
+}
+
+const ENV_FALLBACKS: Record<(typeof SECRET_NAMES)[number], string[]> = {
   "google.placesKey": ["GOOGLE_PLACES_API_KEY"],
   "google.mapsKey": ["GOOGLE_MAPS_BROWSER_KEY", "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY"],
   "hunter.apiKey": ["HUNTER_API_KEY"],
@@ -99,6 +130,7 @@ function decrypt(
 }
 
 export async function setSecret(name: SecretName, value: string): Promise<void> {
+  assertKnownName(name);
   const trimmed = value.trim();
   if (!trimmed) throw new Error("Boş değer kaydedilemez.");
   const file = readFile();
@@ -107,6 +139,7 @@ export async function setSecret(name: SecretName, value: string): Promise<void> 
 }
 
 export async function deleteSecret(name: SecretName): Promise<void> {
+  assertKnownName(name);
   const file = readFile();
   delete file.items[name];
   writeFile(file);
@@ -121,11 +154,24 @@ export async function getSecret(name: SecretName): Promise<string | undefined> {
       // Ana anahtar değişmiş veya dosya bozulmuş: değeri yok say, kullanıcıdan yeniden girmesi istenir.
     }
   }
-  for (const envName of ENV_FALLBACKS[name]) {
+  for (const envName of envNames(name)) {
     const v = process.env[envName]?.trim();
     if (v) return v;
   }
   return undefined;
+}
+
+/** Değer döndürmeden, çözülebilir bir kayıt var mı? (Maskeli değer bile sızdırılmaz.) */
+export async function secretExists(name: SecretName): Promise<boolean> {
+  assertKnownName(name);
+  const item = readFile().items[name];
+  if (!item) return false;
+  try {
+    decrypt(name, item, resolveMasterKey());
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export interface SecretStatus {
@@ -152,7 +198,7 @@ export async function secretStatus(name: SecretName): Promise<SecretStatus> {
       /* aşağıda ortam değişkenine bakılır */
     }
   }
-  for (const envName of ENV_FALLBACKS[name]) {
+  for (const envName of envNames(name)) {
     const v = process.env[envName]?.trim();
     if (v) return { set: true, source: "env", masked: maskSecret(v) };
   }

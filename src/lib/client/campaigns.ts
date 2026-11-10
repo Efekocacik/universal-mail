@@ -48,6 +48,8 @@ export interface MailboxItem {
   dailyCap: number;
   scope: "demo" | "live";
   sendable: boolean;
+  /** Demo olmayan ve bağlı olmayan kutular ad/durum değişikliğine ve silmeye açıktır. */
+  editable?: boolean;
 }
 
 /** Şablon listesi öğesi (gövde yok); `lockedBy` > 0 ise içerik değiştirilemez. */

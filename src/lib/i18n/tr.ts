@@ -1612,4 +1612,42 @@ export const tr = {
     "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu bilgilerin gerekliliği hukuki değerlendirme bekliyor; gönderim engellenmez (gerçek gönderim zaten kapalıdır).",
   "ready.item.legal_tr_identifiers":
     "Türkiye için MERSİS/ticaret sicil zorunluluk kuralı: hukuki değerlendirme",
+
+  "settings.nav.mailbox": "Gönderim hesabı",
+  "mbx.title": "Gönderim hesabı (Gmail)",
+  "mbx.desc":
+    "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlarsınız. Bağlantı kurma bir sonraki aşamada eklenecek.",
+  "mbx.note":
+    "Gerçek e-posta gönderimi bu sürümde kapalıdır. Eklediğiniz kutu “yapılandırılmadı” durumunda kalır; hiçbir hesaba bağlanılmaz ve hiçbir ileti gönderilmez. Kimlik bilgileri veritabanına değil, şifreli depoya yazılır.",
+  "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
+  "mbx.status.connected": "Bağlı",
+  "mbx.status.disabled": "Devre dışı",
+  "mbx.status.not_configured": "Yapılandırılmadı",
+  "mbx.label": "Ad",
+  "mbx.address": "Gmail / Workspace adresi",
+  "mbx.add": "Kutu ekle",
+  "mbx.added": "Posta kutusu eklendi (henüz bağlı değil).",
+  "mbx.enable": "Etkinleştir",
+  "mbx.disable": "Devre dışı bırak",
+  "mbx.remove": "Sil",
+  "mbx.remove.aria": "{label} kutusunu sil",
+  "mbx.remove.title": "Posta kutusu silinsin mi?",
+  "mbx.remove.body":
+    "Kutu kaydı ve varsa saklanan kimlik bilgisi silinir. Kampanya veya gönderim geçmişi olan kutu silinemez.",
+  "mbx.removed": "Posta kutusu silindi.",
+  "mbx.client.title": "Google OAuth istemcisi",
+  "mbx.client.help":
+    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Burada yalnızca saklanır; bu aşamada Google'a hiçbir istek gönderilmez ve geçerliliği sınanmaz.",
+  "mbx.client.id": "İstemci kimliği",
+  "mbx.client.secret": "İstemci sırrı",
+  "mbx.client.secret.hint":
+    "Yalnızca yazılabilir; kaydedildikten sonra gösterilmez. Boş bırakırsanız mevcut sır korunur.",
+  "mbx.client.id.set": "Kimlik kayıtlı ({preview})",
+  "mbx.client.id.unset": "Kimlik girilmedi",
+  "mbx.client.secret.set": "Sır kayıtlı",
+  "mbx.client.secret.unset": "Sır girilmedi",
+  "mbx.client.save": "Kaydet",
+  "mbx.client.saved": "İstemci bilgisi kaydedildi.",
+  "mbx.client.clear": "İstemci bilgisini sil",
+  "mbx.client.cleared": "İstemci bilgisi silindi.",
 } as const;

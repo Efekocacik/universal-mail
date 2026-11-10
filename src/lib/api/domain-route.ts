@@ -1,6 +1,7 @@
 import { AutoStopError } from "@/lib/campaigns/auto-stop";
 import { ErasureError } from "@/lib/compliance/erasure";
 import { MailboxHealthError } from "@/lib/mail/mailbox-health";
+import { MailboxServiceError } from "@/lib/mail/mailbox-service";
 import { PolicyChangeError } from "@/lib/compliance/policy-service";
 import { SuppressionError } from "@/lib/compliance/suppression";
 import { ReviewError } from "@/lib/mail/inbound/process";
@@ -106,6 +107,12 @@ export function mapDomainError(e: unknown): Mapped | null {
       body: { error: e.message, code: e.kind.toUpperCase() },
     };
   }
+  if (e instanceof MailboxServiceError) {
+    return {
+      status: MAILBOX_SERVICE_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase() },
+    };
+  }
   if (e instanceof MailboxHealthError) {
     return {
       status: MAILBOX_HEALTH_STATUS[e.kind],
@@ -153,6 +160,19 @@ const MAILBOX_HEALTH_STATUS: Record<MailboxHealthError["kind"], number> = {
   still_exceeded: 409,
   unconfirmed: 400,
   invalid_input: 400,
+};
+
+const MAILBOX_SERVICE_STATUS: Record<MailboxServiceError["kind"], number> = {
+  invalid_input: 400,
+  invalid_email: 400,
+  reserved_domain: 400,
+  invalid_client: 400,
+  duplicate: 409,
+  limit: 409,
+  not_found: 404,
+  not_editable: 409,
+  in_use: 409,
+  invalid_status: 409,
 };
 
 /** `route()` + alan hatası eşlemesi. */

@@ -296,3 +296,58 @@ test("firma profili: MERSİS ve ticaret sicil isteğe bağlı alanlardır, kayde
   });
   expect(bad.status()).toBe(400);
 });
+
+test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istemci sırrı sızmaz, silinir; hiçbir şey bağlanmaz", async () => {
+  await page.goto("/settings");
+  const section = page.locator("#mailbox");
+  await expect(section.getByText("Gerçek e-posta gönderimi bu sürümde kapalıdır")).toBeVisible();
+  await expect(section.getByText("Demo (gerçek gönderim yapmaz)")).toBeVisible();
+
+  await section.getByLabel("Ad", { exact: true }).fill("Satış hesabı E2E");
+  await section.getByLabel("Gmail / Workspace adresi").fill("satis-e2e@firma-ornek.com");
+  await section.getByRole("button", { name: "Kutu ekle" }).click();
+  const row = section.getByRole("listitem").filter({ hasText: "Satış hesabı E2E" });
+  await expect(row).toContainText("Yapılandırılmadı");
+  await expect(row).not.toContainText("Bağlı");
+
+  // Durum değiştirme: devre dışı ↔ yapılandırılmadı.
+  await row.getByRole("button", { name: "Devre dışı bırak" }).click();
+  await expect(row).toContainText("Devre dışı");
+  await row.getByRole("button", { name: "Etkinleştir" }).click();
+  await expect(row).toContainText("Yapılandırılmadı");
+
+  // OAuth istemcisi: sır yalnızca yazılabilir.
+  const secret = "GOCSPX-e2e-supersecret-0987654321";
+  await section
+    .getByLabel("İstemci kimliği")
+    .fill("123456789012-e2eabcdefghijkl.apps.googleusercontent.com");
+  await section.getByLabel("İstemci sırrı").fill(secret);
+  await section.getByRole("button", { name: "Kaydet" }).click();
+  await expect(section.getByTestId("mbx-client-status")).toContainText("Sır kayıtlı");
+  await expect(section.getByLabel("İstemci sırrı")).toHaveValue("");
+  const html = await page.content();
+  expect(html).not.toContain(secret);
+  const status = await (await page.request.get("/api/mailboxes/gmail-client")).text();
+  expect(status).not.toContain(secret);
+  expect(status).not.toContain("e2eabcdefghijkl");
+
+  // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz.
+  const r = await (await page.request.get("/api/compliance/live-readiness")).json();
+  expect(r.allOk).toBe(false);
+  expect(r.liveSendingEnabled).toBe(false);
+  expect(r.items.find((i: { key: string }) => i.key === "real_mailbox").status).toBe("blocked");
+  // Canlı kutu kampanyaya atanamaz (kampanya servisi demo ister).
+  const mbs = (await (await page.request.get("/api/mailboxes")).json()).items as {
+    id: number;
+    sendable: boolean;
+    provider: string;
+  }[];
+  expect(mbs.filter((m) => m.sendable).every((m) => m.provider === "demo")).toBe(true);
+
+  // Silme: onay penceresi, sonra kayıt kaybolur; istemci bilgisi temizlenir.
+  await row.getByRole("button", { name: /kutusunu sil/ }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Sil", exact: true }).click();
+  await expect(section.getByText("Satış hesabı E2E")).toHaveCount(0);
+  await section.getByRole("button", { name: "İstemci bilgisini sil" }).click();
+  await expect(section.getByTestId("mbx-client-status")).toContainText("Sır girilmedi");
+});
