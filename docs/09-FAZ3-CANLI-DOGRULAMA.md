@@ -49,3 +49,41 @@ Bir madde doğrulanamazsa kilit **kapalı kalır**; otomatik bounce/yanıt işle
 - [ ] **Kısıtlı kapsam doğrulaması:** Dış kullanıcılar için `gmail.readonly` (kısıtlı kapsam) uygulama doğrulaması/güvenlik değerlendirmesi gerekliliği ve Workspace yapılandırması (Dahili/Harici) **varsayılmamıştır**; şirket bilgileri geldikten sonra netleşecek.
 - [ ] **Gmail API hata zarfları:** `messages.send` 400/403/404/413 ve 401 yanıtlarının gerçek biçimi, `googleError` doğrulamasındaki beklenen `error.code` / `error.status` kümeleriyle uyumlu (uyumsuzluk güvenli tarafta "belirsiz" sayılır, ancak sürekli belirsiz sonuç üretirse kümeler gözden geçirilmeli).
 - [ ] **`historyId` ömrü:** `history.list` için gerçek geçerlilik süresi ve 404 davranışı.
+
+## 3. HTTPS tek tıklamalı çıkış (Aşama 15.6)
+
+Kod tarafı hazırdır (imzalı belirteç, taşınabilir aktarıcı işleyicisi, olay işleme); **gerçek HTTPS sunucusu, alan adı ve dağıtım YOKTUR**. Aşağıdakiler gerçek ortam olmadan kanıtlanamaz ve doğrulanana kadar `oneClickEndpointVerified` ASLA true yapılmaz (Aşama 15.7):
+
+- [ ] **Gerçek HTTPS uç noktası:** Aktarıcı işleyicisi (`src/lib/unsubscribe/relay.ts`) genel bir HTTPS alan adında, geçerli TLS sertifikasıyla çalışır; `https://<alan>/u/<belirteç>` adresine dışarıdan ulaşılır.
+- [ ] **RFC 8058 uyumu gerçek istemcilerle:** Gmail ve Yahoo gibi istemcilerin gönderdiği gerçek `POST` isteği (başlıklar, gövde, yönlendirme izlememe, zaman aşımı) işleyici tarafından 2xx ile karşılanır; `List-Unsubscribe` ve `List-Unsubscribe-Post` başlıkları gerçek bir iletide doğru görünür.
+- [ ] **Olay iletim kanalı:** Aktarıcıdan yerel uygulamaya olayların dayanıklı iletimi (kuyruk, kimlik doğrulama, ağ erişimi) henüz YOK; yalnızca arayüzleri (`EventSink`, `UnsubscribeEventSource`) ve bellek içi gerçeklemeleri vardır. Ele geçirilmiş/çalışmayan aktarıcı olayları geciktirebilir veya atabilir (erişilebilirlik); bu katman bunu çözmez, izleme ve uyarı gerekir.
+- [ ] **Anahtar dağıtımı:** Aktarıcıya yalnızca GENEL anahtar kümesi (`exportRelayKeySet`) verilir; döndürme ve iptal sonrası aktarıcının kümeyi güncellediği doğrulanmalıdır.
+- [ ] **Saat ve süre:** Aktarıcı sunucu saatinin doğruluğu (belirteç süresi tıklama anına göre işlenir); 180 günlük varsayılan geçerlilik hukuki danışmanlıkla gözden geçirilmelidir.
+- [ ] **Hız sınırı ve istemci adresi:** Aktarıcı önündeki ters vekilin güvenilir istemci adresi başlığı (`clientKey`) belirlenmeli; sınırlar gerçek trafikle ayarlanmalı.
+
+### 3.1 Olay teslimat sözleşmesi ve Aşama 15.7 kabul ölçütleri
+
+**200 yanıtı ne demek:** RFC 8058 isteğine verilen 2xx, "çıkış talebi alındı ve KAYBOLMAYACAK" anlamına gelir. Bu yüzden aktarıcı 200'ü yalnızca olay **dayanıklı** kaydedilip makbuz alındıktan sonra verir (`src/lib/unsubscribe/relay.ts`). Kaydedilemezse 503 + `Retry-After` (istemci yeniden dener); olay asla sessizce atılmaz.
+
+**Bellek içi kuyruk:** `MemoryEventQueue` yalnızca test/demo içindir ve dayanıklı DEĞİLDİR. `NODE_ENV !== "test"` iken oluşturulamaz ve `createRelayHandler`, `durable !== true` olan hiçbir sink'i test dışında kabul etmez (kodla zorlanır; testle kanıtlı).
+
+**Teslimat modeli:** en-az-bir-kez. Aynı olay birden çok kez kuyruğa girebilir (istemci yeniden denemesi, aktarıcı yeniden başlaması sonrası kaybolan tekrar oynatma kaydı, zaman aşımından sonra geç başarı). **Tekilleştirme uygulama tarafındadır** (`jti`, `ingest.ts`); çift suppression/denetim kaydı oluşmaz.
+
+Aşama 15.7'de bağlanacak gerçek iletim mekanizması için **kabul ölçütleri** (hepsi sağlanmadan `oneClickEndpointVerified` açılamaz):
+
+| # | Ölçüt | Nasıl doğrulanır |
+|---|---|---|
+| K1 | Sink `durable: true` bildirir; `push`, olay kalıcı depoya yazılıp **onaylandıktan sonra** `{ stored: true, id }` makbuzuyla çözülür | `tests/helpers/sink-contract.ts` → `runSinkContract` (gerçek sink gerçeklemesiyle) |
+| K2 | Aktarıcı süreci/makinesi yeniden başlasa bile 200 verilmiş olay kaybolmaz | Aynı sözleşme paketi; ayrıca gerçek ortamda: istek → süreci öldür → olay kuyrukta |
+| K3 | Uygulama çevrimdışıyken olaylar birikir; hiçbiri atılmaz; uygulama açılınca hepsi çekilir | Sözleşme paketi + gerçek ortam denemesi |
+| K4 | Yazma başarısızsa (disk dolu, ağ yok, kota) `push` **reddedilir**; aktarıcı **200 vermez** (503) | Sözleşme paketi (`injectWriteFailure`) + gerçek hata enjeksiyonu |
+| K5 | Kuyruk dolu/geri basınç: olay ASLA sessizce atılmaz; reddedilir (503), mevcut olaylar korunur | `tests/unsubscribe-delivery.test.ts` benzeri gerçekleme testi |
+| K6 | `pull` olayı tüketmez; yalnızca `ack` siler; onaylanmayan olay yeniden başlatmada tekrar gelir (en-az-bir-kez); bilinmeyen kimlik `ack`'i zararsız | Sözleşme paketi |
+| K7 | Olay yalnızca uygulamada **işlendikten** (kabul, tekrar veya kalıcı ret) sonra onaylanır; altyapı hatasında onaylanmaz | `drainUnsubscribeEvents` testleri (`ingest`) |
+| K8 | `push` zaman aşımı (`sinkTimeoutMs`) 503 verir; geç başarı olayı kaybettirmez (kopya olabilir, uygulama tekilleştirir) | `unsubscribe-delivery.test.ts` |
+| K9 | Kuyruk uygulamaya yalnızca kimliği doğrulanmış kanaldan teslim edilir; aktarıcı ele geçirilse bile olaylar uygulamada **yeniden doğrulanır** (imza); aktarıcı yalnızca GENEL anahtarı bilir | Tasarım (kodda); gerçek kanal 15.7'de gözden geçirilir |
+| K10 | Saklama süresi ≥ belirteç ömrü + güvenlik payı (en az 400 gün + 1 gün) ya da onaylanana kadar; yer sınırı aşılırsa K5 geçerlidir | Gerçekleme belgesi ve sınaması |
+| K11 | İzleme: kuyruk derinliği ve en eski onaysız olayın yaşı için uyarı eşiği (aksi halde olay gecikmesi fark edilmez) | 15.7'de readiness/sağlık görünümü |
+| K12 | Gerçek ortamda bellek içi sink yapılandırması hata verir (yanlışlıkla etkinleştirilemez) | `tests/unsubscribe-delivery.test.ts` (üretim/geliştirme ortamı testleri) |
+
+Sınırlar (kanıtlanamayanlar): Bir sink'in `durable: true` bildirmesi, gerçekten dayanıklı olduğunu **kanıtlamaz**; bunu yalnızca K1–K6'nın gerçek gerçekleme üzerinde geçmesi ve K2'nin gerçek ortamda denenmesi gösterir. Tekrar oynatma kaydı (`ReplayStore`) bellek içi varsayılandır; yeniden başlatmada kaybolması güvenlidir (kopya olay uygulamada tekilleştirilir) ama kopya trafiği artırır.

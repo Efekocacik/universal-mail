@@ -103,6 +103,22 @@ export const settingSchemas = {
       reason: z.string(),
     }),
   ),
+  /**
+   * Abonelikten çıkış imza anahtarı kaydı (Aşama 15.6): yalnızca GENEL anahtarlar ve durum; özel anahtar gizli depodadır.
+   * Yalnızca anahtar servisi yazar.
+   */
+  "mail.unsubscribeKeys": z.object({
+    current: z.string().nullable(),
+    keys: z.array(
+      z.object({
+        kid: z.string().regex(/^[0-9a-f]{16}$/),
+        x: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+        createdAt: z.number().int(),
+        retiredAt: z.number().int().nullable(),
+        revokedAt: z.number().int().nullable(),
+      }),
+    ),
+  }),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -132,6 +148,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.mailboxHalts": {},
   "mail.gmailOAuth": { clientId: "" },
   "mail.gmailGrants": {},
+  "mail.unsubscribeKeys": { current: null, keys: [] },
 };
 
 export async function getSetting<K extends SettingKey>(

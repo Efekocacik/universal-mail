@@ -22,8 +22,22 @@ export const OAUTH_CLIENT_SECRET = "gmail.oauthClientSecret" as const;
 /** Posta kutusu başına yenileme belirteci adı (Aşama 15.3'te yazılır); değer SQLite'a ASLA yazılmaz. */
 export type MailboxSecretName = `gmail.refreshToken.${number}`;
 const MAILBOX_SECRET_RE = /^gmail\.refreshToken\.[1-9]\d{0,8}$/;
+/**
+ * Abonelikten çıkış belirteci imza anahtarı (Aşama 15.6): anahtar kimliği başına Ed25519 ÖZEL anahtarı (PKCS8, base64url).
+ * Genel `/api/secrets` listesinde DEĞİLDİR; yalnızca abonelikten çıkış anahtar servisi yazar/okur.
+ */
+export type UnsubscribeKeySecretName = `unsubscribe.signingKey.${string}`;
+const UNSUB_SECRET_RE = /^unsubscribe\.signingKey\.[0-9a-f]{16}$/;
 export type SecretName =
-  (typeof SECRET_NAMES)[number] | typeof OAUTH_CLIENT_SECRET | MailboxSecretName;
+  | (typeof SECRET_NAMES)[number]
+  | typeof OAUTH_CLIENT_SECRET
+  | MailboxSecretName
+  | UnsubscribeKeySecretName;
+
+export function unsubscribeKeySecretName(kid: string): UnsubscribeKeySecretName {
+  if (!/^[0-9a-f]{16}$/.test(kid)) throw new Error("Geçersiz anahtar kimliği.");
+  return `unsubscribe.signingKey.${kid}`;
+}
 
 export function mailboxRefreshTokenName(mailboxId: number): MailboxSecretName {
   if (!Number.isInteger(mailboxId) || mailboxId < 1 || mailboxId > 999_999_999) {
@@ -36,7 +50,8 @@ function assertKnownName(name: string): void {
   if (
     (SECRET_NAMES as readonly string[]).includes(name) ||
     name === OAUTH_CLIENT_SECRET ||
-    MAILBOX_SECRET_RE.test(name)
+    MAILBOX_SECRET_RE.test(name) ||
+    UNSUB_SECRET_RE.test(name)
   ) {
     return;
   }
