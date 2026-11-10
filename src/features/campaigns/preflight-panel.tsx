@@ -184,6 +184,11 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
           {t("preflight.earliest", { at: fmtDateTime(r.estimate.earliestSendAt) })}
         </p>
       )}
+      {r.advisories.map((a) => (
+        <Notice key={a.code} tone="warning">
+          {t(`preflight.advisory.${a.code}`, { n: a.count })}
+        </Notice>
+      ))}
       {Object.keys(r.exclusions).length > 0 && (
         <div>
           <h3 className="text-[13px] font-semibold">{t("preflight.exclusions")}</h3>

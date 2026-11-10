@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { evaluateEnrollment, type IneligibleCode } from "@/lib/compliance/eligibility";
 import type { FrequencyLimits } from "@/lib/compliance/frequency";
 import { maskEmail } from "@/lib/compliance/suppression";
@@ -17,7 +17,7 @@ import { isDemoSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
 import { effectiveWindow, nextWindowStart, timeZonesForCountry } from "@/lib/mail/scheduler/window";
 import { composeEmail } from "@/lib/mail/template-service";
-import { getSettings } from "@/lib/settings";
+import { getSetting, getSettings } from "@/lib/settings";
 import { CampaignError } from "./errors";
 import { assertDemoMailbox } from "./service";
 
@@ -209,10 +209,36 @@ export interface PreflightReport {
   exclusions: Record<string, number>;
   estimate: { perDay: number; days: number; earliestSendAt: number | null };
   previews: PreflightPreview[];
+  /**
+   * Engellemeyen uyarılar. `tr_identifiers_missing`: kampanyada Türkiye alıcıları var ama profilde MERSİS ve ticaret
+   * sicil numaralarının ikisi de yok (gerekliliği hukuki değerlendirme bekler; gönderim engellenmez).
+   */
+  advisories: { code: "tr_identifiers_missing"; count: number }[];
   confirmToken: string;
 }
 
 export const PREVIEW_COUNT = 5;
+
+async function computeAdvisories(
+  db: DbExecutor,
+  campaignId: number,
+): Promise<PreflightReport["advisories"]> {
+  const profile = await getSetting(db, "company.profile");
+  const hasTrId = !!(profile?.mersisNo?.trim() || profile?.tradeRegistryNo?.trim());
+  if (hasTrId) return [];
+  const [row] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(campaignLeads)
+    .where(
+      and(
+        eq(campaignLeads.campaignId, campaignId),
+        eq(campaignLeads.countryCode, "TR"),
+        inArray(campaignLeads.status, ["pending", "scheduled", "waiting_next"]),
+      ),
+    );
+  const count = Number(row?.n ?? 0);
+  return count > 0 ? [{ code: "tr_identifiers_missing", count }] : [];
+}
 
 export async function runPreflight(
   db: DbExecutor,
@@ -301,6 +327,7 @@ export async function runPreflight(
       earliestSendAt,
     },
     previews,
+    advisories: await computeAdvisories(db, campaignId),
     confirmToken: plan.token,
   };
 }

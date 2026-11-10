@@ -1603,4 +1603,13 @@ export const tr = {
   "erasure.history.empty": "Henüz silme talebi yok",
   "erasure.history.row": "Talep: {requested} · işlem: {executed}",
   "erasure.pendingTotal": "Hukuki değerlendirme bekleyen kayıt: {messages} ileti, {sequences} dizi",
+
+  "company.mersisNo": "MERSİS numarası (isteğe bağlı)",
+  "company.tradeRegistryNo": "Ticaret sicil numarası (isteğe bağlı)",
+  "company.trHint":
+    "Bu iki alan isteğe bağlıdır ve yalnızca Türkiye'ye yönelik iletilerin alt bilgisine eklenir. Gerekliliği hukuki değerlendirmeye bağlıdır; boş bırakmak hiçbir gönderimi engellemez.",
+  "preflight.advisory.tr_identifiers_missing":
+    "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu bilgilerin gerekliliği hukuki değerlendirme bekliyor; gönderim engellenmez (gerçek gönderim zaten kapalıdır).",
+  "ready.item.legal_tr_identifiers":
+    "Türkiye için MERSİS/ticaret sicil zorunluluk kuralı: hukuki değerlendirme",
 } as const;

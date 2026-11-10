@@ -14,6 +14,13 @@ const consentSchema = z.object({
   title: z.string().optional(),
 });
 
+const identifierField = z
+  .string()
+  .trim()
+  .max(40)
+  .regex(/^[\p{L}\p{N} .\-/]*$/u)
+  .optional();
+
 const companySchema = z.object({
   legalName: z.string().min(2),
   address: z.string().min(5),
@@ -22,6 +29,13 @@ const companySchema = z.object({
   contactName: z.string().min(2),
   contactTitle: z.string().optional(),
   website: z.string().optional(),
+  /**
+   * Türkiye'ye özgü kurumsal tanımlayıcılar (Aşama 15.1): İSTEĞE BAĞLI. Yalnızca Türkiye'ye yönelik iletilerin alt
+   * bilgisine eklenir; gerekliliği hukuki değerlendirmeye bağlıdır ve hiçbir gönderimi engellemez. Tek satır, kısa,
+   * harf/rakam ve temel noktalama (başlık ve satır enjeksiyonuna karşı).
+   */
+  mersisNo: identifierField,
+  tradeRegistryNo: identifierField,
 });
 
 const noveltySchema = z.object({

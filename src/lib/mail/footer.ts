@@ -22,6 +22,9 @@ export interface SenderProfile {
   taxId: string;
   phone: string;
   contactName: string;
+  /** İsteğe bağlı; yalnızca Türkiye'ye yönelik iletilerde alt bilgiye eklenir. */
+  mersisNo?: string;
+  tradeRegistryNo?: string;
 }
 
 export type FooterMode = "demo" | "live";
@@ -69,12 +72,20 @@ function missingProfileFields(p: Partial<SenderProfile> | null | undefined): str
   return required.filter((k) => !p || typeof p[k] !== "string" || !p[k]!.trim());
 }
 
+/** İsteğe bağlı alan: boşsa null; satır sonu/denetim karakteri içeriyorsa (enjeksiyon) yok sayılır. */
+function singleLine(v: string | undefined): string | null {
+  const s = v?.trim();
+  return s && ![...s].some((ch) => ch.charCodeAt(0) < 32) ? s : null;
+}
+
 const TEXTS = {
   tr: {
     demo: "[DEMO] Bu ileti bir demo ön izlemesidir ve gönderilmez. Çıkış bağlantısı örnektir.",
     sentBy: (n: string) => `Bu e-posta ${n} tarafından ticari tanıtım amacıyla gönderilmiştir.`,
     address: "Adres",
     taxId: "Vergi / sicil no",
+    mersis: "MERSİS no",
+    tradeRegistry: "Ticaret sicil no",
     phone: "Telefon",
     unsubscribe: "Bu tür e-postaları almak istemiyorsanız",
     unsubscribeLink: "iletişimden çıkın",
@@ -84,6 +95,8 @@ const TEXTS = {
     sentBy: (n: string) => `This commercial email was sent by ${n}.`,
     address: "Address",
     taxId: "Tax / registration no",
+    mersis: "MERSIS no",
+    tradeRegistry: "Trade registry no",
     phone: "Phone",
     unsubscribe: "If you prefer not to receive these emails",
     unsubscribeLink: "unsubscribe here",
@@ -101,6 +114,11 @@ export function buildFooter(input: {
   language: TemplateLanguage;
   mode: FooterMode;
   unsubscribeUrl?: string | null;
+  /**
+   * Alıcının ülkesi (ISO-2). `TR` ise ve profilde doluysa MERSİS / ticaret sicil numarası eklenir. Başka ülkelerde
+   * ve alan boşken hiçbir şey eklenmez veya engellenmez (zorunluluk kuralı hukuki değerlendirme bekler).
+   */
+  recipientCountry?: string | null;
 }): Footer {
   const missing = missingProfileFields(input.profile);
   if (missing.length > 0) {
@@ -133,6 +151,12 @@ export function buildFooter(input: {
     `${t.taxId}: ${p.taxId.trim()}`,
     `${t.phone}: ${p.phone.trim()}`,
   ];
+  if (input.recipientCountry?.trim().toUpperCase() === "TR") {
+    const mersis = singleLine(p.mersisNo);
+    const registry = singleLine(p.tradeRegistryNo);
+    if (mersis) lines.push(`${t.mersis}: ${mersis}`);
+    if (registry) lines.push(`${t.tradeRegistry}: ${registry}`);
+  }
   const demo = input.mode === "demo" ? t.demo : null;
 
   const html = [

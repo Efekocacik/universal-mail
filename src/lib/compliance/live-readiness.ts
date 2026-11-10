@@ -27,6 +27,7 @@ export type ReadinessKey =
   | "legal_live_countries"
   | "legal_erasure_records"
   | "legal_suppression_hash"
+  | "legal_tr_identifiers"
   | "pilot";
 
 export interface ReadinessItem {
@@ -89,6 +90,7 @@ export async function getLiveReadiness(db: DbExecutor): Promise<LiveReadiness> {
     legal("legal_live_countries", "liveCountryPolicies"),
     legal("legal_erasure_records", "erasureOfTransmissionRecords"),
     legal("legal_suppression_hash", "suppressionHashRetention"),
+    legal("legal_tr_identifiers", "trSenderIdentifierRules"),
     // Pilot (günde ≤ 20, ilk hafta) başlamadı; ölçülemez.
     { key: "pilot", status: "unknown", owner: "company" },
   ];

@@ -21,6 +21,12 @@ export const LEGAL_APPROVALS = {
   erasureOfTransmissionRecords: false,
   /** Silme talebinden sonra suppression özetinin (e-posta özeti) saklanmasının hukuki dayanağı onaylandı. */
   suppressionHashRetention: false,
+  /**
+   * Türkiye'ye yönelik gönderimlerde MERSİS / ticaret sicil gibi kurumsal tanımlayıcıların ZORUNLULUK kuralı hukuken
+   * belirlendi. Alanlar isteğe bağlıdır; bu kural belirlenene kadar hiçbir gönderim bu yüzden engellenmez ve
+   * canlı gönderim zaten kapalıdır.
+   */
+  trSenderIdentifierRules: false,
   /** Genel HTTPS tek tıklamalı çıkış uç noktası kuruldu ve doğrulandı. */
   httpsUnsubscribeEndpoint: false,
 } as const;

@@ -484,6 +484,7 @@ async function composeCore(
       language,
       mode: input.mode,
       unsubscribeUrl: input.unsubscribeUrl,
+      recipientCountry: ctx.countryCode,
     });
   } catch (e) {
     if (!(e instanceof FooterError)) throw e;

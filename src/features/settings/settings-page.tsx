@@ -650,6 +650,8 @@ const EMPTY_COMPANY: CompanyProfile = {
   contactName: "",
   contactTitle: "",
   website: "",
+  mersisNo: "",
+  tradeRegistryNo: "",
 };
 
 function CompanySection() {
@@ -681,6 +683,8 @@ function CompanySection() {
       ...form,
       contactTitle: form.contactTitle || undefined,
       website: form.website || undefined,
+      mersisNo: form.mersisNo?.trim() || undefined,
+      tradeRegistryNo: form.tradeRegistryNo?.trim() || undefined,
     },
   };
   const saved = { ...EMPTY_COMPANY, ...(data?.settings["company.profile"] ?? {}) };
@@ -769,6 +773,9 @@ export function CompanyFields({
       <div className="sm:col-span-2">
         {field("website", t("company.website"), { placeholder: "https://" })}
       </div>
+      {field("mersisNo", t("company.mersisNo"))}
+      {field("tradeRegistryNo", t("company.tradeRegistryNo"))}
+      <p className="text-[12px] text-muted-foreground sm:col-span-2">{t("company.trHint")}</p>
     </div>
   );
 }

@@ -259,3 +259,40 @@ for (const width of [760, 800]) {
     await page.setViewportSize({ width: 1440, height: 900 });
   });
 }
+
+test("firma profili: MERSİS ve ticaret sicil isteğe bağlı alanlardır, kaydedilir ve hiçbir şeyi engellemez", async () => {
+  await page.goto("/settings");
+  const mersis = page.locator("#c-mersisNo");
+  await expect(mersis).toBeVisible();
+  await expect(page.locator('label[for="c-mersisNo"]')).toContainText("isteğe bağlı");
+  await expect(page.getByText(/boş bırakmak hiçbir gönderimi engellemez/)).toBeVisible();
+  // Boşken profil geçerli kalır (alanlar zorunlu değildir): kayıtlı profil API'den okunabilir.
+  const before = (await (await page.request.get("/api/settings")).json()).settings[
+    "company.profile"
+  ];
+  expect(before).toBeTruthy();
+
+  await mersis.fill("0123456789012345");
+  await page.locator("#c-tradeRegistryNo").fill("TR-98765");
+  const form = page.locator("form", { has: mersis });
+  await form.getByRole("button", { name: "Kaydet" }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await page.request.get("/api/settings")).json()).settings["company.profile"]
+          ?.mersisNo,
+    )
+    .toBe("0123456789012345");
+  const saved = (await (await page.request.get("/api/settings")).json()).settings[
+    "company.profile"
+  ];
+  expect(saved.tradeRegistryNo).toBe("TR-98765");
+  expect(saved.legalName).toBe(before.legalName); // diğer alanlar korunur
+
+  // Geçersiz (satır sonu/özel karakter) değer API'de reddedilir.
+  const bad = await page.request.put("/api/settings", {
+    headers,
+    data: { "company.profile": { ...saved, mersisNo: "<script>" } },
+  });
+  expect(bad.status()).toBe(400);
+});
