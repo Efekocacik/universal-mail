@@ -1,4 +1,4 @@
-import { LIVE_SENDING_ENABLED } from "@/lib/compliance/policies";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db } from "@/lib/db/client";
 import { parseEmail } from "@/lib/email/address";
 import {
@@ -159,7 +159,7 @@ export class GmailProvider implements MailProvider {
       throw new Error("Gmail bağdaştırıcı ayarları yalnızca testte değiştirilebilir.");
     }
     this.apiBase = opts.apiBase ?? GMAIL_API_BASE;
-    this.liveEnabled = opts.liveEnabled ?? (() => LIVE_SENDING_ENABLED);
+    this.liveEnabled = opts.liveEnabled ?? isLiveSendingPermitted;
     this.oauth = opts.oauth ?? getOAuthDeps();
   }
 
@@ -300,7 +300,7 @@ export function getLiveProvider(
   db: Db,
   mailbox: { id: number; provider: string; address: string | null },
 ): MailProvider {
-  if (!LIVE_SENDING_ENABLED || mailbox.provider !== "gmail") {
+  if (!isLiveSendingPermitted() || mailbox.provider !== "gmail") {
     throw new ProviderUnavailableError(mailbox.provider);
   }
   return new GmailProvider({ db, mailbox });

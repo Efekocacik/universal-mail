@@ -1080,6 +1080,7 @@ export const tr = {
   "reason.domain_daily_cap": "Aynı firmaya bugün zaten e-posta gönderildi; yarın gönderilecek",
   "reason.removed_by_user": "Sizin tarafınızdan çıkarıldı",
   "reason.provider_unavailable": "Posta servisi kullanılamıyor",
+  "reason.unsubscribe_unavailable": "Doğrulanmış çıkış bağlantısı hazırlanamadı",
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
@@ -1559,8 +1560,15 @@ export const tr = {
   "ready.item.inbox_access":
     "Gelen kutusu okuma izni (bounce ve yanıt koruması için gmail.readonly)",
   "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
-  "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı)",
-  "ready.item.https_unsubscribe": "Genel HTTPS tek tıklamalı çıkış uç noktası",
+  "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı; son denetim sonucu)",
+  "ready.item.inbox_sync": "Gelen kutusu okuması çalışıyor (son başarılı eşitleme)",
+  "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda kapalı)",
+  "ready.item.inbox_header_trust":
+    "Gmail başlık güven kilidi (gerçek hesapla doğrulanana kadar kapalı)",
+  "ready.item.event_delivery":
+    "Çıkış olaylarının dayanıklı teslimatı (kuyruk sağlığı ve imzalı kanal)",
+  "ready.item.https_unsubscribe":
+    "Genel HTTPS tek tıklamalı çıkış uç noktası (uçtan uca doğrulanmış)",
   "ready.item.live_country_policies": "Canlı ülke politikaları (kilitli)",
   "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi) onayı",
   "ready.item.legal_uyum": "UYUM belgesinin hukuk onayı",

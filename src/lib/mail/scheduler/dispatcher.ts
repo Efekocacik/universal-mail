@@ -262,6 +262,7 @@ export class MailDispatcher {
           break;
         case "invalid_send_window":
         case "provider_unavailable":
+        case "unsubscribe_unavailable":
         case "build_failed":
           if (await this.pauseCampaign(c.campaignId, [out.code], now)) {
             res.pausedCampaigns.push(c.campaignId);

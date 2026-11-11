@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { eq } from "drizzle-orm";
 import { audit } from "@/lib/db/audit";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { campaignLeads } from "@/lib/db/schema";
 import {
   deleteSecret,
@@ -136,12 +136,31 @@ export class MintError extends Error {
   }
 }
 
+/** Etkin imza anahtarı (kimlik + özel anahtar); yoksa `no_key`. */
+export async function getSigner(
+  db: DbExecutor,
+): Promise<{ kid: string; privateKey: crypto.KeyObject }> {
+  const reg = await getSetting(db, "mail.unsubscribeKeys");
+  const cur = reg.keys.find((k) => k.kid === reg.current && k.revokedAt === null);
+  if (!cur) throw new MintError("no_key", "Etkin imza anahtarı yok.");
+  const pkcs8 = await getSecret(unsubscribeKeySecretName(cur.kid));
+  if (!pkcs8) throw new MintError("no_key", "İmza anahtarı okunamadı.");
+  return {
+    kid: cur.kid,
+    privateKey: crypto.createPrivateKey({
+      key: Buffer.from(pkcs8, "base64url"),
+      format: "der",
+      type: "pkcs8",
+    }),
+  };
+}
+
 /**
  * Bir kampanya alıcısı için imzalı çıkış belirteci üretir. Etkin anahtar yoksa OLUŞTURMAZ (`no_key`): anahtar üretimi
  * bilinçli bir adımdır (`ensureSigningKey`). Silinmiş (anonimleştirilmiş) alıcı için belirteç üretilmez.
  */
 export async function mintUnsubscribeToken(
-  db: Db,
+  db: DbExecutor,
   input: { campaignLeadId: number; messageId?: number | null; now?: number; ttlMs?: number },
 ): Promise<{ token: string; jti: string; expiresAt: number }> {
   const now = input.now ?? Date.now();
@@ -153,25 +172,33 @@ export async function mintUnsubscribeToken(
   if (!cl) throw new MintError("lead_not_found", "Kampanya alıcısı bulunamadı.");
   if (!cl.hash || !cl.email) throw new MintError("no_recipient", "Alıcı adresi yok (silinmiş).");
 
-  const reg = await getSetting(db, "mail.unsubscribeKeys");
-  const cur = reg.keys.find((k) => k.kid === reg.current && k.revokedAt === null);
-  if (!cur) throw new MintError("no_key", "Etkin imza anahtarı yok.");
-  const pkcs8 = await getSecret(unsubscribeKeySecretName(cur.kid));
-  if (!pkcs8) throw new MintError("no_key", "İmza anahtarı okunamadı.");
-  const priv = crypto.createPrivateKey({
-    key: Buffer.from(pkcs8, "base64url"),
-    format: "der",
-    type: "pkcs8",
-  });
+  const signer = await getSigner(db);
   const claims = newClaims({
-    kid: cur.kid,
+    kid: signer.kid,
     campaignLeadId: input.campaignLeadId,
     messageId: input.messageId ?? null,
     recipientTag: recipientTag(cl.hash),
     now,
     ...(input.ttlMs !== undefined ? { ttlMs: input.ttlMs } : {}),
   });
-  return { token: signToken(claims, priv), jti: claims.j, expiresAt: claims.e * 1000 };
+  return { token: signToken(claims, signer.privateKey), jti: claims.j, expiresAt: claims.e * 1000 };
+}
+
+/** Uç nokta SINAMA belirteci (kapsam "p"): hiçbir alıcıya bağlı değildir ve hiçbir suppression üretmez. Süre 15 dk. */
+export async function mintProbeToken(
+  db: DbExecutor,
+  now = Date.now(),
+): Promise<{ token: string; jti: string; kid: string }> {
+  const signer = await getSigner(db);
+  const claims = newClaims({
+    kid: signer.kid,
+    campaignLeadId: 1,
+    recipientTag: recipientTag("um-endpoint-probe"),
+    now,
+    ttlMs: 15 * 60_000,
+    scope: "p",
+  });
+  return { token: signToken(claims, signer.privateKey), jti: claims.j, kid: signer.kid };
 }
 
 /** Bağlantı biçimi: `https://<alan>/u/<belirteç>`; yalnızca güvenli HTTPS tabanı kabul edilir. */

@@ -22,7 +22,8 @@ import {
   utcDay,
   type FrequencyLimits,
 } from "./frequency";
-import { LIVE_SENDING_ENABLED, policyScopeForMailbox, resolveCountryPolicy } from "./policies";
+import { isLiveSendingPermitted } from "./live-gate";
+import { policyScopeForMailbox, resolveCountryPolicy } from "./policies";
 import { checkSuppression, hashEmail } from "./suppression";
 
 /**
@@ -438,7 +439,7 @@ async function checkMailbox(
     return "live";
   }
   const scope = policyScopeForMailbox(mb.provider);
-  if (scope === "live" && !LIVE_SENDING_ENABLED) c.add("live_sending_disabled");
+  if (scope === "live" && !isLiveSendingPermitted()) c.add("live_sending_disabled");
   if (mb.status !== "connected") c.add("mailbox_not_ready", { detail: mb.status });
   return scope;
 }

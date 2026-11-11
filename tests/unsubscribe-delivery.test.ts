@@ -347,7 +347,7 @@ describe("uçtan uca: aktarıcı yeniden başlar, uygulama çevrimdışıdır, o
 
     // uygulama o ana kadar çevrimdışıydı; şimdi açılır
     const summary = await drainUnsubscribeEvents(db, store.source(), { now: () => NOW + 3600_000 });
-    expect(summary).toMatchObject({ pulled: 2, unsubscribed: 1, duplicates: 1, error: null });
+    expect(summary).toMatchObject({ pulled: 2, unsubscribed: 1, already: 1, error: null }); // kopya, alıcı zaten engelli
     expect((await db.select().from(suppressions)).length).toBe(1);
     expect(
       (await db.select().from(campaignLeads).where(eq(campaignLeads.id, sent.cl)))[0]!.status,

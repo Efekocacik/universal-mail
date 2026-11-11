@@ -119,6 +119,68 @@ export const settingSchemas = {
       }),
     ),
   }),
+  /** Aktarıcı kanalı imza anahtarları (Aşama 15.7): yalnızca GENEL anahtarlar ve durum. Yalnızca kanal servisi yazar. */
+  "mail.unsubscribeChannel": z.object({
+    current: z.string().nullable(),
+    keys: z.array(
+      z.object({
+        kid: z.string().regex(/^[0-9a-f]{16}$/),
+        x: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+        createdAt: z.number().int(),
+        revokedAt: z.number().int().nullable(),
+      }),
+    ),
+  }),
+  /**
+   * HTTPS çıkış uç noktası yapılandırması ve KANITLARI (Aşama 15.7). Yalnızca uç nokta servisi yazar; kullanıcı beyanı
+   * kanıt DEĞİLDİR: `verified` yalnızca uçtan uca sınama (imzalı sınama belirteci → aktarıcı → kuyruk → uygulama)
+   * başarılı olunca yazılır.
+   */
+  "mail.unsubscribeEndpoint": z.object({
+    baseUrl: z.string().nullable(),
+    pending: z
+      .object({ jti: z.string(), baseUrl: z.string(), kid: z.string(), issuedAt: z.number().int() })
+      .nullable(),
+    verified: z
+      .object({
+        baseUrl: z.string(),
+        kid: z.string(),
+        jti: z.string(),
+        verifiedAt: z.number().int(),
+      })
+      .nullable(),
+    lastAttempt: z.object({ at: z.number().int(), ok: z.boolean(), code: z.string() }).nullable(),
+    delivery: z
+      .object({
+        checkedAt: z.number().int(),
+        ok: z.boolean(),
+        depth: z.number().int(),
+        oldestAgeMs: z.number().nullable(),
+        corrupt: z.number().int(),
+        code: z.string(),
+      })
+      .nullable(),
+  }),
+  /**
+   * Posta kutusu başına SON DNS (SPF/DKIM/DMARC) denetim sonucu (Aşama 15.7): yalnızca durumlar ve neden kodları;
+   * ham TXT kayıtları saklanmaz. Yalnızca DNS servisi yazar.
+   */
+  "mail.dnsReports": z.record(
+    z.string(),
+    z.object({
+      domain: z.string(),
+      checkedAt: z.number().int(),
+      spf: z.enum(["pass", "warn", "fail"]).nullable(),
+      dkim: z.enum(["pass", "warn", "fail"]).nullable(),
+      dmarc: z.enum(["pass", "warn", "fail"]).nullable(),
+      codes: z.array(z.string()).max(30),
+    }),
+  ),
+  /** Gerçek gelen kutusu eşitlemesinin son sonucu (Aşama 15.7). Yalnızca eşitleme servisi yazar. */
+  "mail.inboxSync": z.record(
+    z.string(),
+    z.object({ at: z.number().int(), ok: z.boolean(), code: z.string() }),
+  ),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -149,6 +211,16 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.gmailOAuth": { clientId: "" },
   "mail.gmailGrants": {},
   "mail.unsubscribeKeys": { current: null, keys: [] },
+  "mail.unsubscribeChannel": { current: null, keys: [] },
+  "mail.dnsReports": {},
+  "mail.inboxSync": {},
+  "mail.unsubscribeEndpoint": {
+    baseUrl: null,
+    pending: null,
+    verified: null,
+    lastAttempt: null,
+    delivery: null,
+  },
 };
 
 export async function getSetting<K extends SettingKey>(

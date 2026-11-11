@@ -26,13 +26,20 @@ const MAILBOX_SECRET_RE = /^gmail\.refreshToken\.[1-9]\d{0,8}$/;
  * Abonelikten çıkış belirteci imza anahtarı (Aşama 15.6): anahtar kimliği başına Ed25519 ÖZEL anahtarı (PKCS8, base64url).
  * Genel `/api/secrets` listesinde DEĞİLDİR; yalnızca abonelikten çıkış anahtar servisi yazar/okur.
  */
-export type UnsubscribeKeySecretName = `unsubscribe.signingKey.${string}`;
-const UNSUB_SECRET_RE = /^unsubscribe\.signingKey\.[0-9a-f]{16}$/;
+export type UnsubscribeKeySecretName =
+  `unsubscribe.signingKey.${string}` | `unsubscribe.channelKey.${string}`;
+const UNSUB_SECRET_RE = /^unsubscribe\.(signingKey|channelKey)\.[0-9a-f]{16}$/;
 export type SecretName =
   | (typeof SECRET_NAMES)[number]
   | typeof OAUTH_CLIENT_SECRET
   | MailboxSecretName
   | UnsubscribeKeySecretName;
+
+/** Aktarıcı kanalı (olay çekme/onay) istek imza anahtarı (Aşama 15.7): Ed25519 ÖZEL anahtarı, uygulamada kalır. */
+export function channelKeySecretName(kid: string): UnsubscribeKeySecretName {
+  if (!/^[0-9a-f]{16}$/.test(kid)) throw new Error("Geçersiz anahtar kimliği.");
+  return `unsubscribe.channelKey.${kid}`;
+}
 
 export function unsubscribeKeySecretName(kid: string): UnsubscribeKeySecretName {
   if (!/^[0-9a-f]{16}$/.test(kid)) throw new Error("Geçersiz anahtar kimliği.");

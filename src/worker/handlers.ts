@@ -9,6 +9,11 @@ import { createEmailDeps } from "@/lib/email/deps";
 import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
 import { createMailSendHandler, MAIL_SEND_JOB } from "@/lib/mail/scheduler/job";
 import { createInboxSyncHandler, INBOX_SYNC_JOB } from "@/lib/mail/scheduler/inbox-job";
+import {
+  createUnsubscribeDrainHandler,
+  isUnsubscribeDrainEnabled,
+  UNSUBSCRIBE_DRAIN_JOB,
+} from "@/lib/unsubscribe/drain-job";
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
 import { onEvent } from "@/lib/events";
@@ -134,6 +139,11 @@ export function registerMailHandlers(opts: {
   registerJobHandler(
     INBOX_SYNC_JOB,
     createInboxSyncHandler({ enabled: opts.inboxEnabled === true }),
+  );
+  // Aşama 15.7: çıkış olayı çekme işi. Kendi bayrağı (UM_UNSUBSCRIBE_DRAIN_ENABLED) kapalıyken hiçbir ağ isteği yapılmaz.
+  registerJobHandler(
+    UNSUBSCRIBE_DRAIN_JOB,
+    createUnsubscribeDrainHandler({ enabled: isUnsubscribeDrainEnabled(process.env) }),
   );
   return dispatcher;
 }

@@ -16,7 +16,8 @@ import crypto from "node:crypto";
  *
  * Yük alanları: v=2, k=anahtar kimliği, c=kampanya alıcısı no, m=giden ileti no (isteğe bağlı, null),
  * r=alıcı etiketi, i=verilme zamanı (sn), e=bitiş zamanı (sn), j=benzersiz kimlik (tekrar oynatma ve tekilleştirme),
- * s=kapsam ("u": yalnızca abonelikten çıkış).
+ * s=kapsam: "u" = yalnızca abonelikten çıkış; "p" = uç nokta SINAMA belirteci (Aşama 15.7; hiçbir alıcıya bağlanmaz,
+ * hiçbir suppression/durdurma üretmez, yalnızca uç noktanın uçtan uca çalıştığını kanıtlar).
  */
 
 export const TOKEN_PREFIX = "u2";
@@ -25,8 +26,12 @@ export const SIGN_DOMAIN = "um-unsub-v2.";
 export const DEFAULT_TTL_MS = 180 * 86_400_000;
 /** Mutlak üst sınır: bundan uzun geçerlilikli belirteç reddedilir. */
 export const MAX_TTL_MS = 400 * 86_400_000;
-/** İzin verilen saat sapması (ileri). */
-export const CLOCK_SKEW_MS = 5 * 60_000;
+/**
+ * İzin verilen saat sapması (belirteç "verilme zamanı" ileride görünürse). Geniş tutulur (1 saat): aktarıcı saati
+ * uygulamadan geride olsa bile GEÇERLİ bir çıkış isteği reddedilmesin (alıcı çıkamaz hâle gelmesin). Güvenlik etkisi
+ * yoktur: gelecek tarihli belirteci yalnızca anahtar sahibi üretebilir.
+ */
+export const CLOCK_SKEW_MS = 60 * 60_000;
 export const MAX_TOKEN_LENGTH = 700;
 const MAX_PAYLOAD_B64 = 480;
 
@@ -39,8 +44,10 @@ export interface UnsubscribeClaims {
   i: number;
   e: number;
   j: string;
-  s: "u";
+  s: TokenScope;
 }
+
+export type TokenScope = "u" | "p";
 
 export interface PublicKeyEntry {
   kid: string;
@@ -84,7 +91,7 @@ export function parseClaims(o: unknown): UnsubscribeClaims | null {
     typeof n === "number" && Number.isSafeInteger(n) && n >= 1 && n <= MAX_ID;
   const isSec = (n: unknown): n is number =>
     typeof n === "number" && Number.isSafeInteger(n) && n > 0 && n < 4_102_444_800;
-  if (x.v !== 2 || x.s !== "u") return null;
+  if (x.v !== 2 || (x.s !== "u" && x.s !== "p")) return null;
   if (typeof x.k !== "string" || !KID_RE.test(x.k)) return null;
   if (!isId(x.c)) return null;
   if (x.m !== null && !isId(x.m)) return null;
@@ -101,7 +108,7 @@ export function parseClaims(o: unknown): UnsubscribeClaims | null {
     i: x.i,
     e: x.e,
     j: x.j,
-    s: "u",
+    s: x.s as TokenScope,
   };
 }
 
@@ -187,6 +194,7 @@ export function newClaims(input: {
   recipientTag: string;
   now: number;
   ttlMs?: number;
+  scope?: TokenScope;
 }): UnsubscribeClaims {
   const ttl = Math.min(input.ttlMs ?? DEFAULT_TTL_MS, MAX_TTL_MS);
   const i = Math.floor(input.now / 1000);
@@ -199,6 +207,6 @@ export function newClaims(input: {
     i,
     e: i + Math.max(1, Math.floor(ttl / 1000)),
     j: crypto.randomBytes(16).toString("base64url"),
-    s: "u",
+    s: input.scope ?? "u",
   };
 }

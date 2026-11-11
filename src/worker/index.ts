@@ -5,6 +5,7 @@ import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { isDemoSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
+import { startUnsubscribeDrain } from "@/lib/unsubscribe/drain-job";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import {
@@ -43,6 +44,8 @@ async function main(): Promise<void> {
   registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });
   const inbox = await startInboxScheduler(db, { env: process.env });
   if (inbox.enabled) console.log("[worker] demo gelen kutusu açık (yalnızca demo).");
+  const drain = await startUnsubscribeDrain(db, { env: process.env });
+  if (drain.enabled) console.log("[worker] çıkış olayı çekme işi açık.");
   const mailScheduler = await startMailScheduler(db, {
     env: process.env,
     log: (m) => console.log(`[worker] ${m}`),

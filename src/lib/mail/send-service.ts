@@ -6,6 +6,7 @@ import {
   utcDay,
   type FrequencyLimits,
 } from "@/lib/compliance/frequency";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { hashEmail } from "@/lib/compliance/suppression";
 import type { Db, DbExecutor } from "@/lib/db/client";
@@ -19,6 +20,8 @@ import {
   type CampaignLeadStatus,
 } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
+import { EndpointError, prepareLiveUnsubscribe } from "@/lib/unsubscribe/endpoint";
+import { getLiveProvider } from "./gmail/provider";
 import { mailboxSendBlock } from "./mailbox-health";
 import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import {
@@ -52,7 +55,10 @@ import { composeEmail, type ComposeIssue } from "./template-service";
  *    GÖNDERİLMEZ: yalnızca kayıt yeniden denenir (`retryPendingRecord`); olmazsa kayıt `sending` kalır ve uzlaştırma
  *    onu `unknown` yapar.
  *
- * Gerçek gönderim kapalıdır: yalnızca demo posta kutusu ve demo sağlayıcısı çalışır. Ham ileti kalıcı saklanmaz.
+ * Gerçek gönderim kapalıdır (`LIVE_SENDING_ENABLED`): kapalıyken yalnızca demo posta kutusu ve demo sağlayıcısı çalışır;
+ * canlı kapsamdaki kutu ilk kapıda `provider_unavailable` ile durur. Canlı yol (kapı açılırsa) şunları ZORUNLU kılar:
+ * uygunluk/ülke politikası, doğrulanmış HTTPS çıkış uç noktası ve iletiye özgü imzalı çıkış bağlantısı
+ * (`unsubscribe_unavailable`), Gmail sağlayıcısının kendi kapıları. Ham ileti kalıcı saklanmaz.
  */
 
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
@@ -76,7 +82,9 @@ export type NotSendableCode =
   | "timezone_unknown"
   | "step_template_missing"
   | "compose_failed"
-  | "build_failed";
+  | "build_failed"
+  /** Canlı ileti için doğrulanmış çıkış uç noktası/bağlantısı hazırlanamadı: gönderim YOK. */
+  | "unsubscribe_unavailable";
 
 /** Gönderim kaydı yazılamadığında yeniden denemek için gereken asgari bilgi (ham ileti ve alıcı İÇERMEZ). */
 export interface PendingRecord {
@@ -122,6 +130,8 @@ export interface SendStepOptions {
   provider?: MailProvider;
   timeoutMs?: number;
   limits?: FrequencyLimits;
+  /** Yalnızca testte: canlı gönderim kilidini geçersiz kılar (üretimde yok sayılmaz, HATA verir). */
+  liveEnabled?: () => boolean;
 }
 
 /** Ayırma işlemini geri alıp sonucu döndürmek için. */
@@ -167,6 +177,10 @@ export async function sendCampaignStep(
 ): Promise<SendStepOutcome> {
   const clock = opts.now ?? Date.now;
   const limits = opts.limits ?? DEFAULT_FREQUENCY_LIMITS;
+  if (opts.liveEnabled && process.env.NODE_ENV !== "test") {
+    throw new Error("liveEnabled yalnızca testte kullanılabilir.");
+  }
+  const liveEnabled = opts.liveEnabled ?? isLiveSendingPermitted;
 
   /* 1. Ayırma ----------------------------------------------------------------------------------- */
   let r: Reservation;
@@ -193,12 +207,18 @@ export async function sendCampaignStep(
         throw new Abort({ outcome: "ineligible", reasons: [{ code: "evaluation_error" }] });
       }
 
-      // Yalnızca demo kapsamı; gerçek sağlayıcı yoktur.
+      // Sağlayıcı seçimi. Canlı kapsam: ÖNCE canlı gönderim kilidi (kapalıyken HİÇBİR şey yapılmaz: belirteç basılmaz,
+      // anahtar/gizli depo okunmaz, sağlayıcı kurulmaz); sonra sağlayıcı; çıkış bağlantısı yalnızca doğrulanmış uç noktayla.
       const mode = policyScopeForMailbox(mailbox.provider);
       let provider: MailProvider;
+      let unsubscribe: { url: string; oneClick: boolean } | undefined;
       try {
-        if (mode !== "demo") throw new ProviderUnavailableError(mailbox.provider);
-        provider = opts.provider ?? getProvider(mailbox);
+        if (mode === "live") {
+          if (!liveEnabled()) throw new ProviderUnavailableError(mailbox.provider);
+          provider = opts.provider ?? getLiveProvider(db, mailbox);
+        } else {
+          provider = opts.provider ?? getProvider(mailbox);
+        }
       } catch (e) {
         if (!(e instanceof ProviderUnavailableError)) throw e;
         throw new Abort({ outcome: "not_sendable", code: "provider_unavailable" });
@@ -221,11 +241,25 @@ export async function sendCampaignStep(
       const step = steps.find((s) => s.language === cl.language) ?? (cl.language ? null : steps[0]);
       if (!step) throw new Abort({ outcome: "not_sendable", code: "step_template_missing" });
 
+      if (mode === "live") {
+        try {
+          unsubscribe = await prepareLiveUnsubscribe(tx, { campaignLeadId: cl.id, now });
+        } catch (e) {
+          if (!(e instanceof EndpointError)) throw e;
+          throw new Abort({
+            outcome: "not_sendable",
+            code: "unsubscribe_unavailable",
+            detail: e.code,
+          });
+        }
+      }
+
       const composed = await composeEmail(tx, {
         templateId: step.templateId,
         leadId: cl.leadId,
         mode,
         purpose: "send",
+        ...(unsubscribe ? { unsubscribeUrl: unsubscribe.url } : {}),
       });
       if (!composed.sendable) {
         throw new Abort({
@@ -262,6 +296,14 @@ export async function sendCampaignStep(
           now,
           inReplyTo: references.at(-1) ?? null,
           references,
+          ...(unsubscribe
+            ? {
+                unsubscribe: {
+                  url: unsubscribe.url,
+                  oneClickEndpointVerified: unsubscribe.oneClick,
+                },
+              }
+            : {}),
         });
       } catch (e) {
         if (!(e instanceof MessageBuildError)) throw e;

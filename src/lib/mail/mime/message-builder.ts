@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
-import { LIVE_SENDING_ENABLED, policyScopeForMailbox } from "@/lib/compliance/policies";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
+import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { parseEmail } from "@/lib/email/address";
 import type { SenderProfile } from "../footer";
 import { escapeHtml, sanitizeEmailHtml } from "../html";
@@ -84,7 +85,7 @@ export function buildEmailMessage(
   input: BuildEmailInput,
   random: (size: number) => Buffer = crypto.randomBytes,
 ): BuiltEmail {
-  if (input.mode === "live" && !LIVE_SENDING_ENABLED) {
+  if (input.mode === "live" && !isLiveSendingPermitted()) {
     throw new MessageBuildError("live_sending_disabled", "Gerçek gönderim bu sürümde kapalıdır.");
   }
   if (policyScopeForMailbox(input.mailbox.provider) !== input.mode) {

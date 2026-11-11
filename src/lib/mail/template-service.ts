@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import * as cheerio from "cheerio";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
-import { LIVE_SENDING_ENABLED } from "@/lib/compliance/policies";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { auditLog, campaigns, campaignSteps, categorySets, templates } from "@/lib/db/schema";
 import { checkContent, type ContentIssue } from "./content-check";
@@ -452,7 +452,7 @@ async function composeCore(
     missing: [],
   };
 
-  if (input.mode === "live" && !LIVE_SENDING_ENABLED)
+  if (input.mode === "live" && !isLiveSendingPermitted())
     errors.push({ code: "live_sending_disabled" });
 
   if (!tpl) {

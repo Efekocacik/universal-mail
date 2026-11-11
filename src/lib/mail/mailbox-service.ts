@@ -1,3 +1,4 @@
+import { clearDnsReport } from "./dns-store";
 import { and, count, eq, ne } from "drizzle-orm";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
@@ -170,6 +171,7 @@ export async function deleteMailbox(db: Db, id: number, now = Date.now()): Promi
       );
     }
     await tx.delete(mailboxes).where(eq(mailboxes.id, id));
+    await clearDnsReport(tx, id); // silinen kutunun DNS kaydı kanıt olarak kalmaz
     await audit(tx, "mailbox.deleted", "mailbox", id, undefined, now);
   });
   await deleteSecret(mailboxRefreshTokenName(id)); // veritabanı silindikten sonra; yoksa sorun değil

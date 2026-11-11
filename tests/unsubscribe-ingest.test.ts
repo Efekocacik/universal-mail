@@ -4,7 +4,7 @@ import path from "node:path";
 import type { Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { hashEmail, suppressEmail } from "@/lib/compliance/suppression";
+import { hashEmail, liftProtectedSuppression, suppressEmail } from "@/lib/compliance/suppression";
 import type { Db } from "@/lib/db/client";
 import { auditLog, campaignLeads, messages, settings, suppressions } from "@/lib/db/schema";
 import { secretExists, unsubscribeKeySecretName } from "@/lib/secrets/store";
@@ -243,14 +243,55 @@ describe("olay işleme: mevcut suppression ve denetim sistemiyle entegrasyon", (
     expect(dump).not.toContain(token);
   });
 
-  it("tekrar oynatma: aynı olay/belirteç ikinci kez 'duplicate'; ikinci suppression, denetim veya durdurma YOK", async () => {
+  it("tekrar oynatma: aynı olay ikinci kez 'duplicate'; ikinci suppression, denetim veya durdurma YOK", async () => {
     const { token } = await mint();
     expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
     const snap = await snapshot();
     expect(await ingest(evt(token))).toEqual({ outcome: "duplicate" });
-    expect(await ingest(evt(token, NOW + 5000), NOW + 6000)).toEqual({ outcome: "duplicate" });
+    expect(await ingest(evt(token, NOW + 500), NOW + 6000)).toEqual({ outcome: "duplicate" }); // daha eski zaman
     expect(await snapshot()).toBe(snap);
     expect(await audits("unsubscribe.one_click")).toHaveLength(1);
+  });
+
+  it("aynı belirtecin daha SONRAKİ teslimatı (aktarıcı yeniden başladı) alıcı hâlâ engelliyse etkisizdir: 'already', çift suppression YOK", async () => {
+    const { token } = await mint();
+    expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
+    expect(await ingest(evt(token, NOW + 5000), NOW + 6000)).toEqual({ outcome: "already" });
+    expect(await ingest(evt(token, NOW + 5000), NOW + 7000)).toEqual({ outcome: "duplicate" }); // artık aynı zaman
+    expect(await suppressed()).toHaveLength(1);
+    expect(await audits("unsubscribe.one_click")).toHaveLength(1);
+  });
+
+  it("engel belgelenmiş talepte KALDIRILDIKTAN sonra: eski teslimatın tekrarı yeniden engel koymaz; alıcının YENİ tıklaması koyar", async () => {
+    const { token } = await mint();
+    expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
+    const [sup] = await suppressed();
+    await liftProtectedSuppression(
+      db,
+      {
+        id: sup!.id,
+        confirm: "ALICI_TALEBI_DOGRULANDI",
+        basis: "recipient_request",
+        evidenceRef: "talep-1",
+        justification: "Alıcı yeniden almak istedi",
+      },
+      NOW + 10_000,
+    );
+    // aktarıcı/kuyruk aynı olayı yeniden teslim eder (aynı zaman damgası): ETKİ YOK
+    expect(await ingest(evt(token), NOW + 20_000)).toEqual({ outcome: "duplicate" });
+    expect((await suppressed()).filter((r) => r.liftedAt === null)).toHaveLength(0);
+    // alıcı sonradan eski iletideki bağlantıya YENİDEN basar (daha geç tıklama): çıkış iradesi yok sayılmaz
+    const again = await ingest(evt(token, NOW + 30_000), NOW + 31_000);
+    expect(again.outcome).toBe("unsubscribed");
+    expect((await suppressed()).filter((r) => r.liftedAt === null)).toHaveLength(1);
+    const detail = (await audits("unsubscribe.one_click")).at(-1)!.detail as Record<
+      string,
+      unknown
+    >;
+    expect(detail.reclick).toBe(true);
+    // o yeni tıklamanın da tekrarı etkisizdir
+    expect(await ingest(evt(token, NOW + 30_000), NOW + 32_000)).toEqual({ outcome: "duplicate" });
+    expect((await suppressed()).filter((r) => r.liftedAt === null)).toHaveLength(1);
   });
 
   it("yarış: aynı olayı başka bir işlem önce kaydettiyse (benzersiz dizin) 'duplicate'; etki YOK", async () => {
@@ -306,17 +347,47 @@ describe("olay işleme: mevcut suppression ve denetim sistemiyle entegrasyon", (
     expect(await clStatus(b)).toBe("waiting_next");
   });
 
-  it("olay zamanı: ileri tarihli veya aşırı eski olay reddedilir", async () => {
+  it("olay zamanı yalnızca bilgilendiricidir: aktarıcı saati ilerideyse işleme anına kırpılır (geçerli çıkış isteği KAYBOLMAZ)", async () => {
     const { token } = await mint();
-    expect(await ingest(evt(token, NOW + 3600_000), NOW)).toEqual({
-      outcome: "rejected",
-      reason: "event_time_invalid",
+    // aktarıcı saati 3 saat ileri; olay reddedilip silinmemeli
+    const r = await ingest(evt(token, NOW + 3 * 3600_000), NOW + 1000);
+    expect(r.outcome).toBe("unsubscribed");
+    expect(await suppressed()).toHaveLength(1);
+    expect((await inbound())[0]!.receivedAt).toBe(NOW + 1000); // gelecek zaman işleme anına kırpıldı
+  });
+
+  it("aşırı eski olay: belirtecin süresi zaten dolmuştur → expired (kalıcı ret); süre dolmamışsa kabul", async () => {
+    const { token } = await mint();
+    const longAfter = NOW + MAX_EVENT_AGE_MS + 10 * 86_400_000;
+    expect(await ingest(evt(token, NOW + 1000), longAfter)).toEqual({
+      outcome: "unsubscribed",
+      stopped: 1,
+      suppression: "added",
     });
-    expect(await ingest(evt(token, NOW - MAX_EVENT_AGE_MS - 1000), NOW)).toEqual({
-      outcome: "rejected",
-      reason: "event_time_invalid",
-    });
-    expect(await suppressed()).toHaveLength(0);
+    const t2 = await mint(b);
+    // tıklama anı 401 günden eski değil ama olay işleme çok geç: tıklama anına göre geçerli → kabul (çıkış kaybolmaz)
+    expect((await ingest(evt(t2.token, NOW + 2000), longAfter)).outcome).toBe("unsubscribed");
+  });
+
+  it("kalıcı ret sessiz kayıp DEĞİLDİR: drain, ret nedenini (kişisel veri olmadan) denetime yazar", async () => {
+    const src = {
+      acked: [] as string[],
+      pull: async () =>
+        src.acked.length > 0
+          ? []
+          : [{ id: "1700000000000-aaaaaaaaaaaaaaaa", event: evt("garbage") }],
+      ack: async (ids: string[]) => void src.acked.push(...ids),
+    };
+    const s = await drainUnsubscribeEvents(
+      db,
+      { pull: src.pull, ack: src.ack },
+      { now: () => NOW + 2000 },
+    );
+    expect(s).toMatchObject({ rejected: 1, error: null });
+    const [row] = await audits("unsubscribe.event_rejected");
+    expect(row!.detail).toEqual({ reason: "invalid_token" });
+    expect(row!.entityId).toBe("1700000000000-aaaaaaaaaaaaaaaa");
+    expect(JSON.stringify(row)).not.toContain("garbage");
   });
 
   it("yanlış alıcı: ileti başka alıcıya ait / alıcı kaydı sonradan değişti → ret, HİÇBİR engel veya durdurma yok", async () => {
@@ -386,7 +457,10 @@ describe("olay işleme: mevcut suppression ve denetim sistemiyle entegrasyon", (
       [{ ...evt(token), token: "x".repeat(800) }, "invalid_event"],
       [evt("garbage"), "invalid_token"],
       [evt(`${p}.${tampered}.${sg}`), "invalid_token"],
-      [evt(`${p}.${pl}.${sg.slice(0, -2)}AA`), "invalid_token"],
+      [
+        evt(`${p}.${pl}.${sg.slice(0, 10)}${sg[10] === "A" ? "B" : "A"}${sg.slice(11)}`),
+        "invalid_token",
+      ], // 11. karakter kesin farklı: rastgele eşleşme yok
     ];
     for (const [e, reason] of bad) {
       expect(await ingest(e), JSON.stringify(e).slice(0, 60)).toEqual({

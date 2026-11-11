@@ -5,6 +5,7 @@ import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { audit } from "@/lib/db/audit";
 import { mailboxes } from "@/lib/db/schema";
 import { checkDomainAuth, isValidSelector, type DnsReport } from "@/lib/mail/dns-check";
+import { recordDnsReport } from "@/lib/mail/dns-store";
 import { requireConsent } from "../../../campaigns/schema";
 import { dnsCheckSchema } from "../../../mail/schema";
 
@@ -39,6 +40,8 @@ export const POST = domainRoute(async (req: Request, ctx: { params: Promise<{ id
   try {
     const report = await checkDomainAuth(domain, { selector: input.selector });
     await audit(db, "dns.checked", "mailbox", id, { mode: report.mode });
+    // Sonuç (yalnızca durumlar) canlı hazırlık ekranı için saklanır; yalnızca kutunun kendi alan adı ve gerçek denetim.
+    await recordDnsReport(db, { id, address: mb.address }, report);
     return json(report);
   } catch (e) {
     const m = e instanceof Error ? e.message : "";

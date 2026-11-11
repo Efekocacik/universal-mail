@@ -4,6 +4,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { mailboxes } from "@/lib/db/schema";
 import { processInbound, type InboundEnvelope, type InboundEffects } from "./process";
+import { recordInboxSync } from "./sync-status";
 
 /**
  * Gelen kutusu okuyucu sözleşmesi ve eşitleme turu (Aşama 13).
@@ -96,12 +97,14 @@ export async function syncInbox(
       typeof (e as { code?: unknown })?.code === "string"
         ? (e as { code: string }).code
         : "fetch_failed";
+    if (!demoBox) await recordInboxSync(db, mailboxId, { ok: false, code: summary.error }, clock());
     return summary;
   }
   const { items, nextCursor } = fetched;
   if (items.length > maxMessages) {
     // Sözleşme ihlali: fazlası sessizce atlanıp imleç ilerletilirse veri kaybolur. İlerletme.
     summary.error = "reader_contract_violation";
+    if (!demoBox) await recordInboxSync(db, mailboxId, { ok: false, code: summary.error }, clock());
     return summary;
   }
   const batch = items;
@@ -123,6 +126,8 @@ export async function syncInbox(
     if (r.outcome === "rejected") {
       // İleti işlenemedi (kutu pasif, kapsam reddi...): imleci İLERLETME; aksi halde ileti sonsuza dek kaybolur.
       summary.error = `rejected_${r.code}`;
+      if (!demoBox)
+        await recordInboxSync(db, mailboxId, { ok: false, code: summary.error }, clock());
       return summary;
     }
     if (r.outcome === "duplicate") summary.duplicates++;
@@ -140,6 +145,7 @@ export async function syncInbox(
       .set({ syncCursor: nextCursor, updatedAt: clock() })
       .where(eq(mailboxes.id, mailboxId));
   }
+  if (!demoBox) await recordInboxSync(db, mailboxId, { ok: true, code: "ok" }, clock());
   if (summary.floodGuard) {
     await audit(
       db,

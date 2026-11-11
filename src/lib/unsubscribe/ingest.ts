@@ -1,13 +1,14 @@
 import crypto from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import { suppressEmailInTx } from "@/lib/compliance/suppression";
+import { checkSuppression, suppressEmailInTx } from "@/lib/compliance/suppression";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages } from "@/lib/db/schema";
 import { LINKABLE_FROM } from "@/lib/mail/inbound/process";
+import { getSetting, setSetting } from "@/lib/settings";
 import { loadPublicKeys, recipientTag, tagsEqual } from "./keys";
-import { CLOCK_SKEW_MS, MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
+import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
 
 /**
  * Abonelikten çıkış olaylarını uygulamaya işleme (Aşama 15.6) — uygulama tarafı, aktarıcıya GÜVENMEZ.
@@ -40,7 +41,6 @@ const eventSchema = z
 
 export type RejectReason =
   | "invalid_event"
-  | "event_time_invalid"
   | "invalid_token"
   | "unknown_key"
   | "expired"
@@ -51,11 +51,45 @@ export type RejectReason =
   | "recipient_mismatch";
 
 export type IngestOutcome =
+  /** Uç nokta sınama belirteci (kapsam "p"): yalnızca uç nokta doğrulamasını etkiler; hiçbir alıcı/engel etkilenmez. */
+  | { outcome: "probe"; verified: boolean }
   | { outcome: "unsubscribed"; stopped: number; suppression: "added" | "strengthened" | "existing" }
   /** Alıcı silinmiş (adres yok) veya zaten engelli ve durdurulacak dizi yok. */
   | { outcome: "already" }
   | { outcome: "duplicate" }
   | { outcome: "rejected"; reason: RejectReason };
+
+/**
+ * Sınama belirteci: yalnızca bekleyen sınamayla (aynı jti, aynı anahtar, süresi dolmamış) eşleşirse uç noktayı
+ * "doğrulanmış" yazar ve bekleyeni tüketir (ikinci teslimat etkisizdir). Hiçbir alıcıya/engele dokunmaz.
+ */
+async function recordProbe(
+  db: Db,
+  claims: { j: string; k: string },
+  at: number,
+  now: number,
+): Promise<IngestOutcome> {
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  const p = cfg.pending;
+  if (
+    !p ||
+    p.jti !== claims.j ||
+    p.kid !== claims.k ||
+    p.baseUrl !== cfg.baseUrl ||
+    now - p.issuedAt > PROBE_MAX_AGE_MS
+  ) {
+    return { outcome: "probe", verified: false };
+  }
+  await setSetting(db, "mail.unsubscribeEndpoint", {
+    ...cfg,
+    pending: null,
+    verified: { baseUrl: p.baseUrl, kid: p.kid, jti: p.jti, verifiedAt: at },
+  });
+  await audit(db, "unsubscribe.endpoint_verified", "unsubscribe_endpoint", p.kid, undefined, now);
+  return { outcome: "probe", verified: true };
+}
+
+export const PROBE_MAX_AGE_MS = 15 * 60_000;
 
 const isUnique = (e: unknown) =>
   /UNIQUE constraint failed/i.test(
@@ -71,10 +105,9 @@ export async function ingestUnsubscribeEvent(
   const parsedEvent = eventSchema.safeParse(rawEvent);
   if (!parsedEvent.success) return { outcome: "rejected", reason: "invalid_event" };
   const event = parsedEvent.data;
-  const at = event.receivedAt;
-  if (at > now + CLOCK_SKEW_MS || at < now - MAX_EVENT_AGE_MS) {
-    return { outcome: "rejected", reason: "event_time_invalid" };
-  }
+  // Aktarıcının saati yalnızca bilgilendiricidir: ileri görünüyorsa İŞLEME ANINA kırpılır (saat sapması yüzünden
+  // geçerli bir çıkış isteği reddedilip kuyruktan SİLİNMESİN). Çok eski olay zaten süresi dolmuş belirteç olarak reddedilir.
+  const at = Math.min(event.receivedAt, now);
 
   const keys = await loadPublicKeys(db);
   const verdict = verifyToken(event.token, keys, at);
@@ -90,6 +123,7 @@ export async function ingestUnsubscribeEvent(
     return { outcome: "rejected", reason };
   }
   const claims = verdict.claims;
+  if (claims.s === "p") return recordProbe(db, claims, at, now);
 
   try {
     return await db.transaction(async (tx): Promise<IngestOutcome> => {
@@ -147,27 +181,50 @@ export async function ingestUnsubscribeEvent(
       // Gelen ileti kaydı bir posta kutusuna bağlanır; kutusuz kampanya hiç gönderim yapmamıştır.
       if (mailboxId === null) return { outcome: "rejected", reason: "no_mailbox" };
 
-      // Tekrar oynatma / tekilleştirme: jti başına tek gelen ileti kaydı (benzersiz dizin). Önce yazılır;
-      // çakışırsa işlem geri alınır ve hiçbir etki uygulanmaz.
-      const [inbound] = await tx
-        .insert(messages)
-        .values({
-          direction: "in",
-          purpose: "inbound",
-          campaignId: cl.campaignId,
-          campaignLeadId: cl.id,
-          leadId: cl.leadId,
-          mailboxId,
-          rfcMessageId: `<unsub-${claims.j}@unsubscribe.invalid>`,
-          peerHash: cl.recipientHash,
-          peerDomain: cl.recipientDomain ?? "unknown.invalid",
-          bodySha256: crypto.createHash("sha256").update(claims.j).digest("hex"),
-          status: "matched",
-          classification: "unsubscribe",
-          createdAt: now,
-          receivedAt: at,
-        })
-        .returning({ id: messages.id });
+      // Tekrar oynatma / tekilleştirme: jti başına tek gelen ileti kaydı (benzersiz dizin).
+      const syntheticId = `<unsub-${claims.j}@unsubscribe.invalid>`;
+      const [prev] = await tx
+        .select({ id: messages.id, receivedAt: messages.receivedAt })
+        .from(messages)
+        .where(and(eq(messages.rfcMessageId, syntheticId), eq(messages.direction, "in")))
+        .limit(1);
+      let reclick = false;
+      let existingId: number | null = null;
+      if (prev) {
+        // Aynı (veya daha eski) tıklama zamanı = tekrar oynatma/yinelenen teslimat: etki YOK.
+        if (prev.receivedAt === null || at <= prev.receivedAt) return { outcome: "duplicate" };
+        // Daha SONRAKİ bir tıklama: alıcı eski bir iletideki bağlantıya yeniden bastı. Arada engeli kaldırılmışsa
+        // (belgelenmiş alıcı talebiyle) bu yeni bir çıkış iradesidir ve YOK SAYILMAZ; hâlâ engelliyse etki gerekmez.
+        await tx.update(messages).set({ receivedAt: at }).where(eq(messages.id, prev.id));
+        if ((await checkSuppression(tx, cl.recipientEmail)).suppressed)
+          return { outcome: "already" };
+        reclick = true;
+        existingId = prev.id;
+      }
+
+      // İlk teslimat: önce kayıt yazılır; çakışırsa (yarış) işlem geri alınır ve hiçbir etki uygulanmaz.
+      const [inbound] =
+        existingId !== null
+          ? [{ id: existingId }]
+          : await tx
+              .insert(messages)
+              .values({
+                direction: "in",
+                purpose: "inbound",
+                campaignId: cl.campaignId,
+                campaignLeadId: cl.id,
+                leadId: cl.leadId,
+                mailboxId,
+                rfcMessageId: syntheticId,
+                peerHash: cl.recipientHash,
+                peerDomain: cl.recipientDomain ?? "unknown.invalid",
+                bodySha256: crypto.createHash("sha256").update(claims.j).digest("hex"),
+                status: "matched",
+                classification: "unsubscribe",
+                createdAt: now,
+                receivedAt: at,
+              })
+              .returning({ id: messages.id });
       const inboundId = inbound!.id;
 
       const res = await suppressEmailInTx(
@@ -190,7 +247,13 @@ export async function ingestUnsubscribeEvent(
         "unsubscribe.one_click",
         "message",
         inboundId,
-        { suppression: res.outcome, stopped: stopped.length, via: event.via, kid: claims.k },
+        {
+          suppression: res.outcome,
+          stopped: stopped.length,
+          via: event.via,
+          kid: claims.k,
+          ...(reclick ? { reclick: true } : {}),
+        },
         now,
       );
       if (res.outcome === "existing" && stopped.length === 0) return { outcome: "already" };
@@ -214,6 +277,8 @@ export interface DrainSummary {
   unsubscribed: number;
   already: number;
   duplicates: number;
+  /** Uç nokta sınama olayları (alıcıya/engele dokunmaz). */
+  probes: number;
   rejected: number;
   /** Altyapı hatası (ör. veritabanı) olduysa güvenli kod; işlenmeyen olaylar onaylanmadan kalır ve tekrar çekilir. */
   error: string | null;
@@ -235,6 +300,7 @@ export async function drainUnsubscribeEvents(
     unsubscribed: 0,
     already: 0,
     duplicates: 0,
+    probes: 0,
     rejected: 0,
     error: null,
   };
@@ -247,9 +313,21 @@ export async function drainUnsubscribeEvents(
     for (const it of items) {
       try {
         const r = await ingestUnsubscribeEvent(db, it.event, { now: clock() });
+        if (r.outcome === "rejected") {
+          // Kalıcı ret: olay onaylanıp kuyruktan çıkar; sessiz kayıp OLMASIN diye neden (kişisel veri yok) denetime yazılır.
+          await audit(
+            db,
+            "unsubscribe.event_rejected",
+            "unsubscribe_event",
+            it.id,
+            { reason: r.reason },
+            clock(),
+          );
+        }
         if (r.outcome === "unsubscribed") s.unsubscribed++;
         else if (r.outcome === "already") s.already++;
         else if (r.outcome === "duplicate") s.duplicates++;
+        else if (r.outcome === "probe") s.probes++;
         else s.rejected++;
         done.push(it.id);
       } catch {
