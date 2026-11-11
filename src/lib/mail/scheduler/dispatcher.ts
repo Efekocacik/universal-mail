@@ -65,6 +65,8 @@ const EXCLUDE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
   "recipient_mismatch",
   "reply_received",
   "sequence_limit",
+  // Aynı kampanyada işletmeye başka bir dizi yazdı veya öncelikli: bu kampanyada işletme başına tek dizi (C8).
+  "business_already_in_campaign",
   "lead_status_blocked",
   "lead_not_demo",
 ]);

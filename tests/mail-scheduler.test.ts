@@ -232,15 +232,36 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     expect(perDomainDay.size).toBe(rows.length);
   });
 
-  it("aynı alan adına aynı gün ikinci ileti gönderilmez; dizi dışlanmaz, ertelenir", async () => {
+  it("aynı kampanyada aynı işletme alan adına ikinci dizi gönderilmez ve dışlanır (C8: işletme başına tek dizi)", async () => {
     const c = await createCampaign(db, { steps: 1 });
     const x = await addSequence(db, c, { email: "info@ortak.example" });
     const y = await addSequence(db, c, { email: "sales@ortak.example" });
     const p = fake();
-    const { sends } = await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 3));
+    const { sends } = await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 5));
     expect(sends).toHaveLength(1);
-    const statuses = [(await seq(x.cl)).status, (await seq(y.cl)).status].sort();
-    expect(statuses).toEqual(["completed", "scheduled"]);
+    expect(p.calls).toBe(1);
+    expect((await seq(x.cl)).status).toBe("completed");
+    const second = await seq(y.cl);
+    expect(second.status).not.toMatch(/^(scheduled|waiting_next|in_flight|completed)$/);
+    expect(second.exclusionReasons).toContain("business_already_in_campaign");
+  });
+
+  it("başka kampanyada aynı işletmeye yazıldıysa ikinci kampanyanın dizisi dışlanmaz, ertelenir (C8)", async () => {
+    const c1 = await createCampaign(db, { steps: 1 });
+    const x = await addSequence(db, c1, { email: "info@ortak.example" });
+    const p = fake();
+    await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 3));
+    expect((await seq(x.cl)).status).toBe("completed");
+    const c2 = await createCampaign(db, { steps: 1 });
+    const y = await addSequence(db, c2, { email: "sales@shop.ortak.example" });
+    const before = p.calls;
+    await simulate(new MailDispatcher(db), p, Date.UTC(2026, 10, 3), Date.UTC(2026, 10, 6));
+    expect(p.calls).toBe(before);
+    const deferred = await seq(y.cl);
+    expect(deferred.status).toBe("scheduled");
+    expect(deferred.exclusionReasons).toEqual([]);
+    // Bekleme (yanıtsız tamamlanan dizi: 180 gün) bitene kadar ertelenmiş.
+    expect(deferred.nextSendAt!).toBeGreaterThanOrEqual(T0 + 180 * DAY);
   });
 });
 

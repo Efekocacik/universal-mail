@@ -1113,10 +1113,14 @@ export const tr = {
   "reason.suppressed": "Engelli listesinde (bu adrese yazılmayacak)",
   "reason.already_in_campaign": "Zaten bu kampanyada",
   "reason.domain_already_in_campaign": "Aynı firma web adresi zaten bu kampanyada",
+  "reason.business_already_in_campaign":
+    "Aynı işletmenin başka bir adresi bu kampanyada (işletme başına tek dizi)",
   "reason.active_sequence_elsewhere": "Başka bir kampanyada süren dizi var",
   "reason.recontact_requires_review": "Yeniden temas elle değerlendirme gerektirir",
   "reason.rest_period": "Bu işletmeye son 180 gün içinde yazıldı; sonra tekrar deneyin",
   "reason.cross_campaign_gap": "Son temastan bu yana 30 gün geçmedi",
+  "reason.business_contact_cooldown":
+    "Bu işletmenin başka bir adresine başka kampanyada yakın zamanda yazıldı (bekleme süresi dolmadı)",
   "reason.unresolved_delivery": "Önceki gönderimin sonucu belirsiz",
   "reason.step_out_of_range": "E-posta adımı bulunamadı",
   "reason.step_missing": "Bu dil için şablon yok",
