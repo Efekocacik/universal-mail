@@ -8,6 +8,7 @@ import { Select } from "@/components/ui/input";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { DeliveryAlertBanner } from "@/features/compliance/delivery-alert";
+import { MailboxReauthBanner } from "./mailbox-reauth-banner";
 import { useCampaigns, type CampaignStatus, type CampaignSummary } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
@@ -77,6 +78,7 @@ export function CampaignsPage() {
       <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
         <CampaignsSubnav />
         <DeliveryAlertBanner />
+        <MailboxReauthBanner />
         <PageHeader
           title={t("campaigns.title")}
           description={t("campaigns.subtitle")}

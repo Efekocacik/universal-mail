@@ -978,3 +978,63 @@ describe("kimlik belirteci: İMZA doğrulaması (Google JWKS) ve nonce", () => {
     expect(certs()).toBe(2);
   });
 });
+
+describe("kişisel Gmail hesabı (Workspace yok)", () => {
+  const CONSUMER = "firma.ornek@gmail.com";
+
+  it("@gmail.com kutusu Workspace (hd) iddiası OLMADAN bağlanır; hesap ipucu kutunun adresi", async () => {
+    const b = await begin("send", { address: CONSUMER });
+    expect(b.url.searchParams.get("login_hint")).toBe(CONSUMER);
+    expect(b.url.searchParams.has("hd")).toBe(false);
+    const r = await finish(b);
+    expect(r).toMatchObject({ mailboxId: b.id, send: true, read: false });
+    expect(await mailbox(b.id)).toMatchObject({ status: "connected", address: CONSUMER });
+  });
+
+  it("e-posta karşılaştırması büyük/küçük harf duyarsızdır (kanonik küçük harf ↔ girilen büyük harf)", async () => {
+    const { id } = await createGmailMailbox(db, {
+      label: "Kişisel",
+      address: "Firma.Ornek@Gmail.com",
+    });
+    const b = await begin("send", { id, email: "FIRMA.ORNEK@gmail.com" });
+    expect((await finish(b)).mailboxId).toBe(id);
+  });
+
+  it("Workspace hd iddiası olsa da olmasa da kabul edilir (hd aranmaz)", async () => {
+    const b = await begin("send", { claims: { hd: "firma-ornek.com" } });
+    expect((await finish(b)).send).toBe(true);
+  });
+
+  it.each([
+    ["noktasız yazım", "firmaornek@gmail.com"],
+    ["googlemail ↔ gmail", "firma.ornek@googlemail.com"],
+    ["başka hesap", "baska@gmail.com"],
+  ])("birebir eşleşme korunur (%s) → account_mismatch, hiçbir şey saklanmaz", async (_n, email) => {
+    const b = await begin("send", { address: CONSUMER, email });
+    expect(await kind(finish(b))).toBe("account_mismatch");
+    expect(await mailbox(b.id)).toMatchObject({ status: "not_configured", credentialsRef: null });
+    expect(await secretExists(mailboxRefreshTokenName(b.id))).toBe(false);
+  });
+
+  it("'Testing' projesinde 7 günlük yenileme belirteci süresi dolar (invalid_grant): kutu yeniden bağlanmalı; yeniden bağlanınca düzelir", async () => {
+    const b = await begin("send", { address: CONSUMER });
+    await finish(b);
+    fake.validRefresh.clear(); // Google yenileme belirtecini artık kabul etmiyor
+    clock += 7 * 86_400_000 + 1;
+    expect(await kind(getAccessToken(db, deps, b.id))).toBe("reauthorization_required");
+    expect(await getOAuthStatus(db, b.id)).toMatchObject({
+      connected: false,
+      reauthorizationRequired: true,
+    });
+    // "Yeniden bağlan": aynı kutu için yeni yetkilendirme (durum `error` iken başlatılabilir).
+    const again = await begin("send", { id: b.id, address: CONSUMER });
+    await finish(again);
+    expect(await getOAuthStatus(db, b.id)).toEqual({
+      connected: true,
+      send: true,
+      read: false,
+      reauthorizationRequired: false,
+    });
+    expect(await mailbox(b.id)).toMatchObject({ status: "connected", lastError: null });
+  });
+});

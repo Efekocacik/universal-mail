@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { computeStartPlan } from "@/lib/campaigns/preflight";
 import { evaluateEnrollment } from "@/lib/compliance/eligibility";
+import { utcDay } from "@/lib/compliance/frequency";
 import { LEGAL_APPROVALS } from "@/lib/compliance/legal-status";
 import { applyLiveCountryApproval } from "@/lib/compliance/live-country-approval";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
@@ -15,12 +16,13 @@ import {
   LIVE_SENDING_ENABLED,
   resolveCountryPolicy,
 } from "@/lib/compliance/policies";
+import { hashEmail } from "@/lib/compliance/suppression";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, countryPolicies, mailboxes, messages } from "@/lib/db/schema";
 import { DNS_FRESH_MS } from "@/lib/mail/dns-store";
 import type { MailProvider } from "@/lib/mail/provider/provider";
 import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
-import { DNS_GATE_RETRY_MS, sendCampaignStep } from "@/lib/mail/send-service";
+import { DNS_GATE_RETRY_MS, REAUTH_DEFER_MS, sendCampaignStep } from "@/lib/mail/send-service";
 import { getSetting, setSetting } from "@/lib/settings";
 import {
   HttpEventSource,
@@ -342,5 +344,172 @@ describe("ülke açık olsa bile çalışma anı hazırlığı gönderimi korur"
   it("kontrol: hepsi tamamken gönderilir", async () => {
     expect(await send(cl)).toMatchObject({ outcome: "sent" });
     expect(calls).toBe(1);
+  });
+});
+
+describe("kişisel Gmail (@gmail.com) gönderen kutusu", () => {
+  const CONSUMER = "firma.ornek@gmail.com";
+  let cid: number;
+  let cl: number;
+  beforeEach(async () => {
+    await readyExceptCountry();
+    await unlockGB();
+    cid = await addMailbox(db, { provider: "gmail", address: CONSUMER });
+    const grants = await getSetting(db, "mail.gmailGrants");
+    await setSetting(db, "mail.gmailGrants", {
+      ...grants,
+      [String(cid)]: { send: true, read: false, at: T0 },
+    });
+    const id = await createCampaign(db, { status: "running", mailboxId: cid });
+    cl = (await addSequence(db, id, { nextSendAt: null, email: RECIPIENT })).cl;
+  });
+
+  it("DNS kaydı OLMADAN gönderir: alan adı Google tarafından yönetilir (dns_not_verified yok); ileti From kutunun adresi", async () => {
+    expect((await getSetting(db, "mail.dnsReports"))[String(cid)]).toBeUndefined();
+    expect(await send(cl)).toMatchObject({ outcome: "sent" });
+    expect(calls).toBe(1);
+    const [row] = await outRows();
+    expect(row).toMatchObject({ fromAddress: CONSUMER, mailboxId: cid, status: "sent" });
+  });
+
+  it("diğer çalışma anı kapıları aynen geçerli: çekme kapalıyken ertelenir", async () => {
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    expect(await send(cl)).toMatchObject({
+      outcome: "not_sendable",
+      code: "unsubscribe_drain_unhealthy",
+    });
+    expect(calls).toBe(0);
+  });
+
+  it("günlük tavan kişisel Gmail ısınma tabanında (10): 11. ileti mailbox_daily_cap (warmup) ile bekler", async () => {
+    const [camp] = await db.select().from(campaigns).where(eq(campaigns.mailboxId, cid));
+    for (let i = 0; i < 10; i++) {
+      const other = await addSequence(db, camp!.id, { email: `info@tavan${i}-ornek.com` });
+      await db.insert(messages).values({
+        direction: "out",
+        purpose: "campaign",
+        campaignId: camp!.id,
+        campaignLeadId: other.cl,
+        leadId: other.leadId,
+        mailboxId: cid,
+        stepIndex: 0,
+        idempotencyKey: `cl:${other.cl}:s:0`,
+        fromAddress: CONSUMER,
+        toAddress: other.email,
+        peerHash: hashEmail(other.email),
+        peerDomain: other.email.split("@")[1]!,
+        sendDay: utcDay(T0),
+        status: "sent",
+        createdAt: T0 - 3 * 3_600_000,
+      });
+    }
+    expect(await send(cl)).toMatchObject({
+      outcome: "not_sendable",
+      code: "mailbox_daily_cap",
+      detail: "warmup",
+    });
+    expect(calls).toBe(0);
+  });
+});
+
+describe("Gmail yetkisi düştüğünde (invalid_grant) gönderim ERTELENİR, başarısız sayılmaz", () => {
+  let id: number;
+  let cl: number;
+  beforeEach(async () => {
+    await readyExceptCountry();
+    await unlockGB();
+    id = await createCampaign(db, { status: "running", mailboxId: gid });
+    cl = (await addSequence(db, id, { nextSendAt: null, email: RECIPIENT })).cl;
+  });
+
+  it("kutu reauthorization_required durumundayken dağıtıcı diziyi erteler; kampanya DURMAZ; yeniden bağlanınca gönderir", async () => {
+    await db
+      .update(mailboxes)
+      .set({ status: "error", lastError: "reauthorization_required" })
+      .where(eq(mailboxes.id, gid));
+    const direct = await send(cl);
+    expect(direct).toMatchObject({ outcome: "ineligible" });
+    expect((direct as { reasons: unknown[] }).reasons).toContainEqual({
+      code: "mailbox_not_ready",
+      detail: "reauthorization_required",
+    });
+
+    const r = await new MailDispatcher(db).dispatchOnce({ now: () => T0, provider });
+    expect(r).toMatchObject({ send: null, deferred: 1, excluded: 0, pausedCampaigns: [] });
+    const [c] = await db.select().from(campaigns).where(eq(campaigns.id, id));
+    expect(c!.status).toBe("running");
+    const [row] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, cl));
+    expect(row).toMatchObject({
+      status: "scheduled",
+      nextSendAt: T0 + REAUTH_DEFER_MS,
+      lastError: "reauthorization_required",
+    });
+    expect(calls).toBe(0);
+
+    // Kullanıcı "Yeniden bağlan" ile kutuyu bağladı.
+    await db
+      .update(mailboxes)
+      .set({ status: "connected", lastError: null })
+      .where(eq(mailboxes.id, gid));
+    const later = T0 + REAUTH_DEFER_MS;
+    await recordPassingDns(db, gid, later);
+    const ok = await new MailDispatcher(db).dispatchOnce({ now: () => later, provider });
+    expect(ok.send).toMatchObject({ outcome: "sent" });
+    expect(calls).toBe(1);
+  });
+
+  it("gönderim anında sağlayıcı reauthorization_required döndürürse: ileti kaydı failed (gönderilmedi), dizi ertelenir, deneme hakkı tüketilmez", async () => {
+    const reauth: MailProvider = {
+      id: "gmail",
+      send: async () => ({ status: "rejected", code: "reauthorization_required", permanent: true }),
+    };
+    for (let i = 0; i < 4; i++) {
+      const now = T0 + i * REAUTH_DEFER_MS;
+      const out = await sendCampaignStep(
+        db,
+        { campaignLeadId: cl, stepIndex: 0 },
+        { now: () => now, provider: reauth },
+      );
+      expect(out).toMatchObject({ outcome: "failed", code: "reauthorization_required" });
+      const [row] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, cl));
+      expect(row).toMatchObject({
+        status: "scheduled",
+        nextSendAt: now + REAUTH_DEFER_MS,
+        lastError: "reauthorization_required",
+        attempts: 0,
+      });
+    }
+    const rows = await outRows();
+    expect(rows).toHaveLength(4);
+    expect(rows.every((m) => m.status === "failed" && m.errorMessage === "mailbox_auth")).toBe(
+      true,
+    );
+    // Sonraki gerçek geçici ret yine normal yeniden deneme kuralına girer (ilk deneme sayılır).
+    const transient: MailProvider = {
+      id: "gmail",
+      send: async () => ({ status: "rejected", code: "rate_limited", permanent: false }),
+    };
+    const now = T0 + 4 * REAUTH_DEFER_MS;
+    await sendCampaignStep(
+      db,
+      { campaignLeadId: cl, stepIndex: 0 },
+      { now: () => now, provider: transient },
+    );
+    const [after] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, cl));
+    expect(after).toMatchObject({ status: "scheduled", attempts: 1, lastError: "rate_limited" });
+  });
+
+  it("kontrol: başka bir kalıcı ret diziyi yine başarısız yapar (önceki davranış)", async () => {
+    const bad: MailProvider = {
+      id: "gmail",
+      send: async () => ({ status: "rejected", code: "invalid_request", permanent: true }),
+    };
+    await sendCampaignStep(
+      db,
+      { campaignLeadId: cl, stepIndex: 0 },
+      { now: () => T0, provider: bad },
+    );
+    const [row] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, cl));
+    expect(row!.status).toBe("failed");
   });
 });

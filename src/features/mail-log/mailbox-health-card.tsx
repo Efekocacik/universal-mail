@@ -205,7 +205,17 @@ export function ReadinessCard() {
             >
               {t(`ready.status.${i.status}` as TrKey)}
             </Badge>
-            <span className="min-w-0 flex-1">{t(`ready.item.${i.key}` as TrKey)}</span>
+            <span className="min-w-0 flex-1">
+              {t(`ready.item.${i.key}` as TrKey)}
+              {i.detail && (
+                <span
+                  className="block text-[12px] text-muted-foreground"
+                  data-testid={`ready-detail-${i.key}`}
+                >
+                  {t(`ready.detail.${i.detail}` as TrKey)}
+                </span>
+              )}
+            </span>
             <span className="text-[12px] text-muted-foreground">
               {t(`ready.owner.${i.owner}` as TrKey)}
             </span>

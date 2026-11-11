@@ -54,6 +54,12 @@ export interface MailboxItem {
   sendable: boolean;
   /** Demo olmayan ve bağlı olmayan kutular ad/durum değişikliğine ve silmeye açıktır. */
   editable?: boolean;
+  /** Kişisel Gmail adresi (`@gmail.com`/`@googlemail.com`). */
+  consumerGmail?: boolean;
+  /** Google yetkisi geçersiz/iptal: kutu yeniden bağlanana kadar gönderim ertelenir. */
+  reauthorizationRequired?: boolean;
+  /** Bugünkü geçerli günlük tavan, ısınma tabanı ve günlük üst sınır. */
+  limits?: { todayCap: number; warmupBase: number; maxDaily: number };
 }
 
 /** Şablon listesi öğesi (gövde yok); `lockedBy` > 0 ise içerik değiştirilemez. */

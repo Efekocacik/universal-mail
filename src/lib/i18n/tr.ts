@@ -677,7 +677,7 @@ export const tr = {
   "setup.google.body":
     "Gerçek işletmeleri bulmak için Google anahtarlarınızı girin. Önce uygulamayı denemek isterseniz demo modunu seçin.",
   "setup.google.guide":
-    "Anahtarlar şirketin kendi Google Cloud hesabından alınır (Workspace yönetici hesabıyla):\n1. console.cloud.google.com'da şirket kuruluşu altında yeni bir proje açın.\n2. Faturalandırma'da şirket kartını bağlayın; aylık bütçe uyarısı (ör. 20 USD) ve Places API (New) için günlük kota sınırı koyun. Bütçe uyarısı harcamayı durdurmaz, kota durdurur.\n3. API'ler ve Hizmetler → Kitaplık'ta Places API (New) ve Maps JavaScript API'yi etkinleştirin. Adında '(New)' olmayan eski Places API'yi açmayın.\n4. Kimlik Bilgileri'nde iki ayrı API anahtarı oluşturun: birini yalnızca Places API (New), diğerini yalnızca Maps JavaScript API ile kısıtlayın.\n5. İlkini 'İşletme arama anahtarı', ikincisini 'Harita anahtarı' alanına yapıştırıp 'Anahtarı test et' düğmesine basın. Anahtarları sohbet, e-posta veya ekran görüntüsüyle paylaşmayın.\nAyrıntılar: Faz 0 Kılavuzu, Adım 5–7.",
+    "Anahtarlar şirketin kendi Google Cloud hesabından alınır. Google Workspace gerekmez; şirketin kullandığı Google hesabı (kişisel @gmail.com dahil) yeterlidir. Workspace varsa onun yönetici hesabı önerilir.\n1. console.cloud.google.com'da yeni bir proje açın (Workspace yoksa kuruluş: 'Kuruluş yok').\n2. Faturalandırma'da şirket kartını bağlayın; aylık bütçe uyarısı (ör. 20 USD) ve Places API (New) için günlük kota sınırı koyun. Bütçe uyarısı harcamayı durdurmaz, kota durdurur.\n3. API'ler ve Hizmetler → Kitaplık'ta Places API (New) ve Maps JavaScript API'yi etkinleştirin. Adında '(New)' olmayan eski Places API'yi açmayın.\n4. Kimlik Bilgileri'nde iki ayrı API anahtarı oluşturun: birini yalnızca Places API (New), diğerini yalnızca Maps JavaScript API ile kısıtlayın.\n5. İlkini 'İşletme arama anahtarı', ikincisini 'Harita anahtarı' alanına yapıştırıp 'Anahtarı test et' düğmesine basın. Anahtarları sohbet, e-posta veya ekran görüntüsüyle paylaşmayın.\nGmail gönderimi için aynı projede Gmail API ve OAuth izin ekranı da kurulur (kişisel hesapta kitle 'External', durum 'In production'); bu adım kurulumdan sonra Ayarlar → Gönderim hesabı'nda yapılır.\nAyrıntılar: Faz 0 Kılavuzu, Adım 5–8; Canlıya Geçiş belgesi.",
   "setup.google.demoNote":
     "Demo modunda yapay işletmeler üretilir; Google'a istek atılmaz, ücret doğmaz. Gerçek anahtarları sonradan Ayarlar'dan girebilirsiniz.",
   "setup.budget.title": "Aylık bütçe",
@@ -1137,6 +1137,8 @@ export const tr = {
   "reason.unsubscribe_unavailable": "Doğrulanmış çıkış bağlantısı hazırlanamadı",
   "reason.unsubscribe_drain_unhealthy":
     "Çıkış talepleri çekilmiyor (çekme kapalı veya son 24 saatte sağlıklı kayıt yok); gönderim ertelendi",
+  "reason.reauthorization_required":
+    "Gönderen Gmail kutusunun Google yetkisi geçersiz veya iptal edilmiş; kutu yeniden bağlanana kadar gönderim ertelendi",
   "reason.dns_not_verified":
     'Gönderen alan adının DNS denetimi (SPF/DKIM/DMARC) taze değil veya geçmedi; Günlük → Gönderim sağlığı → "Kontrol et". Gönderim ertelendi',
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
@@ -1530,6 +1532,11 @@ export const tr = {
   "health.dns.selector": "DKIM seçici adı (isteğe bağlı)",
   "health.dns.check": "Kontrol et",
   "health.dns.demo": "Demo posta kutusu gerçek bir alan adı kullanmaz; DNS sorgusu yapılmadı.",
+  "health.dns.help.consumer":
+    "Bu kutu kişisel Gmail adresi kullanır. Alan adının SPF, DKIM ve DMARC kayıtları Google'ın elindedir; “Kontrol et” DNS sorgusu yapmaz.",
+  "health.dns.managed.title": "Google tarafından yönetiliyor",
+  "health.dns.managed.body":
+    "{domain} kişisel Gmail alan adıdır: SPF, DKIM ve DMARC kayıtlarını Google yönetir ve iletileri kendi alan adıyla imzalar. Sizin DNS kaydı eklemeniz gerekmez (eklenemez de). DNS sorgusu yapılmadı; bu kutu gönderim hazırlığında “tamam” sayılır.",
   "health.dns.spf": "SPF",
   "health.dns.dkim": "DKIM",
   "health.dns.dmarc": "DMARC",
@@ -1582,6 +1589,8 @@ export const tr = {
   "health.test.liveNoUnsubscribe":
     "Çıkış uç noktası henüz doğrulanmadığı için iletide tek tıklamalı çıkış (List-Unsubscribe) başlığı yoktur.",
   "health.test.liveFailed": "Gmail iletiyi kabul etmedi; gönderilmedi (kod: {code}).",
+  "health.test.reauth":
+    "Gmail yetkisi geçersiz veya iptal edilmiş; ileti gönderilmedi. Ayarlar → Gönderim hesabı'ndan “Yeniden bağlan”a basın.",
   "health.test.liveUnknown":
     "Gönderim sonucu belirsiz: ileti gitmiş olabilir. Otomatik olarak yeniden gönderilmez; gelen kutunuzu kontrol edin ve Kampanyalar › İnceleme ekranından karar verin.",
   "health.test.error.SEND_SCOPE_MISSING":
@@ -1649,7 +1658,10 @@ export const tr = {
   "ready.item.inbox_access":
     "Gelen kutusu okuma izni (bounce ve yanıt koruması için gmail.readonly)",
   "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
-  "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı; son denetim sonucu)",
+  "ready.item.dns_auth":
+    "SPF/DKIM/DMARC doğrulaması (kendi alan adı: son denetim sonucu; kişisel Gmail: Google yönetir)",
+  "ready.detail.provider_managed":
+    "Kişisel Gmail (@gmail.com): SPF, DKIM ve DMARC Google tarafından yönetilir; DNS kaydı eklemeniz gerekmez.",
   "ready.item.inbox_sync": "Gelen kutusu okuması çalışıyor (son başarılı eşitleme)",
   "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda sabit)",
   "ready.item.inbox_header_trust":
@@ -1716,13 +1728,14 @@ export const tr = {
   "mbx.desc":
     "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlar, kutuyu Google izin ekranıyla Gmail'e bağlarsınız (gönderim izni; isteğe bağlı gelen kutusu okuma izni).",
   "mbx.note":
-    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır. Gmail bağlamak tek başına ileti göndermez: gönderim izni, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
+    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır. Gmail bağlamak tek başına ileti göndermez: gönderim izni, DNS denetimi (kişisel @gmail.com adresinde Google yönetir, gerekmez), HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Google Workspace zorunlu değildir; kişisel Gmail hesabı da kullanılabilir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
   "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
   "mbx.status.connected": "Bağlı",
   "mbx.status.disabled": "Devre dışı",
   "mbx.status.not_configured": "Yapılandırılmadı",
+  "mbx.status.reauth": "Yeniden bağlanmalı",
   "mbx.label": "Ad",
-  "mbx.address": "Gmail / Workspace adresi",
+  "mbx.address": "Gmail adresi (kişisel @gmail.com veya Workspace)",
   "mbx.add": "Kutu ekle",
   "mbx.added": "Posta kutusu eklendi (henüz bağlı değil).",
   "mbx.enable": "Etkinleştir",
@@ -1735,7 +1748,7 @@ export const tr = {
   "mbx.removed": "Posta kutusu silindi.",
   "mbx.client.title": "Google OAuth istemcisi",
   "mbx.client.help":
-    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Kaydederken geçerliliği sınanmaz; yalnızca “Gmail'e bağlan” ile başlattığınız Google OAuth bağlantısında kullanılır.",
+    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Kaydederken geçerliliği sınanmaz; yalnızca “Gmail'e bağlan” ile başlattığınız Google OAuth bağlantısında kullanılır. Kişisel Gmail hesabında Google Auth Platform kitlesi “External” olmalı ve uygulama “In production” (yayında) durumuna alınmalıdır: “Testing” durumunda bağlantı 7 günde bir düşer. Doğrulanmamış uygulama uyarısında “Gelişmiş → … sayfasına git (güvenli değil)” ile devam edilebilir (yalnızca kendi hesabınız için).",
   "mbx.client.id": "İstemci kimliği",
   "mbx.client.secret": "İstemci sırrı",
   "mbx.client.secret.hint":
@@ -1773,6 +1786,16 @@ export const tr = {
   "mbx.oauth.disconnected.norevoke":
     "Bağlantı kesildi, ancak Google'daki yetki iptal edilemedi; Google hesap ayarlarından kaldırabilirsiniz.",
   "mbx.oauth.reauth": "Yetki geçersiz veya iptal edilmiş; yeniden bağlanmanız gerekir.",
+  "mbx.oauth.reauth.help":
+    "Google bu kutunun iznini artık kabul etmiyor: izin Google hesabından kaldırılmış ya da OAuth projesi “Testing” durumunda olduğu için 7 günlük süre dolmuş olabilir. Bu kutudan kampanya gönderimleri yeniden bağlanana kadar ertelenir; diziler başarısız sayılmaz. Sürekli tekrarlıyorsa Google Cloud'da projeyi “In production” (yayında) durumuna alın.",
+  "mbx.oauth.reconnect": "Yeniden bağlan",
+  "mbx.reauthBanner.title": "Gmail bağlantısı yenilenmeli",
+  "mbx.reauthBanner.body":
+    "{list}: Google yetkisi geçersiz veya iptal edilmiş. Bu kutudan kampanya gönderimleri yeniden bağlanana kadar ertelenir (diziler başarısız sayılmaz).",
+  "mbx.limits.consumer":
+    "Kişisel Gmail: bugün en çok {today} ileti. Isınma günde {base} ile başlar, bu kutu için üst sınır günde {max}. Kişisel Gmail'in Google gönderim sınırı Workspace'ten çok düşüktür; yüksek hacim hesabın kısıtlanmasına yol açabilir.",
+  "mbx.limits.workspace":
+    "Bugün en çok {today} ileti. Isınma günde {base} ile başlar, üst sınır günde {max}.",
   "mbx.oauth.result.ok": "Gmail kutusu bağlandı.",
   "mbx.oauth.result.readDenied":
     "Gelen kutusu okuma izni verilmedi; kutu yalnızca gönderim izniyle bağlandı.",
@@ -1939,7 +1962,7 @@ export const tr = {
     "İstek 10 dakika geçerlidir ve uygulama kapanırsa geçersiz olur. Uygulamayı açık tutup bağlantıyı yeniden başlatın.",
   "mbx.oauth.hint.access_denied": "Bağlanmak için Google izin ekranında izin vermeniz gerekir.",
   "mbx.oauth.hint.account_mismatch":
-    "Google'da kutunun birincil adresiyle giriş yapın. Takma ad (alias) veya başka bir hesapla bağlanılamaz.",
+    "Google'da kutunun birincil adresiyle giriş yapın. Takma ad (alias), “+etiket” veya başka bir hesapla bağlanılamaz. Kişisel Gmail'de adresi Google hesabında göründüğü gibi (noktalarıyla) yazın: “ad.soyad@gmail.com” ile “adsoyad@gmail.com” farklı yazım sayılır.",
   "mbx.oauth.hint.scope":
     "İzin ekranında yalnızca istenen izinleri onaylayın. Sorun sürerse Google Cloud'daki izin ekranı ayarlarını (openid, email, gmail.send; gelen kutusu okuma için gmail.readonly) kontrol edin.",
   "mbx.oauth.hint.no_refresh_token":
@@ -1947,12 +1970,12 @@ export const tr = {
   "mbx.oauth.keepOpen":
     "Google'da giriş yaparken Universal Mail açık kalmalıdır; uygulama kapanırsa istek geçersiz olur.",
   "mbx.oauth.primaryAddress":
-    "Google'da bu kutunun birincil adresiyle giriş yapın; takma ad (alias) ile giriş “hesap aynı değil” hatası verir.",
+    "Google'da bu kutunun birincil adresiyle giriş yapın; takma ad (alias) veya farklı yazım (ör. noktasız Gmail adresi) “hesap aynı değil” hatası verir. Kişisel Gmail'de Google bir “doğrulanmamış uygulama” uyarısı gösterebilir: “Gelişmiş → devam et” ile ilerleyin.",
   "mbx.oauth.result.timeout":
     "Google'dan 10 dakika içinde sonuç gelmedi. Gerekirse bağlantıyı yeniden başlatın.",
   "mbx.oauth.result.dismiss": "Kapat",
   "mbx.address.hint":
-    "Google Workspace hesabının birincil adresini girin; takma ad (alias) ile Gmail bağlantısı kurulamaz.",
+    "Google hesabının birincil adresini girin: kişisel Gmail (@gmail.com) veya Google Workspace adresi. Takma ad (alias) ya da “+etiket” ile bağlantı kurulamaz; Gmail adresini noktalarıyla, Google hesabında göründüğü gibi yazın.",
   "sup.import.preview.loading": "Önizleme hazırlanıyor… Henüz hiçbir şey eklenmedi.",
   "sup.import.preview":
     "Önizleme: {added} eklenecek · {strengthened} güçlendirilecek · {duplicates} zaten var · {invalid} geçersiz satır. Henüz hiçbir şey eklenmedi.",

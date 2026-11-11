@@ -114,6 +114,18 @@ function AutoStopCard() {
 
 function DnsResult({ report }: { report: DnsReport }) {
   if (report.mode === "demo") return <Notice>{t("health.dns.demo")}</Notice>;
+  if (report.mode === "managed") {
+    return (
+      <Notice>
+        <p className="font-medium" data-testid="dns-managed">
+          {t("health.dns.managed.title")}
+        </p>
+        <p className="text-[12px]">
+          {t("health.dns.managed.body", { domain: report.domain ?? "" })}
+        </p>
+      </Notice>
+    );
+  }
   const rows = [
     { key: "health.dns.spf", item: report.spf },
     { key: "health.dns.dkim", item: report.dkim },
@@ -140,7 +152,18 @@ function DnsResult({ report }: { report: DnsReport }) {
   );
 }
 
-function DnsCard({ mailboxId }: { mailboxId: number }) {
+function DnsCard({
+  mailboxId,
+  address,
+  consumerGmail = false,
+}: {
+  mailboxId: number;
+  /** Gerçek kutunun adresi (başlıkta gösterilir); demo kutusunda yok. */
+  address?: string | null;
+  /** Kişisel Gmail: DNS Google'ca yönetilir; seçici alanı gösterilmez. */
+  consumerGmail?: boolean;
+}) {
+  const ids = `dns-${mailboxId}`;
   const [selector, setSelector] = useState("");
   const [report, setReport] = useState<DnsReport | null>(null);
   const [error, setError] = useState(false);
@@ -158,11 +181,14 @@ function DnsCard({ mailboxId }: { mailboxId: number }) {
     },
   );
   return (
-    <section aria-labelledby="dns-title" className="space-y-3 rounded-xl border bg-card p-4">
-      <h2 id="dns-title" className="text-sm font-semibold">
+    <section aria-labelledby={`${ids}-title`} className="space-y-3 rounded-xl border bg-card p-4">
+      <h2 id={`${ids}-title`} className="text-sm font-semibold">
         {t("health.dns.title")}
+        {address ? ` · ${address}` : ""}
       </h2>
-      <p className="text-[13px] text-muted-foreground">{t("health.dns.help")}</p>
+      <p className="text-[13px] text-muted-foreground">
+        {consumerGmail ? t("health.dns.help.consumer") : t("health.dns.help")}
+      </p>
       <form
         className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end"
         onSubmit={(e) => {
@@ -170,15 +196,19 @@ function DnsCard({ mailboxId }: { mailboxId: number }) {
           check.mutate(undefined);
         }}
       >
-        <div className="space-y-1.5">
-          <Label htmlFor="dns-selector">{t("health.dns.selector")}</Label>
-          <Input
-            id="dns-selector"
-            value={selector}
-            placeholder="google"
-            onChange={(e) => setSelector(e.target.value)}
-          />
-        </div>
+        {consumerGmail ? (
+          <div />
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor={`${ids}-selector`}>{t("health.dns.selector")}</Label>
+            <Input
+              id={`${ids}-selector`}
+              value={selector}
+              placeholder="google"
+              onChange={(e) => setSelector(e.target.value)}
+            />
+          </div>
+        )}
         <Button type="submit" variant="outline" loading={check.isPending}>
           {t("health.dns.check")}
         </Button>
@@ -320,7 +350,11 @@ function TestSendCard({
         </Notice>
       )}
       {feedback?.kind === "failed" && (
-        <Notice tone="danger">{t("health.test.liveFailed", { code: feedback.code })}</Notice>
+        <Notice tone="danger">
+          {feedback.code === "reauthorization_required" || feedback.code === "not_connected"
+            ? t("health.test.reauth")
+            : t("health.test.liveFailed", { code: feedback.code })}
+        </Notice>
       )}
       {feedback?.kind === "unknown" && (
         <Notice tone="warning">{t("health.test.liveUnknown")}</Notice>
@@ -360,12 +394,25 @@ export function HealthPanel() {
   const gmail = (boxes.data ?? []).filter(
     (m) => m.scope === "live" && m.provider === "gmail" && m.status === "connected" && m.address,
   );
+  // DNS denetimi bağlantıdan bağımsızdır (alan adı kutunun adresinden): adresi olan her gerçek Gmail kutusu.
+  const realGmail = (boxes.data ?? []).filter(
+    (m) => m.scope === "live" && m.provider === "gmail" && m.address,
+  );
   return (
     <div className="space-y-4">
       <Notice>{t("health.demoNote")}</Notice>
       {demo && <MailboxHealthCard mailboxId={demo.id} />}
       <AutoStopCard />
       {demo && <DnsCard mailboxId={demo.id} />}
+      {/* Gerçek Gmail kutuları: kendi alan adının denetimi (kişisel Gmail'de Google yönetir, sorgu atılmaz). */}
+      {realGmail.map((m) => (
+        <DnsCard
+          key={`dns-${m.id}`}
+          mailboxId={m.id}
+          address={m.address}
+          consumerGmail={m.consumerGmail === true}
+        />
+      ))}
       {demo && <TestSendCard mailbox={demo} />}
       {gmail.map((m) => (
         <TestSendCard key={m.id} mailbox={m} />

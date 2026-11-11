@@ -20,7 +20,7 @@ Bu belge, Universal Mail'in **tek tıklamalı abonelikten çıkış aktarıcıs�
 
 | Gereken | Ayrıntı |
 |---|---|
-| Alt alan adı | Örneğin `cikis.firma.com`. DNS'te sunucunun IP'sine giden **A** (ve varsa **AAAA**) kaydı olmalı. |
+| Alt alan adı | Örneğin `cikis.firma.com`. DNS'te sunucunun IP'sine giden **A** (ve varsa **AAAA**) kaydı olmalı. DNS **Cloudflare**'daysa (ör. `cikis.gurcankagitpromosyon.com`) kayıt **"DNS only" (gri bulut)** olmalı; Cloudflare proxy'si (turuncu bulut) kullanılmaz, istekler ve sertifika doğrulaması doğrudan Caddy'ye ulaşmalıdır. Gönderen hesabın kişisel Gmail olması veya alan adında MX bulunmaması aktarıcıyı etkilemez. |
 | Sunucu | Debian 12 veya Ubuntu 24.04; 1 vCPU ve 512 MB RAM yeterli. **Kalıcı** ext4/xfs disk gerekir (geçici/tmpfs olmamalı). |
 | Erişim | SSH; 80 ve 443 portları internete açık olmalı. |
 | Saat | NTP açık olmalı. Kanal en çok ±5 dakika saat farkına izin verir. |

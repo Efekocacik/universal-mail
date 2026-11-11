@@ -317,7 +317,9 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
   await expect(section.getByText("Demo (gerçek gönderim yapmaz)")).toBeVisible();
 
   await section.getByLabel("Ad", { exact: true }).fill("Satış hesabı E2E");
-  await section.getByLabel("Gmail / Workspace adresi").fill("satis-e2e@firma-ornek.com");
+  await section
+    .getByLabel("Gmail adresi (kişisel @gmail.com veya Workspace)")
+    .fill("satis-e2e@firma-ornek.com");
   await section.getByRole("button", { name: "Kutu ekle" }).click();
   const row = section.getByRole("listitem").filter({ hasText: "Satış hesabı E2E" });
   const rowId = async () => {

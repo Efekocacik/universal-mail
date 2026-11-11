@@ -514,8 +514,11 @@ async function checkMailbox(
   }
   const scope = policyScopeForMailbox(mb.provider);
   if (scope === "live" && !isLiveSendingPermitted()) c.add("live_sending_disabled");
-  if (mb.status !== "connected") c.add("mailbox_not_ready", { detail: mb.status });
-  else if (scope === "live" && isLiveSendingPermitted()) {
+  if (mb.status !== "connected") {
+    // Google yetkisi geçersiz/iptal (`invalid_grant`): ayrı ayrıntı; dağıtıcı kampanyayı duraklatmaz, ERTELER.
+    const reauth = mb.status === "error" && mb.lastError === "reauthorization_required";
+    c.add("mailbox_not_ready", { detail: reauth ? "reauthorization_required" : mb.status });
+  } else if (scope === "live" && isLiveSendingPermitted()) {
     // Bağlı ama `gmail.send` izni verilmemiş (yalnızca okuma veya izin geri alındı) kutu gönderemez: sağlayıcıya
     // ulaşmadan kampanya duraklar (aksi halde her dizi sağlayıcıda `scope_missing` ile başarısız sayılırdı).
     const grants = (await getSettings(db, ["mail.gmailGrants"] as const))["mail.gmailGrants"];

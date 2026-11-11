@@ -1,4 +1,17 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { evaluateSend, type IneligibleReason } from "@/lib/compliance/eligibility";
 import {
   DAY_MS,
@@ -77,6 +90,20 @@ export const MAX_PROVIDER_TIMEOUT_MS = STALE_SENDING_MS / 2;
 export const DRAIN_GATE_RETRY_MS = 15 * 60_000;
 /** DNS kapısı kapalıyken (`dns_not_verified`) dizinin yeniden deneneceği süre. */
 export const DNS_GATE_RETRY_MS = 15 * 60_000;
+/**
+ * Gönderen kutunun Google yetkisi geçersiz/iptal (`invalid_grant`; ör. "Testing" durumundaki OAuth projesinde 7 günlük
+ * yenileme belirteci süresi doldu): dizi bu kadar sonra yeniden denenir. Kampanya DURAKLATILMAZ, dizi başarısız
+ * SAYILMAZ ve deneme hakkından düşülmez; kullanıcı "Yeniden bağlan" ile kutuyu bağlayınca gönderim kendiliğinden sürer.
+ */
+export const REAUTH_DEFER_MS = 30 * 60_000;
+/**
+ * Sağlayıcının, iletiyi göndermeden (ağ isteğinden önce) kutunun yetkisi olmadığı için verdiği ret kodları. Kutu
+ * düzeyinde ve kullanıcı eylemiyle düzelir: dizi ertelenir, başarısız sayılmaz.
+ */
+const MAILBOX_AUTH_REJECT_CODES: ReadonlySet<string> = new Set([
+  "reauthorization_required",
+  "not_connected",
+]);
 
 export type NotSendableCode =
   | "provider_unavailable"
@@ -101,6 +128,7 @@ export type NotSendableCode =
   /**
    * Canlı ileti: kutunun alan adı için taze (30 gün) ve SPF/DKIM/DMARC üçü de `pass` olan saklı bir DNS denetimi yok
    * (hiç denetlenmedi, bayat, uyarı veya hata). Gönderim YOK; dizi ERTELENİR. `detail`: `unknown` | `blocked`.
+   * Kişisel Gmail (`gmail.com`, `googlemail.com`) kutusunda DNS Google tarafından yönetildiği için bu kapı geçer.
    */
   | "dns_not_verified";
 
@@ -287,6 +315,7 @@ export async function sendCampaignStep(
         }
         // Gönderen alan adının kimlik doğrulaması (SPF/DKIM/DMARC): yalnızca kullanıcının "Kontrol et" ile kaydettiği
         // taze ve üçü de geçen sonuç kabul edilir (hazırlık ekranındaki `dns_auth` maddesiyle aynı ölçüt). Ağ yok.
+        // İstisna: kişisel Gmail adresi (sağlayıcı yönetimli alan adı) kayıt aranmadan geçer (`isDnsProviderManaged`).
         const dns = await evaluateDnsReadiness(tx, [mailbox], now);
         if (dns !== "ok") {
           throw new Abort({
@@ -639,6 +668,28 @@ async function recordResult(
       return;
     }
 
+    if (result.status === "rejected" && MAILBOX_AUTH_REJECT_CODES.has(result.code)) {
+      // Kutunun yetkisi yok (iptal/süresi dolmuş yenileme belirteci): ileti GÖNDERİLMEDİ (istek atılmadı). Kayıt
+      // `failed` olur ama dizi başarısız sayılmaz ve deneme hakkı tüketilmez; yeniden bağlanana kadar ertelenir.
+      const updated = await tx
+        .update(messages)
+        .set({ status: "failed", errorCode: result.code, errorMessage: "mailbox_auth" })
+        .where(own)
+        .returning({ id: messages.id });
+      if (updated.length === 0) return;
+      await tx
+        .update(campaignLeads)
+        .set({
+          status: p.previousStatus,
+          nextSendAt: now + REAUTH_DEFER_MS,
+          lastError: "reauthorization_required",
+          updatedAt: now,
+        })
+        .where(inFlight);
+      await settleIfCancelled(tx, p.campaignLeadId, now);
+      return;
+    }
+
     if (result.status === "rejected") {
       const updated = await tx
         .update(messages)
@@ -651,6 +702,7 @@ async function recordResult(
         .returning({ id: messages.id });
       if (updated.length === 0) return;
       // Bu adımın başarısız deneme sayısı (az önceki dahil). Kalıcı ret veya hak bitti: dizi `failed`.
+      // Kutu yetkisi nedeniyle (gönderilmeden) düşen kayıtlar deneme hakkından sayılmaz.
       const [{ n: failedAttempts } = { n: 0 }] = await tx
         .select({ n: count() })
         .from(messages)
@@ -658,6 +710,7 @@ async function recordResult(
           and(
             eq(messages.idempotencyKey, `cl:${p.campaignLeadId}:s:${p.stepIndex}`),
             eq(messages.status, "failed"),
+            or(isNull(messages.errorMessage), ne(messages.errorMessage, "mailbox_auth")),
           ),
         );
       const delay = retryDelayMs(failedAttempts, result.permanent, result.retryAfterMs);

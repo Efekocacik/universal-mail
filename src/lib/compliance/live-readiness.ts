@@ -1,7 +1,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db/client";
 import { countryPolicies, mailboxes } from "@/lib/db/schema";
-import { evaluateDnsReadiness } from "@/lib/mail/dns-store";
+import { evaluateDnsReadiness, isDnsProviderManaged } from "@/lib/mail/dns-store";
 import { evaluateInboxSync } from "@/lib/mail/inbound/sync-status";
 import { getSetting, settingSchemas } from "@/lib/settings";
 import { channelPrivateKeyMissing } from "@/lib/unsubscribe/channel";
@@ -51,6 +51,11 @@ export interface ReadinessItem {
   status: ReadinessStatus;
   /** Bu maddeyi kapatabilecek taraf: yazılım, şirket, hukuk veya dış servis. */
   owner: "software" | "company" | "legal" | "external";
+  /**
+   * İsteğe bağlı açıklama kodu (arayüz Türkçe metne çevirir). `provider_managed`: bağlı bütün gerçek kutular kişisel
+   * Gmail; SPF/DKIM/DMARC Google tarafından yönetilir, kullanıcının DNS kaydı eklemesi gerekmez.
+   */
+  detail?: "provider_managed";
 }
 
 export interface LiveReadiness {
@@ -100,6 +105,7 @@ export async function getLiveReadiness(
   const drainActive = await isUnsubscribeDrainActive(db, opts.env ?? process.env);
   const delivery = drainActive ? await evaluateDelivery(db, hasChannelKey, now) : "blocked";
   const dns = await evaluateDnsReadiness(db, realConnected, now);
+  const dnsManaged = realConnected.length > 0 && realConnected.every(isDnsProviderManaged);
   const inboxSync = await evaluateInboxSync(db, realConnected, now);
 
   const [nonBlockedLive] = await db
@@ -127,7 +133,13 @@ export async function getLiveReadiness(
     // Okuma izni ≠ okuma çalışıyor: yalnızca taze ve başarılı bir gerçek eşitleme kaydı "tamam" olur.
     { key: "inbox_sync", status: inboxSync, owner: "external" },
     // DNS: yalnızca kullanıcı "Kontrol et"e bastığında saklanan sonuçtan; kayıt yok/bayat/uyarı → doğrulanmadı.
-    { key: "dns_auth", status: dns, owner: "external" },
+    // Kişisel Gmail kutusu (gmail.com/googlemail.com) Google tarafından yönetilir ve kayıt aranmadan "tamam" sayılır.
+    {
+      key: "dns_auth",
+      status: dns,
+      owner: "external",
+      ...(dnsManaged ? { detail: "provider_managed" as const } : {}),
+    },
     // Uç nokta: yalnızca saklanan uçtan uca doğrulamadan VE sürüm kapısından (LEGAL_APPROVALS) ikisi birden.
     {
       key: "https_unsubscribe",

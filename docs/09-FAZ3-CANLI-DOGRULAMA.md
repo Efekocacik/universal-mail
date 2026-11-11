@@ -62,7 +62,7 @@ Bir madde doğrulanamazsa kilit **kapalı kalır**; otomatik bounce/yanıt işle
 - [ ] **JWKS biçimi ve kimlik belirteci:** Google'ın gerçek `jwks_uri` yanıtı ve gerçek ID token'ın `iss`/`aud`/`nonce`/`azp` biçimi 15.3'te sınanan kurallarla uyumlu.
 - [ ] **Kapsam dizgileri:** Gerçek yetkilendirme yanıtındaki `scope` değerleri (`gmail.send`, `gmail.readonly`, `openid`, `email`) beklenen biçimde.
 - [ ] **İptal (revoke) ucu davranışı:** Yetki iptalinden sonra yenileme `invalid_grant` veriyor ve kutu `reauthorization_required` durumuna geçiyor.
-- [ ] **Kısıtlı kapsam doğrulaması:** Dış kullanıcılar için `gmail.readonly` (kısıtlı kapsam) uygulama doğrulaması/güvenlik değerlendirmesi gerekliliği ve Workspace yapılandırması (Dahili/Harici) **varsayılmamıştır**; şirket bilgileri geldikten sonra netleşecek.
+- [ ] **Kısıtlı kapsam doğrulaması:** Dış kullanıcılar için `gmail.readonly` (kısıtlı kapsam) uygulama doğrulaması/güvenlik değerlendirmesi gerekliliği ve Workspace yapılandırması (Dahili/Harici) **varsayılmamıştır**. Sahip kararı (11 Kasım 2026): gönderen hesap **kişisel Gmail**; proje **External + In production**, doğrulama başvurusu yok (tek kullanıcı, "doğrulanmamış uygulama" ekranı kabul). Doğrulanacak: In production iken yenileme belirtecinin 7 günden sonra da geçerli kaldığı; kişisel hesabın kimlik belirtecinde `hd` olmadığı ve e-postanın birincil adres (küçük harf, noktalarıyla) geldiği (`10` Bölüm 1.1).
 - [ ] **Gmail API hata zarfları:** `messages.send` 400/403/404/413 ve 401 yanıtlarının gerçek biçimi, `googleError` doğrulamasındaki beklenen `error.code` / `error.status` kümeleriyle uyumlu (uyumsuzluk güvenli tarafta "belirsiz" sayılır, ancak sürekli belirsiz sonuç üretirse kümeler gözden geçirilmeli).
 - [ ] **`historyId` ömrü:** `history.list` için gerçek geçerlilik süresi ve 404 davranışı.
 - [ ] **OAuth yönlendirme adresi:** İstemci türü ("Desktop app") ile yerel döngü adresi (`127.0.0.1`) yönlendirmesinin Google tarafından kabul edildiği; `state`/PKCE/`nonce` akışının gerçek yanıtla çalıştığı.
@@ -194,6 +194,7 @@ Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yal
 
 - [ ] **Gönderim alan adı kayıtları:** SPF (tek kayıt, `-all` veya `~all`, arama sınırı ≤ 10), DKIM (seçici adıyla), DMARC yayımlandı. `p=none` ile başlamak (`04` Adım 3) uygundur, ancak hazırlıkta "tamam" için pilot öncesinde `p=quarantine` veya `p=reject` gerekir; hangisinin seçileceği şirket kararıdır.
 - [ ] **Gerçek denetim:** Uygulamadaki "Kontrol et" gerçek kayıtlarla üç denetimi `pass` döndürüyor (DMARC `p=none` iken uyarı beklenir); yanlış yapılandırılmış bir kayıtla (ör. SPF yok) doğru biçimde `fail` döndürüyor.
+- [ ] **Kişisel Gmail (`gmail.com`):** "Kontrol et" ağ sorgusu yapmadan "Google tarafından yönetiliyor" döndürüyor; hazırlık ve gönderim kapısı bu kutu için kayıt aramıyor (uygulamada testli, `tests/consumer-gmail.test.ts`). Canlıda gönderilen iletinin `Authentication-Results`'ta `dkim=pass header.d=gmail.com` ve `spf=pass` taşıdığı kendime test gönderimiyle görülür.
 - [ ] **Gönderim alan adının Gmail/Workspace ile uyumu:** Gmail üzerinden gönderilen iletinin gerçekten bu alan adıyla imzalandığı (DKIM `d=`), `From` alan adıyla DMARC hizalaması.
 - [ ] **Tazelik:** Sonucun 30 gün sonra "doğrulanmadı"ya düştüğü ve kayıt değişince yeniden denetimin gerektiği (uygulamada testli).
 

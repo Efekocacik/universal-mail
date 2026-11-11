@@ -24,6 +24,14 @@ import { getSetting } from "@/lib/settings";
  *  - STATE tek kullanımlık, kutuya bağlı ve 10 dakikada sona erer; PKCE doğrulayıcısı yalnızca bellektedir.
  *  - HESAP DOĞRULAMA: kimlik belirteci (doğrudan Google'ın belirteç ucundan, TLS ile gelir) kontrol edilir; e-posta
  *    kutunun adresiyle aynı, doğrulanmış, hedef kitle bizim istemci kimliğimiz ve süresi dolmamış olmalıdır.
+ *  - WORKSPACE ZORUNLU DEĞİL: Workspace alan adı (`hd`) iddiası ARANMAZ; kişisel `@gmail.com`/`@googlemail.com`
+ *    hesapları da bağlanır. E-posta eşleşmesi büyük/küçük harf duyarsız ama BİREBİRDİR: kimlik belirtecindeki adres
+ *    hesabın birincil (kanonik, küçük harf) adresidir; Gmail noktaları yok saysa da farklı yazım (`ad.soyad` ↔
+ *    `adsoyad`), `+etiket` veya takma ad `account_mismatch` verir. Kutu adresi hesabın birincil adresi olmalıdır.
+ *  - KİŞİSEL HESAPTA İZİN EKRANI: Google'ın "Internal" kitlesi yalnızca Workspace'te vardır; kişisel hesapta proje
+ *    "External" kitleyle ve "In production" (yayında) olmalıdır. "Testing" durumunda Gmail kapsamlı yenileme
+ *    belirteçleri 7 günde sona erer; bu ve iptal edilen yetki `invalid_grant` olarak gelir ve kutu
+ *    `reauthorization_required` durumuna geçer (gönderim yeniden bağlanana kadar ERTELENİR, dizi başarısız sayılmaz).
  *  - SAKLAMA: yenileme belirteci YALNIZCA şifreli gizli depoda; erişim belirteci YALNIZCA bellekte (sürece özgü).
  *    Veritabanına, denetim kaydına, günlüğe veya hata iletisine belirteç/sır/yanıt gövdesi yazılmaz.
  *  - AĞ: yalnızca Google'ın üç sabit ucu. Uçlar çevre değişkeniyle DEĞİŞTİRİLEMEZ; test için enjeksiyon yalnızca
@@ -554,8 +562,9 @@ export async function completeAuthorization(
     await revokeToken(deps, dangling);
     throw e;
   }
-  const email = (claims.email as string).toLowerCase();
-  if (email !== mb.address.toLowerCase()) {
+  // Büyük/küçük harf duyarsız, birebir: kişisel Gmail'de de nokta/`+` normalleştirmesi YAPILMAZ (birincil adres şart).
+  const email = (claims.email as string).trim().toLowerCase();
+  if (email !== mb.address.trim().toLowerCase()) {
     await revokeToken(deps, dangling);
     throw new OAuthError(
       "account_mismatch",

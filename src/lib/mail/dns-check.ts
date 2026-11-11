@@ -1,10 +1,15 @@
 import dns from "node:dns/promises";
 import { normalizeDomain } from "@/lib/compliance/suppression";
+import { isConsumerGmailDomain } from "./consumer-gmail";
 
 /**
  * SPF / DKIM / DMARC denetimi (Aşama 13). YALNIZCA kullanıcı "Kontrol et"e bastığında çalışır; yalnızca genel DNS
  * TXT sorguları yapılır (NFR-01: gerekli DNS hizmetleri). Demo (`.invalid`) alan adı için hiçbir sorgu atılmaz.
  * Sonuç bilgilendiricidir; teslim edilebilirliği garanti etmez.
+ *
+ * SAĞLAYICI YÖNETİMLİ ALAN ADLARI: kişisel Gmail (`gmail.com`, `googlemail.com`) için kullanıcı SPF/DKIM/DMARC kaydı
+ * ekleyemez ve eklemesi gerekmez; Google iletiyi kendi alan adıyla imzalar. Bu alan adları için HİÇBİR DNS sorgusu
+ * atılmadan `mode: "managed"` döner. Workspace ve kendi alan adları katı kurala (üç denetim) tabidir.
  */
 
 export type CheckStatus = "pass" | "warn" | "fail";
@@ -16,7 +21,11 @@ export interface CheckItem {
 }
 
 export interface DnsReport {
-  mode: "demo" | "checked";
+  /**
+   * `demo`: demo kutusu/ayrılmış uzantı, sorgu yok. `checked`: gerçek DNS denetimi. `managed`: alan adının e-posta
+   * kimlik doğrulaması sağlayıcı (Google) tarafından yönetilir; sorgu yok, kullanıcının yapacağı bir şey yok.
+   */
+  mode: "demo" | "checked" | "managed";
   domain: string | null;
   spf: CheckItem | null;
   dkim: CheckItem | null;
@@ -130,6 +139,10 @@ export async function checkDomainAuth(
     domain.endsWith(".localhost")
   ) {
     return { mode: "demo", domain, spf: null, dkim: null, dmarc: null };
+  }
+  // Kişisel Gmail: SPF/DKIM/DMARC Google'ın elindedir; ağ sorgusu yapılmaz, seçici yok sayılır.
+  if (isConsumerGmailDomain(domain)) {
+    return { mode: "managed", domain, spf: null, dkim: null, dmarc: null };
   }
   const resolver = opts.resolver ?? systemResolver;
 

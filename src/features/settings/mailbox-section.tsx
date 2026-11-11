@@ -59,6 +59,7 @@ function useOAuthResult(state: string | null) {
 
 function statusBadge(m: MailboxItem) {
   if (m.provider === "demo") return <Badge variant="info">{t("mbx.status.demo")}</Badge>;
+  if (m.reauthorizationRequired) return <Badge variant="danger">{t("mbx.status.reauth")}</Badge>;
   if (m.status === "connected") return <Badge variant="success">{t("mbx.status.connected")}</Badge>;
   if (m.status === "disabled") return <Badge variant="outline">{t("mbx.status.disabled")}</Badge>;
   return <Badge variant="warning">{t("mbx.status.not_configured")}</Badge>;
@@ -167,7 +168,23 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
   });
   return (
     <div className="basis-full space-y-2 border-t pt-2">
-      {o?.reauthorizationRequired && <Notice tone="danger">{t("mbx.oauth.reauth")}</Notice>}
+      {o?.reauthorizationRequired && (
+        <Notice tone="danger">
+          <div data-testid="mbx-reauth">
+            <p className="font-medium">{t("mbx.oauth.reauth")}</p>
+            <p className="text-[12px]">{t("mbx.oauth.reauth.help")}</p>
+            <Button
+              className="mt-2"
+              size="sm"
+              loading={start.isPending}
+              disabled={!clientReady || m.status === "disabled"}
+              onClick={() => start.mutate("send")}
+            >
+              {t("mbx.oauth.reconnect")}
+            </Button>
+          </div>
+        </Notice>
+      )}
       {connected ? (
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={o?.send ? "success" : "outline"}>{t("mbx.oauth.perm.send")}</Badge>
@@ -185,14 +202,16 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
         </div>
       ) : (
         <div className="space-y-1">
-          <Button
-            size="sm"
-            loading={start.isPending}
-            disabled={!clientReady || m.status === "disabled"}
-            onClick={() => start.mutate("send")}
-          >
-            {t("mbx.oauth.connect")}
-          </Button>
+          {!o?.reauthorizationRequired && (
+            <Button
+              size="sm"
+              loading={start.isPending}
+              disabled={!clientReady || m.status === "disabled"}
+              onClick={() => start.mutate("send")}
+            >
+              {t("mbx.oauth.connect")}
+            </Button>
+          )}
           <p className="text-[12px] text-muted-foreground">
             {clientReady ? t("mbx.oauth.connect.help") : t("mbx.oauth.needClient")}
           </p>
@@ -275,6 +294,15 @@ function MailboxRow({ m, clientReady }: { m: MailboxItem; clientReady: boolean }
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{m.label}</p>
         <p className="truncate text-[12px] text-muted-foreground">{m.address ?? "—"}</p>
+        {m.provider === "gmail" && m.limits && (
+          <p className="text-[12px] text-muted-foreground" data-testid={`mbx-limits-${m.id}`}>
+            {t(m.consumerGmail ? "mbx.limits.consumer" : "mbx.limits.workspace", {
+              today: m.limits.todayCap,
+              base: m.limits.warmupBase,
+              max: m.limits.maxDaily,
+            })}
+          </p>
+        )}
       </div>
       {statusBadge(m)}
       {m.editable && (

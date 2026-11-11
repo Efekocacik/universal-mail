@@ -11,6 +11,7 @@ import type { MailProvider } from "../provider/provider";
 import { MIN_GAP_S } from "./throttle";
 import {
   isBusyError,
+  REAUTH_DEFER_MS,
   retryPendingRecord,
   sendCampaignStep,
   STALE_SENDING_MS,
@@ -74,6 +75,9 @@ const EXCLUDE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
 const UNCERTAIN_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>(["evaluation_error"]);
 
 const SHORT_DEFER_MS = 15 * 60_000;
+/** Uygunsuzluk yalnızca kutunun yeniden yetkilendirilmesini mi bekliyor? */
+const isReauthReason = (r: IneligibleReason) =>
+  r.code === "mailbox_not_ready" && r.detail === "reauthorization_required";
 
 /**
  * Eksik değişkenlerin hepsi lead'den mi geliyor? Gönderen (firma profili) değişkeni eksikse bütün diziler aynı
@@ -100,7 +104,14 @@ export function classifyReasons(
   now: number,
 ): { action: ReasonAction; retryAt?: number } {
   const codes = reasons.map((r) => r.code);
-  if (codes.some((c) => PAUSE_CODES.has(c))) return { action: "pause" };
+  const pauseReasons = reasons.filter((r) => PAUSE_CODES.has(r.code));
+  if (pauseReasons.length > 0) {
+    // Yalnızca kutunun yeniden bağlanması bekleniyorsa: ertele (kampanya durmaz, dizi bozulmaz).
+    if (pauseReasons.every(isReauthReason)) {
+      return { action: "defer", retryAt: now + REAUTH_DEFER_MS };
+    }
+    return { action: "pause" };
+  }
   if (codes.some((c) => SKIP_CODES.has(c))) return { action: "skip" };
   if (codes.length === 0 || codes.some((c) => UNCERTAIN_CODES.has(c))) {
     return { action: "defer", retryAt: now + SHORT_DEFER_MS };
@@ -266,7 +277,10 @@ export class MailDispatcher {
           if (await this.excludeSequence(c.id, codes, now)) res.excluded++;
           log(`dizi #${c.id} sonlandırıldı: ${codesText(codes)}`);
         } else if (verdict.action === "defer") {
-          if (await this.defer(c.id, verdict.retryAt!, codesText(codes), now)) res.deferred++;
+          const reauth = out.reasons.some(isReauthReason);
+          const why = reauth ? "reauthorization_required" : codesText(codes);
+          if (await this.defer(c.id, verdict.retryAt!, why, now)) res.deferred++;
+          if (reauth) log(`dizi #${c.id} ertelendi: posta kutusu yeniden bağlanmalı`);
           wakeCandidates.push(verdict.retryAt!);
         }
         continue;
