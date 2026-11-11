@@ -58,7 +58,9 @@ Canlı hazırlık aşamaları (şirket bilgisinden bağımsız yazılım işleri
 | 15.7 | `35cb7d3` | Dayanıklı kuyruk + imzalı kanal, uç nokta doğrulama kanıtı, DNS saklama, birleşik gönderim kapısı |
 | 15.8 | `e30d0e9` | ARF şikâyet işleme, kısmi kapsam sayacı |
 | 15.9 | (bu belge) | Belgeler ve canlı doğrulama listesi (yalnızca `docs/`) |
-| 15.10 | — | **Henüz yok;** migrasyon gerektirir, ayrıca onay şart (Bölüm 6) |
+| 15.10-0 | `ac31268` | `SQLITE_BUSY` sonrası bağlantının kendiliğinden yenilenmesi |
+| 15.10-1 | `abd61f8` | Migrasyon `0003`: `messages.classification` CHECK'ine `complaint`, `campaign_leads.stop_reason` (`unsubscribe`/`complaint`), mevcut işaretli satırların geri doldurulması, bakım kilidi, korumalı geri alma (`scripts/rollback-0003.ts`) |
+| 15.10-2 | — | **Henüz yok:** kodun yeni sütunlara geçmesi (geri alma için eski işaretlerle çift yazım). O zamana kadar kod eski işaretleri yazar ve okur (Bölüm 6, TB-1/TB-2); ayrıca onay şart |
 
 **Testler (15.8 sonu):** Playwright 49 senaryo (CI yeşil). Yerel Vitest 1415 test: 1255 geçti, 10 atlandı, **150 düştü** — bunlar Windows'ta dosya tabanlı testlerin `libsql` dosyası kapandıktan sonra klasör silinemediği (`EPERM`) ve POSIX/yol biçimi farkları nedeniyle düşen **bilinen ortam hatalarıdır; aşama aşama aynı 150'dir**. **Linux CI belirleyicidir ve yeşildir.** Yerel düşmeler gizlenmedi ve test yapılandırması değiştirilmedi. Yeni güvenlik kuralları mutasyon kontrolüyle (kuralı bozunca testin düşmesi) sınandı.
 
@@ -139,15 +141,15 @@ Bunlar bilinen, bilinçle ertelenmiş ve **belgelenmiş** eksiklerdir; hiçbiri 
 
 | Kod | Borç | Etkisi / geçici önlem | Çözüm | Onay |
 |---|---|---|---|---|
-| **TB-1** | **ARF şikâyeti veritabanında ayrı sınıf değil.** `messages.classification` CHECK kısıtı (`reply, bounce, auto_reply, unsubscribe, negative, other`) `complaint` kabul etmediğinden şikâyet `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak saklanır | Sorgular ve sayaç bir **metin işaretine** dayanır; dışa aktarım/ham sorguda sınıf `other` görünür; arayüz işareti etiketler (Şikâyet raporu (ARF)). İşaret yalnızca şikâyet yolunda yazılır, kullanıcı girdisiyle oluşamaz (testli) | **Aşama 15.10:** `classification` CHECK'ine `complaint` ekleyen tablo yeniden oluşturma migrasyonu + mevcut işaretli satırların taşınması + sorgu ve arayüzün sütuna geçirilmesi | **Evet — migrasyon, ayrıca açık onay** |
-| **TB-2** | **Şikâyet ve abonelikten çıkış sayaçları/durumları ayrılmadı.** Dizi durumu `campaign_leads.status` için ayrı "şikâyet" değeri yok; şikâyetle durdurulan diziler de `unsubscribed` durumunu kullanır. Kampanya özet sayaçları (`counts`) ikisini aynı `unsubscribed` kovasında toplar | Ayrım yalnızca `exclusionReasons=["arf_complaint"]` işaretiyle ve arayüz etiketiyle ("Şikâyet nedeniyle durduruldu" / "Listeden çıkmak istedi") yapılır; **suppression nedeni (`complaint` / `unsubscribe`) ve denetim kayıtları (`inbound.complaint` / `inbound.unsubscribe`) zaten ayrıdır**. Özet sayaçlar, dışa aktarımlar ve ileride panolar şikâyeti çıkış olarak sayar | **Aşama 15.10:** ayrı dizi durumu (migrasyon/CHECK değişikliği) + ayrı sayaçlar, özetler ve arayüz | **Evet — migrasyon, ayrıca açık onay** |
+| **TB-1** | **ARF şikâyeti kodda hâlâ ayrı sınıf olarak yazılmıyor.** 15.10-1'den (migrasyon `0003`) bu yana `messages.classification` CHECK kısıtı `complaint` kabul ediyor ve eski işaretli satırlar `complaint`'e taşındı (`error_code` işareti korundu). Ancak kod 15.10-2'ye kadar yeni şikâyeti hâlâ `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak yazar ve işarete göre okur | Sorgular ve sayaç bir **metin işaretine** dayanır; dışa aktarım/ham sorguda sınıf `other` görünür; arayüz işareti etiketler (Şikâyet raporu (ARF)). İşaret yalnızca şikâyet yolunda yazılır, kullanıcı girdisiyle oluşamaz (testli) | Migrasyon ve taşıma **15.10-1'de yapıldı**. Kalan, **Aşama 15.10-2:** yazımın, sorgunun ve arayüzün sütuna geçirilmesi (geri alma sözleşmesi gereği `error_code` işaretiyle çift yazım) | **Evet — ayrıca açık onay** |
+| **TB-2** | **Şikâyet ve abonelikten çıkış sayaçları/durumları ayrılmadı.** Şikâyetle durdurulan diziler de `unsubscribed` durumunu kullanır. 15.10-1 ayrı durum yerine `campaign_leads.stop_reason` (`unsubscribe`/`complaint`) sütununu ekledi ve mevcut satırları geri doldurdu; kod henüz bu sütunu yazmadığından o tarihten sonraki yeni `unsubscribed` satırlarında `stop_reason` boş (`NULL`) kalır. Kampanya özet sayaçları (`counts`) ikisini aynı `unsubscribed` kovasında toplar | Ayrım yalnızca `exclusionReasons=["arf_complaint"]` işaretiyle ve arayüz etiketiyle ("Şikâyet nedeniyle durduruldu" / "Listeden çıkmak istedi") yapılır; **suppression nedeni (`complaint` / `unsubscribe`) ve denetim kayıtları (`inbound.complaint` / `inbound.unsubscribe`) zaten ayrıdır**. Özet sayaçlar, dışa aktarımlar ve ileride panolar şikâyeti çıkış olarak sayar | Sütun **15.10-1'de eklendi**. Kalan, **Aşama 15.10-2:** `stop_reason` yazımı + ayrı sayaçlar, özetler ve arayüz | **Evet — ayrıca açık onay** |
 | TB-3 | Çıkış adresi, uç nokta doğrulaması, ARF rapor sağlayıcı listesi ve kanal/imza anahtarı yönetimi için **arayüz/API yok** (yalnızca servis işlevleri) | Canlıya geçişte bu işlemler elle kod çağrısı gerektirir; kullanıcı hatasına karşı onay/geri alma akışı yok | Kimlik doğrulama, onay ve denetim tasarımıyla ayrı bir arayüz aşaması | Hayır (tasarım onayı önerilir) |
 | TB-4 | Çıkış olay kuyruğu için **uyarı kanalı yok** (derinlik/yaş yalnızca hazırlık ekranında) | Aktarıcı olayları geciktirir/atarsa fark edilmesi ekranı açmaya bağlı | E-posta/push uyarı eşiği | Hayır |
 | TB-5 | Aktarıcı hız sınırı `clientKey` verilmezse tek genel kova | Saldırgan kovayı doldurup geçerli çıkış isteklerini 429'latabilir | Dağıtım ortamında güvenilir istemci adresi başlığı | Hayır (dağıtım gerekir) |
 | TB-6 | Aktarıcı `ReplayStore` bellek içi | Yeniden başlatmada kopya olay üretir; uygulamada `jti` ile güvenle tekilleştirilir (yalnızca trafik artar) | Kalıcı tekrar oynatma kaydı | Hayır |
 | TB-7 | Kampanya alıcısı kaydı silinirse çıkış isteği uygulanamaz (`lead_not_found`) | Gerçek kampanyalar silinmez (yalnızca demo temizliği siler); belirteçte adres olmadığından alternatif yok | Gerekirse silinen alıcı için özet tabanlı yedek akış | Hayır |
 | TB-8 | Yerel Windows testlerinde ~150 ortam hatası (`EPERM`, POSIX izni, yol biçimi) | Linux CI belirleyici ve yeşil; yerelde gizlenmedi | Windows uyumlu geçici dizin/kapatma stratejisi | Hayır |
-| TB-9 | 320 px üst çubuk taşması; `README.md` durum paragrafı güncel değil (`docs/` dışında olduğundan 15.9'da değiştirilmedi) | Electron `minWidth: 760`; 760/800 px'te taşma yok | Küçük arayüz/belge düzeltmesi | Hayır |
+| TB-9 | 320 px üst çubuk taşması. (`README.md` durum paragrafı canlıya geçiş belgeleriyle birlikte güncellendi.) | Electron `minWidth: 760`; 760/800 px'te taşma yok | Küçük arayüz/belge düzeltmesi | Hayır |
 | TB-10 | Dizi `completed` iken de çıkış/şikâyet `unsubscribed`'a çevirir | Mevcut davranış; sonuç aynı (gönderim zaten bitti) ama bitmiş diziler sayaçlarda kayar | TB-2 ile birlikte durum modeli gözden geçirmesi | Evet (TB-2 kapsamında) |
 
 ## 7. Kalan işler ve doğrulanmayanlar (sırayla)
@@ -157,13 +159,15 @@ Bunlar bilinen, bilinçle ertelenmiş ve **belgelenmiş** eksiklerdir; hiçbiri 
 3. **HTTPS çıkış uç noktası** dağıtımı (barındırma kararı sonrası), uçtan uca doğrulamanın gerçek uç noktaya karşı çalıştırılması ve ancak ondan sonra `List-Unsubscribe-Post`.
 4. **SPF/DKIM/DMARC** gerçek gönderim alan adında doğrulama.
 5. **Hukuki onaylar** (Bölüm 8); canlı ülke kilidinin yeni sürümle açılması; `LEGAL_APPROVALS` maddelerinin onay kayıtlarıyla `true` yapılması.
-6. **Aşama 15.10** — TB-1 ve TB-2 (migrasyon; ayrı onay).
+6. **Aşama 15.10-2** — TB-1 ve TB-2'nin kod tarafı (migrasyon 15.10-1'de yapıldı; ayrı onay).
 7. **Canlı kilitlerin sırayla açılması** (docs/09 Bölüm 9), **SRS 13/6, 7, 8 canlı doğrulaması**, ardından **pilot** (ilk hafta günde ≤ 20).
 8. Faz 3'ü kapatmak (Bölüm 9 koşulları tamam olunca).
 
 ## 8. Şirketten beklenenler
 
 Bu liste **ihtiyaçları ve nedenlerini** söyler; hangi hizmetin veya ücretli seçeneğin kullanılacağı **şirket kararıdır** ve burada **kesinleşmiş sayılmaz**. Ücretli hizmetler yalnızca "olabilir/koşullu" olarak işaretlenmiştir; fiyat veya zorunluluk Google/barındırma sağlayıcılarının güncel koşullarından doğrulanmadan varsayılmamıştır.
+
+Her girdinin uygulamada **nereye ve ne zaman** girildiği, gizli olup olmadığı ve canlı testlerin sırası: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md).
 
 ### 8.1 Zorunlu (bunlar olmadan gerçek gönderim hiçbir koşulda açılamaz)
 
@@ -233,4 +237,4 @@ Faz 3 yalnızca şunların **hepsi** kayda geçtikten sonra "tamamlandı" olarak
 
 - Varsayılan: gerçek gönderim ve gerçek gelen kutusu kapalı; `FAZ3_DEMO_SCHEDULER_ENABLED`, `FAZ3_DEMO_INBOX_ENABLED` ve `UM_UNSUBSCRIBE_DRAIN_ENABLED` tanımsız (kapalı). Demo kampanya gönderimi için yalnızca geçici/test veri klasöründe `FAZ3_DEMO_SCHEDULER_ENABLED=1` verilir.
 - Testler: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, `npx playwright test`. Windows'ta Vitest için ASCII bir geçici klasör (`TMPDIR`/`TMP`/`TEMP`) kullanın.
-- İlgili belgeler: [Canlı doğrulama listesi](09-FAZ3-CANLI-DOGRULAMA.md), [UYUM](UYUM.md) (taslak), [LIA](LIA.md) (iskelet), [UI Rehberi](07-UI-REHBERI.md).
+- İlgili belgeler: [Canlı doğrulama listesi](09-FAZ3-CANLI-DOGRULAMA.md), [Canlıya geçiş](10-CANLIYA-GECIS.md) (şirket girdileri, paylaşım kuralları, canlı test sırası), [UYUM](UYUM.md) (taslak), [LIA](LIA.md) (iskelet), [UI Rehberi](07-UI-REHBERI.md).
