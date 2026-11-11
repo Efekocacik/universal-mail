@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+# Koşucu görüntüleri açıkça sabitlenir (`*-latest` etiketleri habersiz yeni işletim sistemine geçer).
+# Eylemler Node.js 24 üzerinde çalışan güncel ana sürümlerdedir (checkout v7, setup-node v7,
+# upload-artifact v7, download-artifact v8).
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -23,10 +27,10 @@ env:
 jobs:
   checks:
     name: Kalite denetimleri
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -48,10 +52,10 @@ jobs:
 
   e2e:
     name: Uçtan uca (Playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -66,8 +70,19 @@ jobs:
           fi
           exit $code
       - run: npm run build
+      # playwright.config.ts `channel: "chrome"` kullanır: koşucudaki kurulu Google Chrome yeterlidir.
+      # Görüntüde Chrome yoksa (nadiren) Playwright yalnızca Chrome kanalını kurar.
+      - name: Google Chrome'u doğrula
+        shell: bash
+        run: |
+          if command -v google-chrome >/dev/null 2>&1; then
+            google-chrome --version
+          else
+            echo "::warning::Google Chrome bulunamadı; Playwright ile kuruluyor."
+            npx playwright install --with-deps chrome
+          fi
       - run: npx playwright test
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: e2e-izleri
@@ -82,12 +97,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macos-latest Apple Silicon (arm64). Intel Mac için ayrı bir x64 koşucu gerekir (docs/05-FAZ1-NOTLARI.md).
-          - { os: macos-latest, name: macOS, pattern: "release/*.dmg" }
-          - { os: windows-latest, name: Windows, pattern: "release/*.exe" }
+          # macos-26 Apple Silicon (arm64). Intel Mac için ayrı bir x64 koşucu gerekir (docs/05-FAZ1-NOTLARI.md).
+          - { os: macos-26, name: macOS, pattern: "release/*.dmg" }
+          - { os: windows-2025, name: Windows, pattern: "release/*.exe" }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -96,7 +111,7 @@ jobs:
         run: npm run dist
       - name: Paketlenmiş uygulamanın duman testi
         run: npm run smoke
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: kurulum-${{ matrix.name }}
           path: ${{ matrix.pattern }}
@@ -107,11 +122,11 @@ jobs:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: paketler
           pattern: kurulum-*
