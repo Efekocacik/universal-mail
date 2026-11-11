@@ -87,9 +87,11 @@ test("alt gezinme: Günlük sekmesi açılır; üst çubukta Kampanyalar etkin k
 
 test("kendime test gönder: demo kutusuna gider ve günlükte maskeli görünür", async () => {
   await page.goto("/mail-log?tab=health");
-  await expect(page.getByRole("heading", { name: "Kendime test gönder" })).toBeVisible();
-  await expect(page.locator("#test-lead")).not.toHaveValue("");
-  await page.getByRole("button", { name: "Test gönder" }).click();
+  // Her kutunun kendi kartı vardır (demo + bağlı Gmail kutuları); demo kartına odaklanılır.
+  const card = page.getByRole("region", { name: "Kendime test gönder", exact: true });
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel("Önizleme işletmesi")).not.toHaveValue("");
+  await card.getByRole("button", { name: "Test gönder" }).click();
   await expect(page.getByText("Test iletisi demo kutusuna gönderildi.")).toBeVisible();
 
   await page.goto("/mail-log");
