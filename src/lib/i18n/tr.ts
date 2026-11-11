@@ -1709,4 +1709,65 @@ export const tr = {
   "mbx.oauth.reason.no_refresh_token": "Google kalıcı yetki vermedi; yeniden deneyin.",
   "mbx.oauth.reason.transient": "Google'a ulaşılamadı; daha sonra yeniden deneyin.",
   "mbx.oauth.reason.other": "Google yetkilendirmeyi tamamlayamadı.",
+
+  // Paket C12 + C13 + C14: OAuth sonuç sayfası ve ipuçları, CSV içe aktarma onayı, sihirbaz/şablon kayıt korumaları, çıkış teslimat uyarısı
+  "mbx.oauth.page.title": "Universal Mail · Gmail bağlantısı",
+  "mbx.oauth.page.ok": "Bağlantı tamamlandı",
+  "mbx.oauth.page.error": "Bağlantı kurulamadı",
+  "mbx.oauth.page.close": "Bu sekmeyi kapatıp Universal Mail uygulamasına dönebilirsiniz.",
+  "mbx.oauth.page.retry":
+    "Uygulamada “Gmail'e bağlan” düğmesine yeniden basarak tekrar deneyebilirsiniz.",
+  "mbx.oauth.hint.expired":
+    "İstek 10 dakika geçerlidir ve uygulama kapanırsa geçersiz olur. Uygulamayı açık tutup bağlantıyı yeniden başlatın.",
+  "mbx.oauth.hint.access_denied": "Bağlanmak için Google izin ekranında izin vermeniz gerekir.",
+  "mbx.oauth.hint.account_mismatch":
+    "Google'da kutunun birincil adresiyle giriş yapın. Takma ad (alias) veya başka bir hesapla bağlanılamaz.",
+  "mbx.oauth.hint.scope":
+    "İzin ekranında yalnızca istenen izinleri onaylayın. Sorun sürerse Google Cloud'daki izin ekranı ayarlarını (openid, email, gmail.send) kontrol edin.",
+  "mbx.oauth.hint.no_refresh_token":
+    "Yeniden deneyin. Sorun sürerse Google hesabınızdaki üçüncü taraf erişimlerinden bu uygulamanın eski iznini kaldırıp tekrar bağlanın.",
+  "mbx.oauth.keepOpen":
+    "Google'da giriş yaparken Universal Mail açık kalmalıdır; uygulama kapanırsa istek geçersiz olur.",
+  "mbx.oauth.primaryAddress":
+    "Google'da bu kutunun birincil adresiyle giriş yapın; takma ad (alias) ile giriş “hesap aynı değil” hatası verir.",
+  "mbx.oauth.result.timeout":
+    "Google'dan 10 dakika içinde sonuç gelmedi. Gerekirse bağlantıyı yeniden başlatın.",
+  "mbx.oauth.result.dismiss": "Kapat",
+  "mbx.address.hint":
+    "Google Workspace hesabının birincil adresini girin; takma ad (alias) ile Gmail bağlantısı kurulamaz.",
+  "sup.import.preview.loading": "Önizleme hazırlanıyor… Henüz hiçbir şey eklenmedi.",
+  "sup.import.preview":
+    "Önizleme: {added} eklenecek · {strengthened} güçlendirilecek · {duplicates} zaten var · {invalid} geçersiz satır. Henüz hiçbir şey eklenmedi.",
+  "sup.import.preview.reasons": "Eklenecek kayıtların nedenleri",
+  "sup.import.preview.irreversible":
+    "{n} kayıt çıkış veya şikâyet nedeniyle eklenecek ya da güçlendirilecek ({domains} tanesi alan adının tamamını engeller). Bu kayıtlar sonradan kaldırılamaz.",
+  "sup.import.preview.nothing":
+    "Bu dosya yeni kayıt eklemiyor; geçerli satırların tamamı zaten aynı veya daha güçlü nedenle engelli.",
+  "sup.import.confirm.title": "Kaldırılamayacak kayıtlar içe aktarılsın mı?",
+  "sup.import.confirm.body":
+    "{n} kayıt çıkış veya şikâyet nedeniyle eklenecek ya da güçlendirilecek; {domains} tanesi alan adının tamamını engeller. Bu engeller sonradan sıradan işlemle kaldırılamaz. Emin değilseniz bu satırların nedenini dosyada “manual” yapın.",
+  "sup.import.confirm.run": "Kalıcı olarak içe aktar",
+  "wizard.dirty.unsaved": "Kaydedilmemiş değişiklikler var.",
+  "wizard.dirty.title": "Kaydedilmemiş değişiklikler kaybolsun mu?",
+  "wizard.dirty.body":
+    "Bu adımda kaydetmediğiniz değişiklikler var. Devam ederseniz bu değişiklikler kaybolur. Saklamak için düzenlemeye dönüp “Kaydet”e basın.",
+  "wizard.dirty.discard": "Değişiklikleri at",
+  "wizard.dirty.stay": "Düzenlemeye dön",
+  "wizard.dirty.serverChanged":
+    "Kampanya bu arada güncellendi (ör. lead eklendi). Kaydedilmemiş değişiklikleriniz korunuyor; kaydettiğinizde bu adımın alanları sizin girdiğiniz değerlerle güncellenir.",
+  "tplEditor.editedWhileSaving":
+    "Şablon kaydedildi, ancak kayıt sürerken yaptığınız son değişiklikler bu kayda girmedi. Lütfen kontrol edip yeniden girin.",
+  "deliveryAlert.title": "Çıkış talepleri uyarısı",
+  "deliveryAlert.unhealthy.queue_deep":
+    "Aktarıcıda işlenmeyi bekleyen çok sayıda çıkış talebi birikti.",
+  "deliveryAlert.unhealthy.events_stale":
+    "Aktarıcıdaki çıkış talepleri 1 saatten uzun süredir işlenmedi.",
+  "deliveryAlert.unhealthy.corrupt_events": "Aktarıcıda okunamayan (bozuk) çıkış olayları var.",
+  "deliveryAlert.unhealthy.unreachable": "Çıkış aktarıcısına ulaşılamadı.",
+  "deliveryAlert.unhealthy.other": "Çıkış taleplerinin teslimatı sağlıksız.",
+  "deliveryAlert.checkedAt": "(Son denetim: {at})",
+  "deliveryAlert.expiring":
+    "Çıkış uç noktası doğrulaması {days} gün içinde ({at}) sona eriyor. Süresi dolarsa gerçek gönderim durur; yeniden doğrulayın.",
+  "deliveryAlert.expired":
+    "Çıkış uç noktası doğrulamasının süresi {at} tarihinde doldu; gerçek gönderim için yeniden doğrulayın.",
 } as const;

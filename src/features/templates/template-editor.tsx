@@ -5,6 +5,7 @@ import { ArrowLeft, Copy, Lock, RotateCcw, Save } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldHint, Input, Label, Select, Textarea } from "@/components/ui/input";
@@ -42,6 +43,7 @@ import {
   variableChips,
   type Draft,
 } from "./model";
+import { editedSince, savePatch, saveSnapshot, type SaveVars } from "./save-snapshot";
 
 const INVALIDATE = [tk.all] as const;
 
@@ -244,34 +246,46 @@ export function TemplateEditor({ id }: { id?: number }) {
   const d = detail.data;
   const reason = d ? readOnlyReason(d) : null;
   const readOnly = reason !== null;
-  const stale = !!d && baseVersion !== null && d.version !== baseVersion;
   const changed = Object.keys(changedFields(baseDraft, draft)).length > 0;
   const chips = useMemo(() => variableChips(), []);
+  // Kayıt sürerken en son yazılan taslak (başarı anında, gönderilen anlık görüntüyle karşılaştırmak için).
+  const latestDraft = useRef(draft);
+  useEffect(() => {
+    latestDraft.current = draft;
+  }, [draft]);
 
+  // Gönderilen taslak, `mutate` anındaki ANLIK GÖRÜNTÜDÜR (`sent`). Kayıt sürerken yazılanlar bu kayda girmez ve
+  // "kaydedildi" sayılmaz: başarıda temel taslak `sent` olur, sonraki değişiklikler "değişti" olarak kalır.
   const save = useSafeMutation(
-    async (): Promise<{ created: boolean; id: number; version: number }> => {
-      if (id === undefined) {
-        const r = await templateApi.create({ ...draft, categoryKey: null });
+    async (sent: SaveVars): Promise<{ created: boolean; id: number; version: number }> => {
+      if (sent.id === undefined) {
+        const r = await templateApi.create({ ...sent.draft, categoryKey: null });
         return { created: true, id: r.id, version: r.version };
       }
-      const r = await templateApi.update(id, baseVersion!, changedFields(baseDraft, draft));
-      return { created: false, id, version: r.version };
+      const r = await templateApi.update(sent.id, sent.baseVersion, savePatch(sent));
+      return { created: false, id: sent.id, version: r.version };
     },
     {
       invalidate: INVALIDATE,
       successMessage: t("tpl.saved"),
       conflictMessage: t("tpl.error.conflict"),
-      onSuccess: (r) => {
+      onSuccess: (r, sent) => {
         setSaveInfo(null);
-        if (r.created) router.replace(`/templates/${r.id}`);
-        else {
-          setBaseDraft(draft);
+        if (r.created) {
+          // Yeni şablon sayfasına geçilir; kayıt sürerken yazılanlar o sayfaya taşınamaz: kullanıcı uyarılır.
+          if (editedSince(sent, latestDraft.current))
+            toast.warning(t("tplEditor.editedWhileSaving"));
+          router.replace(`/templates/${r.id}`);
+        } else {
+          setBaseDraft(sent.draft);
           setBaseVersion(r.version);
         }
       },
       onError: (info) => setSaveInfo(info),
     },
   );
+  // Kendi kaydımızın yenilemesi, temel sürüm güncellenene kadar "başka yerde değişti" bandı göstermez.
+  const stale = !!d && baseVersion !== null && d.version !== baseVersion && !save.isPending;
   const duplicate = useSafeMutation(() => templateApi.duplicate(id!), {
     invalidate: INVALIDATE,
     successMessage: t("tpl.duplicated"),
@@ -353,7 +367,7 @@ export function TemplateEditor({ id }: { id?: number }) {
               {!readOnly && (
                 <Button
                   size="sm"
-                  onClick={() => save.mutate(undefined)}
+                  onClick={() => save.mutate(saveSnapshot(id, baseVersion, baseDraft, draft))}
                   disabled={!ready || (id !== undefined && !changed)}
                   loading={save.isPending}
                 >

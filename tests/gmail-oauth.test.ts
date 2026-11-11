@@ -713,21 +713,24 @@ describe("API uçları", () => {
     const cb = (qs: string) =>
       callbackRoute.GET(new Request(`${ORIGIN}/api/oauth/gmail/callback?${qs}`));
 
+    // C12: yönlendirme yerine bağımsız Türkçe sonuç sayfası (kod/state içermez).
     const ok = await cb(`code=route-code-abcdef&state=${state}`);
-    expect(ok.status).toBe(303);
-    const loc = ok.headers.get("location")!;
-    expect(loc).toContain("/settings?gmail=ok");
-    expect(loc).not.toContain("route-code");
-    expect(loc).not.toContain(state);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("location")).toBeNull();
+    const okHtml = await ok.text();
+    expect(okHtml).toContain("Bağlantı tamamlandı");
+    expect(okHtml).not.toContain("route-code");
+    expect(okHtml).not.toContain(state);
     expect(ok.headers.get("cache-control")).toBe("no-store");
     expect(ok.headers.get("referrer-policy")).toBe("no-referrer");
     expect((await mailbox(id)).status).toBe("connected");
 
     const again = await cb(`code=route-code-abcdef&state=${state}`);
-    expect(again.headers.get("location")).toContain("gmail=error&reason=invalid_state");
+    expect(again.status).toBe(400);
+    expect(await again.text()).toContain("İstek geçersiz veya süresi dolmuş");
     const denied = await cb("error=access_denied&state=yok");
-    expect(denied.headers.get("location")).toContain("gmail=error");
-    expect((await cb("")).headers.get("location")).toContain("reason=invalid_state");
+    expect(await denied.text()).toContain("Bağlantı kurulamadı");
+    expect(await (await cb("")).text()).toContain("İstek geçersiz veya süresi dolmuş");
   });
 
   it("bağlantıyı kesme ucu: onay ister (şema), kesince durum güncellenir", async () => {

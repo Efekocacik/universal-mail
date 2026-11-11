@@ -551,16 +551,31 @@ export interface CsvImportReport {
   invalid: { line: number; error: CsvRowError }[];
 }
 
+type CsvValidRow =
+  | {
+      kind: "email";
+      parsed: { email: string; local: string; domain: string };
+      reason: SuppressionReason;
+      note: string | null;
+    }
+  | {
+      kind: "domain";
+      domain: string;
+      reason: Exclude<SuppressionReason, "erasure">;
+      note: string | null;
+    };
+
+interface ParsedCsv {
+  valid: CsvValidRow[];
+  invalid: CsvImportReport["invalid"];
+}
+
 /**
- * Suppression CSV'sini içe aktarır. Sütunlar (başlık satırı zorunlu, büyük/küçük harf duyarsız):
- * `email` veya `domain` (biri dolu), isteğe bağlı `reason` (varsayılan `manual`) ve `note`.
- * Geçerli satırlar tek işlemde eklenir; geçersiz satırlar atlanır ve raporlanır.
+ * Suppression CSV'sini doğrular ve satırlara ayırır; veritabanına dokunmaz. Sütunlar (başlık satırı zorunlu,
+ * büyük/küçük harf duyarsız): `email` veya `domain` (biri dolu), isteğe bağlı `reason` (varsayılan `manual`) ve
+ * `note`. Dosya düzeyindeki hatalar istisnadır; satır hataları raporlanır.
  */
-export async function importSuppressionsCsv(
-  db: Db,
-  text: string,
-  now = Date.now(),
-): Promise<CsvImportReport> {
+function parseSuppressionCsv(text: string): ParsedCsv {
   if (Buffer.byteLength(text, "utf8") > CSV_MAX_BYTES) {
     throw new SuppressionError("invalid_input", "Dosya çok büyük (en çok 2 MB).");
   }
@@ -589,21 +604,8 @@ export async function importSuppressionsCsv(
     throw new SuppressionError("invalid_input", `En çok ${CSV_MAX_ROWS} satır içe aktarılabilir.`);
   }
 
-  type Valid =
-    | {
-        kind: "email";
-        parsed: { email: string; local: string; domain: string };
-        reason: SuppressionReason;
-        note: string | null;
-      }
-    | {
-        kind: "domain";
-        domain: string;
-        reason: Exclude<SuppressionReason, "erasure">;
-        note: string | null;
-      };
-  const valid: Valid[] = [];
-  const report: CsvImportReport = { added: 0, strengthened: 0, duplicates: 0, invalid: [] };
+  const valid: CsvValidRow[] = [];
+  const invalid: CsvImportReport["invalid"] = [];
 
   rows.forEach((cells, idx) => {
     const line = idx + 2; // 1 = başlık
@@ -615,20 +617,19 @@ export async function importSuppressionsCsv(
     const reason = (reasonRaw || "manual") as SuppressionReason;
     const note = noteRaw || null;
 
-    if (!emailRaw && !domainRaw) return void report.invalid.push({ line, error: "missing_value" });
-    if (emailRaw && domainRaw) return void report.invalid.push({ line, error: "ambiguous_value" });
-    if (reason === "erasure")
-      return void report.invalid.push({ line, error: "erasure_not_allowed" });
+    if (!emailRaw && !domainRaw) return void invalid.push({ line, error: "missing_value" });
+    if (emailRaw && domainRaw) return void invalid.push({ line, error: "ambiguous_value" });
+    if (reason === "erasure") return void invalid.push({ line, error: "erasure_not_allowed" });
     if (!(CSV_REASONS as string[]).includes(reason))
-      return void report.invalid.push({ line, error: "invalid_reason" });
+      return void invalid.push({ line, error: "invalid_reason" });
     if (emailRaw) {
       const parsed = parseEmail(emailRaw);
-      if (!parsed) return void report.invalid.push({ line, error: "invalid_email" });
+      if (!parsed) return void invalid.push({ line, error: "invalid_email" });
       valid.push({ kind: "email", parsed, reason, note });
     } else {
       const domain = normalizeDomain(domainRaw);
-      if (!domain) return void report.invalid.push({ line, error: "invalid_domain" });
-      if (isPublicSuffix(domain)) return void report.invalid.push({ line, error: "public_suffix" });
+      if (!domain) return void invalid.push({ line, error: "invalid_domain" });
+      if (isPublicSuffix(domain)) return void invalid.push({ line, error: "public_suffix" });
       valid.push({
         kind: "domain",
         domain,
@@ -638,26 +639,75 @@ export async function importSuppressionsCsv(
     }
   });
 
-  await db.transaction(async (tx) => {
-    for (const v of valid) {
-      const r =
-        v.kind === "email"
-          ? await addEmailInTx(
-              tx,
-              v.parsed,
-              { email: v.parsed.email, reason: v.reason, source: "csv", note: v.note },
-              now,
-            )
-          : await addDomainInTx(
-              tx,
-              v.domain,
-              { domain: v.domain, reason: v.reason, source: "csv", note: v.note },
-              now,
-            );
-      if (r.outcome === "added") report.added++;
-      else if (r.outcome === "strengthened") report.strengthened++;
-      else report.duplicates++;
+  return { valid, invalid };
+}
+
+/**
+ * Geçerli satırları verilen işlem içinde yazar ve sonucu sayar (denetim özeti hariç). Önizleme ve gerçek içe aktarma
+ * bu AYNI kodu kullanır; böylece önizleme sayıları içe aktarmayla birebir aynıdır.
+ */
+async function applyCsvRows(tx: Tx, parsed: ParsedCsv, now: number): Promise<CsvImportPreview> {
+  const out: CsvImportPreview = {
+    dryRun: false,
+    added: 0,
+    strengthened: 0,
+    duplicates: 0,
+    invalid: parsed.invalid,
+    byReason: {},
+    byScope: { email: 0, domain: 0 },
+    irreversible: 0,
+    irreversibleDomains: 0,
+  };
+  for (const v of parsed.valid) {
+    const r =
+      v.kind === "email"
+        ? await addEmailInTx(
+            tx,
+            v.parsed,
+            { email: v.parsed.email, reason: v.reason, source: "csv", note: v.note },
+            now,
+          )
+        : await addDomainInTx(
+            tx,
+            v.domain,
+            { domain: v.domain, reason: v.reason, source: "csv", note: v.note },
+            now,
+          );
+    if (r.outcome === "existing") {
+      out.duplicates++;
+      continue;
     }
+    if (r.outcome === "added") out.added++;
+    else out.strengthened++;
+    out.byReason[v.reason] = (out.byReason[v.reason] ?? 0) + 1;
+    out.byScope[v.kind]++;
+    if (PROTECTED_REASONS.has(v.reason)) {
+      out.irreversible++;
+      if (v.kind === "domain") out.irreversibleDomains++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Suppression CSV'sini onay kapısı OLMADAN içe aktarır (iç çağrılar ve testler için; HTTP ucu her zaman
+ * `importSuppressionsCsvGuarded` kullanır). Sütunlar: bkz. `parseSuppressionCsv`. Geçerli satırlar tek işlemde
+ * eklenir; geçersiz satırlar atlanır ve raporlanır.
+ */
+export async function importSuppressionsCsv(
+  db: Db,
+  text: string,
+  now = Date.now(),
+): Promise<CsvImportReport> {
+  const parsed = parseSuppressionCsv(text);
+  return db.transaction(async (tx) => {
+    const r = await applyCsvRows(tx, parsed, now);
+    const report: CsvImportReport = {
+      added: r.added,
+      strengthened: r.strengthened,
+      duplicates: r.duplicates,
+      invalid: r.invalid,
+    };
     await tx.insert(auditLog).values({
       at: now,
       action: "suppression.csv_import",
@@ -670,8 +720,94 @@ export async function importSuppressionsCsv(
         invalid: report.invalid.length,
       },
     });
+    return report;
   });
-  return report;
+}
+
+/* CSV içe aktarma: önizleme ve geri alınamaz nedenler için açık onay (C13) --------------------------- */
+
+export interface CsvImportOptions {
+  /** Yalnızca önizleme: içe aktarma aynı kodla tek işlemde hesaplanır, sonra GERİ ALINIR; hiçbir şey yazılmaz. */
+  dryRun?: boolean;
+  /**
+   * Çıkış veya şikâyet nedeniyle eklenecek/güçlendirilecek kayıtlar sonradan sıradan işlemle kaldırılamaz. Bu tür en
+   * az bir kayıt varsa gerçek içe aktarma yalnızca bu açık onayla yapılır.
+   */
+  confirmIrreversible?: boolean;
+}
+
+export interface CsvImportPreview extends CsvImportReport {
+  /** `true`: önizleme veya onay bekleyen sonuç; veritabanına hiçbir şey yazılmadı. */
+  dryRun: boolean;
+  /** Yazılacak (eklenecek veya güçlendirilecek) kayıtların nedene göre dağılımı. */
+  byReason: Partial<Record<SuppressionReason, number>>;
+  /** Yazılacak kayıtların kapsama göre dağılımı. */
+  byScope: Record<SuppressionScope, number>;
+  /** Geri alınamaz nedenle (çıkış, şikâyet) eklenecek veya güçlendirilecek kayıt sayısı. */
+  irreversible: number;
+  /** Bunlardan alan adının TAMAMINI kalıcı olarak engelleyenler. */
+  irreversibleDomains: number;
+}
+
+/** Geri alınamaz kayıt içeren içe aktarma açık onay olmadan istendi; hiçbir şey yazılmadı. */
+export class CsvConfirmationRequiredError extends Error {
+  constructor(readonly preview: CsvImportPreview) {
+    super(
+      "Dosyada sonradan kaldırılamayacak (çıkış veya şikâyet) kayıtlar var; içe aktarmak için açık onay gerekir.",
+    );
+    this.name = "CsvConfirmationRequiredError";
+  }
+}
+
+/** Önizleme sonucunu taşıyarak işlemi geri aldırır (yalnızca bu modülün içinde). */
+class CsvDryRunRollback extends Error {
+  constructor(readonly preview: CsvImportPreview) {
+    super("dry-run");
+  }
+}
+
+/**
+ * Onay kapılı CSV içe aktarma (HTTP ucu bunu kullanır).
+ *  - `dryRun`: sonuç gerçek içe aktarmayla AYNI kodla, tek işlem içinde hesaplanır ve işlem geri alınır (ekleme,
+ *    güçlendirme, kopya ve dosya içi tekrarlar birebir); ne kayıt ne denetim satırı kalır.
+ *  - Gerçek içe aktarmada geri alınamaz kayıt varsa ve `confirmIrreversible` yoksa `CsvConfirmationRequiredError`
+ *    fırlatılır ve işlem geri alınır. Karar yazmayla AYNI işlemde verilir: önizleme ile içe aktarma arasında veri
+ *    değişse bile onaysız geri alınamaz kayıt yazılamaz.
+ */
+export async function importSuppressionsCsvGuarded(
+  db: Db,
+  text: string,
+  opts: CsvImportOptions = {},
+  now = Date.now(),
+): Promise<CsvImportPreview> {
+  const parsed = parseSuppressionCsv(text);
+  try {
+    return await db.transaction(async (tx) => {
+      const r = await applyCsvRows(tx, parsed, now);
+      if (opts.dryRun) throw new CsvDryRunRollback({ ...r, dryRun: true });
+      if (r.irreversible > 0 && opts.confirmIrreversible !== true) {
+        throw new CsvConfirmationRequiredError({ ...r, dryRun: true });
+      }
+      await tx.insert(auditLog).values({
+        at: now,
+        action: "suppression.csv_import",
+        entity: "suppression",
+        entityId: null,
+        detail: {
+          added: r.added,
+          strengthened: r.strengthened,
+          duplicates: r.duplicates,
+          invalid: r.invalid.length,
+          irreversible: r.irreversible,
+          irreversibleDomains: r.irreversibleDomains,
+        },
+      });
+      return r;
+    });
+  } catch (e) {
+    if (e instanceof CsvDryRunRollback) return e.preview;
+    throw e;
+  }
 }
 
 /** RFC 4180 CSV ayrıştırıcı: tırnaklı alanlar, kaçışlı tırnak (""), CRLF/LF, tırnak içinde satır sonu. */
