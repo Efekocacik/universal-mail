@@ -1,6 +1,6 @@
 # Faz 3 — Canlı Doğrulama Kontrol Listesi
 
-**Durum (11 Kasım 2026, Aşama 15.9): kontrol listesi TAMAMLANDI; içindeki doğrulamaların HİÇBİRİ henüz yapılmadı.** Bu belge, yalnızca **gerçek bir hesapla** (Gmail, DNS, Google Cloud OAuth istemcisi, alan adı, barındırılan sunucu) kanıtlanabilecek varsayımları, bu varsayımlar doğrulanana kadar kodun nasıl güvenli tarafta kaldığını ve kilitlerin hangi sırayla açılabileceğini listeler. Burada işaretlenmeyen (`[ ]`) hiçbir madde "doğrulandı" sayılmaz. Gerçek gönderim, gerçek gelen kutusu okuma ve Gmail başlık güveni kodda **kapalıdır** (`LIVE_SENDING_ENABLED`, `LIVE_INBOX_READING_ENABLED`, `GMAIL_HEADER_TRUST_VERIFIED`; ayrıca `LEGAL_APPROVALS` hepsi `false`) ve bu belge o kapıları açmaz. Genel durum, kararlar ve açık teknik borç: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md).
+**Durum (11 Kasım 2026, Aşama 15.9): kontrol listesi TAMAMLANDI; içindeki doğrulamaların HİÇBİRİ henüz yapılmadı.** Bu belge, yalnızca **gerçek bir hesapla** (Gmail, DNS, Google Cloud OAuth istemcisi, alan adı, barındırılan sunucu) kanıtlanabilecek varsayımları, bu varsayımlar doğrulanana kadar kodun nasıl güvenli tarafta kaldığını ve kilitlerin hangi sırayla açılabileceğini listeler. Burada işaretlenmeyen (`[ ]`) hiçbir madde "doğrulandı" sayılmaz. Gerçek gönderim, gerçek gelen kutusu okuma ve Gmail başlık güveni kodda **kapalıdır** (`LIVE_SENDING_ENABLED`, `LIVE_INBOX_READING_ENABLED`, `GMAIL_HEADER_TRUST_VERIFIED`; ayrıca `LEGAL_APPROVALS` hepsi `false`) ve bu belge o kapıları açmaz. Genel durum, kararlar ve açık teknik borç: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md). Şirket girdilerinin nereye ve ne zaman girileceği, paylaşım kuralları ve bu maddelerin hangi sırayla denenebileceği: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md).
 
 > Bölüm numaraları (özellikle 1.3, 3.1 ve K1–K12) kaynak kod yorumlarından anılır; numaralar bilerek korunmuştur. Yeni bölümler sona (5–9) eklendi.
 
@@ -170,7 +170,7 @@ Kod tarafı hazırdır (ayrıştırıcı, sınıflandırma, kanıt katmanları, 
 
 **Kısmi kapsam (şikâyet ORANI güvenilir değildir):** Şikâyet oranı kuralı (%0,1) HER ZAMAN "ölçülemiyor" gösterilir ve hiçbir otomatik durdurma kararına girmez. Çünkü ARF yalnızca FBL sunan sağlayıcılardan gelir (Gmail dahil birçoğu göndermez) ve alıcıların çoğu şikâyetini bildirmez; paydaya karşılık gelen şikâyet kapsamı bilinmez. Gösterilen sayı yalnızca son 30 gündeki doğrulanmış şikâyetli **alıcı** sayısının alt sınırıdır; incelemede bekleyen raporlar ayrı sayılır.
 
-**Veri modeli sınırı (migrasyon yok):** `messages.classification` CHECK kısıtı `complaint` kabul etmediğinden şikâyet `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak saklanır; dizi durumu için ayrı bir "şikâyet" değeri olmadığından `unsubscribed` kullanılır. Her ikisi de **Aşama 15.10 (ayrıca onay gerektiren migrasyon)** ile düzeltilecek açık teknik borçtur: sınıflandırma sütunu (`08` TB-1) ve şikâyet/çıkış durumu ile sayaçlarının ayrılması (`08` TB-2).
+**Veri modeli sınırı (15.10-1 sonrası):** Migrasyon `0003` (Aşama 15.10-1) `messages.classification` CHECK kısıtına `complaint` değerini ve `campaign_leads.stop_reason` (`unsubscribe`/`complaint`) sütununu ekledi; mevcut işaretli satırlar taşındı. Kod ise **Aşama 15.10-2'ye kadar** şikâyeti hâlâ `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak yazar ve işarete göre okur; şikâyetle durdurulan dizi `unsubscribed` + işaretle kalır ve yeni satırlarda `stop_reason` boştur. Kodun yeni sütunlara geçmesi (sınıflandırma: `08` TB-1; şikâyet/çıkış durumu ve sayaçları: `08` TB-2) ayrıca onay gerektiren açık teknik borçtur.
 
 Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 - [ ] Hangi posta sağlayıcılarının FBL/JMRP sunduğu ve şirketin posta düzeni için kaydolunacak olanlar; rapor göndericisi alan adlarının listesi (`mail.arfReporters`; bu sürümde bilinmez, **varsayılan boş**). Listeyi ayarlamak için arayüz/API YOK (yalnızca servis işlevi).
@@ -189,10 +189,10 @@ Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 
 ## 5. DNS (SPF / DKIM / DMARC)
 
-Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yalnızca kutunun kendi alan adı için çalışır; sonuç durumlar halinde saklanır (ham TXT yok); hazırlık ekranında "tamam" için üç denetim de taze (30 gün) ve `pass` olmalıdır. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
+Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yalnızca kutunun kendi alan adı için çalışır; sonuç durumlar halinde saklanır (ham TXT yok); hazırlık ekranında "tamam" için üç denetim de taze (30 gün) ve `pass` olmalıdır. DMARC'ta `pass` yalnızca `p=quarantine` veya `p=reject` ile alınır; `p=none` **uyarı** (`dmarc_monitor_only`) verir ve hazırlık maddesini "tamam" yapmaz. Hazırlık ekranı yalnızca gösterimdir: gönderim yolu DNS sonucunu ayrıca denetlemez, yani `p=none` gönderimi durdurmaz ama kanıt da sayılmaz. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
 
-- [ ] **Gönderim alan adı kayıtları:** SPF (tek kayıt, `-all` veya `~all`, arama sınırı ≤ 10), DKIM (seçici adıyla), DMARC (en az `p=none`; hedef politika şirket kararı) yayımlandı.
-- [ ] **Gerçek denetim:** Uygulamadaki "Kontrol et" gerçek kayıtlarla üç denetimi `pass` döndürüyor; yanlış yapılandırılmış bir kayıtla (ör. SPF yok) doğru biçimde `fail` döndürüyor.
+- [ ] **Gönderim alan adı kayıtları:** SPF (tek kayıt, `-all` veya `~all`, arama sınırı ≤ 10), DKIM (seçici adıyla), DMARC yayımlandı. `p=none` ile başlamak (`04` Adım 3) uygundur, ancak hazırlıkta "tamam" için pilot öncesinde `p=quarantine` veya `p=reject` gerekir; hangisinin seçileceği şirket kararıdır.
+- [ ] **Gerçek denetim:** Uygulamadaki "Kontrol et" gerçek kayıtlarla üç denetimi `pass` döndürüyor (DMARC `p=none` iken uyarı beklenir); yanlış yapılandırılmış bir kayıtla (ör. SPF yok) doğru biçimde `fail` döndürüyor.
 - [ ] **Gönderim alan adının Gmail/Workspace ile uyumu:** Gmail üzerinden gönderilen iletinin gerçekten bu alan adıyla imzalandığı (DKIM `d=`), `From` alan adıyla DMARC hizalaması.
 - [ ] **Tazelik:** Sonucun 30 gün sonra "doğrulanmadı"ya düştüğü ve kayıt değişince yeniden denetimin gerektiği (uygulamada testli).
 
@@ -231,7 +231,7 @@ Her adım ayrı bir sürüm ve kayıt gerektirir; bir adım doğrulanamazsa sonr
 4. HTTPS çıkış aktarıcısı dağıtımı, uçtan uca doğrulama ve K2 disk dayanıklılığı (Bölüm 3). Bu adımdan sonra `List-Unsubscribe-Post` doğrulanmış kanıtla türer.
 5. (İsteğe bağlı, otomatik gelen kutusu işleme için) okuma izni; Bölüm 1.3 doğrulaması; önce `LIVE_INBOX_READING_ENABLED`, ancak başlık doğrulaması tamamlandıysa `GMAIL_HEADER_TRUST_VERIFIED`. Aksi halde gelen iletiler elle incelenir (güvenli).
 6. ARF: güvenilir rapor sağlayıcı listesi (Bölüm 4).
-7. Aşama 15.10 kararı: TB-1/TB-2 tamamlandı veya pilot için yazılı kabul edildi (`08` Bölüm 6).
+7. Aşama 15.10 kararı: TB-1/TB-2'nin kod tarafı (15.10-2) tamamlandı veya pilot için yazılı kabul edildi (`08` Bölüm 6; migrasyon 15.10-1'de yapıldı).
 8. Hukuki onaylar → `LEGAL_APPROVALS`; ülke bazında canlı politika kilidi.
 9. Son olarak `LIVE_SENDING_ENABLED`; pilot (Bölüm 7).
 

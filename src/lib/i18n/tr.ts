@@ -677,7 +677,7 @@ export const tr = {
   "setup.google.body":
     "Gerçek işletmeleri bulmak için Google anahtarlarınızı girin. Önce uygulamayı denemek isterseniz demo modunu seçin.",
   "setup.google.guide":
-    "Anahtarı nasıl alacağınızı anlatan adım adım kılavuz için destek ekibinize ulaşın.",
+    "Anahtarlar şirketin kendi Google Cloud hesabından alınır (Workspace yönetici hesabıyla):\n1. console.cloud.google.com'da şirket kuruluşu altında yeni bir proje açın.\n2. Faturalandırma'da şirket kartını bağlayın; aylık bütçe uyarısı (ör. 20 USD) ve Places API (New) için günlük kota sınırı koyun. Bütçe uyarısı harcamayı durdurmaz, kota durdurur.\n3. API'ler ve Hizmetler → Kitaplık'ta Places API (New) ve Maps JavaScript API'yi etkinleştirin. Adında '(New)' olmayan eski Places API'yi açmayın.\n4. Kimlik Bilgileri'nde iki ayrı API anahtarı oluşturun: birini yalnızca Places API (New), diğerini yalnızca Maps JavaScript API ile kısıtlayın.\n5. İlkini 'İşletme arama anahtarı', ikincisini 'Harita anahtarı' alanına yapıştırıp 'Anahtarı test et' düğmesine basın. Anahtarları sohbet, e-posta veya ekran görüntüsüyle paylaşmayın.\nAyrıntılar: Faz 0 Kılavuzu, Adım 5–7.",
   "setup.google.demoNote":
     "Demo modunda yapay işletmeler üretilir; Google'a istek atılmaz, ücret doğmaz. Gerçek anahtarları sonradan Ayarlar'dan girebilirsiniz.",
   "setup.budget.title": "Aylık bütçe",
@@ -723,6 +723,9 @@ export const tr = {
   "setup.err.budget": "0 ile 100.000 arasında bir tutar girin.",
   "setup.err.key":
     "Anahtar çok kısa görünüyor; Google'dan kopyaladığınız anahtarı eksiksiz yapıştırın.",
+  // Paket C15 (kurulum kılavuzu ve belgeler): sihirbazdaki isteğe bağlı MERSİS / ticaret sicil alanları
+  "setup.err.identifier":
+    "En çok 40 karakter girin; yalnızca harf, rakam, boşluk ve . - / kullanılabilir.",
   "setup.keyTest.ok": "Anahtar çalışıyor.",
   "setup.keyTest.fail":
     "Anahtar doğrulanamadı. Anahtarı kontrol edip yeniden deneyin ya da Demo modunu seçin.",

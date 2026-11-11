@@ -103,9 +103,9 @@ Alıcılar adresi görüp "bu kim?" diye bakacaktır. Boş bir alan adı güven 
 - [ ] `sirket-export.com` adresine girilince tek sayfalık bir site açılsın (şirketin asıl sitesine yönlendirme de olur ama tek sayfa daha iyi).
 - [ ] Sayfada: şirket unvanı, adres, iletişim e-postası, kısa tanıtım, ürün görselleri.
 - [ ] **Gizlilik bildirimi** bölümü: "Kimiz, iş e-posta adreslerini kamuya açık web sitelerinden hangi amaçla (ürün tanıtımı) kullanıyoruz, nasıl çıkabilirsiniz (çıkış bağlantısı veya `optout@...`), verileriniz silinsin isterseniz kime yazmalısınız."
-- [ ] Çıkış için **ek kanal** olarak `optout@sirket-export.com` adresi (Workspace'te takma ad/alias olarak tanımlayın, ücretsizdir). Gerçek **tek tıklamalı çıkış** için bu yeterli değildir: yalnızca `mailto:` bağlantısı tek tıkla çıkış sayılmaz. Bunun için alan adınızda çalışan bir **HTTPS çıkış bağlantısı** gerekir (küçük, ücretsiz bir bulut işlevi ya da statik sayfa + form servisi). Teknik tasarımı Faz 3'te yapacağız (SRS FR-CMP-08); Faz 0'da yalnızca vitrin sayfasını barındıracağınız yeri seçin (ör. Cloudflare Pages), çünkü ileride aynı yerde çıkış uç noktası da çalışacak.
+- [ ] Çıkış için **ek kanal** olarak `optout@sirket-export.com` adresi (Workspace'te takma ad/alias olarak tanımlayın, ücretsizdir). Gerçek **tek tıklamalı çıkış** için bu yeterli değildir: yalnızca `mailto:` bağlantısı tek tıkla çıkış sayılmaz. Bunun için alan adınızda çalışan bir **HTTPS çıkış bağlantısı** gerekir (SRS FR-CMP-08). Faz 3'te tasarlandı: çıkış talepleri, **kalıcı diski olan** küçük bir Linux sunucusunda (VPS) çalışan bir aktarıcıya yazılır ve uygulama onları oradan imzalı bir kanalla çeker. Statik barındırma (GitHub Pages, Cloudflare Pages) ve kalıcı diski olmayan bulut işlevleri bu aktarıcıyı **barındıramaz**. Aktarıcı ayrı bir alt alan adında (ör. `cikis.sirket-export.com`) ve standart 443 portunda çalışır; ayrıntı: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md).
 
-Barındırma için ücretsiz seçenekler yeterlidir (GitHub Pages, Cloudflare Pages vb.). Bu sayfayı Faz 3'te birlikte yazarız.
+Vitrin sayfası için ücretsiz statik barındırma yeterlidir (GitHub Pages, Cloudflare Pages vb.). Bu sayfayı Faz 3'te birlikte yazarız.
 
 ---
 
@@ -169,7 +169,7 @@ Uygulama, arkadaşın kutusundan e-posta gönderecek ve yanıt/bounce okuyacak.
 - [ ] Yönetici hesabıyla *Google Auth Platform* (eski adıyla "OAuth izin ekranı") bölümüne gidin.
 - [ ] **Marka:** Uygulama adı `Universal Mail`, destek e-postası şirket adresi.
 - [ ] **Kitle (Audience):** **Internal** seçin. (Seçenek görünmüyorsa proje Workspace organizasyonuna bağlı değildir: Adım 5'e dönün.)
-- [ ] **Veri erişimi (Scopes):** `gmail.send` (gönderme) ve `gmail.readonly` (yanıt ve bounce okuma) ekleyin.
+- [ ] **Veri erişimi (Scopes):** `openid` ve `email` (bağlanan hesabın gönderen kutusuyla aynı olduğunu doğrulamak için), `gmail.send` (gönderme) ve otomatik yanıt/bounce okuma istenirse `gmail.readonly` ekleyin. Başka kapsam eklemeyin: Google beklenmeyen bir kapsam döndürürse uygulama bağlantıyı reddeder (`scope_excess`).
 - [ ] **İstemciler → İstemci oluştur:** Uygulama türü **Masaüstü uygulaması**. Oluşan **JSON dosyasını** indirmeyin ya da indirirseniz hemen şifre yöneticisine koyup dosyayı silin. (İçinde gizli anahtar vardır.)
 - [ ] Uygulama ilk kez bağlanırken arkadaş kendi Workspace hesabıyla giriş yapıp izin verecek (Faz 3).
 
@@ -215,7 +215,7 @@ Geliştirme sırasında arkadaşın kotasını ve kartını kullanmamak için **
 - [ ] Fatura hesabı bağlı, bütçe uyarısı (20 USD) kuruldu, **günlük kotalar düşürüldü**
 - [ ] Places API (New), Maps JavaScript API, Gmail API açık
 - [ ] Sunucu ve tarayıcı anahtarları oluşturulup API'ye göre kısıtlandı, Map ID alındı
-- [ ] OAuth: Internal, Masaüstü istemci, iki izin eklendi
+- [ ] OAuth: Internal, Masaüstü istemci; `openid`, `email`, `gmail.send` (+ istenirse `gmail.readonly`) kapsamları eklendi
 - [ ] Sizin `um-dev` test projeniz hazır, kota düşük
 - [ ] Gönderen bilgileri (unvan, adres, vergi/MERSİS, imzalayan kişi) yazılı
 - [ ] `docs/03-ANLASMA-NOTU.md` iki tarafça onaylandı
