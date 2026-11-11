@@ -36,14 +36,18 @@ function FilterButton({
         <button
           type="button"
           className={cn(
-            "inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] font-medium transition-colors hover:bg-accent",
+            "inline-flex h-8 items-center gap-1 rounded-full border px-3 text-[12px] font-medium transition-colors hover:bg-accent",
             active
-              ? "border-primary/40 bg-accent text-accent-foreground"
+              ? "border-primary/50 bg-accent text-accent-foreground"
               : "bg-card text-muted-foreground",
           )}
         >
           {label}
-          {summary && <span className="max-w-24 truncate text-foreground">{summary}</span>}
+          {summary && (
+            <span className="max-w-24 truncate rounded-full bg-primary px-1.5 text-[11px] leading-4 text-primary-foreground">
+              {summary}
+            </span>
+          )}
           <ChevronDown className="size-3.5 opacity-60" />
         </button>
       </PopoverTrigger>
@@ -70,7 +74,7 @@ function MultiList({
       </p>
     );
   return (
-    <ul className="max-h-64 overflow-y-auto">
+    <ul className="um-scroll max-h-64 overflow-y-auto">
       {options.map((o) => {
         const checked = selected.includes(o.value);
         const id = `f-${o.value}`;
@@ -78,7 +82,7 @@ function MultiList({
           <li key={o.value}>
             <label
               htmlFor={id}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] hover:bg-accent"
+              className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors hover:bg-accent"
             >
               <Checkbox
                 id={id}
@@ -129,6 +133,22 @@ const LEAD_STATUSES = [
   "do_not_contact",
 ] as const;
 
+function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="um-enter inline-flex h-7 max-w-full items-center gap-1 rounded-full bg-accent pl-2.5 pr-1 text-[12px] font-medium text-accent-foreground">
+      <span className="truncate">{label}</span>
+      <button
+        type="button"
+        aria-label={t("filters.removeOne", { name: label })}
+        onClick={onRemove}
+        className="flex size-5 items-center justify-center rounded-full transition-colors hover:bg-foreground/10"
+      >
+        <X className="size-3.5" />
+      </button>
+    </span>
+  );
+}
+
 function summaryOf(n: number): string | undefined {
   return n > 0 ? String(n) : undefined;
 }
@@ -147,6 +167,65 @@ export function LeadFilters() {
   const { data: categories } = useCategories();
   const [cityQuery, setCityQuery] = useState("");
 
+  const chips: { key: string; label: string; remove: () => void }[] = [];
+  const without = <T,>(arr: T[], v: T) => arr.filter((x) => x !== v);
+  for (const v of filters.countries)
+    chips.push({
+      key: `co-${v}`,
+      label: countryLabel(v),
+      remove: () => setFilters({ countries: without(filters.countries, v) }),
+    });
+  if (filters.city)
+    chips.push({ key: "city", label: filters.city, remove: () => setFilters({ city: "" }) });
+  for (const v of filters.categories)
+    chips.push({
+      key: `ca-${v}`,
+      label: categories?.find((c) => c.key === v)?.name ?? v,
+      remove: () => setFilters({ categories: without(filters.categories, v) }),
+    });
+  for (const v of filters.novelty)
+    chips.push({
+      key: `no-${v}`,
+      label: t(`novelty.${v}`),
+      remove: () => setFilters({ novelty: without(filters.novelty, v) }),
+    });
+  for (const v of filters.businessStatus)
+    chips.push({
+      key: `bs-${v}`,
+      label: t(`businessStatus.${v as (typeof BUSINESS_STATUSES)[number]}`),
+      remove: () => setFilters({ businessStatus: without(filters.businessStatus, v) }),
+    });
+  for (const v of filters.emailStatus)
+    chips.push({
+      key: `em-${v}`,
+      label: t(`emailState.${v as (typeof EMAIL_STATES)[number]}`),
+      remove: () => setFilters({ emailStatus: without(filters.emailStatus, v) }),
+    });
+  for (const v of filters.leadStatus)
+    chips.push({
+      key: `ls-${v}`,
+      label: t(`leadStatus.${v}`),
+      remove: () => setFilters({ leadStatus: without(filters.leadStatus, v) }),
+    });
+  if (filters.hasWebsite !== "any")
+    chips.push({
+      key: "web",
+      label: t(`filters.website.${filters.hasWebsite}`),
+      remove: () => setFilters({ hasWebsite: "any" }),
+    });
+  if (filters.hideNotFound)
+    chips.push({
+      key: "nf",
+      label: t("filters.hideNotFound"),
+      remove: () => setFilters({ hideNotFound: false }),
+    });
+  if (filters.scanId !== undefined)
+    chips.push({
+      key: "scan",
+      label: t("filters.scan", { id: filters.scanId }),
+      remove: () => setFilters({ scanId: undefined }),
+    });
+
   const set = <K extends keyof UiFilters>(k: K, v: UiFilters[K]) =>
     setFilters({ [k]: v } as Partial<UiFilters>);
 
@@ -157,20 +236,20 @@ export function LeadFilters() {
   return (
     <div className="space-y-2 border-b px-4 py-3">
       <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+        <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
         <Input
           value={filters.q}
           onChange={(e) => set("q", e.target.value)}
           placeholder={t("filters.search")}
           aria-label={t("filters.search")}
-          className="pl-8 pr-8"
+          className="h-10 pl-9 pr-9 text-sm"
         />
         {filters.q && (
           <button
             type="button"
-            aria-label={t("filters.clear")}
+            aria-label={t("filters.clearSearch")}
             onClick={() => set("q", "")}
-            className="absolute right-2 top-2 rounded p-0.5 text-muted-foreground hover:bg-accent"
+            className="absolute right-2 top-2.5 rounded p-0.5 text-muted-foreground transition-colors hover:bg-accent"
           >
             <X className="size-4" />
           </button>
@@ -223,7 +302,7 @@ export function LeadFilters() {
             className="mb-1 h-8"
             aria-label={t("filters.city")}
           />
-          <ul className="max-h-56 overflow-y-auto">
+          <ul className="um-scroll max-h-56 overflow-y-auto">
             {filters.city && (
               <li>
                 <button
@@ -367,28 +446,28 @@ export function LeadFilters() {
           />
           {t("filters.onlyInView")}
         </label>
-        <div className="flex items-center gap-1">
-          {filters.scanId !== undefined && (
-            <button
-              type="button"
-              onClick={() => set("scanId", undefined)}
-              className="inline-flex h-7 items-center gap-1 rounded-full bg-primary px-2.5 text-[12px] font-medium text-primary-foreground"
-            >
-              {t("filters.scan", { id: filters.scanId })} <X className="size-3.5" />
-            </button>
-          )}
-          {ex.activeFilterCount > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-[12px]"
-              onClick={ex.resetFilters}
-            >
-              {t("filters.clear")} ({ex.activeFilterCount})
-            </Button>
-          )}
-        </div>
       </div>
+
+      {chips.length > 0 && (
+        <div
+          className="flex flex-wrap items-center gap-1.5"
+          role="group"
+          aria-label={t("filters.active")}
+        >
+          {chips.map((c) => (
+            <Chip key={c.key} label={c.label} onRemove={c.remove} />
+          ))}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-[12px]"
+            onClick={ex.resetFilters}
+            aria-label={t("filters.activeCount", { n: ex.activeFilterCount })}
+          >
+            {t("filters.clear")} ({ex.activeFilterCount})
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

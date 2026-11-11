@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Download, Loader2, Sparkles } from "lucide-react";
+import { Download, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -87,16 +87,10 @@ export function GoogleLoadButton({
         variant={variant}
         size={size}
         onClick={() => preview.mutate()}
-        disabled={preview.isPending || run.isPending}
+        loading={preview.isPending}
+        disabled={run.isPending}
       >
-        {preview.isPending ? (
-          <Loader2 className="animate-spin" />
-        ) : mode === "enrich" ? (
-          <Sparkles />
-        ) : (
-          <Download />
-        )}{" "}
-        {label}
+        {!preview.isPending && (mode === "enrich" ? <Sparkles /> : <Download />)} {label}
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -105,7 +99,7 @@ export function GoogleLoadButton({
             <DialogDescription>{t(`load.${mode}.body`)}</DialogDescription>
           </DialogHeader>
           {data && (
-            <dl className="rounded-lg bg-muted p-3 text-[13px]">
+            <dl className="um-enter rounded-lg border bg-muted/50 p-3 text-[13px]">
               <Row label={t("load.places")}>{data.places}</Row>
               <Row label={t("load.cost")}>
                 <span className="tabular font-medium">{fmtUsd(data.estimatedCostUsd)}</span>
@@ -119,11 +113,11 @@ export function GoogleLoadButton({
             </dl>
           )}
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setOpen(false)}>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={run.isPending}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={() => run.mutate()} disabled={run.isPending}>
-              {run.isPending && <Loader2 className="animate-spin" />} {t("load.confirm")}
+            <Button variant="success" onClick={() => run.mutate()} loading={run.isPending}>
+              {t("load.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

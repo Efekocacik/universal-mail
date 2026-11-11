@@ -198,6 +198,8 @@ export interface CompanyProfile {
   contactName: string;
   contactTitle?: string;
   website?: string;
+  mersisNo?: string;
+  tradeRegistryNo?: string;
 }
 
 export interface FindEmailsPreview {

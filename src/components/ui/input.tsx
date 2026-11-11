@@ -2,14 +2,14 @@ import * as React from "react";
 import { cn } from "@/lib/cn";
 
 const field =
-  "w-full rounded-md border border-input bg-card px-3 text-sm shadow-xs placeholder:text-muted-foreground/80 focus-visible:outline-2 disabled:cursor-not-allowed disabled:opacity-50 aria-[invalid=true]:border-destructive";
+  "w-full rounded-md border border-control bg-card px-3 text-sm shadow-xs transition-[border-color,box-shadow] duration-150 placeholder:text-muted-foreground hover:border-muted-foreground/50 focus-visible:border-ring focus-visible:outline-2 focus-visible:outline-offset-0 disabled:cursor-not-allowed disabled:bg-muted disabled:opacity-60 disabled:hover:border-control aria-[invalid=true]:border-destructive aria-[invalid=true]:focus-visible:outline-destructive";
 
 export function Input({ className, type = "text", ...props }: React.ComponentProps<"input">) {
   return <input type={type} className={cn(field, "h-9", className)} {...props} />;
 }
 
 export function Textarea({ className, ...props }: React.ComponentProps<"textarea">) {
-  return <textarea className={cn(field, "min-h-20 py-2", className)} {...props} />;
+  return <textarea className={cn(field, "min-h-20 resize-y py-2", className)} {...props} />;
 }
 
 export function Select({ className, children, ...props }: React.ComponentProps<"select">) {
@@ -33,4 +33,22 @@ export function Select({ className, children, ...props }: React.ComponentProps<"
 
 export function Label({ className, ...props }: React.ComponentProps<"label">) {
   return <label className={cn("text-[13px] font-medium leading-none", className)} {...props} />;
+}
+
+/** Alanın altında kısa, sönük yardım metni. */
+export function FieldHint({ className, ...props }: React.ComponentProps<"p">) {
+  return (
+    <p className={cn("text-[12px] leading-snug text-muted-foreground", className)} {...props} />
+  );
+}
+
+/** Alanın altında kırmızı hata metni (ekran okuyucuya hemen bildirilir). */
+export function FieldError({ className, ...props }: React.ComponentProps<"p">) {
+  return (
+    <p
+      role="alert"
+      className={cn("text-[12px] leading-snug font-medium text-destructive", className)}
+      {...props}
+    />
+  );
 }

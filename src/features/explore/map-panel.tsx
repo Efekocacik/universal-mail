@@ -1,6 +1,6 @@
 "use client";
 
-import { Crosshair, KeyRound } from "lucide-react";
+import { Crosshair, KeyRound, Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useMemo } from "react";
@@ -22,7 +22,11 @@ const SchematicMapView = dynamic(() => import("./schematic-map").then((m) => m.S
 
 function MapLoading() {
   return (
-    <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
+    <div
+      className="flex size-full items-center justify-center gap-2 bg-muted text-sm text-muted-foreground"
+      role="status"
+    >
+      <Loader2 className="size-4 animate-spin" aria-hidden />
       {t("map.loading")}
     </div>
   );
@@ -37,7 +41,7 @@ function Legend() {
   ];
   return (
     <div
-      className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-card/95 px-3 py-2 text-[12px] shadow-sm ring-1 ring-border"
+      className="pointer-events-none absolute bottom-3 left-3 rounded-lg bg-card/95 px-3 py-2 text-[12px] shadow-sm ring-1 ring-border backdrop-blur-sm"
       aria-label={t("map.legend")}
     >
       <ul className="flex flex-col gap-1">
@@ -111,7 +115,7 @@ export function MapPanel() {
   } else {
     body = (
       <div className="flex size-full items-center justify-center p-8">
-        <div className="max-w-sm rounded-xl border bg-card p-6 text-center shadow-xs">
+        <div className="um-enter max-w-sm rounded-xl border bg-card p-6 text-center shadow-xs">
           <KeyRound className="mx-auto mb-3 size-6 text-muted-foreground" />
           <p className="text-sm font-semibold">{t("map.noKey.title")}</p>
           <p className="mt-1.5 text-[13px] text-muted-foreground">{t("map.noKey.body")}</p>
@@ -140,7 +144,11 @@ export function MapPanel() {
               <Crosshair /> {t("map.fit")}
             </Button>
             {isFetching && (
-              <span className="rounded-md bg-card/90 px-2 py-1 text-[11px] text-muted-foreground shadow-xs ring-1 ring-border">
+              <span
+                className="inline-flex items-center gap-1 rounded-md bg-card/90 px-2 py-1 text-[11px] text-muted-foreground shadow-xs ring-1 ring-border"
+                role="status"
+              >
+                <Loader2 className="size-3 animate-spin" aria-hidden />
                 {t("common.updating")}
               </span>
             )}
@@ -154,6 +162,14 @@ export function MapPanel() {
               </span>
             )}
           </div>
+          {!isFetching && pointData && points.length === 0 && !ex.drawMode && (
+            <div
+              className="um-enter pointer-events-none absolute inset-x-0 top-3 mx-auto w-fit max-w-[70%] rounded-full bg-card/95 px-4 py-2 text-center text-[13px] text-muted-foreground shadow-sm ring-1 ring-border"
+              role="status"
+            >
+              {t("map.noPoints")}
+            </div>
+          )}
           {ex.drawMode && (
             <div className="pointer-events-none absolute inset-x-0 top-3 mx-auto w-fit rounded-full bg-foreground px-4 py-2 text-[13px] font-medium text-background shadow-lg">
               {ex.drawMode === "rect" ? t("map.draw.rect") : t("map.draw.circle")}

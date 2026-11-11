@@ -11,6 +11,7 @@ import {
   requeueJob,
 } from "@/lib/jobs/queue";
 import { getJobHandler, NonRetryableJobError } from "@/lib/jobs/registry";
+import { MAIL_SEND_JOB, requeueStaleMailJobs } from "@/lib/mail/scheduler/job";
 import { enqueueScanJob } from "@/lib/scan/service";
 import { errorMessage, sleep } from "@/lib/util";
 
@@ -47,6 +48,7 @@ export class Worker {
   /**
    * Önceki oturumdan kalanları toparlar:
    * - "çalışıyor" görünen tarama işleri iptal edilir, tarama DURAKLATILIR (ücretli çağrılar kullanıcı onayı olmadan sürmez);
+   * - `mail.send` işi yalnızca kalp atışı kesilmişse geri alınır (başka aktif bir worker'ın işi sahiplenilmez);
    * - diğer işler yeniden kuyruğa alınır;
    * - kuyruğa alınmış ama işi kaybolmuş taramalara iş eklenir.
    */
@@ -54,8 +56,9 @@ export class Worker {
     const { db } = this.opts;
     for (const job of await listRunningJobs(db)) {
       if (job.type === "scan.run") await cancelJob(db, job.id);
-      else await requeueJob(db, job.id);
+      else if (job.type !== MAIL_SEND_JOB) await requeueJob(db, job.id);
     }
+    await requeueStaleMailJobs(db);
     const interrupted = await db
       .update(scans)
       .set({

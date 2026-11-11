@@ -24,6 +24,10 @@ initDatabase()
         : "✔ Veritabanı güncel.",
     );
     if (r.seededCategories > 0) console.log(`✔ ${r.seededCategories} yerleşik kategori eklendi.`);
+    const f = r.seededFaz3;
+    if (f.countryPolicies > 0) console.log(`✔ ${f.countryPolicies} ülke politikası eklendi.`);
+    if (f.templates > 0) console.log(`✔ ${f.templates} hazır e-posta şablonu eklendi.`);
+    if (f.demoMailbox > 0) console.log("✔ Demo posta kutusu eklendi (gerçek gönderim yapmaz).");
     await closeDb();
   })
   .catch((e) => {

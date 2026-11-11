@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ZodError, type ZodType } from "zod";
+import { CAMPAIGN_ERROR_STATUS, CampaignError } from "@/lib/campaigns/errors";
 import { getDb, type Db } from "@/lib/db/client";
 import { PlacesApiError } from "@/lib/places/errors";
 import { PlanError } from "@/lib/scan/planner";
@@ -35,16 +36,37 @@ export function route<C = unknown>(handler: Handler<C>): Handler<C> {
       if (e instanceof ZodError) {
         return json(
           {
-            error: "Geçersiz istek.",
+            error: "Girilen bilgilerde bir sorun var. Alanları kontrol edip yeniden deneyin.",
             issues: e.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
           },
           { status: 400 },
+        );
+      }
+      if (e instanceof CampaignError) {
+        return json(
+          { error: e.message, code: e.code.toUpperCase(), ...e.detail },
+          { status: CAMPAIGN_ERROR_STATUS[e.code] },
         );
       }
       if (e instanceof PlanError) return json({ error: e.message }, { status: 400 });
       if (e instanceof PlacesApiError)
         return json({ error: e.message, kind: e.kind }, { status: 502 });
       const message = errorMessage(e);
+      // Veritabanı başka bir işlemle meşgul (aynı bağlantıda açık işlem veya başka süreç): güvenle yeniden denenebilir.
+      const cause = (e as { cause?: unknown })?.cause;
+      if (
+        /TRANSACTION_ACTIVE|SQLITE_BUSY|database is locked/i.test(
+          `${message} ${cause ? errorMessage(cause) : ""}`,
+        )
+      ) {
+        return json(
+          {
+            error: "Veritabanı şu an meşgul. Birkaç saniye sonra yeniden deneyin.",
+            code: "DB_BUSY",
+          },
+          { status: 503 },
+        );
+      }
       if (/no such table|SQLITE_ERROR.*no such/i.test(message)) {
         return json(
           {
@@ -55,7 +77,10 @@ export function route<C = unknown>(handler: Handler<C>): Handler<C> {
         );
       }
       console.error(`[api] ${req.method} ${new URL(req.url).pathname}:`, e);
-      return json({ error: "Beklenmeyen bir hata oluştu." }, { status: 500 });
+      return json(
+        { error: "Beklenmeyen bir hata oluştu. Yeniden deneyin; sürerse uygulamayı kapatıp açın." },
+        { status: 500 },
+      );
     }
   };
 }
@@ -65,7 +90,7 @@ export async function body<T>(req: Request, schema: ZodType<T>): Promise<T> {
   try {
     raw = await req.json();
   } catch {
-    throw new HttpError(400, "İstek gövdesi geçerli JSON değil.");
+    throw new HttpError(400, "Bilgiler gönderilemedi. Sayfayı yenileyip yeniden deneyin.");
   }
   return schema.parse(raw);
 }

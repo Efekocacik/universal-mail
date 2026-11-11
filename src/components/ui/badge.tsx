@@ -3,7 +3,7 @@ import * as React from "react";
 import { cn } from "@/lib/cn";
 
 const badgeVariants = cva(
-  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium leading-4 whitespace-nowrap",
+  "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium leading-4 whitespace-nowrap",
   {
     variants: {
       variant: {
@@ -11,11 +11,13 @@ const badgeVariants = cva(
         outline: "bg-card text-muted-foreground",
         primary: "border-transparent bg-primary text-primary-foreground",
         future: "border-transparent bg-nov-future/12 text-nov-future",
-        high: "border-transparent bg-nov-high/12 text-nov-high",
+        high: "border-transparent bg-nov-high/12 text-[#166534]",
         likely: "border-transparent bg-nov-likely/16 text-[#8a6700]",
         low: "border-transparent bg-nov-low/18 text-[#5b6168]",
-        contacted: "border-transparent bg-contacted/12 text-contacted",
-        danger: "border-transparent bg-destructive/10 text-destructive",
+        contacted: "border-transparent bg-contacted/12 text-[#1d4ed8]",
+        success: "border-transparent bg-success/12 text-[#166534]",
+        info: "border-transparent bg-info/10 text-info",
+        danger: "border-transparent bg-destructive/8 text-[#b91c1c]",
         warning: "border-transparent bg-nov-likely/16 text-[#8a6700]",
       },
     },

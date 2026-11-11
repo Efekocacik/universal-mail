@@ -9,15 +9,18 @@ export function Progress({
   value,
   className,
   tone = "primary",
+  label,
 }: {
   value: number;
   className?: string;
-  tone?: "primary" | "warning" | "danger";
+  tone?: "primary" | "warning" | "danger" | "neutral";
+  label?: string;
 }) {
   const v = Math.max(0, Math.min(100, value));
   return (
     <div
       role="progressbar"
+      aria-label={label}
       aria-valuenow={Math.round(v)}
       aria-valuemin={0}
       aria-valuemax={100}
@@ -29,6 +32,7 @@ export function Progress({
           tone === "primary" && "bg-primary",
           tone === "warning" && "bg-nov-likely",
           tone === "danger" && "bg-destructive",
+          tone === "neutral" && "bg-muted-foreground/50",
         )}
         style={{ width: `${v}%` }}
       />
@@ -37,5 +41,5 @@ export function Progress({
 }
 
 export function Separator({ className }: { className?: string }) {
-  return <div role="separator" className={cn("h-px w-full bg-border", className)} />;
+  return <div aria-hidden="true" className={cn("h-px w-full bg-border", className)} />;
 }

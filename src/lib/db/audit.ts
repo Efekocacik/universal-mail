@@ -1,15 +1,16 @@
 import { auditLog } from "./schema";
-import type { Db } from "./client";
+import type { DbExecutor } from "./client";
 
 export async function audit(
-  db: Db,
+  db: DbExecutor,
   action: string,
   entity?: string,
   entityId?: string | number,
   detail?: unknown,
+  at: number = Date.now(),
 ): Promise<void> {
   await db.insert(auditLog).values({
-    at: Date.now(),
+    at,
     action,
     entity: entity ?? null,
     entityId: entityId === undefined ? null : String(entityId),

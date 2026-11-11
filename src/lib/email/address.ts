@@ -39,7 +39,7 @@ export function parseEmail(raw: string): ParsedEmail | null {
 }
 
 /** `a.b.example.co.uk` → ["a.b.example.co.uk", "b.example.co.uk", "example.co.uk", "co.uk"] */
-function parentDomains(domain: string): string[] {
+export function parentDomains(domain: string): string[] {
   const parts = domain.split(".");
   return parts.map((_, i) => parts.slice(i).join(".")).slice(0, -1);
 }

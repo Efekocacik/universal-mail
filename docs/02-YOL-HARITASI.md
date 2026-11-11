@@ -97,22 +97,24 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Hedef:** İlk gerçek e-postalar güvenli şekilde gider; yanıt ve bounce takip edilir.
 
-- [ ] Şablon editörü (konu + HTML/düz metin), SRS FR-TPL-01'deki tüm değişkenler (`{{firma_adres}}`, `{{telefon}}` dahil), eksik veri uyarıları, dil bazlı şablonlar, canlı önizleme, hazır TR/EN şablonlar.
-- [ ] Zorunlu footer motoru (unvan, adres, çıkış bağlantısı, TR için MERSİS).
-- [ ] Ülke politikası tablosu (`country_policies`) ve uyum kontrolü; hariç tutma sebepleri ekranı.
-- [ ] Suppression listesi (elle, CSV, otomatik).
-- [ ] Gmail OAuth bağlantısı + SMTP alternatifi; zorunlu MVP işlevi olarak "kendime test gönder" (FR-TPL-07).
-- [ ] Kişisel posta alan adlarını (gmail.com vb.) hariç tutma, gönderen profili olmadan gönderimi kilitleme.
-- [ ] Temas sıklığı sınırları (SRS 5.6.1): işletme/alan adı başına en fazla 3 e-posta, 5 gün aralık, 180 gün dinlenme, otomatik durdurma eşikleri, birim testleri.
-- [ ] Gönderim kuyruğu: günlük tavan, ısınma eğrisi, rastgele aralık, alıcı yerel saat penceresi, duraklat/devam/iptal.
-- [ ] Kampanya sihirbazı (4 adım) ve "Başlat" öncesi özet + ilk 5 önizleme.
-- [ ] Gelen kutusu okuyucu: bounce (DSN) → suppression; yanıt → lead "yanıtladı", takip iptal.
-- [ ] Erişilebilir iletişimden çıkma yöntemi ve suppression işleme; uygun altyapıda `List-Unsubscribe` / `List-Unsubscribe-Post` başlıkları. Gerçek tek tıklamalı çıkış gerekiyorsa HTTPS uç noktası veya eşdeğer güvenilir hizmet sağla; yalnızca `mailto:` yöntemini tek tıklamalı çıkış olarak sunma (FR-CMP-08).
-- [ ] SPF/DKIM/DMARC kontrol ekranı.
-- [ ] Gönderim günlüğü ve dışa aktarım; audit log.
-- [ ] `docs/LIA.md` (meşru menfaat değerlendirmesi) ve `docs/UYUM.md` (kullanıcı için sade kurallar).
+- [x] Şablon editörü (konu + HTML/düz metin), SRS FR-TPL-01'deki tüm değişkenler (`{{firma_adres}}`, `{{telefon}}` dahil), eksik veri uyarıları, dil bazlı şablonlar, canlı önizleme, hazır TR/EN şablonlar.
+- [ ] Zorunlu footer motoru (unvan, adres, çıkış bağlantısı, TR için MERSİS). *(Kısmen: unvan/adres/vergi no/telefon/çıkış bağlantısı var; MERSİS ve ticaret sicil alanları isteğe bağlı eklendi, TR için zorunluluk kuralı hukuken belirlenmedi; canlı iletide doğrulanmış HTTPS çıkış bağlantısı zorunlu ama gerçek uç nokta yok.)*
+- [x] Ülke politikası tablosu (`country_policies`) ve uyum kontrolü; hariç tutma sebepleri ekranı. *(Canlı politikaların tamamı bilinçli olarak engelli ve kilitli; kilidi hukuki onay açar.)*
+- [ ] Suppression listesi (elle, CSV, otomatik). *(Elle ve CSV tamam. Otomatik kaynaklar (bounce, yanıt, çıkış, ARF şikâyet) kod ve testlerle var, ancak gerçek tasdik kaynağı yok: demo simülasyonu veya kapalı kilitli Gmail başlık güveni.)*
+- [ ] Gmail OAuth bağlantısı + SMTP alternatifi; zorunlu MVP işlevi olarak "kendime test gönder" (FR-TPL-07). *(Gmail OAuth çekirdeği ve gönderim bağdaştırıcısı kodlandı ve YALNIZCA yerel sahte sunucularla sınandı; gerçek Google hesabıyla hiç çalıştırılmadı ve canlı gönderim kilidi kapalı. SMTP planlanmadı. "Kendime test gönder" yalnızca demo kutusuna çalışıyor.)*
+- [x] Kişisel posta alan adlarını (gmail.com vb.) hariç tutma, gönderen profili olmadan gönderimi kilitleme.
+- [x] Temas sıklığı sınırları (SRS 5.6.1): işletme/alan adı başına en fazla 3 e-posta, 5 gün aralık, 180 gün dinlenme, otomatik durdurma eşikleri, birim testleri.
+- [x] Gönderim kuyruğu: günlük tavan, ısınma eğrisi, rastgele aralık, alıcı yerel saat penceresi, duraklat/devam/iptal.
+- [x] Kampanya sihirbazı (4 adım) ve "Başlat" öncesi özet + ilk 5 önizleme.
+- [ ] Gelen kutusu okuyucu: bounce (DSN) → suppression; yanıt → lead "yanıtladı", takip iptal. *(Çekirdek işleme, demo okuyucu ve Gmail okuyucusu (sahte sunucuyla sınanmış) var; gerçek gelen kutusu yok, okuma kilidi ve Gmail başlık güven kilidi kapalı, gerçek kanal tasdiki yok.)*
+- [ ] Erişilebilir iletişimden çıkma yöntemi ve suppression işleme; uygun altyapıda `List-Unsubscribe` / `List-Unsubscribe-Post` başlıkları. Gerçek tek tıklamalı çıkış gerekiyorsa HTTPS uç noktası veya eşdeğer güvenilir hizmet sağla; yalnızca `mailto:` yöntemini tek tıklamalı çıkış olarak sunma (FR-CMP-08). *(Yazılım hazır: Ed25519 imzalı belirteç, RFC 8058 aktarıcı işleyicisi, dayanıklı kuyruk, imzalı kanal ve uçtan uca doğrulama kanıtı yerel testlerle sınandı. Yapılmadı: alıcıların ulaşabileceği gerçek HTTPS uç nokta/alan adı/TLS yok, gerçek istemcilerle denenmedi; bu yüzden `List-Unsubscribe-Post` hiç eklenmez.)*
+- [ ] SPF/DKIM/DMARC kontrol ekranı. *(Ekran, kural değerlendirmesi ve sonucun durum olarak saklanması + hazırlık ekranı var; gerçek alan adı üzerinde hiç sorgu çalıştırılmadı.)*
+- [x] Gönderim günlüğü ve dışa aktarım; audit log.
+- [ ] `docs/LIA.md` (meşru menfaat değerlendirmesi) ve `docs/UYUM.md` (kullanıcı için sade kurallar). *(UYUM taslak, LIA iskelet (teknik olgular güncel); hukuk onayı bekliyor.)*
 
 **Kabul:** SRS Bölüm 13 maddeleri 5–8 geçer. İlk hafta günde ≤ 20 e-posta ile pilot başlar.
+
+**Durum (11 Kasım 2026):** Demo geliştirmeleri tamamlandı ve canlı entegrasyonun yazılım hazırlığı (Aşama 15.1–15.8: Gmail OAuth/gönderim/gelen kutusu, HTTPS çıkış altyapısı, DNS saklama, ARF şikâyet) `feat/faz-3` dalında kodlandı; her aşamanın CI sonucu yeşil. **Faz 3 KAPANMADI:** bütün canlı bileşenler yalnızca yerel sahte sunucularla sınandı; gerçek Gmail hesabı, gerçek gelen kutusu, genel HTTPS çıkış uç noktası ve alan adı, gerçek DNS doğrulaması, hukuki onaylar, canlı ülke politikaları ve pilot yoktur. Gerçek gönderim, gerçek gelen kutusu okuma ve Gmail başlık güveni kodda **kapalıdır**. Yukarıda yalnızca kod ve testlerle tam doğrulanan maddeler işaretlidir; kısmi veya gerçek hesap/alan adı/onay isteyenler işaretsiz bırakıldı. Açık teknik borç (Aşama 15.10: ARF sınıflandırması ve şikâyet/çıkış sayaçlarının ayrılması, migrasyon gerektirir) ve kapanış koşulları: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 6 ve 9; gerçek ortam doğrulama listesi: [`09-FAZ3-CANLI-DOGRULAMA.md`](09-FAZ3-CANLI-DOGRULAMA.md).
 
 ---
 

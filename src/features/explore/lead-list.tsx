@@ -1,7 +1,8 @@
 "use client";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Globe, Loader2, Mail, Search, SearchX, Sparkles } from "lucide-react";
+import { Globe, Loader2, Mail, SearchX, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { NOVELTY_DOT } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
@@ -14,11 +15,12 @@ import { useEnrichmentStatus, useFacets, useLeadsInfinite } from "@/lib/client/q
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { toSearchParams } from "@/lib/client/api";
+import { AddToCampaignButton } from "@/features/campaigns/add-to-campaign-button";
 import { FindEmailsButton } from "./find-emails-button";
 import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
 
-const ROW_HEIGHT = 78;
+const ROW_HEIGHT = 84;
 
 /** Satırdaki e-posta durumu rozeti: bulunduysa yeşil, sürüyorsa dönen simge, engelliyse uyarı; aksi halde görünmez. */
 function EmailBadge({ row }: { row: LeadRow }) {
@@ -26,7 +28,7 @@ function EmailBadge({ row }: { row: LeadRow }) {
   if (st === "found_verified" || st === "generic" || st === "found_unverified")
     return (
       <Badge
-        variant={st === "found_unverified" ? "outline" : "high"}
+        variant={st === "found_unverified" ? "outline" : "success"}
         title={row.primaryEmail ?? undefined}
       >
         <Mail className="size-3" /> {t(`list.email.${st}`)}
@@ -48,11 +50,11 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
     <button
       type="button"
       onClick={onClick}
-      aria-current={selected}
+      data-lead-row
+      aria-current={selected ? "true" : undefined}
       className={cn(
-        "flex h-full w-full flex-col justify-center gap-1 border-b px-4 text-left transition-colors hover:bg-accent/60",
-        selected && "bg-accent",
-        row.notFound && "opacity-70",
+        "flex h-full w-full flex-col justify-center gap-1 border-b border-l-2 border-l-transparent px-4 text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:bg-accent/60",
+        selected && "border-l-primary bg-accent",
       )}
     >
       <div className="flex items-center gap-2">
@@ -66,7 +68,7 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
         />
         <span
           className={cn(
-            "min-w-0 flex-1 truncate text-sm font-semibold",
+            "min-w-0 flex-1 truncate text-[15px] font-semibold",
             !row.name && "font-normal italic text-muted-foreground",
           )}
         >
@@ -76,10 +78,11 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
           className="tabular shrink-0 text-[12px] text-muted-foreground"
           title={t("list.score")}
         >
+          <span className="sr-only">{t("list.score")}: </span>
           {row.noveltyScore}
         </span>
       </div>
-      <div className="truncate pl-[18px] text-[12px] text-muted-foreground">
+      <div className="truncate pl-[18px] text-[13px] text-muted-foreground">
         {[typeLabel(row.primaryType), row.city, countryLabel(row.countryCode)]
           .filter(Boolean)
           .join(" · ")}
@@ -100,13 +103,13 @@ function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onCl
         ) : null}
         {row.notFound && <Badge variant="warning">{t("list.notFound")}</Badge>}
         {row.website && (
-          <Badge variant="outline">
-            <Globe className="size-3" /> {t("list.website")}
+          <Badge variant="outline" title={t("list.website")} aria-label={t("list.website")}>
+            <Globe className="size-3" />
           </Badge>
         )}
         <EmailBadge row={row} />
         {row.source === "demo" && <Badge variant="outline">DEMO</Badge>}
-        {contacted && <Badge variant="contacted">{t(`leadStatus.${row.leadStatus}`)}</Badge>}
+        {contacted && <Badge variant="info">{t(`leadStatus.${row.leadStatus}`)}</Badge>}
       </div>
     </button>
   );
@@ -173,19 +176,25 @@ export function LeadList() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-2">
-        <p className="tabular text-[13px] text-muted-foreground" aria-live="polite">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+        <p className="tabular text-[13px] font-medium text-foreground" aria-live="polite">
           {q.isLoading ? t("common.loading") : t("list.count", { n: fmtNumber(total) })}
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {total > 0 && (
             <FindEmailsButton target={{ filtersQuery: toSearchParams(ex.apiFilters).toString() }} />
+          )}
+          {total > 0 && (
+            <AddToCampaignButton
+              filterQuery={toSearchParams(ex.apiFilters).toString()}
+              total={total}
+            />
           )}
           <Select
             aria-label={t("list.sort")}
             value={sort}
             onChange={(e) => setSort(e.target.value as typeof sort)}
-            className="h-8 w-auto py-0 pr-7 text-[13px]"
+            className="h-8 w-auto py-0 pr-7 text-[13px] transition-colors hover:bg-accent"
           >
             <option value="novelty">{t("list.sort.novelty")}</option>
             <option value="recent">{t("list.sort.recent")}</option>
@@ -197,22 +206,30 @@ export function LeadList() {
       <EmailProgress />
       <UncachedBanner />
 
-      <div ref={parentRef} className="min-h-0 flex-1 overflow-y-auto" tabIndex={-1}>
+      <div
+        ref={parentRef}
+        className="um-scroll min-h-0 flex-1 overflow-y-auto"
+        tabIndex={0}
+        aria-label={t("list.count", { n: fmtNumber(total) })}
+      >
         {q.isLoading ? (
-          <div className="space-y-px p-4">
+          <div className="space-y-2 px-4 py-2" aria-busy="true">
             {Array.from({ length: 7 }).map((_, i) => (
-              <Skeleton key={i} className="h-16" />
+              <Skeleton key={i} className="h-[76px]" />
             ))}
           </div>
         ) : rows.length === 0 ? (
           <EmptyList />
         ) : (
-          <div style={{ height: virt.getTotalSize(), position: "relative" }}>
+          <div role="list" style={{ height: virt.getTotalSize(), position: "relative" }}>
             {items.map((v) => {
               const row = rows[v.index];
               return (
                 <div
                   key={v.key}
+                  role="listitem"
+                  aria-posinset={v.index + 1}
+                  aria-setsize={Math.max(total, rows.length)}
                   data-index={v.index}
                   style={{
                     position: "absolute",
@@ -237,7 +254,7 @@ export function LeadList() {
                     />
                   ) : (
                     <div className="flex h-full items-center justify-center text-[12px] text-muted-foreground">
-                      {t("common.loading")}
+                      {t("list.loadMore")}
                     </div>
                   )}
                 </div>
@@ -291,39 +308,79 @@ function UncachedBanner() {
 function EmptyList() {
   const ex = useExplore();
   const filtered = ex.activeFilterCount > 0 || ex.onlyInView;
-  return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
-      <div className="flex size-11 items-center justify-center rounded-full bg-muted">
-        {filtered ? (
-          <SearchX className="size-5 text-muted-foreground" />
-        ) : (
-          <Search className="size-5 text-muted-foreground" />
-        )}
-      </div>
-      <div>
-        <p className="text-sm font-semibold">
-          {filtered ? t("list.empty.filtered.title") : t("list.empty.title")}
-        </p>
-        <p className="mt-1 max-w-64 text-[13px] text-muted-foreground">
-          {filtered ? t("list.empty.filtered.body") : t("list.empty.body")}
-        </p>
-      </div>
-      {filtered ? (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            ex.resetFilters();
-            ex.setOnlyInView(false);
-          }}
+  if (!filtered)
+    return (
+      <div className="um-enter flex h-full flex-col items-center justify-center gap-5 p-6 text-center">
+        <div>
+          <p className="text-base font-semibold">{t("list.empty.title")}</p>
+          <p className="mx-auto mt-1 max-w-72 text-[13px] text-muted-foreground">
+            {t("list.empty.body")}
+          </p>
+        </div>
+        <section
+          aria-label={t("list.guide.title")}
+          className="w-full max-w-sm rounded-xl border bg-card p-4 text-left shadow-xs"
         >
-          {t("filters.clear")}
-        </Button>
-      ) : (
-        <Button size="sm" onClick={() => ex.setTab("scan")}>
+          <h3 className="mb-3 text-[13px] font-semibold">{t("list.guide.title")}</h3>
+          <ol className="space-y-3">
+            {([1, 2, 3, 4] as const).map((n) => (
+              <li key={n} className="flex items-start gap-3">
+                <span
+                  className={cn(
+                    "flex size-6 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold",
+                    n === 2
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-accent text-accent-foreground",
+                  )}
+                  aria-hidden
+                >
+                  {n}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[13px] font-medium">
+                    {n === 1 ? (
+                      <Link
+                        href="/settings"
+                        className="underline-offset-4 hover:underline focus-visible:underline"
+                      >
+                        {t("list.guide.1")}
+                      </Link>
+                    ) : (
+                      t(`list.guide.${n}`)
+                    )}
+                  </p>
+                  <p className="text-[12px] text-muted-foreground">{t(`list.guide.${n}.hint`)}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+        <Button size="lg" onClick={() => ex.setTab("scan")}>
           {t("list.empty.cta")}
         </Button>
-      )}
+      </div>
+    );
+  return (
+    <div className="um-enter flex h-full flex-col items-center justify-center gap-3 p-8 text-center">
+      <div className="flex size-11 items-center justify-center rounded-full bg-muted">
+        <SearchX className="size-5 text-muted-foreground" />
+      </div>
+      <div>
+        <p className="text-sm font-semibold">{t("list.empty.filtered.title")}</p>
+        <p className="mt-1 max-w-64 text-[13px] text-muted-foreground">
+          {t("list.empty.filtered.body")}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          ex.resetFilters();
+          ex.setOnlyInView(false);
+        }}
+      >
+        {t("filters.clear")}
+      </Button>
     </div>
   );
 }
