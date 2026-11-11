@@ -57,6 +57,7 @@ export type IneligibleCode =
   | "live_sending_disabled"
   | "lead_not_found"
   | "lead_status_blocked"
+  | "lead_not_demo"
   | "campaign_lead_not_found"
   | "campaign_lead_not_sendable"
   | "no_email"
@@ -172,7 +173,7 @@ export async function evaluateEnrollment(
       }
     }
 
-    const lead = await loadLead(db, input.leadId, c);
+    const lead = await loadLead(db, input.leadId, c, scope);
     if (!lead) return c.result(scope);
     const [primary] = await db
       .select()
@@ -276,7 +277,7 @@ export async function evaluateSend(
       c.add("step_out_of_range", { detail: `expected:${cl.nextStep}` });
     }
 
-    const lead = await loadLead(db, cl.leadId, c);
+    const lead = await loadLead(db, cl.leadId, c, scope);
 
     // Alıcı: dizinin anlık görüntüsü ile lead e-posta kaydı birebir tutmalı.
     let recipient: { hash: string; domain: string } | null = null;
@@ -444,9 +445,14 @@ async function checkMailbox(
   return scope;
 }
 
-async function loadLead(db: DbExecutor, id: number, c: Collector) {
+async function loadLead(db: DbExecutor, id: number, c: Collector, scope: PolicyScope) {
   const [row] = await db
-    .select({ id: leads.id, status: leads.status, countryCode: leads.countryCode })
+    .select({
+      id: leads.id,
+      status: leads.status,
+      countryCode: leads.countryCode,
+      source: leads.source,
+    })
     .from(leads)
     .where(eq(leads.id, id))
     .limit(1);
@@ -455,6 +461,9 @@ async function loadLead(db: DbExecutor, id: number, c: Collector) {
     return null;
   }
   if (BLOCKED_LEAD_STATUSES.has(row.status)) c.add("lead_status_blocked", { detail: row.status });
+  // Demo kutusuyla yalnızca demo lead'leri: demo "gönderimi" gerçek bir işletmeyi temas kurulmuş göstermemeli
+  // (lead durumu, `last_contacted_at` ve gönderim geçmişi kalıcıdır ve sonraki kampanyaları etkiler).
+  if (scope === "demo" && row.source !== "demo") c.add("lead_not_demo");
   return row;
 }
 

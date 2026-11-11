@@ -202,7 +202,10 @@ export function sequenceStatusLabel(
 /** Uygunluk, engel ve hata kodlarının okunur karşılığı; sözlükte yoksa kodun kendisi. */
 export function reasonLabel(code: string): string {
   const key = `reason.${code}`;
-  return has(key) ? t(key) : code;
+  if (has(key)) return t(key);
+  // Otomatik duraklatma gerekçesinde içerik hatası kodları da bulunur (ör. `template_archived`).
+  const compose = `composeError.${code}`;
+  return has(compose) ? t(compose) : code;
 }
 
 export function blockerLabel(code: string): string {

@@ -190,17 +190,26 @@ describe("uygunsuzluk sınıflandırması (ertele / çıkar / duraklat)", () => 
       action: "defer",
       retryAt: now + 5_000_000,
     });
-    for (const code of [
-      "email_not_verified",
-      "already_sent",
-      "unresolved_delivery",
-      "cross_campaign_gap",
-      "step_missing",
-    ] as const) {
+    for (const code of ["already_sent", "unresolved_delivery", "cross_campaign_gap"] as const) {
       expect(classifyReasons([{ code }], now), code).toEqual({
         action: "defer",
         retryAt: now + 86_400_000,
       });
     }
+  });
+
+  it("kendiliğinden düzelmeyen tarihsiz nedenler ertelenmez (kampanya sonsuza dek açık kalmaz)", () => {
+    // Geçersiz işaretlenen adres ve demo dışı lead: dizi sonlandırılır.
+    expect(classifyReasons([{ code: "email_not_verified", detail: "invalid" }], now)).toEqual({
+      action: "exclude",
+    });
+    // "Doğrulanmamış" geçici olabilir (DNS zaman aşımı) ve kullanıcı düzeltebilir: ertelenir.
+    expect(classifyReasons([{ code: "email_not_verified", detail: "unverified" }], now)).toEqual({
+      action: "defer",
+      retryAt: now + 86_400_000,
+    });
+    expect(classifyReasons([{ code: "lead_not_demo" }], now)).toEqual({ action: "exclude" });
+    // Adım tanımı eksik: kampanya yapılandırması bozuk, kullanıcı düzeltmeli.
+    expect(classifyReasons([{ code: "step_missing" }], now)).toEqual({ action: "pause" });
   });
 });

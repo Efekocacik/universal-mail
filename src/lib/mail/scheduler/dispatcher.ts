@@ -4,6 +4,8 @@ import { DAY_MS, type FrequencyLimits } from "@/lib/compliance/frequency";
 import { bumpUpdatedAt } from "@/lib/campaigns/errors";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes, type CampaignLeadStatus } from "@/lib/db/schema";
+import type { ComposeErrorCode, ComposeIssue } from "../template-service";
+import { variableInfo } from "../variables";
 import type { MailProvider } from "../provider/provider";
 import { MIN_GAP_S } from "./throttle";
 import {
@@ -37,6 +39,8 @@ const PAUSE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
   "invalid_limits",
   "mailbox_missing",
   "mailbox_not_ready",
+  // Kampanya yapılandırması (adım/şablon) bozuldu: kullanıcı düzeltmeli; her diziyi tek tek ertelemek anlamsız.
+  "step_missing",
 ]);
 /** Kampanya bu arada durum değiştirdi (yarış): hiçbir şey değiştirilmez. */
 const SKIP_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
@@ -59,11 +63,32 @@ const EXCLUDE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
   "reply_received",
   "sequence_limit",
   "lead_status_blocked",
+  "lead_not_demo",
 ]);
 /** Belirsiz/sistem kaynaklı: kısa erteleme; asla dışlama. */
 const UNCERTAIN_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>(["evaluation_error"]);
 
 const SHORT_DEFER_MS = 15 * 60_000;
+
+/**
+ * Eksik değişkenlerin hepsi lead'den mi geliyor? Gönderen (firma profili) değişkeni eksikse bütün diziler aynı
+ * hatayı verir: dizileri tek tek sonlandırmak yerine kampanya duraklatılmalı.
+ */
+function onlyLeadVariablesMissing(errors: readonly ComposeIssue[]): boolean {
+  return errors
+    .filter((e) => e.code === "missing_variables")
+    .every((e) => {
+      const keys = (e.detail ?? "").split(",").filter(Boolean);
+      return keys.length > 0 && keys.every((k) => variableInfo(k)?.source === "lead");
+    });
+}
+
+/** Yalnızca o lead'e özgü içerik hataları (`compose_failed`): dizi sonlandırılır, kampanya sürer. */
+const LEAD_COMPOSE_ERRORS: ReadonlySet<ComposeErrorCode> = new Set<ComposeErrorCode>([
+  "missing_variables",
+  "content_blocked",
+  "lead_not_found",
+]);
 
 export function classifyReasons(
   reasons: readonly IneligibleReason[],
@@ -76,6 +101,11 @@ export function classifyReasons(
     return { action: "defer", retryAt: now + SHORT_DEFER_MS };
   }
   if (codes.some((c) => EXCLUDE_CODES.has(c))) return { action: "exclude" };
+  // Geçersiz olarak işaretlenen adres düzelmez: dizi biter. Yalnızca "doğrulanmamış" (DNS zaman aşımı, yeniden
+  // doğrulama) ertelenir; kullanıcı adresi doğrulayabilir ya da diziyi kuyruktan çıkarabilir.
+  if (reasons.some((r) => r.code === "email_not_verified" && r.detail === "invalid")) {
+    return { action: "exclude" };
+  }
   // Geri kalan her şey (zamanla değişebilir veya güvenle sınıflandırılamaz): bildirilen en geç ana, yoksa 1 gün.
   const untils = reasons.map((r) => r.until).filter((u): u is number => typeof u === "number");
   const retryAt = untils.length > 0 ? Math.max(...untils) : now + DAY_MS;
@@ -254,12 +284,35 @@ export class MailDispatcher {
           wakeCandidates.push(at);
           break;
         }
-        case "timezone_unknown":
-        case "step_template_missing":
-        case "compose_failed":
-          // Lead'e özgü olabilir; kalıcı dışlama yok, bir gün sonra yeniden değerlendirilir.
-          if (await this.defer(c.id, now + DAY_MS, out.code, now)) res.deferred++;
+        case "compose_failed": {
+          // Şablon/profil kaynaklı hata bütün dizileri etkiler: kampanya duraklar, kullanıcı düzeltip sürdürür.
+          // Yalnızca bu lead'e özgü hata (eksik değişken, içerik) diziyi sonlandırır. Ertelemek kampanyayı hiç
+          // bitirmezdi: aynı içerik ertesi gün de aynı hatayı verir.
+          const errs = (out.errors ?? []).map((e) => e.code);
+          if (
+            errs.length === 0 ||
+            errs.some((e) => !LEAD_COMPOSE_ERRORS.has(e)) ||
+            !onlyLeadVariablesMissing(out.errors ?? [])
+          ) {
+            if (await this.pauseCampaign(c.campaignId, [out.code, ...errs], now)) {
+              res.pausedCampaigns.push(c.campaignId);
+              log(`kampanya #${c.campaignId} duraklatıldı: ${out.code} (${errs.join(",")})`);
+            }
+            blockedCampaigns.add(c.campaignId);
+          } else if (await this.excludeSequence(c.id, [out.code, ...errs], now)) {
+            res.excluded++;
+            log(`dizi #${c.id} sonlandırıldı: ${out.code} (${errs.join(",")})`);
+          }
           break;
+        }
+        case "timezone_unknown":
+          // Saat dilimi tablosu sürümle değişir; bu sürümde bu alıcıya hiçbir zaman gönderilemez.
+          if (await this.excludeSequence(c.id, [out.code], now)) {
+            res.excluded++;
+            log(`dizi #${c.id} sonlandırıldı: ${out.code}`);
+          }
+          break;
+        case "step_template_missing":
         case "invalid_send_window":
         case "provider_unavailable":
         case "unsubscribe_unavailable":

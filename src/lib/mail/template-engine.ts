@@ -257,6 +257,7 @@ export function renderTemplate(
     tokens: TemplateToken[],
     encode: (v: string) => string,
     marker: (k: string) => string,
+    encodeFallback: (v: string) => string = encode,
   ) =>
     tokens
       .map((t) => {
@@ -265,7 +266,7 @@ export function renderTemplate(
         if (present(v)) return encode(v.trim());
         if (t.fallback !== null) {
           usedFallback.add(t.name);
-          return encode(t.fallback);
+          return encodeFallback(t.fallback);
         }
         missing.add(t.name);
         return opts.markMissing ? marker(t.name) : "";
@@ -273,10 +274,14 @@ export function renderTemplate(
       .join("");
 
   const subject = headerSafe(fill(s.tokens, headerSafe, (k) => `[eksik: ${k}]`));
+  // Gövdedeki yedek metin, kayıtlı (temizlenip HTML olarak yazılmış) gövdeden okunur: zaten HTML metnidir
+  // (`&` → `&amp;`) ve `<`, `>` içeremez. Yeniden kaçışlamak alıcıya "Tom &amp; Jerry" gösterirdi. Sonuç yine
+  // aşağıda temizlenir.
   const filled = fill(
     b.tokens,
     (v) => escapeHtml(v),
     (k) => `<strong>[eksik: ${escapeHtml(k)}]</strong>`,
+    (fallbackHtml) => fallbackHtml,
   );
   const html = sanitizeEmailHtml(filled).html;
   return {

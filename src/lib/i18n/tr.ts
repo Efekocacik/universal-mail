@@ -1022,6 +1022,7 @@ export const tr = {
   "blocker.live_disabled": "Gerçek posta kutusuyla gönderim kapalı",
   "blocker.mailbox_not_ready": "Posta kutusu hazır değil",
   "blocker.steps_missing": "İlk e-posta adımı tanımlanmamış",
+  "blocker.steps_invalid": "Bir adımın şablonu artık kullanılamıyor",
   "blocker.invalid_send_window": "Gönderim penceresi geçersiz",
   "blocker.scheduler_disabled": "Otomatik gönderim kapalı",
   "blocker.no_eligible_leads": "Gönderilebilecek uygun işletme yok",
@@ -1033,6 +1034,8 @@ export const tr = {
   "blocker.hint.live_disabled": "Bu sürümde yalnızca demo posta kutusu kullanılabilir.",
   "blocker.hint.mailbox_not_ready": "Posta kutusu kullanıma hazır olunca yeniden deneyin.",
   "blocker.hint.steps_missing": "E-posta adımları sayfasında en az bir ilk e-posta şablonu seçin.",
+  "blocker.hint.steps_invalid":
+    "Bir şablon arşivlenmiş ya da dili/türü değişmiş. Taslak kampanyada E-posta adımları sayfasında şablonları yeniden seçip kaydedin; başlamış kampanyada adımlar değiştirilemez, kampanyayı iptal edip yenisini oluşturun.",
   "blocker.hint.invalid_send_window": "Temel ayarlarda gün ve saat aralığını düzeltin.",
   "blocker.hint.scheduler_disabled": "Bu özellik şu an kapalı. Destek ekibinize bildirin.",
   "blocker.hint.no_eligible_leads":
@@ -1051,6 +1054,7 @@ export const tr = {
   "reason.live_sending_disabled": "Gerçek gönderim kapalı",
   "reason.lead_not_found": "İşletme bulunamadı",
   "reason.lead_status_blocked": "İşletmenin durumu e-posta gönderimine izin vermiyor",
+  "reason.lead_not_demo": "Demo posta kutusuyla yalnızca demo işletmelere gönderilebilir",
   "reason.campaign_lead_not_found": "Alıcı kampanyada bulunamadı",
   "reason.campaign_lead_not_sendable": "Dizi gönderilebilir durumda değil",
   "reason.no_email": "E-posta adresi yok",

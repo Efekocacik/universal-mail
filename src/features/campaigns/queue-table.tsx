@@ -119,7 +119,9 @@ export function QueueTable({
                         <SequenceStatusBadge status={r.status} reasons={r.exclusionReasons} />
                         {r.exclusionReasons.length > 0 && <ReasonList codes={r.exclusionReasons} />}
                         {r.lastError && (
-                          <p className="text-[12px] text-destructive">{reasonLabel(r.lastError)}</p>
+                          <p className="text-[12px] text-destructive">
+                            {r.lastError.split(",").map(reasonLabel).join(", ")}
+                          </p>
                         )}
                       </div>
                     </td>

@@ -51,6 +51,7 @@ const CONFIG_BLOCKERS: ReadonlySet<BlockerCode> = new Set<BlockerCode>([
   "live_disabled",
   "mailbox_not_ready",
   "steps_missing",
+  "steps_invalid",
   "invalid_send_window",
 ]);
 

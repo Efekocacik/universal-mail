@@ -18,7 +18,10 @@ export const DEFAULT_SEND_WINDOW: Readonly<{
 
 /** Ülke → IANA saat dilimleri. İlk öğe ana dilimdir; ek öğeler kesişime katılır. */
 export const COUNTRY_TIME_ZONES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  AD: ["Europe/Andorra"],
+  AL: ["Europe/Tirane"],
   AT: ["Europe/Vienna"],
+  BA: ["Europe/Sarajevo"],
   BE: ["Europe/Brussels"],
   BG: ["Europe/Sofia"],
   CH: ["Europe/Zurich"],
@@ -31,6 +34,7 @@ export const COUNTRY_TIME_ZONES: Readonly<Record<string, readonly string[]>> = O
   FI: ["Europe/Helsinki"],
   FR: ["Europe/Paris"],
   GB: ["Europe/London"],
+  GI: ["Europe/Gibraltar"],
   GR: ["Europe/Athens"],
   HR: ["Europe/Zagreb"],
   HU: ["Europe/Budapest"],
@@ -41,16 +45,24 @@ export const COUNTRY_TIME_ZONES: Readonly<Record<string, readonly string[]>> = O
   LT: ["Europe/Vilnius"],
   LU: ["Europe/Luxembourg"],
   LV: ["Europe/Riga"],
+  MC: ["Europe/Monaco"],
+  MD: ["Europe/Chisinau"],
+  ME: ["Europe/Podgorica"],
+  MK: ["Europe/Skopje"],
   MT: ["Europe/Malta"],
   NL: ["Europe/Amsterdam"],
   NO: ["Europe/Oslo"],
   PL: ["Europe/Warsaw"],
   PT: ["Europe/Lisbon", "Atlantic/Azores"],
   RO: ["Europe/Bucharest"],
+  RS: ["Europe/Belgrade"],
   SE: ["Europe/Stockholm"],
   SI: ["Europe/Ljubljana"],
   SK: ["Europe/Bratislava"],
+  SM: ["Europe/San_Marino"],
   TR: ["Europe/Istanbul"],
+  // Kosova'nın ayrı IANA dilimi yok; Belgrad ile aynı saati kullanır.
+  XK: ["Europe/Belgrade"],
 });
 
 export function timeZonesForCountry(

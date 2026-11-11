@@ -171,7 +171,7 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     expect(await allMessages()).toHaveLength(0);
   });
 
-  it("saat dilimi bilinmeyen ülke dışlanmaz, ertelenir ve gönderilmez", async () => {
+  it("saat dilimi bilinmeyen ülke gönderilmez ve dizi sonlandırılır (sonsuza dek ertelenmez)", async () => {
     // Test: demo politikasına tabloda saat dilimi olmayan izinli bir ülke eklenir.
     await client.execute(
       `INSERT INTO country_policies (scope, country_code, mode, locked, seed_version, updated_at)
@@ -183,9 +183,9 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     await new MailDispatcher(db).dispatchOnce({ now: () => T0, provider: p });
     expect(p.calls).toBe(0);
     expect(await seq(cl)).toMatchObject({
-      status: "scheduled",
-      nextSendAt: T0 + DAY,
-      lastError: "timezone_unknown",
+      status: "removed",
+      nextSendAt: null,
+      exclusionReasons: ["timezone_unknown"],
     });
   });
 

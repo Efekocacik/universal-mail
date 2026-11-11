@@ -39,6 +39,7 @@ export type BlockerCode =
   | "live_disabled"
   | "mailbox_not_ready"
   | "steps_missing"
+  | "steps_invalid"
   | "invalid_send_window"
   | "scheduler_disabled"
   | "no_eligible_leads"
@@ -97,9 +98,36 @@ export async function campaignBlockers(
     .from(campaignSteps)
     .where(and(eq(campaignSteps.campaignId, c.id), eq(campaignSteps.stepIndex, 0)));
   if (step0.length === 0) out.push("steps_missing");
+  else if (!(await stepsStillValid(db, c.id))) out.push("steps_invalid");
   if (!effectiveWindow(c.sendWindow)) out.push("invalid_send_window");
   if (!isDemoSchedulerEnabled(env)) out.push("scheduler_disabled");
   return out;
+}
+
+/**
+ * Adımlara bağlı şablonlar hâlâ kullanılabilir mi? Taslak kampanyanın şablonu kilitli değildir: adımlar
+ * kaydedildikten sonra arşivlenebilir, dili veya türü değişebilir. Hazır/başlat/sürdür bu yüzden yeniden denetler;
+ * aksi halde her gönderim `compose_failed` verir ya da yanlış dilde/türde şablon gider.
+ */
+async function stepsStillValid(db: DbExecutor, campaignId: number): Promise<boolean> {
+  const rows = await db
+    .select({
+      stepIndex: campaignSteps.stepIndex,
+      language: campaignSteps.language,
+      tLanguage: templates.language,
+      tKind: templates.kind,
+      tArchivedAt: templates.archivedAt,
+    })
+    .from(campaignSteps)
+    .leftJoin(templates, eq(templates.id, campaignSteps.templateId))
+    .where(eq(campaignSteps.campaignId, campaignId));
+  return rows.every(
+    (r) =>
+      r.tLanguage !== null &&
+      r.tArchivedAt === null &&
+      r.tLanguage === r.language &&
+      r.tKind === (r.stepIndex === 0 ? "initial" : "followup"),
+  );
 }
 
 export async function computeStartPlan(
