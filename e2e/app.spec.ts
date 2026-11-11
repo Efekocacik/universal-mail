@@ -210,7 +210,7 @@ test("e-posta bulma: ayrıntıdan başlat (Google verisi + site taraması), elle
   const ids = await leadIds(40);
   const res = await page.request.post("/api/leads/find-emails", {
     data: { leadIds: ids, loadGoogle: true },
-    headers: { Origin: "http://127.0.0.1:3210" },
+    headers: { Origin: "http://127.0.0.1:" + (process.env.E2E_PORT ?? "3210") },
   });
   expect(res.status()).toBe(202);
   const facets = async () =>
