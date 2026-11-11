@@ -51,6 +51,7 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { recordPassingDns } from "./helpers/dns-fixture";
 import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 // Bu dosyada YALNIZCA test içinde (mevcut geçersiz kılma yöntemi, bkz. live-send-wiring.test.ts): canlı kilit "açık",
@@ -181,6 +182,7 @@ async function verifiedEndpoint() {
   });
   expect(r.ok).toBe(true);
   await enableHealthyDrain(db, T0);
+  await recordPassingDns(db, gid, T0);
 }
 
 describe("canlı kapı açık (test): zamanlayıcı", () => {

@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { and, eq, inArray, min } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { suppressEmail } from "@/lib/compliance/suppression";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, jobs, mailboxes, messages } from "@/lib/db/schema";
@@ -45,7 +45,15 @@ import {
 /**
  * Aşama 9: dağıtıcı, zamanlama kuralları ve `mail.send` iş entegrasyonu. Veritabanı BELLEKTE; ağ yok, gerçek
  * gönderim yok, `.data` kullanılmaz. Saat dışarıdan verilir (gerçek bekleme yok).
+ *
+ * Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapı kapalıyken korunması gereken zamanlayıcı davranışı
+ * için kapı YALNIZCA test içinde `gate.closed` ile geçici olarak kapatılabilir.
  */
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
 
 let client: Client;
 let db: Db;
@@ -462,7 +470,7 @@ describe("dağıtıcı: uygunluk ve güvenlik", () => {
     expect(p.calls).toBe(0);
   });
 
-  it("duraklatılmış kampanya ve canlı posta kutulu kampanya hiç seçilmez", async () => {
+  it("duraklatılmış kampanya seçilmez; gönderime hazır olmayan canlı kutulu kampanya gönderilmeden duraklar", async () => {
     const paused = await createCampaign(db, { steps: 1, status: "paused" });
     const pl = await addSequence(db, paused);
     const [mb] = await db
@@ -485,8 +493,11 @@ describe("dağıtıcı: uygunluk ve güvenlik", () => {
     expect(await allMessages()).toHaveLength(0);
     expect((await seq(pl.cl)).status).toBe("scheduled");
     expect((await seq(ll.cl)).status).toBe("scheduled");
+    // Kapı açık: canlı kampanya aday olur, ama gönderim izni olmayan kutu (ve kilitli ülke) yüzünden ileti gitmez;
+    // kampanya kutu düzelene kadar duraklatılır, diziye dokunulmaz.
     const [lc] = await db.select().from(campaigns).where(eq(campaigns.id, live));
-    expect(lc!.status).toBe("running"); // canlı kampanyaya dokunulmaz
+    expect(lc!.status).toBe("paused");
+    expect(lc!.pauseReason).toContain("mailbox_not_ready");
   });
 
   it("ayırma işlemi başarısız olursa sağlayıcı çağrılmaz ve dizi değişmez", async () => {
@@ -545,13 +556,25 @@ describe("mail.send işi ve worker entegrasyonu", () => {
     return s;
   }
 
-  it("bayrak kapalıyken başlangıç veritabanına hiç yazmaz (uzlaştırma ve iş yok)", async () => {
+  it("bayrak ve canlı kapı kapalıyken başlangıç veritabanına hiç yazmaz (uzlaştırma ve iş yok)", async () => {
     await staleSendingRow();
     const before = JSON.stringify(await allMessages());
-    const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
-    expect(s).toMatchObject({ enabled: false, reconciled: 0 });
+    gate.closed = true;
+    try {
+      const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
+      expect(s).toMatchObject({ enabled: false, reconciled: 0 });
+    } finally {
+      gate.closed = false;
+    }
     expect(JSON.stringify(await allMessages())).toBe(before);
     expect(await db.select().from(jobs)).toHaveLength(0);
+  });
+
+  it("kapı açma sürümü: demo bayrağı olmadan da başlangıç uzlaştırır ve dağıtım işini kurar", async () => {
+    await staleSendingRow();
+    const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
+    expect(s).toMatchObject({ enabled: true, reconciled: 1 });
+    expect(await db.select().from(jobs)).toHaveLength(1);
   });
 
   it("bayrak kapalıyken işleyici gönderim yapmaz ve kalıcı hata verir", async () => {

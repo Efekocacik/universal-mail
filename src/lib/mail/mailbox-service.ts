@@ -20,8 +20,9 @@ import {
  *  - Eklenen Gmail kutusu `not_configured` durumunda başlar. `connected` durumuna YALNIZCA OAuth tamamlanınca
  *    (sonraki aşama) geçilir; bu servis `connected` yazmaz.
  *  - Kimlik bilgisi (yenileme belirteci, istemci sırrı) SQLite'a YAZILMAZ; gizli depoda tutulur.
- *  - Demo kutusu eklenemez, değiştirilemez, silinemez. Canlı kutu kampanyaya atanamaz (kampanya servisi demo ister).
- *  - Gerçek gönderim `LIVE_SENDING_ENABLED=false` ile kapalıdır; kutu eklemek bunu değiştirmez.
+ *  - Demo kutusu eklenemez, değiştirilemez, silinemez. Canlı kutu kampanyaya yalnızca canlı gönderim kapısı açıkken,
+ *    bağlı ve `gmail.send` izinliyken atanabilir (`assertSendableMailbox`).
+ *  - Kutu eklemek tek başına gönderim değildir; gönderim yolu DNS, HTTPS çıkış, çekme ve ülke kilidini ayrıca denetler.
  */
 
 const GMAIL_OAUTH_SETTING = "mail.gmailOAuth";

@@ -11,10 +11,10 @@ Her madde için kanıt, Bölüm 9'daki biçimde kaydedilir (tarih, yapan, ortam,
 | Kilit (kodda sabit) | Şu an | Neyi engeller | Açılmadan önce | Bölüm |
 |---|---|---|---|---|
 | `GMAIL_HEADER_TRUST_VERIFIED` | `false` | Gmail başlıklarından tasdik üretme (gelen kutusundan otomatik suppression/durdurma) | Gerçek test hesabıyla başlık doğrulaması | 1.3 |
-| `LIVE_INBOX_READING_ENABLED` | `false` | Gerçek gelen kutusunu okuma | Okuma izni, `historyId`/hata davranışı doğrulaması, başlık güveni kararı | 1.3, 2 |
-| `LEGAL_APPROVALS.*` (7 madde) | hepsi `false` | Gönderim yolu (birleşik kapı) ve hazırlık | Yazılı hukuki/operasyonel onaylar | 6 |
-| `LIVE_SENDING_ENABLED` | `false` | Gerçek gönderim | Yukarıdakilerin ve Bölüm 2–5, 7'nin tamamı | 8 |
-| Canlı ülke politikası kilidi (`country_policies`, `scope=live`) | tamamı engelli ve kilitli | Ülke bazında canlı gönderim | Ülke bazında yazılı hukuki onay | 6 |
+| `LIVE_INBOX_READING_ENABLED` | **`true`** (`release/live-gates`, sahip kararı) | — (okuma izinli kutular okunur; başlık güveni kapalıyken etkisiz, `no_attestation`) | — | 1.3, 2 |
+| `LEGAL_APPROVALS.*` (7 madde) | **hepsi `true`** (sahip kararı, dış hukuki inceleme yok) | — | — | 6 |
+| `LIVE_SENDING_ENABLED` | **`true`** (`release/live-gates`, sahip kararı) | — (gönderim anında çalışma zamanı koşulları yine aranır: `08` Bölüm 3) | — | 8 |
+| Canlı ülke politikası kilidi (`country_policies`, `scope=live`) | tamamı engelli ve kilitli | Ülke bazında canlı gönderim | Kendime test gönderimi; sahibin onay betiğini çalıştırması | 6 |
 | `oneClickEndpointVerified` (türetilmiş) | kanıt yok → `List-Unsubscribe-Post` eklenmez | Tek tıklamalı çıkış başlığı ve canlı iletiye çıkış bağlantısı | Gerçek uç noktaya karşı uçtan uca doğrulama | 3 |
 | `mail.arfReporters` (ayar) | boş | ARF şikâyetinin otomatik doğrulanması | Gerçek FBL sağlayıcıları ve rapor biçimi | 4 |
 
@@ -190,7 +190,7 @@ Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 
 ## 5. DNS (SPF / DKIM / DMARC)
 
-Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yalnızca kutunun kendi alan adı için çalışır; sonuç durumlar halinde saklanır (ham TXT yok); hazırlık ekranında "tamam" için üç denetim de taze (30 gün) ve `pass` olmalıdır. DMARC'ta `pass` yalnızca `p=quarantine` veya `p=reject` ile alınır; `p=none` **uyarı** (`dmarc_monitor_only`) verir ve hazırlık maddesini "tamam" yapmaz. Hazırlık ekranı yalnızca gösterimdir: gönderim yolu DNS sonucunu ayrıca denetlemez, yani `p=none` gönderimi durdurmaz ama kanıt da sayılmaz. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
+Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yalnızca kutunun kendi alan adı için çalışır; sonuç durumlar halinde saklanır (ham TXT yok); hazırlık ekranında "tamam" için üç denetim de taze (30 gün) ve `pass` olmalıdır. DMARC'ta `pass` yalnızca `p=quarantine` veya `p=reject` ile alınır; `p=none` **uyarı** (`dmarc_monitor_only`) verir ve hazırlık maddesini "tamam" yapmaz. `release/live-gates` ile gönderim yolu aynı ölçütü **gönderim anında da** uygular: kutunun DNS raporu taze, alan adı aynı ve üç denetimi de `pass` değilse canlı gönderim `dns_not_verified` ile 15 dk ertelenir (kampanya duraklamaz). Yani `p=none` canlı gönderimi durdurur. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
 
 - [ ] **Gönderim alan adı kayıtları:** SPF (tek kayıt, `-all` veya `~all`, arama sınırı ≤ 10), DKIM (seçici adıyla), DMARC yayımlandı. `p=none` ile başlamak (`04` Adım 3) uygundur, ancak hazırlıkta "tamam" için pilot öncesinde `p=quarantine` veya `p=reject` gerekir; hangisinin seçileceği şirket kararıdır.
 - [ ] **Gerçek denetim:** Uygulamadaki "Kontrol et" gerçek kayıtlarla üç denetimi `pass` döndürüyor (DMARC `p=none` iken uyarı beklenir); yanlış yapılandırılmış bir kayıtla (ör. SPF yok) doğru biçimde `fail` döndürüyor.
@@ -199,7 +199,7 @@ Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yal
 
 ## 6. Hukuki onaylar ve şirket girdileri (özet)
 
-Ayrıntılı, zorunlu/koşullu/isteğe bağlı sınıflandırma ve nedenler: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 8. Burada yalnızca kilitlerle eşleşme verilir. `LEGAL_APPROVALS` maddeleri **yazılı onayla, kayıt altında, yeni bir yazılım sürümünde** `true` yapılır; kullanıcı beyanı, ayar veya ortam değişkeni bunların yerine geçmez.
+Ayrıntılı, zorunlu/koşullu/isteğe bağlı sınıflandırma ve nedenler: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 8. Burada yalnızca kilitlerle eşleşme verilir. **`release/live-gates` sürümünde yedi madde de şirket sahibinin kararıyla (11 Kasım 2026) dış hukuki inceleme olmadan `true` yapıldı; hukuki sorumluluk şirkettedir.** Kullanıcı beyanı, ayar veya ortam değişkeni bunların yerine geçmez.
 
 | `LEGAL_APPROVALS` maddesi | Onay konusu | Sahibi |
 |---|---|---|
@@ -224,7 +224,7 @@ Başlamadı. Yalnızca Bölüm 2–6'nın ilgili maddeleri tamamlanıp hukuki on
 
 ## 8. Kilitleri açma sırası (öneri)
 
-Her adım ayrı bir sürüm ve kayıt gerektirir; bir adım doğrulanamazsa sonraki adıma geçilmez ve ilgili kilit kapalı kalır. **Aşağıdaki sıra bir öneridir; açma kararı şirketin ve hukukun onayına bağlıdır.**
+Her adım ayrı bir sürüm ve kayıt gerektirir; bir adım doğrulanamazsa sonraki adıma geçilmez ve ilgili kilit kapalı kalır. **Aşağıdaki sıra bir öneridir.** Sahip kararıyla (11 Kasım 2026) 8. ve 9. adımların kod kapıları ile `LIVE_INBOX_READING_ENABLED` `release/live-gates`'te önceden açıldı; gönderim anındaki çalışma zamanı koşulları (Gmail izni, DNS, HTTPS uç nokta, çekme sağlığı, ülke kilidi) 2–4. adımlar tamamlanmadan gönderime izin vermez. Ülke kilidi kendime test gönderiminden sonra açılır; `GMAIL_HEADER_TRUST_VERIFIED` kapalı kalır.
 
 1. Şirket girdileri ve hukuki hazırlık (Bölüm 6; `08` Bölüm 8.1). Kilitler kapalı.
 2. Gmail OAuth bağlantısı yalnızca gönderim izniyle, test hesabıyla (Bölüm 2). Kilitler kapalı; bağlantı kurulur ama gönderim yok.

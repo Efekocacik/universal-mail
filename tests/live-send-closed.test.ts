@@ -19,8 +19,9 @@ import {
 import { addMailbox } from "./helpers/inbound-fixture";
 
 /**
- * Gerçek (mock'lanmamış) kapalı kapılar (Aşama 15.7): canlı gönderim kilidi ve ülke politikası/uygunluk kapısı
- * kapalıyken canlı bir posta kutusu hiçbir şey yapmaz — belirteç basmaz, ileti kaydı açmaz, sağlayıcıyı çağırmaz.
+ * Gerçek (mock'lanmamış) sabitlerle (Aşama 15.7; kapı açma sürümünde güncellendi): kod kapısı AÇIK olsa bile canlı
+ * ülke politikası kilitliyken ve kutu gönderime hazır değilken canlı bir posta kutusu hiçbir şey yapmaz — belirteç
+ * basmaz, ileti kaydı açmaz, sağlayıcıyı çağırmaz.
  */
 
 let client: Client;
@@ -70,9 +71,9 @@ const snapshot = async () =>
     await db.select().from(messages),
   ]);
 
-describe("kapalı kapılar", () => {
-  it("gerçek kilit kapalı: canlı kutu kampanya yolunda hiçbir yan etki üretmez", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
+describe("ülke kilidi ve uygunluk kapısı (kod kapısı açık)", () => {
+  it("gerçek kod kapısı açık ama ülke kilitli: canlı kutu kampanya yolunda hiçbir yan etki üretmez", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
     const s = await liveSequence();
     await ensureSigningKey(db, T0); // anahtar var; yine de belirteç BASILMAMALI
     const before = await snapshot();
@@ -81,7 +82,10 @@ describe("kapalı kapılar", () => {
       { campaignLeadId: s.cl, stepIndex: 0 },
       { now: () => T0, provider },
     );
-    expect(["ineligible", "not_sendable"]).toContain(out.outcome);
+    expect(out.outcome).toBe("ineligible");
+    expect((out as { reasons: { code: string }[] }).reasons.map((r) => r.code)).toContain(
+      "country_blocked",
+    );
     expect(calls).toBe(0);
     expect(await snapshot()).toBe(before);
   });

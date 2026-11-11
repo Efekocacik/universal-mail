@@ -471,25 +471,29 @@ describe("kod değişimi, hesap ve kapsam denetimi", () => {
     }
   });
 
-  it("bağlı kutu kampanyaya atanamaz; canlı hazırlıkta kutu 'tamam' olur ama okuma izni yoksa gelen kutusu maddesi ENGELDİR; allOk false", async () => {
+  it("bağlı ve gönderim izinli kutu kampanyaya atanabilir (kapı açık); hazırlıkta kutu 'tamam', okuma izni yoksa gelen kutusu ENGEL; allOk false", async () => {
     const b = await begin();
     await finish(b);
     await expect(
       createCampaignService(db, { name: "Deneme", mailboxId: b.id }, { now: 1 }),
-    ).rejects.toMatchObject({ code: "live_disabled" });
+    ).resolves.toMatchObject({ id: expect.any(Number) });
     let r = await getLiveReadiness(db);
     const by = () => Object.fromEntries(r.items.map((i) => [i.key, i.status]));
     expect(by()).toMatchObject({
       real_mailbox: "ok",
       inbox_access: "blocked",
-      live_flag: "blocked",
+      live_flag: "ok",
+      // Bağlantı tek başına yeterli değil: DNS, çıkış uç noktası ve ülke kilidi hâlâ engel/doğrulanmadı.
+      dns_auth: "unknown",
+      https_unsubscribe: "blocked",
+      live_country_policies: "blocked",
     });
     expect(r.allOk).toBe(false);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
 
     await finish(await begin("send_read", { id: b.id }));
     r = await getLiveReadiness(db);
-    expect(by()).toMatchObject({ real_mailbox: "ok", inbox_access: "ok", live_flag: "blocked" });
+    expect(by()).toMatchObject({ real_mailbox: "ok", inbox_access: "ok", live_flag: "ok" });
     expect(r.allOk).toBe(false);
   });
 });

@@ -146,7 +146,7 @@ describe("durum (GET)", () => {
       verification: { verified: false, verifiedAt: null, expiresAt: null, lastAttempt: null },
       delivery: { status: "blocked", last: null },
       drain: { enabled: false, envForced: false, active: false },
-      legalApproved: false,
+      legalApproved: true, // sürüm kapısı (sahip kararı); uç nokta yine doğrulanmamış
       keyFileReady: false,
     });
     await configureAll();

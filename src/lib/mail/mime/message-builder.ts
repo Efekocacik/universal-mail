@@ -13,8 +13,8 @@ import { buildUnsubscribeHeaders, type UnsubscribeHeaderInput } from "./unsubscr
  * Aşama 6 çıktısından (`composeEmail`, `purpose: "send"`) gönderime hazır MIME iletisi üretir.
  *
  *  - Hiçbir şey GÖNDERMEZ ve veritabanına yazmaz; yalnızca metin döndürür.
- *  - `live` bu sürümde her zaman reddedilir (`LIVE_SENDING_ENABLED = false`). Live yolu açılsa bile güvenli çıkış
- *    bağlantısı ve alt bilgi ile başlıktaki bağlantının aynı olması zorunludur.
+ *  - `live` yalnızca canlı gönderim kapısı (`isLiveSendingPermitted`) açıkken kabul edilir (kendine test hariç); kapı
+ *    açıkken de güvenli çıkış bağlantısı ve alt bilgi ile başlıktaki bağlantının aynı olması zorunludur.
  *  - Kapsam posta kutusundan belirlenir; demo kutusu yalnızca demo, gerçek kutu yalnızca live ile kullanılabilir.
  *  - Gönderen adı firma profilinden gelir (`İletişim kişisi – Ticari unvan`); eksikse ileti oluşturulmaz.
  *  - Gövde Aşama 6'da temizlenmiştir; burada yeniden temizlenir ve tam HTML belgesine sarılır (uzak kaynak yok).
@@ -99,7 +99,7 @@ export function buildEmailMessage(
     );
   }
   if (input.mode === "live" && !selfTest && !isLiveSendingPermitted()) {
-    throw new MessageBuildError("live_sending_disabled", "Gerçek gönderim bu sürümde kapalıdır.");
+    throw new MessageBuildError("live_sending_disabled", "Gerçek gönderim kapısı kapalı.");
   }
   if (policyScopeForMailbox(input.mailbox.provider) !== input.mode) {
     throw new MessageBuildError("scope_mismatch", "Posta kutusu ile gönderim kapsamı uyuşmuyor.");

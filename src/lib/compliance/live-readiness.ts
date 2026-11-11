@@ -17,8 +17,8 @@ import {
 } from "./policies";
 
 /**
- * "Canlı gönderime hazırlık" (Aşama 14). SALT OKUNUR: gerçek gönderimin neden hâlâ kapalı olduğunu gösterir ve
- * kapıyı ASLA açmaz. Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
+ * "Canlı gönderime hazırlık" (Aşama 14). SALT OKUNUR: gerçek gönderimin önünde hâlâ ne kaldığını gösterir ve
+ * hiçbir kapıyı AÇMAZ (kod kapıları bu sürümde açıktır; çalışma anı maddeleri gönderim yolunda ayrıca denetlenir). Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
  * ölçülemeyen madde `unknown` (doğrulanmadı) olarak kalır. Hukuki onaylar `LEGAL_APPROVALS` sabitlerindendir ve
  * kullanıcı beyanıyla değişmez.
  */
@@ -113,7 +113,7 @@ export async function getLiveReadiness(
     { key: "company_profile", status: profile.success ? "ok" : "blocked", owner: "company" },
     { key: "real_mailbox", status: realConnected.length > 0 ? "ok" : "blocked", owner: "external" },
     { key: "inbox_access", status: inboxOk ? "ok" : "blocked", owner: "external" },
-    // Gerçek gelen kutusu okuma kilidi ve Gmail başlık güven kilidi: kodda kapalı sabitler (kullanıcı beyanıyla açılmaz).
+    // Gerçek gelen kutusu okuma kilidi ve Gmail başlık güven kilidi: kodda sabitler (kullanıcı beyanıyla değişmez).
     {
       key: "live_inbox_flag",
       status: LIVE_INBOX_READING_ENABLED ? "ok" : "blocked",

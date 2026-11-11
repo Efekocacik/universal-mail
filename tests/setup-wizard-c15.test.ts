@@ -155,8 +155,15 @@ describe("canlıya geçiş belgeleri kodla tutarlı", () => {
     }
     // TB-3 (çıkış altyapısı arayüzü) kodlandı: belge onu artık bekleyen paket olarak anmaz.
     expect(doc).not.toContain("[TB-3]");
-    // Gerçek kapılar belgede kapalı olarak anılır; belge hiçbir kapıyı açmaz.
-    expect(doc).toMatch(/kodda \*\*kapalıdır\*\*/);
+    // Kod kapıları `release/live-gates`'te sahip kararıyla açıldı; belge bunu ve hâlâ kapalı olanları (başlık güveni,
+    // ülke kilitleri) kodla aynı anar.
+    expect(doc).toMatch(/Kod kapıları `release\/live-gates` dalında AÇILDI \(sahip kararı\)/);
+    expect(doc).toContain("`LIVE_SENDING_ENABLED = true`");
+    expect(doc).toMatch(/`GMAIL_HEADER_TRUST_VERIFIED` \*\*kapalı kalır\*\*/);
+    expect(doc).toMatch(/Canlı ülke politikalarının hepsi \*\*engelli ve kilitli\*\* kalır/);
+    const policies = read("src/lib/compliance/policies.ts");
+    expect(policies).toMatch(/export const LIVE_SENDING_ENABLED = true;/);
+    expect(policies).toMatch(/export const GMAIL_HEADER_TRUST_VERIFIED = false;/);
   });
 
   it("DMARC belgesi kodla aynı: p=none uyarı verir, hazırlık için quarantine/reject gerekir", () => {

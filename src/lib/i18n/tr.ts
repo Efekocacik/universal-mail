@@ -754,7 +754,7 @@ export const tr = {
   "campaigns.filter": "Duruma göre süz",
   "campaigns.filter.all": "Tüm durumlar",
   "campaigns.demoNote":
-    "Bu sürümde gerçek e-posta gönderimi kapalıdır. Kampanyalar yalnızca demo posta kutusuyla çalışır; demo iletiler hiçbir alıcıya ulaşmaz.",
+    "Demo posta kutusuyla iletiler hiçbir alıcıya ulaşmaz. Gönderim izni verilmiş Gmail kutusuyla iletiler GERÇEK alıcılara gider; ancak Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi hazır olmadan hiçbir ileti gönderilmez.",
   "campaigns.empty.title": "Henüz kampanya yok",
   "campaigns.empty.body":
     "Bir kampanya oluşturun, şablonunu seçin ve Keşif ekranından lead ekleyin. Başlatmadan önce özeti ve önizlemeleri görürsünüz.",
@@ -856,9 +856,9 @@ export const tr = {
   "wizard.name": "Kampanya adı",
   "wizard.mailbox": "Gönderen posta kutusu",
   "wizard.mailbox.none": "Seçin",
-  "wizard.mailbox.disabled": "bu sürümde kapalı",
+  "wizard.mailbox.disabled": "gönderime hazır değil",
   "wizard.mailbox.note":
-    "Gerçek posta kutuları (Gmail, SMTP) bu sürümde kullanılamaz; yalnızca demo posta kutusu seçilebilir.",
+    "Gerçek gönderim için bağlı ve gönderim izni verilmiş bir Gmail kutusu seçin; demo posta kutusu hiçbir alıcıya ileti göndermez. SMTP kutuları kullanılamaz.",
   "wizard.window": "Gönderim günleri ve saatleri",
   "wizard.window.start": "Başlangıç saati",
   "wizard.window.end": "Bitiş saati",
@@ -992,7 +992,7 @@ export const tr = {
   "preflight.confirm":
     "Özeti ve önizlemeleri inceledim; kampanyanın kurallara göre otomatik yürütülmesini onaylıyorum.",
   "preflight.confirm.note":
-    "Bu sürümde gönderim demo modundadır: iletiler gerçek alıcılara gitmez. Her gönderimden hemen önce uygunluk yeniden denetlenir.",
+    "Gmail kutusuyla başlatılan kampanya GERÇEK alıcılara ileti gönderir; demo posta kutusuyla iletiler hiçbir alıcıya gitmez. Her gönderimden hemen önce uygunluk ve gönderim hazırlığı yeniden denetlenir.",
   "preflight.start": "Başlat",
   "preflight.started": "Kampanya başlatıldı.",
   "preflight.check.title": "Göndermeden önce kontrol",
@@ -1062,7 +1062,7 @@ export const tr = {
   "blocker.consent_missing": "Kullanım onayı verilmemiş",
   "blocker.sender_profile_incomplete": "Gönderen firma bilgileri eksik",
   "blocker.mailbox_missing": "Posta kutusu seçilmemiş",
-  "blocker.live_disabled": "Gerçek posta kutusuyla gönderim kapalı",
+  "blocker.live_disabled": "Bu posta kutusuyla gerçek gönderim yapılamaz",
   "blocker.mailbox_not_ready": "Posta kutusu hazır değil",
   "blocker.steps_missing": "İlk e-posta adımı tanımlanmamış",
   "blocker.steps_invalid": "Bir adımın şablonu artık kullanılamıyor",
@@ -1074,7 +1074,8 @@ export const tr = {
   "blocker.hint.sender_profile_incomplete":
     "Ayarlar'dan firma adı, adres ve iletişim bilgilerini doldurun.",
   "blocker.hint.mailbox_missing": "Sihirbazın ilk adımında bir gönderen posta kutusu seçin.",
-  "blocker.hint.live_disabled": "Bu sürümde yalnızca demo posta kutusu kullanılabilir.",
+  "blocker.hint.live_disabled":
+    "Demo posta kutusunu veya gönderim izni verilmiş bağlı bir Gmail kutusunu seçin.",
   "blocker.hint.mailbox_not_ready": "Posta kutusu kullanıma hazır olunca yeniden deneyin.",
   "blocker.hint.steps_missing": "E-posta adımları sayfasında en az bir ilk e-posta şablonu seçin.",
   "blocker.hint.steps_invalid":
@@ -1136,6 +1137,8 @@ export const tr = {
   "reason.unsubscribe_unavailable": "Doğrulanmış çıkış bağlantısı hazırlanamadı",
   "reason.unsubscribe_drain_unhealthy":
     "Çıkış talepleri çekilmiyor (çekme kapalı veya son 24 saatte sağlıklı kayıt yok); gönderim ertelendi",
+  "reason.dns_not_verified":
+    'Gönderen alan adının DNS denetimi (SPF/DKIM/DMARC) taze değil veya geçmedi; Günlük → Gönderim sağlığı → "Kontrol et". Gönderim ertelendi',
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
@@ -1325,11 +1328,11 @@ export const tr = {
   "policy.strictest": "En kısıtlayıcı",
   "policy.error.conflict":
     "Politika aynı anda değiştirilmiş. Güncel hâli yüklendi; yeniden deneyin.",
-  "policy.live.title": "Gerçek gönderim politikaları (kilitli)",
+  "policy.live.title": "Gerçek gönderim politikaları (uygulamada değiştirilemez)",
   "policy.live.on": "Açık",
   "policy.live.off": "Kapalı",
   "policy.live.body":
-    "Gerçek e-posta gönderimi bu sürümde kapalıdır; bütün ülkeler engelli ve kilitlidir. Bu satırlar yalnızca bilgi içindir, değiştirilemez.",
+    "Gerçek gönderim kapısı bu sürümde açıktır, ancak ülkeler engelli ve kilitli başlar. Bir ülkenin kilidi yalnızca şirket sahibinin çalıştırdığı canlı ülke onay betiğiyle açılır; kilitli ülkeye hiçbir ileti gönderilmez. Bu satırlar uygulama içinden değiştirilemez.",
 
   "supReason.unsubscribe": "Çıkış talebi",
   "supReason.bounce_hard": "Kalıcı teslimat hatası",
@@ -1508,7 +1511,8 @@ export const tr = {
   "audit.empty": "Kayıt yok",
   "audit.col.action": "İşlem",
   "audit.col.detail": "Ayrıntı",
-  "health.demoNote": "Demo: gerçek e-posta gönderimi kapalıdır.",
+  "health.demoNote":
+    "Demo posta kutusunun iletileri hiçbir alıcıya ulaşmaz; gerçek iletiler yalnızca gönderim izni verilmiş Gmail kutusundan gider.",
   "health.autostop.title": "Otomatik durdurma",
   "health.autostop.help":
     "Bir kampanyada doğrulanmış kalıcı teslim hatası oranı eşiği aşarsa kampanya duraklatılır. Eşikler yalnızca sıkılaştırılabilir (durdurma daha kolay tetiklenir).",
@@ -1630,7 +1634,7 @@ export const tr = {
     "Şu an: %{rate} üzeri, en az {recipients} alıcıda; daha azında {guard} doğrulanmış hata.",
   "ready.title": "Canlı gönderime hazırlık",
   "ready.help":
-    "Gerçek gönderim kapalıdır ve bu ekrandan açılamaz. Maddeler gerçek duruma bakılarak hesaplanır; hiçbiri varsayımla tamamlanmış sayılmaz.",
+    "Kod kapıları bu sürümde açıktır; yine de Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi tamamlanmadan gerçek ileti gönderilmez. Bu ekran hiçbir şeyi açmaz; maddeler gerçek duruma bakılarak hesaplanır, hiçbiri varsayımla tamamlanmış sayılmaz.",
   "ready.summary": "{blocked} engel, {unknown} doğrulanmamış madde",
   "ready.status.ok": "Tamam",
   "ready.status.blocked": "Engel var",
@@ -1639,7 +1643,7 @@ export const tr = {
   "ready.owner.company": "Şirket",
   "ready.owner.legal": "Hukuk",
   "ready.owner.external": "Dış hesap/hizmet",
-  "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda kapalı)",
+  "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda sabit)",
   "ready.item.consent": "Kullanım onayı",
   "ready.item.company_profile": "Gönderen firma profili",
   "ready.item.inbox_access":
@@ -1647,21 +1651,20 @@ export const tr = {
   "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
   "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı; son denetim sonucu)",
   "ready.item.inbox_sync": "Gelen kutusu okuması çalışıyor (son başarılı eşitleme)",
-  "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda kapalı)",
+  "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda sabit)",
   "ready.item.inbox_header_trust":
     "Gmail başlık güven kilidi (gerçek hesapla doğrulanana kadar kapalı)",
   "ready.item.event_delivery":
     "Çıkış olaylarının dayanıklı teslimatı (çekme açık, son 24 saatte sağlıklı kuyruk kaydı, imzalı kanal)",
   "ready.item.https_unsubscribe":
     "Genel HTTPS tek tıklamalı çıkış uç noktası (uçtan uca doğrulanmış)",
-  "ready.item.live_country_policies": "Canlı ülke politikaları (kilitli)",
-  "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi) onayı",
-  "ready.item.legal_uyum": "UYUM belgesinin hukuk onayı",
-  "ready.item.legal_live_countries": "Canlı ülke politikası kilidi için yazılı hukuki onay",
-  "ready.item.legal_erasure_records":
-    "Gönderilmiş ileti kayıtlarının silinmesi: hukuki değerlendirme",
-  "ready.item.legal_suppression_hash":
-    "Engel listesinde e-posta özetinin saklanması: hukuki dayanak",
+  "ready.item.live_country_policies":
+    "Canlı ülke politikaları (en az bir ülkenin kilidi sahip onay betiğiyle açıldı)",
+  "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi): sahip kararı",
+  "ready.item.legal_uyum": "UYUM belgesi: sahip kararı",
+  "ready.item.legal_live_countries": "Canlı ülke kilidini açma yetkisi: sahip kararı",
+  "ready.item.legal_erasure_records": "Gönderilmiş ileti kayıtlarının silinmesi: sahip kararı",
+  "ready.item.legal_suppression_hash": "Engel listesinde e-posta özetinin saklanması: sahip kararı",
   "ready.item.pilot": "Pilot (günde en çok 20 e-posta, ilk hafta)",
   "erasure.title": "Kişisel veri silme talebi",
   "erasure.help":
@@ -1682,7 +1685,7 @@ export const tr = {
   "erasure.pending.body":
     "Gerçek bir posta kutusundan fiilen iletilmiş {messages} ileti ve {sequences} dizi kaydı yasal saklama yükümlülükleriyle çakışabilir. Hukuki değerlendirme tamamlanana kadar bu kayıtlar korunur; iletişim yine de durdurulur.",
   "erasure.legal.suppression":
-    "Silme sonrası yeniden iletişimi önlemek için e-posta özeti ve alan adı engel listesinde saklanır. Bu saklamanın hukuki dayanağı henüz onaylanmadı (hukuki değerlendirme bekliyor).",
+    "Silme sonrası yeniden iletişimi önlemek için e-posta özeti ve alan adı engel listesinde saklanır. Bu saklama şirket sahibinin kararıdır; dış hukuki inceleme yapılmadı.",
   "erasure.backup":
     "Yedekler: şema güncellemesi öncesi alınan en çok 5 yedek dosyası eski veriyi taşıyabilir. Bu işlem onları değiştirmez; döngüde silinene kadar kalırlar.",
   "erasure.exists": "Bu adres için silme kaydı zaten var.",
@@ -1704,16 +1707,16 @@ export const tr = {
   "company.trHint":
     "Bu iki alan isteğe bağlıdır ve yalnızca Türkiye'ye yönelik iletilerin alt bilgisine eklenir. Gerekliliği hukuki değerlendirmeye bağlıdır; boş bırakmak hiçbir gönderimi engellemez.",
   "preflight.advisory.tr_identifiers_missing":
-    "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu bilgilerin gerekliliği hukuki değerlendirme bekliyor; gönderim engellenmez (gerçek gönderim zaten kapalıdır).",
+    "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu alanlar isteğe bağlıdır (sahip kararı); gönderim engellenmez.",
   "ready.item.legal_tr_identifiers":
-    "Türkiye için MERSİS/ticaret sicil zorunluluk kuralı: hukuki değerlendirme",
+    "Türkiye için MERSİS/ticaret sicil kuralı: sahip kararı (alanlar isteğe bağlı)",
 
   "settings.nav.mailbox": "Gönderim hesabı",
   "mbx.title": "Gönderim hesabı (Gmail)",
   "mbx.desc":
     "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlar, kutuyu Google izin ekranıyla Gmail'e bağlarsınız (gönderim izni; isteğe bağlı gelen kutusu okuma izni).",
   "mbx.note":
-    "Gerçek e-posta gönderimi ve gelen kutusu okuma bu sürümde kodda kapalıdır; Gmail bağlansa bile kilitler açılana kadar hiçbir ileti gönderilmez. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
+    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır. Gmail bağlamak tek başına ileti göndermez: gönderim izni, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
   "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
   "mbx.status.connected": "Bağlı",
   "mbx.status.disabled": "Devre dışı",
@@ -1760,7 +1763,7 @@ export const tr = {
   "mbx.oauth.read.enable": "Gelen kutusu okumayı etkinleştir",
   "mbx.oauth.read.title": "Gelen kutusu okuma izni istensin mi?",
   "mbx.oauth.read.body":
-    "Bounce ve yanıt tespiti için Google'dan “gmail.readonly” izni istenir. Bu izin posta kutunuzdaki tüm iletileri okuma yetkisi verir (kısıtlı kapsam). Yalnızca gerekiyorsa verin; gönderim izni bundan bağımsızdır. Gerçek gönderim bu sürümde kapalıdır.",
+    "Bounce ve yanıt tespiti için Google'dan “gmail.readonly” izni istenir. Bu izin posta kutunuzdaki tüm iletileri okuma yetkisi verir (kısıtlı kapsam). Yalnızca gerekiyorsa verin; gönderim izni bundan bağımsızdır.",
   "mbx.oauth.read.confirm": "İzni iste",
   "mbx.oauth.disconnect": "Bağlantıyı kes",
   "mbx.oauth.disconnect.title": "Gmail bağlantısı kesilsin mi?",

@@ -23,10 +23,11 @@ import { activeMaintenance } from "../src/lib/db/maintenance";
  *   2) Uygulama (aynı değerler + --apply):
  *        npx tsx scripts/approve-live-country.ts --db <dosya> ... --apply
  *
- * Uygulama `LEGAL_APPROVALS.liveCountryPolicies` (kodda sabit, yazılı hukuki onay) `true` değilse REDDEDİLİR; hedef
+ * Uygulama `LEGAL_APPROVALS.liveCountryPolicies` (kodda sabit; bu sürümde sahip kararıyla `true`) değilse REDDEDİLİR; hedef
  * değerler veritabanı CHECK kısıtlarına uymuyorsa, satır yoksa veya zaten açılmışsa da reddedilir. Bütün ülkeler ve
  * denetim kayıtları (`country_policy.live_approved`) tek işlemde yazılır. Satırların açılması tek başına gerçek
- * gönderim DEĞİLDİR: `LIVE_SENDING_ENABLED` ve bütün hukuki onaylar ayrıca gerekir.
+ * gönderim DEĞİLDİR: kod kapıları ve çalışma anı hazırlığı (Gmail, DNS, HTTPS çıkış, çekme) ayrıca gerekir. Bu betiği
+ * yalnızca şirket sahibi, kendine test ve canlı hazırlık tamamlandıktan sonra çalıştırır (docs/10).
  */
 
 function arg(name: string): string | undefined {

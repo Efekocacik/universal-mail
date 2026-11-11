@@ -2,7 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 /**
  * Şablon editörü ve uyum yönetimi (Aşama 12) uçtan uca: demo, geçici veri klasörü, ağa çıkılmaz. Testler sırayla
- * çalışır ve durumu paylaşır. Gerçek gönderim kapalıdır; bu senaryo hiçbir ileti göndermez.
+ * çalışır ve durumu paylaşır. Gerçek gönderim kapısı kodda açıktır, ancak bağlı Gmail kutusu yoktur ve ülkeler kilitlidir;
+ * bu senaryo hiçbir ileti göndermez.
  */
 test.describe.configure({ mode: "serial" });
 
@@ -247,14 +248,15 @@ test("ülke politikası: yalnızca sıkılaştırılır; gevşetme ve gerçek g�
   });
   expect(live.status()).toBe(400);
   const policies = await api.get("/api/compliance/policies");
-  expect(policies.liveSendingEnabled).toBe(false);
+  expect(policies.liveSendingEnabled).toBe(true);
   expect(
     (policies.live as { mode: string; locked: boolean }[]).every(
       (p) => p.mode === "blocked" && p.locked,
     ),
   ).toBe(true);
-  await page.getByText("Gerçek gönderim politikaları (kilitli)").click();
-  await expect(page.getByText(/Gerçek e-posta gönderimi bu sürümde kapalıdır/)).toBeVisible();
+  await page.getByText("Gerçek gönderim politikaları (uygulamada değiştirilemez)").click();
+  await expect(page.getByText(/Gerçek gönderim kapısı bu sürümde açıktır/)).toBeVisible();
+  await expect(page.getByText(/kilitli ülkeye hiçbir ileti gönderilmez/)).toBeVisible();
 });
 
 test("engel listesi: ekle (maskeli görünüm), kaldır (gerekçeyle), korumalı kayıt kaldırılamaz", async () => {

@@ -15,14 +15,16 @@ import { isPolicyMode, normalizeCountryCode, POLICY_MODES } from "./policies";
  *
  * GÜVENLİK:
  * - Varsayılan işlem PLAN'dır: hiçbir şeyi değiştirmez.
- * - Uygulama, `LEGAL_APPROVALS.liveCountryPolicies` (yazılı hukuki onay; kodda sabit) `true` değilse REDDEDİLİR. Bu
- *   sürümde `false` olduğundan betik hiçbir canlı satırı açamaz.
+ * - Uygulama, `LEGAL_APPROVALS.liveCountryPolicies` (kodda sabit) `true` değilse REDDEDİLİR. Bu sürümde sahip kararıyla
+ *   `true`'dur (11 Kasım 2026, dış hukuki inceleme yok): ülke kilidini açan SON adım bu betiğin sahip tarafından
+ *   çalıştırılmasıdır.
  * - Hedef değerler veritabanı CHECK kısıtlarına (`country_policies_*_ck`) uymuyorsa yazmadan reddedilir; uysa bile
  *   veritabanı aynı kısıtları yeniden uygular.
  * - Yalnızca KİLİTLİ ve `blocked` canlı satırlar açılır; zaten açılmış bir satırın onayı sessizce ÜZERİNE YAZILMAZ.
  * - Bütün ülkeler ve denetim kayıtları TEK işlemde yazılır: ya hepsi kalıcı olur ya da hiçbiri.
- * - Satırların açılması tek başına gerçek gönderim DEĞİLDİR: `LIVE_SENDING_ENABLED` kapalıyken çözümleyici canlı
- *   kapsamı yine `blocked` döndürür (`resolveCountryPolicy`) ve gönderim yolu `isLiveSendingPermitted()` ister.
+ * - Satırların açılması tek başına gerçek gönderim DEĞİLDİR: `LIVE_SENDING_ENABLED` kapalı olsaydı çözümleyici canlı
+ *   kapsamı yine `blocked` döndürürdü (`resolveCountryPolicy`); gönderim yolu ayrıca `isLiveSendingPermitted()`, bağlı
+ *   Gmail kutusu, DNS, doğrulanmış HTTPS çıkış uç noktası ve sağlıklı çıkış çekme işi ister.
  */
 
 export class LiveCountryApprovalError extends Error {

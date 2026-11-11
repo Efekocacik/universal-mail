@@ -293,7 +293,7 @@ describe("kampanyaya ekleme uygunluğu", () => {
     });
   });
 
-  it("aynı lead gerçek bir posta kutusuyla live kapsamında engellenir", async () => {
+  it("aynı lead gerçek bir posta kutusuyla live kapsamında engellenir (kapı açık: ülke kilidi ve gönderim izni)", async () => {
     const [mb] = await db
       .insert(mailboxes)
       .values({
@@ -311,8 +311,9 @@ describe("kampanyaya ekleme uygunluğu", () => {
     const r = await evaluateEnrollment(db, { campaignId, leadId: lead.leadId }, { now: T0 });
     expect(r.scope).toBe("live");
     expect(r.eligible).toBe(false);
-    expect(codes(r)).toEqual(["country_blocked", "live_sending_disabled"]);
-    expect(reason(r, "country_blocked")?.detail).toBe("live_disabled");
+    expect(codes(r)).toEqual(["country_blocked", "mailbox_not_ready"]);
+    expect(reason(r, "country_blocked")?.detail).toBe("locked");
+    expect(reason(r, "mailbox_not_ready")?.detail).toBe("send_grant_missing");
   });
 
   it("onay ve gönderen profili zorunlu", async () => {
@@ -840,7 +841,7 @@ describe("gönderim öncesi uygunluk", () => {
       await db.update(campaigns).set({ mailboxId: mb!.id }).where(eq(campaigns.id, campaignId));
       const r = await evaluateSend(db, { campaignLeadId: cl, stepIndex: 0 }, { now: T0 });
       expect(r.scope).toBe("live");
-      expect(codes(r)).toEqual(["country_blocked", "live_sending_disabled", "mailbox_not_ready"]);
+      expect(codes(r)).toEqual(["country_blocked", "mailbox_not_ready"]);
     });
 
     it("lead e-postası değişti, silindi veya alıcı silme talebiyle kaldırıldı", async () => {

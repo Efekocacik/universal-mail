@@ -28,7 +28,7 @@ import { getSetting } from "@/lib/settings";
  *    Veritabanına, denetim kaydına, günlüğe veya hata iletisine belirteç/sır/yanıt gövdesi yazılmaz.
  *  - AĞ: yalnızca Google'ın üç sabit ucu. Uçlar çevre değişkeniyle DEĞİŞTİRİLEMEZ; test için enjeksiyon yalnızca
  *    `NODE_ENV=test` iken kabul edilir. Hiçbir işlem kullanıcı eylemi olmadan ağa çıkmaz.
- *  - Gerçek gönderim `LIVE_SENDING_ENABLED=false` ile kapalıdır; bu modül iletiyi göndermez ve kapıyı açmaz.
+ *  - Bu modül iletiyi göndermez ve hiçbir kapıyı açmaz (gönderim kapısı `isLiveSendingPermitted`, ayrıca denetlenir).
  */
 
 export const GMAIL_SCOPES = {

@@ -21,6 +21,7 @@ import {
 } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import { evaluateDrainGate } from "@/lib/unsubscribe/delivery-alert";
+import { evaluateDnsReadiness } from "./dns-store";
 import { EndpointError, prepareLiveUnsubscribe } from "@/lib/unsubscribe/endpoint";
 import { getLiveProvider } from "./gmail/provider";
 import { mailboxSendBlock } from "./mailbox-health";
@@ -56,10 +57,12 @@ import { composeEmail, type ComposeIssue } from "./template-service";
  *    GÖNDERİLMEZ: yalnızca kayıt yeniden denenir (`retryPendingRecord`); olmazsa kayıt `sending` kalır ve uzlaştırma
  *    onu `unknown` yapar.
  *
- * Gerçek gönderim kapalıdır (`LIVE_SENDING_ENABLED`): kapalıyken yalnızca demo posta kutusu ve demo sağlayıcısı çalışır;
- * canlı kapsamdaki kutu ilk kapıda `provider_unavailable` ile durur. Canlı yol (kapı açılırsa) şunları ZORUNLU kılar:
- * uygunluk/ülke politikası, doğrulanmış HTTPS çıkış uç noktası ve iletiye özgü imzalı çıkış bağlantısı
- * (`unsubscribe_unavailable`), Gmail sağlayıcısının kendi kapıları. Ham ileti kalıcı saklanmaz.
+ * Canlı gönderim kapısı (`isLiveSendingPermitted`) kapalıyken yalnızca demo posta kutusu ve demo sağlayıcısı çalışır;
+ * canlı kapsamdaki kutu ilk kapıda `provider_unavailable` ile durur. Kapı açıkken canlı yol şunları ÇALIŞMA ANINDA
+ * ZORUNLU kılar: uygunluk/kilidi açılmış canlı ülke politikası, doğrulanmış HTTPS çıkış uç noktası ve iletiye özgü
+ * imzalı çıkış bağlantısı (`unsubscribe_unavailable`), sağlıklı çıkış çekme işi (`unsubscribe_drain_unhealthy`),
+ * kutunun alan adı için taze ve üçü de geçen DNS denetimi (`dns_not_verified`), Gmail sağlayıcısının kendi kapıları
+ * (bağlı kutu, `gmail.send`). Ham ileti kalıcı saklanmaz.
  */
 
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
@@ -72,6 +75,8 @@ export const STALE_SENDING_MS = 10 * 60_000;
 export const MAX_PROVIDER_TIMEOUT_MS = STALE_SENDING_MS / 2;
 /** Çekme kapısı kapalıyken (`unsubscribe_drain_unhealthy`) dizinin yeniden deneneceği süre. */
 export const DRAIN_GATE_RETRY_MS = 15 * 60_000;
+/** DNS kapısı kapalıyken (`dns_not_verified`) dizinin yeniden deneneceği süre. */
+export const DNS_GATE_RETRY_MS = 15 * 60_000;
 
 export type NotSendableCode =
   | "provider_unavailable"
@@ -92,7 +97,12 @@ export type NotSendableCode =
    * Canlı ileti: çıkış talepleri çekilmiyor (çekme işi kapalı, son sağlık kaydı kötü ya da 24 saatten eski).
    * Gönderim YOK; dizi ERTELENİR (dışlanmaz, başarısız sayılmaz). `detail`: `DrainGateCode`.
    */
-  | "unsubscribe_drain_unhealthy";
+  | "unsubscribe_drain_unhealthy"
+  /**
+   * Canlı ileti: kutunun alan adı için taze (30 gün) ve SPF/DKIM/DMARC üçü de `pass` olan saklı bir DNS denetimi yok
+   * (hiç denetlenmedi, bayat, uyarı veya hata). Gönderim YOK; dizi ERTELENİR. `detail`: `unknown` | `blocked`.
+   */
+  | "dns_not_verified";
 
 /** Gönderim kaydı yazılamadığında yeniden denemek için gereken asgari bilgi (ham ileti ve alıcı İÇERMEZ). */
 export interface PendingRecord {
@@ -273,6 +283,17 @@ export async function sendCampaignStep(
             code: "unsubscribe_drain_unhealthy",
             detail: drain.code,
             retryAt: now + DRAIN_GATE_RETRY_MS,
+          });
+        }
+        // Gönderen alan adının kimlik doğrulaması (SPF/DKIM/DMARC): yalnızca kullanıcının "Kontrol et" ile kaydettiği
+        // taze ve üçü de geçen sonuç kabul edilir (hazırlık ekranındaki `dns_auth` maddesiyle aynı ölçüt). Ağ yok.
+        const dns = await evaluateDnsReadiness(tx, [mailbox], now);
+        if (dns !== "ok") {
+          throw new Abort({
+            outcome: "not_sendable",
+            code: "dns_not_verified",
+            detail: dns,
+            retryAt: now + DNS_GATE_RETRY_MS,
           });
         }
       }

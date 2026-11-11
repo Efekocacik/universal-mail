@@ -26,7 +26,7 @@ import { bumpUpdatedAt, CampaignError } from "./errors";
  * - Ayarlar, adımlar ve posta kutusu yalnızca `draft` durumunda değiştirilebilir.
  * - Eşzamanlı düzenlemeler `updated_at` iyimser kilidiyle yakalanır (bkz. `bumpUpdatedAt`).
  * - Bağlı DEMO posta kutusu her zaman atanabilir. Gmail posta kutusu YALNIZCA canlı gönderim kapısı
- *   (`isLiveSendingPermitted`) açıkken ve kutu gönderim izniyle bağlıyken atanabilir; kapı bu sürümde kapalıdır.
+ *   (`isLiveSendingPermitted`) açıkken ve kutu gönderim izniyle bağlıyken atanabilir; kapı bu sürümde açıktır.
  */
 
 export const MAX_STEPS = 3;
@@ -66,7 +66,7 @@ export async function assertSendableMailbox(db: DbExecutor, mailboxId: number): 
   if (live && (mb.provider !== "gmail" || !isLiveSendingPermitted())) {
     throw new CampaignError(
       "live_disabled",
-      "Gerçek posta kutusuyla gönderim bu sürümde kapalıdır; yalnızca demo posta kutusu kullanılabilir.",
+      "Bu posta kutusuyla gerçek gönderim yapılamaz; demo posta kutusunu veya gönderim izni verilmiş bağlı bir Gmail kutusunu seçin.",
     );
   }
   if (mb.status !== "connected") {

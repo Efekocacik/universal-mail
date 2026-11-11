@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addLeadsToCampaign,
   listCampaignQueue,
@@ -48,7 +48,24 @@ import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fix
 /**
  * Aşama 10: kampanya yönetimi servisleri, durum geçişleri, dağıtıcıyla yarışlar ve demo temizliği.
  * Veritabanı BELLEKTE; gerçek gönderim yok, `.data` kullanılmaz, Google verisi yok.
+ *
+ * Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler). Kapı kapalıyken korunması gereken davranışı (demo bayrağı
+ * olmadan zamanlayıcı engeli, gerçek kutunun atanamaması) sınamak için kapı YALNIZCA test içinde, `gate.closed` ile
+ * geçici olarak kapatılabilir; varsayılan olarak gerçek kapı kullanılır.
  */
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
+async function withGateClosed<T>(fn: () => Promise<T>): Promise<T> {
+  gate.closed = true;
+  try {
+    return await fn();
+  } finally {
+    gate.closed = false;
+  }
+}
 
 let client: Client;
 let db: Db;
@@ -251,7 +268,7 @@ describe("kampanya oluşturma ve düzenleme", () => {
     expect(await listCampaigns(db, { status: "running" })).toHaveLength(0);
   });
 
-  it("yalnızca bağlı demo posta kutusu atanabilir (gerçek gönderim kapalı)", async () => {
+  it("posta kutusu ataması: demo bağlıysa; Gmail yalnızca gönderim izniyle; kapı kapalıyken Gmail live_disabled", async () => {
     const [live] = await db
       .insert(mailboxes)
       .values({
@@ -264,7 +281,19 @@ describe("kampanya oluşturma ve düzenleme", () => {
         updatedAt: T0,
       })
       .returning({ id: mailboxes.id });
-    await expectError(createCampaign(db, { name: "X", mailboxId: live!.id }), "live_disabled");
+    // Kapı açık (bu sürüm): bağlı Gmail kutusu gönderim izni (`gmail.send`) olmadan atanamaz.
+    await expectError(createCampaign(db, { name: "X", mailboxId: live!.id }), "invalid_input");
+    await withGateClosed(() =>
+      expectError(createCampaign(db, { name: "X", mailboxId: live!.id }), "live_disabled"),
+    );
+    await setSetting(db, "mail.gmailGrants", {
+      [String(live!.id)]: { send: true, read: false, at: T0 },
+    });
+    const g = await createCampaign(db, { name: "Gerçek", mailboxId: live!.id }, { now: T0 });
+    expect((await getCampaign(db, g.id)).mailboxId).toBe(live!.id);
+    await withGateClosed(() =>
+      expectError(createCampaign(db, { name: "X", mailboxId: live!.id }), "live_disabled"),
+    );
     await expectError(createCampaign(db, { name: "X", mailboxId: 999 }), "not_found");
     await db.update(mailboxes).set({ status: "disabled" }).where(eq(mailboxes.id, DEMO_MAILBOX));
     await expectError(createCampaign(db, { name: "X", mailboxId: DEMO_MAILBOX }), "invalid_input");
@@ -452,11 +481,14 @@ describe("başlatma öncesi denetim (preflight)", () => {
     expect(after).toBe(before);
   });
 
-  it("engeller: bayrak kapalı, onay ve profil eksik, adım yok", async () => {
+  it("engeller: bayrak ve kapı kapalı, onay ve profil eksik, adım yok", async () => {
     const { id } = await readyCampaign();
-    expect((await runPreflight(db, id, { now: T0, env: OFF })).blockers).toEqual([
-      "scheduler_disabled",
-    ]);
+    // Canlı kapı açıkken (bu sürüm) zamanlayıcı demo bayrağı olmadan da açıktır: engel yok.
+    expect((await runPreflight(db, id, { now: T0, env: OFF })).blockers).toEqual([]);
+    // Kapı kapalı olsaydı demo bayrağı gerekirdi.
+    expect(
+      (await withGateClosed(() => runPreflight(db, id, { now: T0, env: OFF }))).blockers,
+    ).toEqual(["scheduler_disabled"]);
     await client.execute("DELETE FROM settings WHERE key IN ('consent', 'company.profile')");
     await client.execute(`DELETE FROM campaign_steps WHERE campaign_id = ${id}`);
     const pf = await runPreflight(db, id, { now: T0, env: ON });
@@ -525,12 +557,14 @@ describe("durum geçişleri", () => {
     );
   });
 
-  it("başlatma: bayrak kapalıysa reddedilir; açıkken diziler zamanlanır ve dağıtım işi kurulur", async () => {
+  it("başlatma: zamanlayıcı kapalıysa (bayrak ve kapı kapalı) reddedilir; açıkken diziler zamanlanır ve dağıtım işi kurulur", async () => {
     const { id } = await readyCampaign({ leads: 3 });
     const pf = await runPreflight(db, id, { now: T0, env: ON });
-    await expectError(
-      transitionCampaign(db, id, "start", { now: T0, env: OFF, confirmToken: pf.confirmToken }),
-      "scheduler_disabled",
+    await withGateClosed(() =>
+      expectError(
+        transitionCampaign(db, id, "start", { now: T0, env: OFF, confirmToken: pf.confirmToken }),
+        "scheduler_disabled",
+      ),
     );
     expect((await campaignRow(id)).status).toBe("ready");
 
@@ -577,9 +611,11 @@ describe("durum geçişleri", () => {
       "preflight_failed",
     );
     await setSetting(db, "consent", { version: "t", acceptedAt: T0, name: "Test" });
-    await expectError(
-      transitionCampaign(db, id, "resume", { now: T0, env: OFF }),
-      "scheduler_disabled",
+    await withGateClosed(() =>
+      expectError(
+        transitionCampaign(db, id, "resume", { now: T0, env: OFF }),
+        "scheduler_disabled",
+      ),
     );
     expect((await transitionCampaign(db, id, "resume", { now: T0, env: ON })).status).toBe(
       "running",

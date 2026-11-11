@@ -35,6 +35,7 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { recordPassingDns } from "./helpers/dns-fixture";
 import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 // Bu dosyada YALNIZCA test içinde: canlı kilit "açık" ve uygunluk denetimi "uygun" varsayılır, böylece canlı yolun
@@ -136,6 +137,7 @@ async function verifiedEndpoint() {
   });
   expect(r.ok).toBe(true);
   await enableHealthyDrain(db, T0);
+  await recordPassingDns(db, gid, T0);
 }
 
 async function liveSequence() {

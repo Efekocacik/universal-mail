@@ -1,6 +1,6 @@
 # Faz 3 — Şablonlar, Kampanya, Gönderim, Uyum: Uygulama Notları
 
-**Durum (11 Kasım 2026): Demo geliştirmeleri ve canlı entegrasyonun yazılım hazırlığı tamamlandı; Faz 3 canlı doğrulama, hukuki onaylar ve pilot bekliyor.** Faz 3'ün 14 demo aşaması ve 8 canlı hazırlık aşaması (15.1–15.8) `feat/faz-3` dalında kodlandı; her aşamanın CI sonucu GitHub üzerinde yeşil doğrulandı (son kod aşaması: `e30d0e9`). **Faz 3 resmi olarak KAPANMADI:** gerçek Gmail hesabı, gerçek gelen kutusu, genel HTTPS çıkış uç noktası ve alan adı, gerçek DNS doğrulaması, hukuki onaylar, canlı ülke politikaları ve pilot kabulü yoktur (Bölüm 7–9). Gerçek e-posta gönderimi ve gerçek gelen kutusu okuma kodda **kapalıdır**; bu belge o kapıları açmaz.
+**Durum (11 Kasım 2026): Demo geliştirmeleri ve canlı entegrasyonun yazılım hazırlığı tamamlandı; Faz 3 canlı doğrulama, hukuki onaylar ve pilot bekliyor.** Faz 3'ün 14 demo aşaması ve 8 canlı hazırlık aşaması (15.1–15.8) `feat/faz-3` dalında kodlandı; her aşamanın CI sonucu GitHub üzerinde yeşil doğrulandı (son kod aşaması: `e30d0e9`). **Faz 3 resmi olarak KAPANMADI:** gerçek Gmail hesabı, gerçek gelen kutusu, genel HTTPS çıkış uç noktası ve alan adı, gerçek DNS doğrulaması, hukuki onaylar, canlı ülke politikaları ve pilot kabulü yoktur (Bölüm 7–9). Gerçek e-posta gönderimi ve gerçek gelen kutusu okuma kapıları **`release/live-gates` dalında sahip kararıyla açıldı** (11 Kasım 2026; Bölüm 3 "Kilitler"); ülke kilitleri ve Gmail başlık güveni kapalı kalır.
 
 > Bu belge yalnızca kod ve testlerle doğrulanmış olanı "yapıldı" diye yazar. Kısmi olan, sahte sunucu/simülasyonla çalışan veya gerçek hesap/alan adı/hukuki onay isteyen her şey açıkça işaretlidir. Gerçek ortam doğrulamaları ve kilidin hangi sırayla açılacağı: [`09-FAZ3-CANLI-DOGRULAMA.md`](09-FAZ3-CANLI-DOGRULAMA.md).
 
@@ -109,17 +109,20 @@ Bütün değiştiren çıkış altyapısı uçları kullanım onayı ister (`req
 
 **Şifreli gizli depo adları** (`secrets.json`; değerler SQLite'a, günlüğe veya denetime ASLA yazılmaz): `gmail.oauthClientSecret`, `gmail.refreshToken.<kutu>`, `unsubscribe.signingKey.<kid>`, `unsubscribe.channelKey.<kid>`. Erişim belirteci yalnızca bellektedir.
 
-**Kilitler (kodda sabit; kullanıcı beyanı, ayar veya ortam değişkeniyle AÇILAMAZ):**
+**Kilitler (kodda sabit; kullanıcı beyanı, ayar veya ortam değişkeniyle değiştirilemez).** `release/live-gates` sürümünde (sahip kararı, 11 Kasım 2026; **dış hukuki inceleme yapılmadı, hukuki sorumluluk şirkettedir**) değerler:
 
-| Sabit | Değer | Engellediği |
+| Sabit | Değer | Etkisi |
 |---|---|---|
-| `LIVE_SENDING_ENABLED` (`policies.ts`) | `false` | Gerçek gönderim |
-| `LIVE_INBOX_READING_ENABLED` (`policies.ts`) | `false` | Gerçek gelen kutusu okuma |
-| `GMAIL_HEADER_TRUST_VERIFIED` (`policies.ts`) | `false` | Gmail başlıklarından tasdik üretme (Bölüm 5) |
-| `LEGAL_APPROVALS` (`legal-status.ts`) | 7 madde, hepsi `false` | Gönderim yolu (birleşik kapı) ve hazırlık ekranı |
-| `isLiveSendingPermitted()` (`live-gate.ts`) | bayrak VE tüm onaylar | Uygunluk, gönderim, ileti kurucusu, içerik, Gmail sağlayıcısı |
+| `LIVE_SENDING_ENABLED` (`policies.ts`) | **`true`** | Gerçek gönderim kod kapısı açık |
+| `LIVE_INBOX_READING_ENABLED` (`policies.ts`) | **`true`** | Okuma izni verilmiş Gmail kutuları okunur |
+| `GMAIL_HEADER_TRUST_VERIFIED` (`policies.ts`) | `false` (**kapalı kalır**) | Gmail başlıkları tasdik üretmez: gelen iletiler `no_attestation` ile saklanır, otomatik suppression/durdurma yok (Bölüm 5; docs/09 1.3) |
+| `LEGAL_APPROVALS` (`legal-status.ts`) | 7 madde, **hepsi `true`** (sahip kararı) | Birleşik kapı ve hazırlık maddeleri; silmede gönderim kayıtları hemen temizlenir |
+| `isLiveSendingPermitted()` (`live-gate.ts`) | bayrak VE tüm onaylar → **`true`** | Uygunluk, gönderim, ileti kurucusu, içerik, Gmail sağlayıcısı |
+| Canlı ülke politikaları (`country_policies`, `scope=live`) | hepsi engelli ve kilitli | Kilit yalnızca sürüm dışı `scripts/approve-live-country.ts` ile, kendime test gönderiminden sonra sahip tarafından açılır |
 
-**İş türleri ve ortam bayrakları (hepsi varsayılan KAPALI; yalnızca E2E sunucusunda `e2e/serve.mjs` demo bayrakları açıktır):** `mail.send` (`FAZ3_DEMO_SCHEDULER_ENABLED` VEYA canlı gönderim kapısı `isLiveSendingPermitted()`; kapı bugün kapalı), `inbox.sync` (`FAZ3_DEMO_INBOX_ENABLED` VEYA `LIVE_INBOX_READING_ENABLED`; kilit bugün kapalı), `unsubscribe.drain` (`UM_UNSUBSCRIBE_DRAIN_ENABLED` ortam bayrağı VEYA Ayarlar'daki "Talepleri düzenli çek" ayarı (`mail.unsubscribeDrain`), ve yapılandırılmış çıkış adresi; worker zinciri her 10 dakikada bir idempotent olarak yeniden kurar).
+**Kapı açıkken de gönderim anında aranan çalışma zamanı koşulları** (biri eksikse ileti gitmez): kutu bağlı (`connected`) ve gönderim izinli (`mail.gmailGrants[id].send`, yoksa uygunlukta `mailbox_not_ready`/`send_grant_missing`); taze (30 gün) ve üç denetimi de `pass` olan DNS raporu (`dns_not_verified`, 15 dk erteleme; DMARC `p=none` yetmez); doğrulanmış HTTPS çıkış uç noktası (`unsubscribe_unavailable`, kampanya duraklar); sağlıklı çıkış talebi çekme (`unsubscribe_drain_unhealthy`, 15 dk erteleme); alıcının ülkesinin canlı kilidinin açık olması (`country_blocked`, dizi dışlanır). Kanıt: `tests/live-gates-open.test.ts`. Kapalı kapı davranışı testlerde kapı geçici kapatılarak korunur.
+
+**İş türleri ve ortam bayrakları (hepsi varsayılan KAPALI; yalnızca E2E sunucusunda `e2e/serve.mjs` demo bayrakları açıktır):** `mail.send` (`FAZ3_DEMO_SCHEDULER_ENABLED` VEYA canlı gönderim kapısı `isLiveSendingPermitted()`; `release/live-gates`'te kapı açık olduğundan zamanlayıcı her zaman çalışır), `inbox.sync` (`FAZ3_DEMO_INBOX_ENABLED` VEYA `LIVE_INBOX_READING_ENABLED`; `release/live-gates`'te açık), `unsubscribe.drain` (`UM_UNSUBSCRIBE_DRAIN_ENABLED` ortam bayrağı VEYA Ayarlar'daki "Talepleri düzenli çek" ayarı (`mail.unsubscribeDrain`), ve yapılandırılmış çıkış adresi; worker zinciri her 10 dakikada bir idempotent olarak yeniden kurar).
 
 **Ana anahtar değişimi (go-live C5):** Ana anahtar çözülemezse uygulama sessizce yenisini üretmez; engelleyici bir pencere açılır ("Uygulamayı kapat", "Tekrar dene", "Veri klasörünü göster", "Gizli bilgileri sıfırla…"); sıfırlama ikinci onay ister ve `master.key.enc` ile `secrets.json` dosyalarını `.bak-<zaman>` adıyla saklar. Anahtar değişince eski belirteçlerdeki alıcı etiketi tutmaz, ama **çıkış talebi kaybolmaz**: belirtecin işaret ettiği kampanya alıcısına çıkış uygulanır ve ayrıca `unsubscribe.recipient_tag_mismatch` denetim kaydı yazılır. Sıfırlamadan sonra imza ve kanal özel anahtarları okunamaz: ayar kartı bunu gösterir ("özel anahtar okunamıyor"), çekme işi `no_channel_key` sağlık kaydı yazar ve uyarı bandı çıkar; kullanıcı iki anahtarda da "Yeni anahtara geç" seçip anahtar dosyasını yeniden yüklemeli ve yeniden doğrulamalıdır (adımlar: docs/10 Bölüm 5).
 
@@ -134,7 +137,7 @@ Bütün değiştiren çıkış altyapısı uçları kullanım onayı ister (`req
 
 ## 5. Kararlar ve SRS'den sapmalar
 
-- **Gerçek gönderim kodda kapalı ve iki anahtarlı:** `LIVE_SENDING_ENABLED = false` ve `LEGAL_APPROVALS` içinde hepsi `false`. Gönderim yolu bunları BİRLİKTE denetler (`isLiveSendingPermitted`); bayrağın yanlışlıkla açılması hukuki onay olmadan gönderim doğurmaz. Canlı kapsamın bütün politikaları engelli ve kilitli; kilit yalnızca hukuki onayla yeni yazılım sürümünde açılır.
+- **Gerçek gönderim iki anahtarlı; `release/live-gates`'te ikisi de açık (sahip kararı):** `LIVE_SENDING_ENABLED = true` ve `LEGAL_APPROVALS` maddelerinin hepsi `true` (11 Kasım 2026; dış hukuki inceleme olmadan, sorumluluk şirkette). Gönderim yolu bunları BİRLİKTE denetler (`isLiveSendingPermitted`). Canlı kapsamın bütün politikaları yine engelli ve kilitli; kilit yalnızca sahibin çalıştırdığı onay betiğiyle ülke bazında açılır. Kapı açıkken gönderim anında ayrıca gönderim izni, DNS, HTTPS uç nokta, çekme sağlığı ve ülke kilidi aranır (Bölüm 3).
 - **Sağlayıcı sözleşmesi:** `MailProvider` (sonuç `accepted`/`rejected`/`unknown`; `unknown` asla otomatik tekrarlanmaz) ve `InboxReader`. Gerçek uygulamalar: Gmail bağdaştırıcıları (yalnızca sahte sunucularla sınanmış). **Gmail API birincil (SRS); SMTP alternatif olarak planlanmadı** — eklenirse yeni paket (`nodemailer`) için önce onay gerekir.
 - **Kademeli Gmail yetkisi:** varsayılan yalnızca `gmail.send` (+ `openid email`); `gmail.readonly` yalnızca ayrı, açık bir yükseltmeyle. `gmail.modify` veya tam erişim ASLA istenmez. Workspace yapılandırması (Dahili/Harici) varsayılmadı.
 - **Gönderimde sınıflandırma güvenliği (15.4):** kesin ret yalnızca Google'ın belgelenmiş hata zarfı (`error.code` HTTP durumuyla aynı + beklenen `status`/`reason`) doğrulanırsa; bozuk/eksik/beklenmeyen yanıt `unknown` sayılır ve **asla otomatik tekrar gönderilmez**. 401'de belirteç yenileme ve tek tekrar yalnızca Google'ın tanınan kimlik doğrulama hatasında.
@@ -203,7 +206,7 @@ Her girdinin uygulamada **nereye ve ne zaman** girildiği, gizli olup olmadığ�
 | `gmail.readonly` (gelen kutusu okuma) izni ve kısıtlı kapsam gerekliliklerinin netleşmesi | Bounce/yanıt/çıkış iletilerinin **otomatik** işlenmesi istenirse | Okuma izni olmadan bounce ve yanıtlar otomatik işlenemez; elle işleme gerekir. Kısıtlı kapsam doğrulaması gerekebilir (belirsiz) |
 | Gmail başlık güveninin gerçek hesapla doğrulanması için **şirket dışı, tek kullanımlık bir test Gmail hesabı** | Gelen kutusundan otomatik etki (suppression, dizi durdurma) açılacaksa | Başlık güven kilidi (`GMAIL_HEADER_TRUST_VERIFIED`) doğrulama olmadan açılmaz; açılmazsa tüm gelen iletiler yalnızca incelemeye düşer (güvenli ama elle iş) |
 | Çıkış aktarıcısı için **sunucu/barındırma** (kalıcı disk, TLS sertifikası, ters vekil) | HTTPS çıkış uç noktası kurulacaksa (yukarıdaki zorunlu girdinin gerçekleşmesi) | Aktarıcı ve dayanıklı kuyruk bir sunucuda çalışmalıdır; güç kesintisi dayanıklılığı gerçek POSIX diskinde sınanmalıdır. **Ücretli olabilir; sağlayıcı seçilmedi** |
-| MERSİS / ticaret sicil numaraları ve hukuki kural | Türkiye'ye gönderim yapılacaksa | Alanlar isteğe bağlı eklendi; TR için zorunlu olup olmadığı **hukuken belirlenmedi**, belirlenene kadar engel olmaz, canlı gönderim zaten kapalı |
+| MERSİS / ticaret sicil numaraları ve hukuki kural | Türkiye'ye gönderim yapılacaksa | Alanlar isteğe bağlı eklendi; TR için zorunlu olup olmadığı hukuken belirlenmedi; `trSenderIdentifierRules` sahip kararıyla `true`, alanlar isteğe bağlı ve engel değil |
 | Geri bildirim döngüsü (FBL/ARF) kayıtları ve rapor sağlayıcı alan adları | Şikâyet raporlarının otomatik işlenmesi istenirse | Yalnızca ilan edilmiş güvenilir rapor sağlayıcılarından gelen raporlar doğrulanabilir; liste boşken tüm raporlar incelemeye düşer. Hangi sağlayıcıların FBL sunduğu şirketin posta düzenine bağlıdır (bilinmiyor) |
 | Hukuki değerlendirme: yedeklerde kalan eski verinin durumu | Silme talepleri gerçek veriyle çalışmaya başladığında | Şema güncellemesi öncesi yedekler eski veriyi taşıyabilir |
 

@@ -29,6 +29,7 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { recordPassingDns } from "./helpers/dns-fixture";
 import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 /**
@@ -90,6 +91,8 @@ beforeEach(async () => {
   for (const k of Object.keys(gates.legal)) gates.legal[k] = true;
   gates.policy.mode = "allowed";
   gid = await addMailbox(db, { provider: "gmail", address: ADDRESS });
+  // Canlı kutu yalnızca `gmail.send` izni kayıtlıyken gönderebilir (uygunluk denetimi).
+  await setSetting(db, "mail.gmailGrants", { [String(gid)]: { send: true, read: false, at: T0 } });
   calls = 0;
   provider = {
     id: "gmail",
@@ -126,6 +129,7 @@ beforeEach(async () => {
   });
   expect(v.ok).toBe(true);
   await enableHealthyDrain(db, T0);
+  await recordPassingDns(db, gid, T0);
 });
 afterEach(() => {
   expect(globalFetch).not.toHaveBeenCalled(); // gerçek ağ isteği YOK

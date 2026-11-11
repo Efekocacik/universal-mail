@@ -26,6 +26,7 @@ import {
 } from "@/lib/db/schema";
 import { tr } from "@/lib/i18n/tr";
 import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
+import { setSetting } from "@/lib/settings";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
 
 /**
@@ -288,7 +289,7 @@ describe("reevaluateExcluded", () => {
     expect((await rowOf(id, b)).exclusionReasons).toContain("domain_already_in_campaign");
   });
 
-  it("canlı (Gmail) kampanyada kapılar kapalıyken hiçbir dizi pending olmaz", async () => {
+  it("canlı (Gmail) kampanyada canlı ülke kilitliyken hiçbir dizi pending olmaz (kapılar açık olsa bile)", async () => {
     const [live] = await db
       .insert(mailboxes)
       .values({
@@ -301,17 +302,20 @@ describe("reevaluateExcluded", () => {
         updatedAt: T0,
       })
       .returning({ id: mailboxes.id });
-    // Servis canlı kutuyu atamaz; geçmişten kalan durumu taklit etmek için doğrudan yazılır.
+    // Gönderim izni verilmiş bağlı Gmail kutusu: tek engel, sahip tarafından açılmamış canlı ülke kilididir.
+    await setSetting(db, "mail.gmailGrants", {
+      [String(live!.id)]: { send: true, read: false, at: T0 },
+    });
     const id = await draft();
     await db.update(campaigns).set({ mailboxId: live!.id }).where(eq(campaigns.id, id));
     const a = await lead();
     await addLeadsToCampaign(db, id, [a], { now: T0 });
-    expect((await rowOf(id, a)).exclusionReasons).toContain("live_sending_disabled");
+    expect((await rowOf(id, a)).exclusionReasons).toEqual(["country_blocked"]);
 
     const r = await reevaluateExcluded(db, id, { now: T0 + 1 });
     expect(r).toMatchObject({ reevaluated: 1, nowPending: 0, stillExcluded: 1 });
     expect(await rowOf(id, a)).toMatchObject({ status: "excluded", recipientEmail: null });
-    expect((await rowOf(id, a)).exclusionReasons).toContain("live_sending_disabled");
+    expect((await rowOf(id, a)).exclusionReasons).toEqual(["country_blocked"]);
     expect((await addLeadsToCampaign(db, id, [a], { now: T0 + 2 })).added).toBe(0);
   });
 

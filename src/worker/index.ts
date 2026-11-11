@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   bindEmailEvents();
   const db = await getDb();
   // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim
-  // kapısı (isLiveSendingPermitted; kodda sabit, bu sürümde kapalı) ile açılır. Kapalıyken veritabanına yazmaz.
+  // kapısı (isLiveSendingPermitted; kodda sabit, bu sürümde açık) ile açılır. Kapalıyken veritabanına yazmaz.
   const schedulerEnabled = isMailSchedulerEnabled(process.env);
   const inboxEnabled = isDemoInboxEnabled(process.env);
   registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });

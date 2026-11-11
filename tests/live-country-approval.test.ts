@@ -24,8 +24,9 @@ import * as schema from "@/lib/db/schema";
 import { auditLog, countryPolicies } from "@/lib/db/schema";
 import { MIGRATIONS, openMemoryDb, T0 } from "./helpers/campaign-fixture";
 
-// Hukuki onay nesnesi: varsayılan olarak GERÇEK değerler (hepsi false). Yalnızca "uygulama" testlerinde,
-// test içinde `liveCountryPolicies` geçici olarak true yapılır. Gerçek sabitler ve LIVE_SENDING_ENABLED DEĞİŞMEZ.
+// Onay nesnesi: bu dosyadaki süreç içi testlerde her testten önce HEPSİ false yapılır (onaysız sürümün reddini
+// korumak için); "uygulama" testlerinde `liveCountryPolicies` test içinde true yapılır. Gerçek sabitler (bu sürümde
+// sahip kararıyla hepsi true) DEĞİŞMEZ; gerçek süreçle çalışan betik testleri gerçek sabitleri kullanır.
 const legal = vi.hoisted(() => ({ a: {} as Record<string, boolean> }));
 vi.mock("@/lib/compliance/legal-status", async (orig) => {
   const m = await orig<typeof import("@/lib/compliance/legal-status")>();
@@ -196,10 +197,12 @@ describe("uygulama (--apply)", () => {
       to: { mode: "allowed", locked: false },
       approvalRef: "HUK-2026-014",
     });
-    // Satırın açılması tek başına gerçek gönderim değildir: LIVE_SENDING_ENABLED kapalı → canlı kapsam engelli.
-    expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({
+    // Kod kapısı (LIVE_SENDING_ENABLED) bu sürümde açık: açılan satır çözümleyicide izinli olur; kilitli kalanlar
+    // engelli kalır. (Gönderim yine de çalışma anı hazırlığı ister: bkz. live-gates-open.test.ts.)
+    expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({ mode: "allowed", reason: null });
+    expect(await resolveCountryPolicy(db, "live", "DE")).toEqual({
       mode: "blocked",
-      reason: "live_disabled",
+      reason: "locked",
     });
   });
 
@@ -247,7 +250,7 @@ describe("betik uygulamadan ayrıdır", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------
-describe("betik (gerçek süreç, gerçek sabitler): --db zorunlu, varsayılan plan, bu sürümde uygulama reddedilir", () => {
+describe("betik (gerçek süreç, gerçek sabitler): --db zorunlu, varsayılan plan, bu sürümde sahibin --apply'ı uygular", () => {
   let dir: string;
   let file: string;
   let fc: Client;
@@ -309,20 +312,30 @@ describe("betik (gerçek süreç, gerçek sabitler): --db zorunlu, varsayılan p
     expect(fs.existsSync(missing)).toBe(false);
   });
 
-  it("plan çıktısı ülkeleri ve hukuki onay engelini yazar, hiçbir şeyi değiştirmez; --apply de reddedilir", async () => {
+  it("plan hiçbir şeyi değiştirmez ve engel yazmaz; --apply yalnızca istenen ülkeleri açar, ikinci kez reddedilir", async () => {
     const before = await snapshot();
     const plan = await runCli(["--db", file, ...ARGS]);
     expect(plan.out).toContain("hiçbir şey değiştirilmedi");
     expect(plan.out).toContain(path.resolve(file));
     expect(plan.out).toMatch(/GB: blocked \(kilitli\) → allowed/);
-    expect(plan.err).toMatch(/liveCountryPolicies/);
-    expect(plan.code).toBe(1);
+    expect(plan.out).toContain("--apply ile");
+    expect(plan.err).not.toMatch(/liveCountryPolicies/);
+    expect(plan.code).toBe(0);
     const bad = await runCli(["--db", file, ...ARGS.slice(0, 3), "blocked", ...ARGS.slice(4)]);
     expect(bad.code).toBe(2);
     expect(bad.err).toMatch(/Geçersiz mod/);
-    const apply = await runCli(["--db", file, ...ARGS, "--apply"]);
-    expect(apply.code).toBe(1);
-    expect(apply.err).toMatch(/Uygulanmadı.*liveCountryPolicies/);
     expect(await snapshot()).toBe(before);
+
+    const apply = await runCli(["--db", file, ...ARGS, "--apply"]);
+    expect(apply.err).toBe("");
+    expect(apply.code).toBe(0);
+    expect(apply.out).toMatch(/Canlı politika kilidi açıldı: GB, FR → allowed/);
+    const open = await fc.execute(
+      "SELECT country_code FROM country_policies WHERE scope = 'live' AND locked = 0 ORDER BY 1",
+    );
+    expect(open.rows.map((r) => r.country_code)).toEqual(["FR", "GB"]);
+    const again = await runCli(["--db", file, ...ARGS, "--apply"]);
+    expect(again.code).toBe(1);
+    expect(again.err).toMatch(/satır zaten/);
   });
 });

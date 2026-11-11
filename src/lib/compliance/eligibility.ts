@@ -38,8 +38,9 @@ import { checkSuppression, hashEmail } from "./suppression";
  * "uygun değil" sonucunu verir. Sonuç makine tarafından işlenebilir ret nedenleri listesidir.
  *
  * Kapsam (`scope`) kampanyanın posta kutusundan gelir. `demo` sonucu yalnızca ağa çıkmayan demo posta kutusu için
- * geçerlidir ve GERÇEK GÖNDERİM İZNİ DEĞİLDİR; demo dışındaki her sağlayıcı `live` sayılır ve bu sürümde
- * (`LIVE_SENDING_ENABLED = false`) her zaman `live_sending_disabled` ile reddedilir.
+ * geçerlidir ve GERÇEK GÖNDERİM İZNİ DEĞİLDİR; demo dışındaki her sağlayıcı `live` sayılır. Canlı gönderim kapısı
+ * (`isLiveSendingPermitted`) kapalıysa `live_sending_disabled` ile reddedilir; açıkken (bu sürüm) canlı ülke politikası
+ * (kilitli ülke `country_blocked`), bağlı kutu ve `gmail.send` izni ayrıca zorunludur.
  *
  * Bu aşamadaki kararlar: yalnızca doğrulanmış (`verified`) GENEL işletme adreslerine gönderilir (`personal` ve
  * `consumer` hariç); daha önce kampanya iletisi almış bir alıcı, süreler dolsa da elle inceleme gerektirir.
@@ -493,7 +494,10 @@ async function loadCampaign(db: DbExecutor, id: number, c: Collector) {
   return row ?? null;
 }
 
-/** Posta kutusu kapsamı belirler. Demo dışı her sağlayıcı `live`'dır ve bu sürümde gönderemez. */
+/**
+ * Posta kutusu kapsamı belirler. Demo dışı her sağlayıcı `live`'dır; canlı kutu yalnızca canlı gönderim kapısı açıkken,
+ * bağlıyken ve `gmail.send` izni kayıtlıyken gönderebilir.
+ */
 async function checkMailbox(
   db: DbExecutor,
   mailboxId: number | null,
@@ -511,6 +515,12 @@ async function checkMailbox(
   const scope = policyScopeForMailbox(mb.provider);
   if (scope === "live" && !isLiveSendingPermitted()) c.add("live_sending_disabled");
   if (mb.status !== "connected") c.add("mailbox_not_ready", { detail: mb.status });
+  else if (scope === "live" && isLiveSendingPermitted()) {
+    // Bağlı ama `gmail.send` izni verilmemiş (yalnızca okuma veya izin geri alındı) kutu gönderemez: sağlayıcıya
+    // ulaşmadan kampanya duraklar (aksi halde her dizi sağlayıcıda `scope_missing` ile başarısız sayılırdı).
+    const grants = (await getSettings(db, ["mail.gmailGrants"] as const))["mail.gmailGrants"];
+    if (!grants[String(mb.id)]?.send) c.add("mailbox_not_ready", { detail: "send_grant_missing" });
+  }
   return scope;
 }
 

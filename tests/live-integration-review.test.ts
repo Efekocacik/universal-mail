@@ -55,8 +55,9 @@ import {
 import { addMailbox } from "./helpers/inbound-fixture";
 
 /**
- * Canlı entegrasyon incelemesi (Aşama 15.7): (a) hazırlık ekranı gerçek ortam kanıtı olmadan başarılı görünmez,
- * (b) tüm kapılar kapalıyken HİÇBİR gerçek gönderim/okuma isteği oluşmaz, (c) iç durum anahtarları API'den yazılamaz.
+ * Canlı entegrasyon incelemesi (Aşama 15.7; kapı açma sürümünde güncellendi): (a) hazırlık ekranı gerçek ortam
+ * kanıtı olmadan başarılı görünmez, (b) kod kapıları açıkken de varsayılan ayarlarla (bağlantı belirteci, DNS, uç nokta,
+ * ülke kilidi yok) HİÇBİR gerçek gönderim/okuma isteği oluşmaz, (c) iç durum anahtarları API'den yazılamaz.
  * Ağ yok: genel fetch casusla izlenir; "ağ" süreç içidir.
  */
 
@@ -164,7 +165,7 @@ async function bestCaseSoftwareState() {
 }
 
 describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", () => {
-  it("yazılımın kanıtlayabildiği EN İYİ durumda bile allOk=false; kapalı kapılar ve hukuk maddeleri engel olarak kalır", async () => {
+  it("yazılımın kanıtlayabildiği EN İYİ durumda bile allOk=false; başlık güveni, ülke kilidi ve pilot kalır", async () => {
     await bestCaseSoftwareState();
     const r = await getLiveReadiness(db, { now: NOW + 1000 });
     const s = Object.fromEntries(r.items.map((i) => [i.key, i.status]));
@@ -178,23 +179,26 @@ describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", ()
       event_delivery: "ok",
       inbox_sync: "ok",
     });
-    // ... ama kodda/ortamda kapalı kapılar ve hukuki onaylar HÂLÂ engel
+    // Kod kapıları ve sahip kararları bu sürümde açık; uç nokta kanıtı + sürüm kapısı birlikte 'tamam'.
     expect(s).toMatchObject({
-      live_flag: "blocked",
-      live_inbox_flag: "blocked",
+      live_flag: "ok",
+      live_inbox_flag: "ok",
+      https_unsubscribe: "ok",
+      legal_lia: "ok",
+      legal_uyum: "ok",
+      legal_live_countries: "ok",
+      legal_erasure_records: "ok",
+      legal_suppression_hash: "ok",
+      legal_tr_identifiers: "ok",
+    });
+    // ... ama gerçek hesapla doğrulanacak başlık güveni, sahibin açacağı ülke kilidi ve pilot HÂLÂ eksik
+    expect(s).toMatchObject({
       inbox_header_trust: "blocked",
-      https_unsubscribe: "blocked", // kanıt var ama sürüm kapısı (LEGAL_APPROVALS) kapalı
       live_country_policies: "blocked",
-      legal_lia: "blocked",
-      legal_uyum: "blocked",
-      legal_live_countries: "blocked",
-      legal_erasure_records: "blocked",
-      legal_suppression_hash: "blocked",
-      legal_tr_identifiers: "blocked",
       pilot: "unknown",
     });
     expect(r.allOk).toBe(false);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
   });
 
   it("dört gerçek-ortam kanıtından her biri eksildiğinde ilgili madde 'tamam' olmaktan çıkar", async () => {
@@ -226,18 +230,19 @@ describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", ()
     expect((await by(NOW + 1000)).inbox_access).toBe("blocked");
   });
 
-  it("uç nokta kanıtı silinirse veya adres değişirse https_unsubscribe 'tamam' olamaz (sürüm kapısı açık olsaydı bile)", async () => {
+  it("uç nokta kanıtı silinirse veya adres değişirse https_unsubscribe 'tamam' olamaz (sürüm kapısı açıkken de)", async () => {
     await bestCaseSoftwareState();
+    expect((await by(NOW + 1000)).https_unsubscribe).toBe("ok");
     await setUnsubscribeBaseUrl(db, "https://baska.firma-ornek.com", NOW);
     expect((await by(NOW + 1000)).https_unsubscribe).toBe("blocked");
   });
 
-  it("kapılar kodda sabit: hiçbiri ayarlarla/ortamla/API ile açılamaz", () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
-    expect(LIVE_INBOX_READING_ENABLED).toBe(false);
+  it("kapılar kodda sabit (kapı açma sürümü): gönderim/okuma açık, yedi onay true, başlık güveni kapalı", () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
+    expect(LIVE_INBOX_READING_ENABLED).toBe(true);
     expect(GMAIL_HEADER_TRUST_VERIFIED).toBe(false);
-    for (const [k, v] of Object.entries(LEGAL_APPROVALS)) expect(v, k).toBe(false);
-    expect(isLiveSendingPermitted()).toBe(false);
+    for (const [k, v] of Object.entries(LEGAL_APPROVALS)) expect(v, k).toBe(true);
+    expect(isLiveSendingPermitted()).toBe(true);
   });
 
   it("iç durum ve kanıt anahtarları ayarlar API'siyle YAZILAMAZ (katı şema)", async () => {
@@ -266,14 +271,14 @@ describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", ()
   });
 });
 
-describe("kapılar kapalıyken HİÇBİR gerçek gönderim veya okuma isteği oluşmaz", () => {
-  it("Gmail sağlayıcısı, gelen kutusu okuyucusu, eşitleme, kampanya gönderimi ve çekme işi varsayılan ayarlarla hiçbir istek atmaz", async () => {
+describe("kapılar açıkken de varsayılan ayarlarla HİÇBİR gerçek gönderim veya okuma isteği oluşmaz", () => {
+  it("Gmail sağlayıcısı, gelen kutusu okuyucusu, eşitleme, kampanya gönderimi ve çekme işi bağlantı belirteci/hazırlık olmadan hiçbir istek atmaz", async () => {
     const gid = await addMailbox(db, { provider: "gmail", address: ADDRESS });
     await setSetting(db, "mail.gmailGrants", {
       [String(gid)]: { send: true, read: true, at: NOW },
     });
 
-    // 1. gönderim sağlayıcısı
+    // 1. gönderim sağlayıcısı: kapı açık, ama kutunun yenileme belirteci yok → ağa çıkmadan reddedilir
     const provider = new GmailProvider({ db, mailbox: { id: gid, address: ADDRESS } });
     const raw = `From: ${ADDRESS}\r\nTo: info@alici-ornek.com\r\nMessage-ID: <a@firma-ornek.com>\r\n\r\nx`;
     expect(
@@ -284,12 +289,18 @@ describe("kapılar kapalıyken HİÇBİR gerçek gönderim veya okuma isteği ol
         messageId: "<a@firma-ornek.com>",
         signal: new AbortController().signal,
       }),
-    ).toMatchObject({ status: "rejected", code: "live_sending_disabled" });
+    ).toMatchObject({ status: "rejected", code: "reauthorization_required" });
 
-    // 2. gelen kutusu okuyucusu ve eşitleme
+    // Belirteç sorunu kutuyu "yeniden yetkilendirme gerekli" durumuna alır: sonraki turlar (gönderim ve okuma) kutuyu
+    // kullanmaz.
+    const [mb] = await db.select().from(mailboxes).where(eq(mailboxes.id, gid));
+    expect(mb).toMatchObject({ status: "error", lastError: "reauthorization_required" });
+
+    // 2. gelen kutusu okuyucusu: okuma kilidi açık, ama kutu bağlı değil → ağa çıkmadan hata
     await expect(new GmailInboxReader({ db }).fetch(gid, null, 10)).rejects.toMatchObject({
-      code: "live_inbox_disabled",
+      code: "not_connected",
     });
+    // Kutu yeniden bağlanana kadar eşitleme okuyucuyu hiç çağırmaz.
     let fetchCalled = false;
     const reader: InboxReader = {
       id: "gmail",
@@ -303,9 +314,12 @@ describe("kapılar kapalıyken HİÇBİR gerçek gönderim veya okuma isteği ol
       error: null,
     });
     expect(fetchCalled).toBe(false);
-    expect((await getSetting(db, "mail.inboxSync"))[String(gid)]).toBeUndefined(); // kayıt da oluşmaz
+    // Yeniden bağlanmış (bağlı) kutuda tur okuma kilidi açık olduğundan okuyucuyu çağırır (süreç içi; ağ yok).
+    await db.update(mailboxes).set({ status: "connected" }).where(eq(mailboxes.id, gid));
+    await syncInbox(db, reader, gid, { now: () => NOW });
+    expect(fetchCalled).toBe(true);
 
-    // 3. kampanya gönderim yolu (canlı kutu)
+    // 3. kampanya gönderim yolu (canlı kutu): canlı ülke kilitli → uygun değil, sağlayıcı çağrılmaz
     const camp = await createCampaign(db, { status: "running", mailboxId: gid });
     const seq = await addSequence(db, camp, { nextSendAt: null, email: "info@alici-ornek.com" });
     let providerCalls = 0;

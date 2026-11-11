@@ -14,7 +14,7 @@ export const dynamic = "force-dynamic";
 /**
  * Posta kutuları. Kimlik bilgisi referansı, SMTP ayrıntıları ve hata metinleri DÖNDÜRÜLMEZ.
  * `sendable`: kampanyaya atanabilir mi (`assertSendableMailbox` ile aynı kural): bağlı demo kutusu her zaman; Gmail kutusu
- * yalnızca canlı gönderim kapısı açıkken, bağlı ve gönderim izinliyse. Kapı bu sürümde kapalıdır.
+ * yalnızca canlı gönderim kapısı açıkken (bu sürümde açık), bağlı ve gönderim izinliyse.
  * `editable`: demo olmayan ve bağlı olmayan kutular ad/durum değişikliğine ve silmeye açıktır.
  */
 export const GET = domainRoute(async () => {

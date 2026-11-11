@@ -172,14 +172,14 @@ describe("kampanya özeti ve gönderim kapısı", () => {
     expect(cl).toBeDefined();
   });
 
-  it("hukuki madde 'bekliyor' kalır ve hazırlık ekranında engel olarak görünür; kapıyı açmaz", async () => {
-    expect(LEGAL_APPROVALS.trSenderIdentifierRules).toBe(false);
+  it("madde sahip kararıyla kapatıldı: hazırlıkta 'tamam' görünür; alanlar isteğe bağlı kalır, tek başına hazırlığı tamamlamaz", async () => {
+    expect(LEGAL_APPROVALS.trSenderIdentifierRules).toBe(true);
     const r = await getLiveReadiness(db);
     expect(r.items.find((i) => i.key === "legal_tr_identifiers")).toMatchObject({
-      status: "blocked",
+      status: "ok",
       owner: "legal",
     });
     expect(r.allOk).toBe(false);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
   });
 });

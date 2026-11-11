@@ -131,7 +131,8 @@ describe("güvenle silinenler (demo kayıtları)", () => {
     const r = await run(s.email);
     expect(r.cleared).toMatchObject({ leadEmails: 1, sequences: 1, messages: 2 });
     expect(r.pending).toEqual({ sequences: 0, messages: 0 });
-    expect(r.suppressionRetentionPendingLegal).toBe(true);
+    // Sahip kararıyla (11 Kasım 2026) özet saklamanın dayanağı kayıtlı: "bekliyor" değil.
+    expect(r.suppressionRetentionPendingLegal).toBe(false);
 
     const dump = await dumpAll();
     expect(dump).not.toContain(s.email);
@@ -285,20 +286,23 @@ describe("sızıntı: API, arayüz verisi ve dışa aktarma", () => {
 });
 
 describe("hukuki değerlendirme bekleyenler (gerçek posta kutusundan iletilmiş kayıtlar)", () => {
+  // Bu sürümde `erasureOfTransmissionRecords` sahip kararıyla `true`'dur. Onaysız bir sürümün davranışı (kayıtlar
+  // korunur, "bekliyor") parametreyle (`transmissionRecordsApproved: false`) simüle edilerek korunur.
+  const UNAPPROVED = { transmissionRecordsApproved: false } as const;
   async function liveCase() {
     const live = await addMailbox(db, { provider: "gmail", address: "canli@firma.example" });
     const s = await seedSent(db, campaignId, { mailboxId: live });
     return { s, live };
   }
 
-  it("onay yokken DOKUNULMAZ ve 'bekliyor' olarak bildirilir; güvenle yapılabilenler yine yapılır", async () => {
+  it("onay yokken (simüle) DOKUNULMAZ ve 'bekliyor' olarak bildirilir; güvenle yapılabilenler yine yapılır", async () => {
     const { s } = await liveCase();
-    const p = await previewErasure(db, s.email);
+    const p = await previewErasure(db, s.email, UNAPPROVED);
     expect(p.transmissionRecordsApproved).toBe(false);
     expect(p.pending).toEqual({ sequences: 1, messages: 1 });
     expect(p.safe.messages).toBe(0);
 
-    const r = await run(s.email);
+    const r = await run(s.email, {}, UNAPPROVED);
     expect(r.pending).toEqual({ sequences: 1, messages: 1 });
     expect(r.cleared).toMatchObject({ leadEmails: 1, messages: 0, sequences: 0 });
     const [m] = await db.select().from(messages).where(eq(messages.campaignLeadId, s.cl));
@@ -307,7 +311,7 @@ describe("hukuki değerlendirme bekleyenler (gerçek posta kutusundan iletilmiş
     expect(cl).toMatchObject({ recipientEmail: s.email, redactedAt: null, status: "cancelled" }); // iletişim durdu
     expect(await db.select().from(leadEmails).where(eq(leadEmails.email, s.email))).toHaveLength(0);
     expect((await checkSuppression(db, s.email)).suppressed).toBe(true);
-    expect(await listPendingErasures(db)).toMatchObject({
+    expect(await listPendingErasures(db, UNAPPROVED)).toMatchObject({
       messages: 1,
       sequences: 1,
       transmissionRecordsApproved: false,
@@ -318,8 +322,8 @@ describe("hukuki değerlendirme bekleyenler (gerçek posta kutusundan iletilmiş
 
   it("kullanıcının beyanı onay yerine geçmez: girdide böyle bir alan yoktur ve bekleyen tamamlanamaz", async () => {
     const { s } = await liveCase();
-    await run(s.email);
-    await expect(completePendingErasures(db, { now: NOW })).rejects.toMatchObject({
+    await run(s.email, {}, UNAPPROVED);
+    await expect(completePendingErasures(db, { now: NOW, ...UNAPPROVED })).rejects.toMatchObject({
       kind: "not_approved",
     });
     const res = await erasureRoute.POST(
@@ -335,12 +339,12 @@ describe("hukuki değerlendirme bekleyenler (gerçek posta kutusundan iletilmiş
       undefined,
     );
     expect(res.status).toBe(400); // katı şema: bilinmeyen alan reddedilir
-    expect((await listPendingErasures(db)).messages).toBe(1);
+    expect((await listPendingErasures(db, UNAPPROVED)).messages).toBe(1);
   });
 
-  it("onay kaydedilmiş bir sürümde (parametreyle simüle) bekleyenler kişi bazında tamamlanır", async () => {
+  it("onaysız sürümde biriken bekleyenler onaylı sürümde kişi bazında tamamlanır", async () => {
     const { s } = await liveCase();
-    await run(s.email);
+    await run(s.email, {}, UNAPPROVED);
     const done = await completePendingErasures(db, {
       now: NOW + 1,
       transmissionRecordsApproved: true,
@@ -364,8 +368,19 @@ describe("hukuki değerlendirme bekleyenler (gerçek posta kutusundan iletilmiş
     expect(await dumpAll()).not.toContain(s.email);
   });
 
-  it("hukuki onay sabitleri bu sürümde kapalıdır", () => {
-    expect(Object.values(LEGAL_APPROVALS).every((v) => v === false)).toBe(true);
+  it("bu sürümde onay sabitleri sahip kararıyla açıktır: varsayılan çalıştırma kayıtları ilk seferde temizler", async () => {
+    expect(Object.values(LEGAL_APPROVALS).every((v) => v === true)).toBe(true);
+    const { s } = await liveCase();
+    expect((await previewErasure(db, s.email)).transmissionRecordsApproved).toBe(true);
+    const r = await run(s.email);
+    expect(r.pending).toEqual({ sequences: 0, messages: 0 });
+    expect(r.cleared).toMatchObject({ messages: 1, sequences: 1 });
+    expect(await dumpAll()).not.toContain(s.email);
+    expect(await listPendingErasures(db)).toMatchObject({ messages: 0, sequences: 0 });
+    expect(await completePendingErasures(db, { now: NOW + 1 })).toEqual({
+      messages: 0,
+      sequences: 0,
+    });
   });
 });
 
@@ -446,7 +461,7 @@ describe("API uçları", () => {
     expect(text).not.toContain(s.email);
     expect(JSON.parse(text)).toMatchObject({
       pending: { sequences: 0, messages: 0 },
-      suppressionRetentionPendingLegal: true,
+      suppressionRetentionPendingLegal: false,
     });
     const g = await erasureRoute.GET(new Request(`${ORIGIN}/api/compliance/erasure`), undefined);
     const gt = await g.text();
@@ -456,24 +471,24 @@ describe("API uçları", () => {
 });
 
 describe("canlı gönderime hazırlık (salt okunur)", () => {
-  it("varsayılan durumda hiçbir hukuki/canlı madde 'tamam' değildir; ölçülemeyenler 'bilinmiyor'", async () => {
+  it("varsayılan durumda kod kapıları ve sahip kararları 'tamam'; çalışma anı maddeleri engel veya 'bilinmiyor'", async () => {
     const r = await getLiveReadiness(db);
     const by = Object.fromEntries(r.items.map((i) => [i.key, i.status]));
     expect(r.allOk).toBe(false);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
     expect(by).toMatchObject({
-      live_flag: "blocked",
+      live_flag: "ok",
       consent: "ok",
       company_profile: "ok",
       real_mailbox: "blocked",
       dns_auth: "unknown",
       https_unsubscribe: "blocked",
       live_country_policies: "blocked",
-      legal_lia: "blocked",
-      legal_uyum: "blocked",
-      legal_live_countries: "blocked",
-      legal_erasure_records: "blocked",
-      legal_suppression_hash: "blocked",
+      legal_lia: "ok",
+      legal_uyum: "ok",
+      legal_live_countries: "ok",
+      legal_erasure_records: "ok",
+      legal_suppression_hash: "ok",
       pilot: "unknown",
     });
   });

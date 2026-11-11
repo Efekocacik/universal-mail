@@ -140,10 +140,9 @@ const refreshCalls = () =>
     .length;
 
 describe("kapılar: ağ isteğinden ÖNCE", () => {
-  it("LIVE_SENDING_ENABLED kapalıyken (varsayılan) hiçbir istek atılmaz: ne Gmail'e ne OAuth'a", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
+  it("canlı gönderim kapısı kapalıyken (testte kapatılır) hiçbir istek atılmaz: ne Gmail'e ne OAuth'a", async () => {
     const id = await connected();
-    const p = new GmailProvider({ db, mailbox: { id, address: ADDRESS }, oauth: deps }); // anahtar geçersiz kılınmadı
+    const p = provider(id, { liveEnabled: () => false });
     expect(await p.send(input())).toEqual({
       status: "rejected",
       code: "live_sending_disabled",
@@ -153,15 +152,38 @@ describe("kapılar: ağ isteğinden ÖNCE", () => {
     expect(oauth.requests).toHaveLength(0);
   });
 
-  it("fabrika: canlı kapalıyken Gmail bağdaştırıcısı hiç kurulmaz; getProvider de gerçek sağlayıcıda hata verir", async () => {
+  it("kapı açma sürümü: GERÇEK kapı açık (geçersiz kılma yok); gönderim izni yoksa yine ağa çıkılmaz", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
+    const noSend = await connected({ send: false, read: true });
+    // `liveEnabled` verilmez: üretimdeki birleşik kapı kullanılır. Yalnızca sahte sunucu adresi verilir.
+    const p = new GmailProvider({
+      db,
+      mailbox: { id: noSend, address: ADDRESS },
+      oauth: deps,
+      apiBase: gmail.base,
+    });
+    expect(await p.send(input())).toEqual({
+      status: "rejected",
+      code: "scope_missing",
+      permanent: true,
+    });
+    expect(gmail.requests).toHaveLength(0);
+    expect(oauth.requests).toHaveLength(0);
+  });
+
+  it("fabrika: kapı açıkken yalnızca Gmail kutusu için bağdaştırıcı kurulur (ağ yok); getProvider gerçek sağlayıcıda hata verir", async () => {
     const id = await connected();
     const mb = { id, provider: "gmail", address: ADDRESS };
-    expect(() => getLiveProvider(db, mb)).toThrow(ProviderUnavailableError);
+    expect(getLiveProvider(db, mb).id).toBe("gmail");
     expect(() => getLiveProvider(db, { ...mb, provider: "demo" })).toThrow(
+      ProviderUnavailableError,
+    );
+    expect(() => getLiveProvider(db, { ...mb, provider: "smtp" })).toThrow(
       ProviderUnavailableError,
     );
     expect(() => getProvider({ provider: "gmail" })).toThrow(ProviderUnavailableError);
     expect(gmail.requests).toHaveLength(0);
+    expect(oauth.requests).toHaveLength(0);
   });
 
   it("test geçersiz kılmaları üretimde kabul edilmez (apiBase, liveEnabled)", async () => {

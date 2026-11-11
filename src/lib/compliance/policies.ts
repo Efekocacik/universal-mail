@@ -7,30 +7,40 @@ import { COUNTRY_CODES } from "@/lib/geo/countries";
  * Ülke bazlı gönderim politikası (SRS 8.2, FR-CMPL-01).
  *
  * `live` (gerçek gönderim) ve `demo` kapsamları ayrıdır; hangisinin uygulanacağını kampanyanın posta kutusu
- * belirler. Şirketten hukuki onay ve hedef ülke bilgisi gelene kadar gerçek gönderim KAPALIDIR:
- *  - `live` satırlarının hepsi `blocked` ve kilitli eklenir (veritabanı kısıtları kilitliyken gevşetmeyi reddeder),
- *  - `LIVE_SENDING_ENABLED` false olduğu sürece `live` kapsamı satırdan bağımsız olarak her zaman `blocked` döner.
+ * belirler. Kod kapısı (`LIVE_SENDING_ENABLED`) bu sürümde AÇIKTIR (sahip kararı, 11 Kasım 2026); ülke kilidi ise
+ * veritabanında kalır:
+ *  - `live` satırlarının hepsi `blocked` ve kilitli eklenir (veritabanı kısıtları kilitliyken gevşetmeyi reddeder);
+ *    bir ülkenin kilidi YALNIZCA sürüm dışı canlı ülke onay betiğiyle (`scripts/`, docs/10), sahip tarafından açılır,
+ *  - `LIVE_SENDING_ENABLED` false olsaydı `live` kapsamı satırdan bağımsız olarak her zaman `blocked` dönerdi.
  * Kaydı olmayan veya bilinmeyen ülke her iki kapsamda da `blocked` sayılır.
  */
 
-/** Bu sürümde gerçek gönderim yoktur. Yalnızca hukuki onaydan sonra çıkacak yeni bir sürümde değişebilir. */
-export const LIVE_SENDING_ENABLED = false;
+/**
+ * Gerçek gönderimin kod kapısı. AÇIK: sahip kararı (11 Kasım 2026), dış hukuki inceleme olmadan yayımlandı;
+ * sorumluluk şirkettedir. Kapı tek başına gönderim DEMEK DEĞİLDİR: bağlı Gmail kutusu (`gmail.send`), taze ve geçen
+ * DNS denetimi, doğrulanmış HTTPS çıkış uç noktası, sağlıklı çıkış çekme işi ve kilidi açılmış canlı ülke politikası
+ * çalışma anında ayrıca zorunludur (bkz. `send-service.ts`, `eligibility.ts`).
+ */
+export const LIVE_SENDING_ENABLED = true;
 
 /**
- * Gerçek (Gmail) gelen kutusunu OKUMA kilidi (Aşama 15.5). Gönderim kilidinden ayrıdır ve varsayılan KAPALIDIR:
- * kapalıyken Gmail okuyucusu hiçbir ağ isteği atmaz, hiçbir ileti işlenmez. Hukuki onay ve pilot öncesi değişmez.
+ * Gerçek (Gmail) gelen kutusunu OKUMA kilidi (Aşama 15.5). Gönderim kilidinden ayrıdır. AÇIK: sahip kararı
+ * (11 Kasım 2026). Okuyucu yalnızca bağlı ve `gmail.readonly` izni verilmiş Gmail kutularını okur. Başlık güveni
+ * (`GMAIL_HEADER_TRUST_VERIFIED`) kapalı kaldıkça okunan hiçbir ileti tasdik üretmez: iletiler yalnızca inceleme
+ * için kaydedilir; doğrulanmış bounce/suppression/otomatik durdurma doğmaz (kanıt düzeyi düşük kalır).
  */
-export const LIVE_INBOX_READING_ENABLED = false;
+export const LIVE_INBOX_READING_ENABLED = true;
 
 /**
  * Gmail başlıklarına (Authentication-Results, Return-Path, Delivered-To) dayalı kimlik tasdikine GÜVEN kilidi
- * (Aşama 15.5). Varsayılan KAPALIDIR: kapalıyken hiçbir Gmail ileti başlığı tasdik ÜRETMEZ; ileti yalnızca inceleme
+ * (Aşama 15.5). KAPALI KALIR (gönderim ve okuma kapıları açılsa da): kapalıyken hiçbir Gmail ileti başlığı tasdik ÜRETMEZ; ileti yalnızca inceleme
  * için kaydedilir, doğrulanmış bounce/suppression/otomatik durdurma doğmaz.
  *
  * Neden: Gönderen, iletinin kendi başlıklarını kontrol eder. Gmail'in eklediği başlıkları gönderenin eklediklerinden
  * YALNIZCA başlık sırası/biçimi ile ayırt etmek, gerçek bir Gmail hesabında gözlenip doğrulanmadan kanıt değildir.
  * Yalnızca docs/09-FAZ3-CANLI-DOGRULAMA.md'deki Gmail başlık doğrulama adımları gerçek hesapla tamamlandıktan sonra
- * (ve bilinçli bir sürüm değişikliğiyle) true yapılabilir. Test ortamında yalnızca testlerde geçersiz kılınır.
+ * (docs/09 Bölüm 1.3; ayrı, küçük bir sürüm değişikliğiyle) true yapılabilir. Test ortamında yalnızca testlerde
+ * geçersiz kılınır.
  */
 export const GMAIL_HEADER_TRUST_VERIFIED = false;
 

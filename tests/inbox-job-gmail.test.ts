@@ -29,9 +29,10 @@ import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 import { NOW, rawMessage, seedSent, type Sent } from "./helpers/inbound-fixture";
 
 /**
- * Gelen kutusu işinin Gmail bağlantısı (go-live C6). Kilit (`LIVE_INBOX_READING_ENABLED`) kapalıyken iş hiçbir Gmail
- * kutusunu okumaz ve hiçbir ağ isteği atmaz; yalnızca testte açılan kilitle, okuma izni olan Gmail kutusu yerel SAHTE
- * Gmail/OAuth sunucularıyla eşitlenir ve `mail.inboxSync` kanıtı yazılır. Gerçek Google'a istek yok.
+ * Gelen kutusu işinin Gmail bağlantısı (go-live C6). Kilit (`LIVE_INBOX_READING_ENABLED`) bu sürümde AÇIKTIR (sahip
+ * kararı); kapalıyken korunması gereken davranış kilit testte kapatılarak sınanır (iş hiçbir Gmail kutusunu okumaz,
+ * ağ isteği atmaz). Açıkken okuma izni olan Gmail kutusu yerel SAHTE Gmail/OAuth sunucularıyla eşitlenir ve
+ * `mail.inboxSync` kanıtı yazılır. Gerçek Google'a istek yok.
  */
 
 const CLIENT_ID = "123456789012-abcdefghijklmnop.apps.googleusercontent.com";
@@ -158,12 +159,18 @@ const inboxJobs = () => db.select().from(jobs).where(eq(jobs.type, INBOX_SYNC_JO
 
 /* ---------------------------------------------------------------------------------------------- */
 
-describe("kilit kapalı (varsayılan): Gmail okunmaz, ağ isteği yok", () => {
+describe("kilit kapalı (testte kapatılır): Gmail okunmaz, ağ isteği yok", () => {
+  const CLOSED = () => false;
+
   it("demo bayrağı açık iş yalnızca demo kutusunu okur; okuma izni olan Gmail kutusuna dokunmaz", async () => {
-    expect(LIVE_INBOX_READING_ENABLED).toBe(false);
     inbox.add({ labels: ["INBOX"], raw: reply("k1"), threadId: "t-out1" });
     const demo = demoSpy();
-    await createInboxSyncHandler({ enabled: true, reader: demo, now: () => NOW })(ctx());
+    await createInboxSyncHandler({
+      enabled: true,
+      reader: demo,
+      liveInboxEnabled: CLOSED,
+      now: () => NOW,
+    })(ctx());
 
     expect(demo.calls).toEqual([DEMO_MAILBOX]); // demo davranışı değişmedi
     expect(globalFetch).not.toHaveBeenCalled();
@@ -175,13 +182,17 @@ describe("kilit kapalı (varsayılan): Gmail okunmaz, ağ isteği yok", () => {
   });
 
   it("demo bayrağı da kapalıyken iş reddedilir ve worker başlangıcı veritabanına yazmaz", async () => {
-    expect(isInboxSyncEnabled({})).toBe(false);
+    expect(isInboxSyncEnabled({}, { liveInboxEnabled: CLOSED })).toBe(false);
     const factory = vi.fn(fakeGmailReader);
     await expect(
-      createInboxSyncHandler({ enabled: false, gmailReader: factory })(ctx()),
+      createInboxSyncHandler({ enabled: false, gmailReader: factory, liveInboxEnabled: CLOSED })(
+        ctx(),
+      ),
     ).rejects.toBeInstanceOf(NonRetryableJobError);
     expect(factory).not.toHaveBeenCalled();
-    expect(await startInboxScheduler(db, { env: {}, now: () => NOW })).toEqual({
+    expect(
+      await startInboxScheduler(db, { env: {}, now: () => NOW, liveInboxEnabled: CLOSED }),
+    ).toEqual({
       enabled: false,
       demo: false,
       live: false,
@@ -313,11 +324,18 @@ describe("kilit açık (yalnızca test): okuma izni olan Gmail kutusu eşitlenir
     expect((await getSetting(db, "mail.inboxSync"))[String(gid)]).toBeUndefined();
   });
 
-  it("varsayılan okuyucu GmailInboxReader'dır ve kendi kilidi kapalı olduğundan ağa çıkmaz (kanıt 'engel')", async () => {
+  it("okuyucunun kendi kilidi kapalıysa (işinki açık olsa bile) ağa çıkılmaz (kanıt 'engel')", async () => {
     inbox.add({ labels: ["INBOX"], raw: reply("k4"), threadId: "t-out1" });
     await createInboxSyncHandler({
       enabled: false,
-      liveInboxEnabled: () => true, // yalnızca işin kilidi; okuyucu üretim kilidini (false) kullanır
+      liveInboxEnabled: () => true, // yalnızca işin kilidi; okuyucunun kilidi aşağıda kapalı
+      gmailReader: (d) =>
+        new GmailInboxReader({
+          db: d,
+          oauth: deps,
+          apiBase: inbox.base,
+          liveInboxEnabled: () => false,
+        }),
       now: () => NOW,
     })(ctx());
     expect(globalFetch).not.toHaveBeenCalled();
@@ -330,14 +348,30 @@ describe("kilit açık (yalnızca test): okuma izni olan Gmail kutusu eşitlenir
     expect(await inboundRows()).toHaveLength(0);
   });
 
-  it("worker başlangıcı: kilit açıkken demo bayrağı olmadan da tur planlanır (tek iş, yinelenmez)", async () => {
-    expect(isInboxSyncEnabled({}, { liveInboxEnabled: () => true })).toBe(true);
-    const opts = { env: {}, now: () => NOW, liveInboxEnabled: () => true };
+  it("worker başlangıcı: GERÇEK kilit açık (geçersiz kılma yok), demo bayrağı olmadan da tur planlanır (tek iş, yinelenmez)", async () => {
+    expect(LIVE_INBOX_READING_ENABLED).toBe(true);
+    expect(isInboxSyncEnabled({})).toBe(true);
+    const opts = { env: {}, now: () => NOW };
     expect(await startInboxScheduler(db, opts)).toEqual({ enabled: true, demo: false, live: true });
     await startInboxScheduler(db, opts);
     const rows = await inboxJobs();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "queued", runAt: NOW });
     expect(globalFetch).not.toHaveBeenCalled();
+  });
+
+  it("GERÇEK kilitlerle (okuma açık, başlık güveni kapalı) iş okur; ileti yalnızca incelemeye kaydedilir, etki yok", async () => {
+    inbox.add({ labels: ["INBOX"], raw: reply("k5"), threadId: "t-out1" });
+    await createInboxSyncHandler({
+      enabled: false,
+      // Kilit geçersiz kılması YOK: yalnızca sahte sunucu adresleri verilir.
+      gmailReader: (d) => new GmailInboxReader({ db: d, oauth: deps, apiBase: inbox.base }),
+      now: () => NOW,
+    })(ctx());
+    expect(inbox.requests.length).toBeGreaterThan(0);
+    const rows = await inboundRows();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "received", errorCode: "no_attestation" });
+    expect((await getSetting(db, "mail.inboxSync"))[String(gid)]).toMatchObject({ ok: true });
   });
 });

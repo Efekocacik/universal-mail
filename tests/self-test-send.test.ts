@@ -36,9 +36,10 @@ import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 import { decodeEncodedWords } from "./helpers/mime-parse";
 
 /**
- * GERÇEK kutuyla "kendime test gönder" (C11). HİÇBİR kilit veya onay mock'lanmaz: `LIVE_SENDING_ENABLED` ve
- * `LEGAL_APPROVALS` gerçekten kapalıyken, gerçek Gmail bağdaştırıcısı (yerel SAHTE Gmail/OAuth sunucusuna) ve gerçek
- * MIME/alt bilgi kod yoluyla ileti YALNIZCA kutunun kendi adresine gider. Gerçek Google'a istek yok.
+ * GERÇEK kutuyla "kendime test gönder" (C11). HİÇBİR kilit veya onay mock'lanmaz. Kendine test `LIVE_SENDING_ENABLED`
+ * ve `LEGAL_APPROVALS`'tan BAĞIMSIZDIR (kapı açma sürümünde bu sabitler açıktır; kendine test onlara bakmaz): gerçek
+ * Gmail bağdaştırıcısı (yerel SAHTE Gmail/OAuth sunucusuna) ve gerçek MIME/alt bilgi kod yoluyla ileti YALNIZCA kutunun
+ * kendi adresine gider. Gerçek Google'a istek yok.
  */
 
 const CLIENT_ID = "123456789012-abcdefghijklmnop.apps.googleusercontent.com";
@@ -169,11 +170,11 @@ async function verifiedEndpoint() {
   expect(r.ok).toBe(true);
 }
 
-describe("kendime test gönder: gerçek Gmail kutusu (kilitler ve hukuki onaylar KAPALIYKEN)", () => {
-  it("kilitler gerçekten kapalı (bu dosyada hiçbir şey mock'lanmaz)", () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
-    expect(isLiveSendingPermitted()).toBe(false);
-    expect(Object.values(LEGAL_APPROVALS).some((v) => !v)).toBe(true);
+describe("kendime test gönder: gerçek Gmail kutusu (kapılardan bağımsız; kapı açma sürümü)", () => {
+  it("bu sürümde kapılar açık (bu dosyada hiçbir şey mock'lanmaz); kendine test yine yalnızca kendi adrese gider", () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
+    expect(isLiveSendingPermitted()).toBe(true);
+    expect(Object.values(LEGAL_APPROVALS).every((v) => v)).toBe(true);
   });
 
   it("uç nokta yokken: gerçek ileti YALNIZCA kutunun kendi adresine; [TEST] önekli; List-Unsubscribe YOK", async () => {
@@ -367,9 +368,9 @@ describe("kendine test: başka alıcı MÜMKÜN DEĞİL (savunma katmanları)", 
     const ok = buildEmailMessage({ ...base, recipient: ADDRESS });
     expect(ok.to).toBe(ADDRESS);
     expect(ok.raw).not.toMatch(/^List-Unsubscribe/im);
-    // Kendine test bayrağı olmadan canlı kilit kapalıyken ileti oluşturulmaz (kampanya yolu değişmedi).
+    // Kendine test bayrağı olmadan (kampanya yolu) kapı açıkken de alt bilgiyle aynı çıkış bağlantısı zorunludur.
     expect(() => buildEmailMessage({ ...base, selfTest: false, recipient: ADDRESS })).toThrow(
-      /kapalı/,
+      expect.objectContaining({ kind: "unsubscribe_mismatch" }),
     );
   });
 });
