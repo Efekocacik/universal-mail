@@ -125,12 +125,15 @@ async function main(): Promise<void> {
 
 // Yakalanmamış hata/ret: nedeni günlüğe yazılır ve süreç hata koduyla kapanır; Electron ana süreci işçiyi yeniden başlatır
 // (sessizce yarım durumda çalışmaya devam etmez). Ayrıntı güvenli tutulur: yalnızca hata iletisi/yığını.
+// Hata nesnesinin tamamı (ek alanları, `cause` zinciri) yazılmaz; yalnızca yığın veya ileti.
+const crashText = (e: unknown): string =>
+  e instanceof Error ? (e.stack ?? `${e.name}: ${e.message}`) : `[${typeof e}]`;
 process.on("uncaughtException", (e) => {
-  console.error("[worker] yakalanmamış hata; işçi yeniden başlatılacak:", e);
+  console.error("[worker] yakalanmamış hata; işçi yeniden başlatılacak:", crashText(e));
   process.exit(1);
 });
 process.on("unhandledRejection", (e) => {
-  console.error("[worker] yakalanmamış ret; işçi yeniden başlatılacak:", e);
+  console.error("[worker] yakalanmamış ret; işçi yeniden başlatılacak:", crashText(e));
   process.exit(1);
 });
 
