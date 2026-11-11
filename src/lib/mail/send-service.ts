@@ -581,52 +581,17 @@ async function recordResult(
         .returning({ id: messages.id, mailboxId: messages.mailboxId });
       // Arada uzlaştırma kaydı `unknown` yaptıysa ona dokunulmaz.
       if (updated.length === 0) return;
-      const [cl] = await tx
-        .select({ campaignId: campaignLeads.campaignId, leadId: campaignLeads.leadId })
-        .from(campaignLeads)
-        .where(eq(campaignLeads.id, p.campaignLeadId));
-      const stepRows = await tx
-        .select({ stepIndex: campaignSteps.stepIndex, delayDays: campaignSteps.delayDays })
-        .from(campaignSteps)
-        .where(eq(campaignSteps.campaignId, cl!.campaignId));
-      const total = Math.min(
-        new Set(stepRows.map((s) => s.stepIndex)).size,
-        limits.maxMessagesPerSequence,
+      await advanceAfterSent(
+        tx,
+        {
+          campaignLeadId: p.campaignLeadId,
+          stepIndex: p.stepIndex,
+          mailboxId: updated[0]!.mailboxId,
+          sentAt: now,
+        },
+        now,
+        limits,
       );
-      const nextStep = p.stepIndex + 1;
-      // Sonraki adımın en erken zamanı: adım gecikmesi ve takip aralığı alt sınırının büyüğü. Pencereye kaydırma
-      // gönderim anında yapılır.
-      const delayDays = Math.max(
-        limits.minFollowupGapDays,
-        ...stepRows.filter((s) => s.stepIndex === nextStep).map((s) => s.delayDays),
-      );
-      const done = nextStep >= total;
-      await tx
-        .update(campaignLeads)
-        .set({
-          nextStep,
-          status: done ? "completed" : "waiting_next",
-          lastSentAt: now,
-          nextSendAt: done ? null : now + delayDays * DAY_MS,
-          attempts: 0,
-          lastError: null,
-          updatedAt: now,
-        })
-        .where(inFlight);
-      await tx
-        .update(leads)
-        .set({
-          lastContactedAt: now,
-          status: sql`CASE WHEN ${leads.status} IN ('new', 'enriched', 'queued') THEN 'sent' ELSE ${leads.status} END`,
-          updatedAt: now,
-        })
-        .where(eq(leads.id, cl!.leadId));
-      await settleIfCancelled(tx, p.campaignLeadId, now);
-      // Isınma, kutunun ilk başarılı gönderimiyle başlar.
-      await tx
-        .update(mailboxes)
-        .set({ warmupStartedAt: now, updatedAt: now })
-        .where(and(eq(mailboxes.id, updated[0]!.mailboxId), isNull(mailboxes.warmupStartedAt)));
       return;
     }
 
@@ -673,10 +638,74 @@ async function recordResult(
 }
 
 /**
+ * Gönderildiği kesinleşen adımdan sonra diziyi ilerletir: sonraki adım ve zamanı (son adımsa `completed`), lead'in son
+ * temas zamanı, iptal edilmiş kampanyada diziyi kapatma ve posta kutusu ısınmasının başlangıcı. Yalnızca `in_flight`
+ * dizi ilerler. Kabul edilen gönderimin kaydında ve incelemedeki "gönderildi" kararında (`scheduler/resolve-review.ts`)
+ * AYNI kurallarla kullanılır. `sentAt`: iletinin gönderildiği an (kabulde `now`); `now`: kaydın yazıldığı an.
+ */
+export async function advanceAfterSent(
+  tx: DbExecutor,
+  p: { campaignLeadId: number; stepIndex: number; mailboxId: number; sentAt: number },
+  now: number,
+  limits: FrequencyLimits,
+): Promise<void> {
+  const inFlight = and(
+    eq(campaignLeads.id, p.campaignLeadId),
+    eq(campaignLeads.status, "in_flight"),
+  );
+  const [cl] = await tx
+    .select({ campaignId: campaignLeads.campaignId, leadId: campaignLeads.leadId })
+    .from(campaignLeads)
+    .where(eq(campaignLeads.id, p.campaignLeadId));
+  const stepRows = await tx
+    .select({ stepIndex: campaignSteps.stepIndex, delayDays: campaignSteps.delayDays })
+    .from(campaignSteps)
+    .where(eq(campaignSteps.campaignId, cl!.campaignId));
+  const total = Math.min(
+    new Set(stepRows.map((s) => s.stepIndex)).size,
+    limits.maxMessagesPerSequence,
+  );
+  const nextStep = p.stepIndex + 1;
+  // Sonraki adımın en erken zamanı: adım gecikmesi ve takip aralığı alt sınırının büyüğü. Pencereye kaydırma
+  // gönderim anında yapılır.
+  const delayDays = Math.max(
+    limits.minFollowupGapDays,
+    ...stepRows.filter((s) => s.stepIndex === nextStep).map((s) => s.delayDays),
+  );
+  const done = nextStep >= total;
+  await tx
+    .update(campaignLeads)
+    .set({
+      nextStep,
+      status: done ? "completed" : "waiting_next",
+      lastSentAt: p.sentAt,
+      nextSendAt: done ? null : p.sentAt + delayDays * DAY_MS,
+      attempts: 0,
+      lastError: null,
+      updatedAt: now,
+    })
+    .where(inFlight);
+  await tx
+    .update(leads)
+    .set({
+      lastContactedAt: p.sentAt,
+      status: sql`CASE WHEN ${leads.status} IN ('new', 'enriched', 'queued') THEN 'sent' ELSE ${leads.status} END`,
+      updatedAt: now,
+    })
+    .where(eq(leads.id, cl!.leadId));
+  await settleIfCancelled(tx, p.campaignLeadId, now);
+  // Isınma, kutunun ilk başarılı gönderimiyle başlar.
+  await tx
+    .update(mailboxes)
+    .set({ warmupStartedAt: p.sentAt, updatedAt: now })
+    .where(and(eq(mailboxes.id, p.mailboxId), isNull(mailboxes.warmupStartedAt)));
+}
+
+/**
  * Gönderim sürerken kampanya iptal edildiyse (ayrılmış ileti tamamlanabilir; bkz. campaigns/lifecycle.ts), sonucu
  * kaydedilen dizi bekleyen durumda kalmaz, `cancelled` olur. Tamamlanmış dizi (`completed`) olduğu gibi kalır.
  */
-async function settleIfCancelled(tx: DbExecutor, campaignLeadId: number, now: number) {
+export async function settleIfCancelled(tx: DbExecutor, campaignLeadId: number, now: number) {
   await tx
     .update(campaignLeads)
     .set({ status: "cancelled", nextSendAt: null, updatedAt: now })
@@ -701,28 +730,35 @@ export async function reconcileStaleSending(
   opts: { now?: number; olderThanMs?: number } = {},
 ): Promise<number> {
   const now = opts.now ?? Date.now();
-  const cutoff = now - (opts.olderThanMs ?? STALE_SENDING_MS);
-  return db.transaction(async (tx) => {
-    const stale = await tx
-      .update(messages)
-      .set({ status: "unknown", errorCode: "stale_sending" })
-      .where(
-        and(
-          eq(messages.direction, "out"),
-          eq(messages.status, "sending"),
-          lt(messages.createdAt, cutoff),
-        ),
-      )
-      .returning({ campaignLeadId: messages.campaignLeadId });
-    const ids = [
-      ...new Set(stale.map((s) => s.campaignLeadId).filter((x): x is number => x !== null)),
-    ];
-    if (ids.length > 0) {
-      await tx
-        .update(campaignLeads)
-        .set({ lastError: "stale_sending", updatedAt: now })
-        .where(and(inArray(campaignLeads.id, ids), eq(campaignLeads.status, "in_flight")));
-    }
-    return stale.length;
-  });
+  return db.transaction((tx) => reconcileStaleSendingIn(tx, now, opts.olderThanMs));
+}
+
+/** `reconcileStaleSending`'in açık bir işlem içinde çalışan gövdesi (inceleme kararı aynı işlemde uzlaştırır). */
+export async function reconcileStaleSendingIn(
+  tx: DbExecutor,
+  now: number,
+  olderThanMs: number = STALE_SENDING_MS,
+): Promise<number> {
+  const cutoff = now - olderThanMs;
+  const stale = await tx
+    .update(messages)
+    .set({ status: "unknown", errorCode: "stale_sending" })
+    .where(
+      and(
+        eq(messages.direction, "out"),
+        eq(messages.status, "sending"),
+        lt(messages.createdAt, cutoff),
+      ),
+    )
+    .returning({ campaignLeadId: messages.campaignLeadId });
+  const ids = [
+    ...new Set(stale.map((s) => s.campaignLeadId).filter((x): x is number => x !== null)),
+  ];
+  if (ids.length > 0) {
+    await tx
+      .update(campaignLeads)
+      .set({ lastError: "stale_sending", updatedAt: now })
+      .where(and(inArray(campaignLeads.id, ids), eq(campaignLeads.status, "in_flight")));
+  }
+  return stale.length;
 }

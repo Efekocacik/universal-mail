@@ -1015,6 +1015,32 @@ export const tr = {
   "review.empty": "İnceleme bekleyen gönderim yok.",
   "review.noCode": "Ek bilgi yok",
   "review.openCampaign": "Kampanya #{id}",
+  // C7: sonucu belirsiz gönderimin kullanıcı kararıyla çözülmesi
+  "review.resolve.help":
+    "Her e-posta için posta kutunuzun Gönderilmiş klasörüne bakıp karar verin. Emin değilseniz «Gönderimi durdur»u seçin: bu kişiye bu kampanyadan başka e-posta gitmez.",
+  "review.resolve.actions": "Karar",
+  "review.markSent": "Gönderildi",
+  "review.markNotSent": "Gönderilmedi",
+  "review.stop": "Gönderimi durdur",
+  "review.markSent.title": "Bu e-posta gönderildi olarak işaretlensin mi?",
+  "review.markSent.body":
+    "Yalnızca e-postayı Gönderilmiş klasöründe gördüyseniz seçin. Kayıt «gönderildi» olur ve kişi bir sonraki adıma geçer; sonraki e-posta bekleme süresi dolunca olağan kurallarla gönderilir. Geri alınamaz.",
+  "review.markSent.confirm": "Gönderildi olarak işaretle",
+  "review.markNotSent.title": "Bu e-posta gönderilmedi olarak işaretlensin mi?",
+  "review.markNotSent.body":
+    "Yalnızca e-postanın gitmediğinden eminseniz seçin (Gönderilmiş klasöründe yok). Bu adım yeniden gönderime açılır ve olağan kurallarla tekrar gönderilir. Karar yanlışsa aynı kişiye ikinci e-posta gider. Geri alınamaz.",
+  "review.markNotSent.confirm": "Gönderilmedi, yeniden gönderime aç",
+  "review.stop.title": "Bu kişiye gönderim durdurulsun mu?",
+  "review.stop.body":
+    "Bu kişiye bu kampanyadan başka e-posta gönderilmez. Kayıt «sonuç belirsiz» olarak kalır; bu yüzden kişi diğer kampanyalarda da engelli kalır. Emin değilseniz en güvenli seçenek budur. Geri alınamaz.",
+  "review.stop.confirm": "Gönderimi durdur",
+  "review.resolved.mark_sent": "Gönderildi olarak işaretlendi.",
+  "review.resolved.mark_not_sent":
+    "Gönderilmedi olarak işaretlendi; adım yeniden gönderime açıldı.",
+  "review.resolved.stop_sequence": "Bu kişiye gönderim durduruldu.",
+  "review.testSend": "Test e-postası",
+  "reason.resolved_not_sent": "Gönderilmediği kullanıcı tarafından doğrulandı",
+  "reason.review_stopped": "Sonuç belirsiz olduğu için gönderim durduruldu",
 
   "blocker.consent_missing": "Kullanım onayı verilmemiş",
   "blocker.sender_profile_incomplete": "Gönderen firma bilgileri eksik",

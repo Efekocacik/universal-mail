@@ -4,6 +4,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { IneligibleCode } from "@/lib/compliance/eligibility";
 import type { CampaignStatus, CampaignLeadStatus, SendWindow } from "@/lib/db/schema";
 import type { ReviewItem } from "@/lib/mail/scheduler/review";
+import type {
+  ResolveReviewResult,
+  UncertainSendDecision,
+} from "@/lib/mail/scheduler/resolve-review";
 import type { TemplateListItem } from "@/lib/mail/template-service";
 import type { AddLeadsResult, QueueItem } from "@/lib/campaigns/enrollment";
 import type { CampaignMessageItem } from "@/lib/campaigns/messages";
@@ -188,5 +192,18 @@ export const campaignApi = {
     api<TransitionResult>(`/api/campaigns/${id}/control`, {
       method: "POST",
       json: confirmToken ? { action, confirmToken } : { action },
+    }),
+};
+
+/* Sonucu belirsiz gönderimin kararı (C7): tek deneme; hiçbir şey göndermez. -------------------------- */
+
+export type { ResolveReviewResult, UncertainSendDecision };
+
+export const reviewApi = {
+  /** `mark_not_sent` açık onay ister (`confirm: true`); yanlış kararda aynı kişiye ikinci e-posta gider. */
+  resolve: (messageId: number, decision: UncertainSendDecision, opts: { confirm?: boolean } = {}) =>
+    api<ResolveReviewResult>(`/api/campaigns/review/${messageId}`, {
+      method: "POST",
+      json: opts.confirm ? { decision, confirm: true } : { decision },
     }),
 };
