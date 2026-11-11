@@ -365,6 +365,35 @@ describe("kampanyaya ekleme: işletme başına sınırlar", () => {
     expect(plan.ineligible).toHaveLength(1);
     expect(plan.ineligible[0]!.reasons).toContain("business_contact_cooldown");
   });
+
+  it("başlatma özeti: eski çift pending dizilerde küçük kimlik uygun kalır, yalnızca diğeri dışlanır", async () => {
+    const campaignId = await addCampaign("draft");
+    const a = await addLead("info@ortak.example");
+    const b = await addLead("sales@shop.ortak.example");
+    const c = await addLead("info@ikiz.example");
+    const d = await addLead("sales@ikiz.example");
+    // C8 öncesinden kalmış kayıtlar: ekleme bugün ikincileri engeller, bu yüzden doğrudan yazılır.
+    const ids = [];
+    for (const l of [a, b, c, d]) ids.push(await enroll(campaignId, l, { status: "pending" }));
+    const plan = await computeStartPlan(db, campaignId, { now: T0, env: {} });
+    expect(plan.eligible.map((e) => e.leadId)).toEqual([a.leadId, c.leadId]);
+    expect(plan.ineligible).toEqual([
+      { id: ids[1], reasons: ["business_already_in_campaign"] },
+      { id: ids[3], reasons: ["domain_already_in_campaign"] },
+    ]);
+
+    // Dışlanmış dizinin yeniden denetimi ise açık (pending) kardeşe karşı engellenmeye devam eder.
+    await db.update(campaignLeads).set({ status: "excluded" }).where(eq(campaignLeads.id, ids[0]!));
+    expect(
+      codes(
+        await evaluateEnrollment(
+          db,
+          { campaignId, leadId: a.leadId },
+          { now: T0, ignoreCampaignLeadId: ids[0] },
+        ),
+      ),
+    ).toEqual(["business_already_in_campaign"]);
+  });
 });
 
 describe("gönderim öncesi: işletme başına sınırlar", () => {

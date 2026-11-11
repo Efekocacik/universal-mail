@@ -122,7 +122,8 @@ export interface EligibilityOptions {
   limits?: FrequencyLimits;
   /**
    * Yalnızca `evaluateEnrollment`: kampanyadaki bu dizinin KENDİSİ "zaten kampanyada" sayılmaz. Kampanya başlatılırken
-   * `pending` dizilerin yeniden denetlenmesi için kullanılır; diğer bütün kontroller aynen uygulanır.
+   * `pending` dizilerin yeniden denetlenmesi için kullanılır; diğer bütün kontroller aynen uygulanır. Bu dizi `pending`
+   * ise aynı alan adındaki/işletmedeki büyük kimlikli `pending` kardeş onu engellemez (küçük kimlik kazanır).
    */
   ignoreCampaignLeadId?: number;
 }
@@ -214,10 +215,18 @@ export async function evaluateEnrollment(
         .from(campaignLeads)
         .where(eq(campaignLeads.campaignId, campaign.id));
       const inCampaign = inCampaignAll.filter((r) => r.id !== opts.ignoreCampaignLeadId);
+      // Başlatma öncesi yeniden denetimde (`pending` dizinin kendisi) eski çift `pending` diziler arasında gönderimdeki
+      // kural uygulanır: küçük kimlik işletmeyi tutar; büyük kimlikli `pending` kardeş bu diziyi engellemez (yoksa
+      // ikisi de dışlanır ve işletmeye hiç yazılmaz).
+      const self = inCampaignAll.find((r) => r.id === opts.ignoreCampaignLeadId);
+      const siblings =
+        self?.status === "pending"
+          ? inCampaign.filter((r) => !(r.status === "pending" && r.id > self.id))
+          : inCampaign;
       if (inCampaign.some((r) => r.leadId === lead.id || r.hash === recipient.hash)) {
         c.add("already_in_campaign");
       } else if (
-        inCampaign.some(
+        siblings.some(
           (r) =>
             r.domain === recipient.domain &&
             !["excluded", "removed", "cancelled"].includes(r.status),
@@ -230,7 +239,7 @@ export async function evaluateEnrollment(
           c,
           campaign.id,
           businessDomainOf(recipient.domain),
-          inCampaign,
+          siblings,
         );
       }
     }
