@@ -4,8 +4,9 @@ import { bumpUpdatedAt } from "@/lib/campaigns/errors";
 import { DAY_MS } from "@/lib/compliance/frequency";
 import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
-import { campaigns, messages, settings, suppressions } from "@/lib/db/schema";
+import { campaignLeads, campaigns, messages, settings, suppressions } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
+import { ARF_COMPLAINT_CODE } from "./inbound/process";
 
 /**
  * Posta kutusu düzeyi gönderim sağlığı (SRS 5.6.1: "bounce oranı %3'ü veya şikâyet oranı %0,1'i aşarsa yeni
@@ -24,8 +25,13 @@ import { getSetting } from "@/lib/settings";
  * doğrulanmış bounce'lu alıcı "küçük örneklem freni"ni tetikler. Ayrıca adres düzeyinde anında suppression ve kampanya
  * düzeyinde otomatik durdurma zaten çalışır.
  *
- * ŞİKÂYET: Bu sürümde sağlayıcıdan şikâyet verisi YOKTUR. %0,1 kuralı "ölçülemiyor" olarak gösterilir; elle girilen
- * şikâyet kayıtları posta kutusuna bağlanamadığından orana KATILMAZ ve doğrulanmış sayılmaz.
+ * ŞİKÂYET: %0,1 kuralı HER ZAMAN "ölçülemiyor" gösterilir ve hiçbir otomatik durdurma kararına girmez. Neden: ARF
+ * (RFC 5965) raporlarını yalnızca geri bildirim döngüsü (FBL) sunan sağlayıcılar gönderir (Gmail dahil birçok sağlayıcı
+ * göndermez) ve alıcıların çoğu şikâyetini hiçbir yere bildirmez; yani paydaya karşılık gelen şikâyet kapsamı
+ * BİLİNMEZ. Gösterilen ARF sayısı bu yüzden "KISMİ KAPSAM"dır: yalnızca (1) güvenilir ilan edilmiş raporcudan gelen,
+ * (2) tüm kanıt katmanlarından geçmiş şikâyetlerin son 30 gündeki ALICI sayısı (alt sınır; gerçek şikâyet sayısı
+ * bundan büyük olabilir) ve (3) insan incelemesi bekleyen doğrulanmamış raporların sayısı. Elle girilen şikâyet
+ * kayıtları posta kutusuna bağlanamadığından bunlara da katılmaz.
  *
  * Eşikler yalnızca SIKILAŞTIRILABİLİR (durdurmayı kolaylaştırma yönünde); geri gevşetme yoktur.
  */
@@ -325,7 +331,18 @@ export interface MailboxHealthView {
   rateBp: number;
   evaluation: MailboxEvaluation;
   halted: HaltRecord | null;
-  complaint: { status: "not_measurable"; thresholdBp: number; manualRecords: number };
+  complaint: {
+    status: "not_measurable";
+    thresholdBp: number;
+    manualRecords: number;
+    /** ARF kısmi kapsam sayacı: oran DEĞİL, alt sınır. */
+    arf: {
+      coverage: "partial";
+      windowDays: number;
+      verifiedRecipients: number;
+      pendingReview: number;
+    };
+  };
 }
 
 export async function getMailboxHealth(
@@ -346,6 +363,32 @@ export async function getMailboxHealth(
         sql`${suppressions.liftedAt} IS NULL`,
       ),
     );
+  const since = now - MAILBOX_WINDOW_MS;
+  const [verified] = await db
+    // Birim: ALICI. Gelen satırın `peer_hash`'i raporu gönderen sağlayıcıdır; alıcı, bağlı kampanya alıcısı kaydındandır.
+    .select({ n: sql<number>`count(distinct ${campaignLeads.recipientHash})` })
+    .from(messages)
+    .innerJoin(campaignLeads, eq(campaignLeads.id, messages.campaignLeadId))
+    .where(
+      and(
+        eq(messages.direction, "in"),
+        eq(messages.mailboxId, mailboxId),
+        eq(messages.status, "matched"),
+        eq(messages.errorCode, ARF_COMPLAINT_CODE),
+        gte(sql`coalesce(${messages.receivedAt}, ${messages.createdAt})`, since),
+      ),
+    );
+  const [pending] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.direction, "in"),
+        eq(messages.mailboxId, mailboxId),
+        eq(messages.status, "received"),
+        sql`${messages.errorCode} LIKE ${`${ARF_COMPLAINT_CODE}:%`}`,
+      ),
+    );
   return {
     limits,
     floors: MAILBOX_FLOORS,
@@ -359,6 +402,12 @@ export async function getMailboxHealth(
       status: "not_measurable",
       thresholdBp: COMPLAINT_THRESHOLD_BP,
       manualRecords: Number(manual?.n ?? 0),
+      arf: {
+        coverage: "partial",
+        windowDays: MAILBOX_WINDOW_DAYS,
+        verifiedRecipients: Number(verified?.n ?? 0),
+        pendingReview: Number(pending?.n ?? 0),
+      },
     },
   };
 }

@@ -181,6 +181,11 @@ export const settingSchemas = {
     z.string(),
     z.object({ at: z.number().int(), ok: z.boolean(), code: z.string() }),
   ),
+  /**
+   * ARF şikâyet raporlarını bildirmesine güvenilen geri bildirim sağlayıcı alan adları (Aşama 15.8). Varsayılan BOŞ:
+   * boşken hiçbir ARF şikâyeti doğrulanmaz (yalnızca inceleme kuyruğuna düşer). Yalnızca ARF servisi yazar.
+   */
+  "mail.arfReporters": z.array(z.string().regex(/^[a-z0-9.-]{3,253}$/)).max(50),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -214,6 +219,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.unsubscribeChannel": { current: null, keys: [] },
   "mail.dnsReports": {},
   "mail.inboxSync": {},
+  "mail.arfReporters": [],
   "mail.unsubscribeEndpoint": {
     baseUrl: null,
     pending: null,

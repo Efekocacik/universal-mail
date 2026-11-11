@@ -74,7 +74,7 @@ export function SendLogPanel() {
                     purposeLabel(m.purpose),
                     m.campaignName,
                     m.subject,
-                    classLabel(m.classification),
+                    classLabel(m.classification, m.errorCode),
                   ]
                     .filter(Boolean)
                     .join(" · ")}

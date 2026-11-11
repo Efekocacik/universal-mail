@@ -31,7 +31,7 @@ function ReviewRow({ item }: { item: ReviewItem }) {
       <div className="min-w-0 space-y-0.5">
         <p className="flex flex-wrap items-center gap-1.5 font-medium">
           <Badge variant="warning">
-            {classLabel(item.classification) ?? t("mlog.class.other")}
+            {classLabel(item.classification, item.reason) ?? t("mlog.class.other")}
           </Badge>
           <span>{reviewReasonLabel(item.reason)}</span>
         </p>

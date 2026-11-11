@@ -286,6 +286,7 @@ describe("şikâyet: ölçülemiyor, doğrulanmış gibi davranılmaz", () => {
       status: "not_measurable",
       thresholdBp: 10,
       manualRecords: 0,
+      arf: { coverage: "partial", windowDays: 30, verifiedRecipients: 0, pendingReview: 0 },
     });
     for (let i = 0; i < 5; i++) {
       await db.insert(suppressions).values({

@@ -19,6 +19,10 @@ export type InboundKind =
   /** Olumsuz/ret ifadesi: asla otomatik suppression üretmez (K4). */
   | "negative"
   | "reply"
+  /** RFC 5965 geri bildirim raporu, `Feedback-Type: abuse` (şikâyet). Otomatik etki için ayrıca kanıt gerekir. */
+  | "complaint"
+  /** Başka türde geri bildirim raporu (fraud, virus, other, not-spam, opt-out...): hiçbir otomatik etki yok. */
+  | "feedback_other"
   | "other";
 
 /** Alıcı adresinin var olmadığını bildiren kalıcı durum kodları. */
@@ -58,6 +62,9 @@ const AUTO_SUBJECT =
   /^(automatic reply|auto(matic)? ?reply|auto-?response|out of office|autoreply|otomatik yanıt|abwesenheit|absence)/i;
 
 export function classifyInbound(p: ParsedInbound): InboundKind {
+  // RFC 5965 raporu bounce/yanıt kurallarından ÖNCE ele alınır (ARF gövdesindeki özgün ileti başlıkları bounce
+  // sanılmasın). Yalnızca `abuse` şikâyettir; yapı ve güven kontrolleri evidence.ts'tedir.
+  if (p.arf) return p.arf.feedbackType === "abuse" ? "complaint" : "feedback_other";
   if (
     p.dsn ||
     isSystemSender(p) ||

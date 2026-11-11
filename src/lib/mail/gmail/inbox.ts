@@ -351,6 +351,7 @@ export class GmailInboxReader implements InboxReader {
       ...parsed.inReplyTo,
       ...parsed.references,
       ...(parsed.dsn?.originalMessageId ? [parsed.dsn.originalMessageId] : []),
+      ...(parsed.arf?.originalMessageId ? [parsed.arf.originalMessageId] : []),
     ].slice(0, 20);
     const conds = [eq(messages.threadId, o.threadId)];
     if (refs.length > 0) conds.push(inArray(messages.rfcMessageId, refs));

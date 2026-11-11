@@ -36,6 +36,27 @@ export interface DsnInfo {
   originalMessageId: string | null;
 }
 
+/**
+ * RFC 5965 geri bildirim raporu (ARF). Rapor bir SALDIRGAN GİRDİSİDİR: alanlar yalnızca veri olarak okunur ve
+ * hiçbiri tek başına otomatik etki üretmez (bkz. evidence.ts).
+ */
+export interface ArfInfo {
+  /**
+   * `multipart/report; report-type=feedback-report` yapısı, geçerli bir `message/feedback-report` parçası,
+   * `Version: 1` ve geçerli bir `Feedback-Type` var mı?
+   */
+  structural: boolean;
+  /** Küçük harf: abuse, fraud, virus, other, not-spam, opt-out...; yoksa/geçersizse null. */
+  feedbackType: string | null;
+  version: string | null;
+  /** `Original-Rcpt-To` değerleri (geçerli adresler, küçük harf; en çok 5). Birçok sağlayıcı bunu gizler (boş). */
+  originalRcptTo: string[];
+  /** Raporun içindeki özgün iletinin Message-ID'si (yoksa null). */
+  originalMessageId: string | null;
+  /** Özgün iletinin `To` başlığındaki geçerli adresler (varsa; en çok 5). */
+  originalTo: string[];
+}
+
 export interface ParsedInbound {
   ok: true;
   /** Başlıklar: küçük harf ad → değerler (katlama açılmış). */
@@ -53,6 +74,8 @@ export interface ParsedInbound {
   /** İlk metin parçasının alıntısız, kısaltılmış hâli. */
   text: string;
   dsn: DsnInfo | null;
+  /** RFC 5965 geri bildirim raporu; rapor değilse null. Rapor iletisi `dsn` ÜRETMEZ. */
+  arf: ArfInfo | null;
   /** Ayrıştırmada görülen kuşkulu durumlar; doluysa otomatik etki yapılmaz. */
   suspicious: string[];
 }
@@ -202,6 +225,43 @@ function parseDsnBlocks(text: string): DsnRecipient[] {
   return recipients;
 }
 
+const FEEDBACK_TYPE_RE = /^[a-z][a-z-]{0,29}$/;
+
+/** `message/feedback-report` alanları (ilk blok); katlanmış satırlar açılır. */
+function parseArfFields(text: string): Map<string, string[]> {
+  const fields = new Map<string, string[]>();
+  const block = text.split(/\r?\n\r?\n/)[0] ?? "";
+  for (const line of block.replace(/\r?\n[ \t]+/g, " ").split(/\r?\n/)) {
+    const i = line.indexOf(":");
+    if (i <= 0) continue;
+    const k = line.slice(0, i).trim().toLowerCase();
+    if (!/^[a-z][a-z0-9-]{0,40}$/.test(k)) continue;
+    const arr = fields.get(k) ?? [];
+    if (arr.length < 10)
+      arr.push(
+        line
+          .slice(i + 1)
+          .trim()
+          .slice(0, 500),
+      );
+    fields.set(k, arr);
+  }
+  return fields;
+}
+
+function emailsOf(values: string[], max = 5): string[] {
+  const out: string[] = [];
+  for (const v of values) {
+    for (const piece of v.split(",")) {
+      const addr = (/<([^<>]+)>/.exec(piece)?.[1] ?? piece).trim().toLowerCase();
+      const parsed = parseEmail(addr);
+      if (parsed && !out.includes(parsed.email)) out.push(parsed.email);
+      if (out.length >= max) return out;
+    }
+  }
+  return out;
+}
+
 const MID_RE = /<[^<>\s]{1,240}>/g;
 
 function idsOf(value: string | null | undefined): string[] {
@@ -240,12 +300,36 @@ export function parseInbound(raw: string): ParseResult {
   const ct = first(headers, "content-type");
   const topType = typeOf(ct);
 
+  // RFC 5965: üst düzey `multipart/report; report-type=feedback-report`.
+  const isFeedbackReport =
+    topType === "multipart/report" &&
+    (paramOf(ct, "report-type") ?? "").toLowerCase() === "feedback-report";
+  let arfFields: Map<string, string[]> | null = null;
+  let arfOriginalId: string | null = null;
+  let arfOriginalTo: string[] = [];
+  let arfOriginals = 0;
+
   let text = "";
   let dsn = null as DsnInfo | null;
   for (const p of parts) {
     const t = typeOf(first(p.headers, "content-type"));
     const decoded = () => decodeBody(p.body, first(p.headers, "content-transfer-encoding"));
-    if (t === "text/plain" && !text) {
+    if (isFeedbackReport && t === "message/feedback-report") {
+      if (arfFields) suspicious.push("duplicate_feedback_report");
+      else arfFields = parseArfFields(decoded().slice(0, 20_000));
+    } else if (isFeedbackReport && (t === "message/rfc822" || t === "text/rfc822-headers")) {
+      arfOriginals++;
+      const inner = splitHeadBody(p.body) ?? { head: p.body, body: "" };
+      const ih = parseHeaders(inner.head.slice(0, 20_000), []);
+      if (ih !== "too_many") {
+        const id = idsOf(first(ih, "message-id"))[0] ?? null;
+        if (arfOriginals > 1 && id !== arfOriginalId) suspicious.push("multiple_original_messages");
+        else {
+          arfOriginalId = id;
+          arfOriginalTo = emailsOf(ih.get("to") ?? []);
+        }
+      }
+    } else if (t === "text/plain" && !text) {
       text = decoded().slice(0, MAX_TEXT_CHARS);
     } else if (t === "message/delivery-status") {
       const recipients = parseDsnBlocks(decoded());
@@ -266,6 +350,26 @@ export function parseInbound(raw: string): ParseResult {
       topType === "multipart/report" &&
       (paramOf(ct, "report-type") ?? "").toLowerCase() === "delivery-status" &&
       dsn.recipients.length > 0;
+  }
+
+  let arf: ArfInfo | null = null;
+  if (isFeedbackReport) {
+    const f = arfFields;
+    const type = f?.get("feedback-type")?.[0]?.trim().toLowerCase() ?? null;
+    const version = f?.get("version")?.[0]?.trim() ?? null;
+    const feedbackType = type !== null && FEEDBACK_TYPE_RE.test(type) ? type : null;
+    arf = {
+      structural:
+        !!f &&
+        version === "1" &&
+        feedbackType !== null &&
+        !suspicious.includes("duplicate_feedback_report"),
+      feedbackType,
+      version,
+      originalRcptTo: f ? emailsOf(f.get("original-rcpt-to") ?? []) : [],
+      originalMessageId: arfOriginalId,
+      originalTo: arfOriginalTo,
+    };
   }
 
   const autoSubmitted = (first(headers, "auto-submitted") ?? "no").toLowerCase();
@@ -290,6 +394,7 @@ export function parseInbound(raw: string): ParseResult {
     autoGenerated,
     text,
     dsn,
+    arf,
     suspicious,
   };
 }

@@ -42,7 +42,12 @@ export function deliveryLabel(d: string | null): string | null {
   return d === "bounced_hard" || d === "bounced_soft" ? t(`mlog.delivery.${d}` as TrKey) : null;
 }
 
-export function classLabel(c: string | null): string | null {
+/** ARF şikâyet işareti (`arf_complaint` veya `arf_complaint:<neden>`): sınıflandırma sütunu `other` kalır. */
+export const isArfComplaintCode = (code: string | null | undefined): boolean =>
+  !!code && (code === "arf_complaint" || code.startsWith("arf_complaint:"));
+
+export function classLabel(c: string | null, errorCode?: string | null): string | null {
+  if (isArfComplaintCode(errorCode)) return t("mlog.class.complaint");
   return c && ["reply", "bounce", "auto_reply", "unsubscribe", "negative", "other"].includes(c)
     ? t(`mlog.class.${c}` as TrKey)
     : null;
@@ -54,7 +59,16 @@ export function purposeLabel(p: string): string {
 
 /** Bilinmeyen inceleme nedeni makine koduyla gösterilmez; genel bir metne düşer. */
 export function reviewReasonLabel(code: string | null): string {
+  // ARF şikâyeti: "arf_complaint:<neden>" → "Şikâyet raporu — <neden>"
+  if (code && code.startsWith("arf_complaint:")) {
+    return t("inbox.reason.arf_complaint", {
+      reason: reviewReasonLabel(code.slice("arf_complaint:".length)),
+    });
+  }
   const known = [
+    "reporter_untrusted",
+    "recipient_unavailable",
+    "arf_other_type",
     "no_attestation",
     "attestation_failed",
     "recipient_mismatch",

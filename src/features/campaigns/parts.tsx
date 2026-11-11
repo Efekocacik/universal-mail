@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CampaignLeadStatus, CampaignStatus } from "@/lib/client/campaigns";
 import { t } from "@/lib/i18n";
-import { reasonLabel, SEQUENCE_VARIANT, STATUS_VARIANT } from "./model";
+import { reasonLabel, SEQUENCE_VARIANT, sequenceStatusLabel, STATUS_VARIANT } from "./model";
 
 /** Renk tek başına anlam taşımaz: her duruma metnin yanında küçük bir simge de eklenir. */
 const STATUS_ICON: Record<CampaignStatus, LucideIcon> = {
@@ -40,8 +40,18 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
   );
 }
 
-export function SequenceStatusBadge({ status }: { status: CampaignLeadStatus }) {
-  return <Badge variant={SEQUENCE_VARIANT[status]}>{t(`sequenceStatus.${status}`)}</Badge>;
+/**
+ * `reasons`: dizinin gerekçe kodları. `unsubscribed` durumu çıkış talebi VE ARF şikâyeti için ortak geçici durumdur
+ * (migrasyon yok); şikâyetle durdurulan dizi `arf_complaint` işaretiyle ayrı etiketlenir.
+ */
+export function SequenceStatusBadge({
+  status,
+  reasons,
+}: {
+  status: CampaignLeadStatus;
+  reasons?: readonly string[];
+}) {
+  return <Badge variant={SEQUENCE_VARIANT[status]}>{sequenceStatusLabel(status, reasons)}</Badge>;
 }
 
 export function DemoBadge() {

@@ -24,6 +24,7 @@ import {
   type OutboundMatch,
 } from "./evidence";
 import { parseInbound, type ParsedInbound } from "./parse";
+import { getSetting } from "@/lib/settings";
 
 /**
  * Gelen ileti işleme (Aşama 13). Sağlayıcıdan bağımsızdır; yalnızca DEMO posta kutuları için çalışır (canlı kapsam
@@ -90,6 +91,8 @@ const NO_EFFECTS: InboundEffects = {
 };
 
 const CLASSIFICATION: Record<InboundKind, MessageClassification> = {
+  complaint: "other",
+  feedback_other: "other",
   bounce_hard: "bounce",
   bounce_soft: "bounce",
   bounce_policy: "bounce",
@@ -176,13 +179,26 @@ async function findMatch(
 interface Plan {
   status: InboundStatus;
   reviewReason: string | null;
+  /**
+   * Satıra yazılacak `error_code` (verilmezse `reviewReason`). ARF şikâyeti için işaret: `classification` sütunu
+   * (CHECK kısıtı) `complaint` kabul etmediğinden şikâyet `other` + bu kodla saklanır (migrasyon 15.10'dadır).
+   */
+  errorCode?: string;
   /** Uygulanacak etki; null ise yalnızca kayıt. */
-  apply: "hard_bounce" | "soft_bounce" | "reply" | "unsubscribe" | null;
+  apply: "hard_bounce" | "soft_bounce" | "reply" | "unsubscribe" | "complaint" | null;
   /** Satıra kampanya/dizi bağlantısı yazılsın mı? */
   link: boolean;
 }
 
-function planFor(kind: InboundKind, ev: Evidence, match: OutboundMatch | null): Plan {
+/** ARF şikâyet işareti: doğrulanmış satır `arf_complaint`, doğrulanmamış `arf_complaint:<neden>`. */
+export const ARF_COMPLAINT_CODE = "arf_complaint";
+
+function planFor(
+  kind: InboundKind,
+  ev: Evidence,
+  match: OutboundMatch | null,
+  parsed: ParsedInbound,
+): Plan {
   if (ev.isTest)
     return { status: "ignored", reviewReason: "test_message", apply: null, link: false };
   const verified = evidenceOk(ev);
@@ -196,6 +212,33 @@ function planFor(kind: InboundKind, ev: Evidence, match: OutboundMatch | null): 
   switch (kind) {
     case "auto_reply":
       return { status: "ignored", reviewReason: null, apply: null, link: false };
+    case "complaint":
+      return verified
+        ? {
+            status: "matched",
+            reviewReason: null,
+            errorCode: ARF_COMPLAINT_CODE,
+            apply: "complaint",
+            link: true,
+          }
+        : {
+            status: match && ev.l1 ? "received" : "unmatched",
+            reviewReason: ev.reviewReason,
+            errorCode: `${ARF_COMPLAINT_CODE}:${ev.reviewReason ?? "unverified"}`,
+            apply: null,
+            link: false,
+          };
+    case "feedback_other":
+      // `not-spam` olumlu sinyaldir: inceleme gerektirmez. Diğer türler (fraud, virus, other, opt-out...) otomatik
+      // işlenmez, insan incelemesine gider.
+      return parsed.arf?.feedbackType === "not-spam"
+        ? { status: "ignored", reviewReason: null, apply: null, link: false }
+        : {
+            status: match && ev.l1 ? "received" : "unmatched",
+            reviewReason: "arf_other_type",
+            apply: null,
+            link: false,
+          };
     case "bounce_hard":
       return verified
         ? { status: "matched", reviewReason: null, apply: "hard_bounce", link: true }
@@ -299,21 +342,46 @@ export async function processInbound(
       }
 
       const kind = classifyInbound(parsed);
-      const refIds = kind.startsWith("bounce")
-        ? parsed.dsn?.originalMessageId
-          ? [parsed.dsn.originalMessageId]
+      const isArf = kind === "complaint" || kind === "feedback_other";
+      const refIds = isArf
+        ? parsed.arf?.originalMessageId
+          ? [parsed.arf.originalMessageId]
           : []
-        : [...parsed.inReplyTo, ...parsed.references.slice().reverse()].slice(0, 10);
+        : kind.startsWith("bounce")
+          ? parsed.dsn?.originalMessageId
+            ? [parsed.dsn.originalMessageId]
+            : []
+          : [...parsed.inReplyTo, ...parsed.references.slice().reverse()].slice(0, 10);
       const fromHash = parsed.from ? hashEmail(parsed.from.email) : null;
       const match = await findMatch(
         tx,
         refIds,
         mailbox.id,
         kind === "unsubscribe" ? fromHash : null,
-        env.threadId ?? null,
+        // ARF'nin kendi konuşması bizim gönderdiğimizle ilgisizdir: konuşma yedeği yalnızca Message-ID yeniden
+        // yazımı olan yanıtlar içindir.
+        isArf ? null : (env.threadId ?? null),
       );
 
+      // ARF şikâyeti: eşleşen kampanya alıcısının adresi kayıtlı ve iletinin alıcı özetiyle tutarlı olmalı
+      // (silinmiş alıcıya engel yazılamaz). Güvenilir rapor sağlayıcıları ayardan okunur (varsayılan: boş).
+      let complaintEmail: string | null = null;
+      if (kind === "complaint" && match?.campaignLeadId != null) {
+        const [cl] = await tx
+          .select({ email: campaignLeads.recipientEmail })
+          .from(campaignLeads)
+          .where(eq(campaignLeads.id, match.campaignLeadId))
+          .limit(1);
+        if (cl?.email && hashEmail(cl.email) === match.peerHash) complaintEmail = cl.email;
+      }
+      const trustedReporters =
+        kind === "complaint"
+          ? new Set((await getSetting(tx, "mail.arfReporters")).map((d) => d.toLowerCase()))
+          : undefined;
+
       const ev = evaluateEvidence({
+        ...(trustedReporters ? { trustedReporters } : {}),
+        ...(kind === "complaint" ? { recipientResolvable: complaintEmail !== null } : {}),
         parsed,
         kind,
         attestation: env.attestation,
@@ -323,7 +391,7 @@ export async function processInbound(
         now,
         allowEffects,
       });
-      const plan = planFor(kind, ev, match);
+      const plan = planFor(kind, ev, match, parsed);
 
       const [row] = await tx
         .insert(messages)
@@ -337,20 +405,23 @@ export async function processInbound(
           rfcMessageId: syntheticId,
           providerMessageId: env.providerMessageId ?? null,
           threadId: env.threadId ?? null,
-          inReplyTo: kind.startsWith("bounce")
-            ? (parsed.dsn?.originalMessageId ?? null)
-            : (parsed.inReplyTo[0] ?? null),
-          references: kind.startsWith("bounce")
-            ? null
-            : parsed.references.length > 0
-              ? parsed.references
-              : null,
+          inReplyTo: isArf
+            ? (parsed.arf?.originalMessageId ?? null)
+            : kind.startsWith("bounce")
+              ? (parsed.dsn?.originalMessageId ?? null)
+              : (parsed.inReplyTo[0] ?? null),
+          references:
+            isArf || kind.startsWith("bounce")
+              ? null
+              : parsed.references.length > 0
+                ? parsed.references
+                : null,
           peerHash: fromHash ?? hashEmail("unknown-sender"),
           peerDomain: parsed.from?.domain ?? "unknown.invalid",
           bodySha256: rawHash,
           status: plan.status,
           classification: CLASSIFICATION[kind],
-          errorCode: plan.reviewReason,
+          errorCode: plan.errorCode ?? plan.reviewReason,
           createdAt: now,
           receivedAt: env.receivedAt,
         })
@@ -365,6 +436,7 @@ export async function processInbound(
             now,
             ev,
             attestation: env.attestation!,
+            complaintEmail,
           })
         : NO_EFFECTS;
 
@@ -422,6 +494,7 @@ async function applyEffect(
     now: number;
     ev: Evidence;
     attestation: Attestation;
+    complaintEmail: string | null;
   },
 ): Promise<InboundEffects> {
   const { match, now } = c;
@@ -463,6 +536,45 @@ async function applyEffect(
       effects.campaignPaused = await autoPauseIfNeeded(tx, match.campaignId, now);
     // Posta kutusu düzeyi (SRS 5.6.1): eşik aşıldıysa kutu durdurulur, çalışan kampanyalar duraklar.
     if (await enforceMailboxHealth(tx, match.mailboxId, now)) effects.campaignPaused = true;
+    return effects;
+  }
+
+  if (kind === "complaint") {
+    // Doğrulanmış ARF şikâyeti: adres, kampanya alıcısı kaydındandır (rapordaki alan DEĞİL). Korumalı neden
+    // (`complaint`): sıradan işlemle kaldırılamaz. Alıcının BÜTÜN bekleyen dizileri durur (başka kampanyalar dahil).
+    const email = c.complaintEmail!;
+    await suppressEmailInTx(
+      tx,
+      { email, reason: "complaint", source: "inbox", messageId: c.inboundId },
+      now,
+    );
+    effects.suppressed = true;
+    // `unsubscribed` geçici durumu (migrasyon 15.10'a kadar) çıkış talebiyle KARIŞMASIN diye durdurulan dizilere
+    // `exclusionReasons=["arf_complaint"]` işareti yazılır; arayüz bunu "Şikâyet nedeniyle durduruldu" gösterir.
+    const stopped = await tx
+      .update(campaignLeads)
+      .set({
+        status: "unsubscribed",
+        exclusionReasons: [ARF_COMPLAINT_CODE],
+        nextSendAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(campaignLeads.recipientHash, match.peerHash),
+          inArray(campaignLeads.status, [...LINKABLE_FROM]),
+        ),
+      )
+      .returning({ id: campaignLeads.id });
+    effects.sequenceStopped = stopped.length > 0;
+    await audit(
+      tx,
+      "inbound.complaint",
+      "message",
+      c.inboundId,
+      { ...detail, stopped: stopped.length },
+      now,
+    );
     return effects;
   }
 

@@ -101,7 +101,12 @@ export function MailboxHealthCard({ mailboxId }: { mailboxId: number }) {
         </Notice>
       )}
       <p className="text-[12px] text-muted-foreground">
-        {t("health.mb.complaint", { n: h.complaint.manualRecords })}
+        {t("health.mb.complaint", {
+          n: h.complaint.manualRecords,
+          arf: h.complaint.arf.verifiedRecipients,
+          pending: h.complaint.arf.pendingReview,
+          days: h.complaint.arf.windowDays,
+        })}
       </p>
 
       <form

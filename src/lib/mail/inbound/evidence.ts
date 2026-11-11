@@ -44,6 +44,10 @@ export interface OutboundMatch {
 }
 
 export interface EvidenceInput {
+  /** ARF için: şikâyeti bildirmesine güvenilen rapor sağlayıcı alan adları (küçük harf). Boşsa hiçbir ARF doğrulanmaz. */
+  trustedReporters?: ReadonlySet<string>;
+  /** ARF için: eşleşen kampanya alıcısının adresi kayıtlı ve iletinin alıcı özetiyle tutarlı mı? */
+  recipientResolvable?: boolean;
   parsed: ParsedInbound;
   kind: InboundKind;
   attestation: Attestation | null;
@@ -81,7 +85,13 @@ export function evaluateEvidence(i: EvidenceInput): Evidence {
 
   let l2 = false;
   if (match && l1) {
-    if (i.kind.startsWith("bounce")) {
+    if (i.kind === "complaint") {
+      // RFC 5965: `Original-Rcpt-To` ve özgün iletinin `To` başlığı birçok sağlayıcıda gizlidir. Verilmişse HEPSİ
+      // iletinin gerçek alıcısıyla birebir aynı olmalı; hiç verilmemişse alıcı, eşleşen (tek alıcılı) iletinin
+      // kendisinden bellidir. Her iki durumda alıcı adresi kayıtlı olmalıdır.
+      const cands = [...(p.arf?.originalRcptTo ?? []), ...(p.arf?.originalTo ?? [])];
+      l2 = i.recipientResolvable !== false && cands.every((a) => hashEmail(a) === match.peerHash);
+    } else if (i.kind.startsWith("bounce")) {
       const rcpts = p.dsn?.recipients ?? [];
       l2 = rcpts.length === 1 && hashEmail(rcpts[0]!.address) === match.peerHash;
     } else if (p.from) {
@@ -90,8 +100,13 @@ export function evaluateEvidence(i: EvidenceInput): Evidence {
   }
 
   let l3 = false;
+  const reporterTrusted =
+    !!p.from && (i.trustedReporters?.has(p.from.domain.toLowerCase()) ?? false);
   if (attestation && attestation.senderAuth === "pass") {
-    if (i.kind.startsWith("bounce")) {
+    if (i.kind === "complaint") {
+      // Rapor, KENDİ kimliği doğrulanmış ve önceden güvenilir ilan edilmiş bir geri bildirim sağlayıcısından gelmeli.
+      l3 = !!p.arf?.structural && p.suspicious.length === 0 && reporterTrusted;
+    } else if (i.kind.startsWith("bounce")) {
       l3 =
         attestation.nullReturnPath &&
         !!p.dsn?.structural &&
@@ -105,6 +120,9 @@ export function evaluateEvidence(i: EvidenceInput): Evidence {
   const ownMailbox =
     !!i.mailboxAddress && !!p.from && p.from.email === i.mailboxAddress.toLowerCase();
   let l4 = i.allowEffects && !ownMailbox && p.suspicious.length === 0;
+  if (l4 && i.kind === "complaint") {
+    l4 = p.arf?.feedbackType === "abuse" && p.arf.version === "1";
+  }
   if (l4 && i.kind === "bounce_hard") {
     const st = p.dsn?.recipients[0]?.status ?? "";
     l4 = ADDRESS_GONE_STATUSES.has(st);
@@ -113,9 +131,17 @@ export function evaluateEvidence(i: EvidenceInput): Evidence {
   let reviewReason: string | null = null;
   if (isTest) reviewReason = "test_message";
   else if (!l1) reviewReason = match ? "match_invalid" : "no_match";
-  else if (!l2) reviewReason = "recipient_mismatch";
+  else if (!l2)
+    reviewReason =
+      i.kind === "complaint" && i.recipientResolvable === false
+        ? "recipient_unavailable"
+        : "recipient_mismatch";
   else if (!attestation) reviewReason = "no_attestation";
-  else if (!l3) reviewReason = "attestation_failed";
+  else if (!l3)
+    reviewReason =
+      i.kind === "complaint" && attestation.senderAuth === "pass" && !reporterTrusted
+        ? "reporter_untrusted"
+        : "attestation_failed";
   else if (!l4) reviewReason = i.allowEffects ? "limits" : "flood_guard";
 
   return { l1, l2, l3, l4, isTest, reviewReason };

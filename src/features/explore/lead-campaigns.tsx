@@ -48,7 +48,7 @@ export function LeadCampaigns({ leadId }: { leadId: number }) {
                 {c.campaignName}
               </Link>
               <CampaignStatusBadge status={c.campaignStatus} />
-              <SequenceStatusBadge status={c.sequenceStatus} />
+              <SequenceStatusBadge status={c.sequenceStatus} reasons={c.exclusionReasons} />
             </div>
             {c.exclusionReasons.length > 0 && (
               <div className="space-y-1">

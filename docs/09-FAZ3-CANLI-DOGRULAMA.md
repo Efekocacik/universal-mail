@@ -137,3 +137,30 @@ Gerçek ortam gerektiren BEKLEYEN maddeler (bu aşamada YAPILMADI): gerçek alan
 5. `ReplayStore` aktarıcıda bellek içidir (yeniden başlatmada kopya olay üretir; uygulamada güvenle tekilleştirilir).
 
 **Açık kalan — gerçek ortam/şirket bilgisi gerektirenler:** gerçek alan adı ve HTTPS aktarıcı dağıtımı, TLS, gerçek POSIX disk dayanıklılığı (K2), gerçek DNS denetimi, Gmail hesabı/OAuth, Gmail başlık güven doğrulaması (Bölüm 1.3), gelen kutusu okumasının canlıda çalıştığının kanıtı (`inbox_sync`), hukuki onaylar (`LEGAL_APPROVALS`), canlı ülke politikası kilidi, pilot.
+
+## 4. ARF (RFC 5965) şikâyet raporları (Aşama 15.8)
+
+Kod tarafı hazırdır (ayrıştırıcı, sınıflandırma, kanıt katmanları, suppression ve dizi durdurma, kısmi kapsam sayacı). **Gerçek bir geri bildirim döngüsü (FBL) olmadan hiçbir şey kanıtlanmadı.** Tasarım kararları:
+
+- **Doğrulanmış şikâyet** = `Feedback-Type: abuse` + yapısal geçerli ARF (`Version: 1`) + kimlik doğrulama tasdiki (`pass`) + rapor göndericisinin alan adı **önceden ilan edilmiş güvenilir rapor sağlayıcısı** (`mail.arfReporters`, varsayılan BOŞ) + bizim gönderdiğimiz kampanya iletisiyle Message-ID eşleşmesi (30 gün, aynı posta kutusu) + (rapor verdiyse) `Original-Rcpt-To`/özgün `To` iletinin alıcısıyla birebir aynı + alıcı adresi kayıtlı. Biri eksikse rapor yalnızca **inceleme kuyruğuna** düşer; suppression, dizi durdurma, sayım üretmez.
+- **Etki:** korumalı `complaint` engeli (sıradan işlemle kaldırılamaz; engel adresi rapordan değil kampanya alıcısı kaydından gelir) ve alıcının BÜTÜN bekleyen dizilerinin durması.
+- **Gmail gelen kutusundan** gelen raporlar yine **Gmail başlık güven kilidine** (`GMAIL_HEADER_TRUST_VERIFIED`, kapalı) bağlıdır: kilit kapalıyken tasdik üretilmez, raporlar yalnızca incelemeye kaydedilir.
+
+**Kısmi kapsam (şikâyet ORANI güvenilir değildir):** Şikâyet oranı kuralı (%0,1) HER ZAMAN "ölçülemiyor" gösterilir ve hiçbir otomatik durdurma kararına girmez. Çünkü ARF yalnızca FBL sunan sağlayıcılardan gelir (Gmail dahil birçoğu göndermez) ve alıcıların çoğu şikâyetini bildirmez; paydaya karşılık gelen şikâyet kapsamı bilinmez. Gösterilen sayı yalnızca son 30 gündeki doğrulanmış şikâyetli **alıcı** sayısının alt sınırıdır; incelemede bekleyen raporlar ayrı sayılır.
+
+**Veri modeli sınırı (migrasyon yok):** `messages.classification` CHECK kısıtı `complaint` kabul etmediğinden şikâyet `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak saklanır; dizi durumu için ayrı bir "şikâyet" değeri olmadığından `unsubscribed` kullanılır. Her ikisi de **Aşama 15.10 (ayrıca onay gerektiren migrasyon)** ile düzeltilecektir.
+
+Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
+- [ ] Hangi posta sağlayıcılarının FBL/JMRP sunduğu ve şirketin posta düzeni için kaydolunacak olanlar; rapor göndericisi alan adlarının listesi (`mail.arfReporters`; bu sürümde bilinmez, **varsayılan boş**). Listeyi ayarlamak için arayüz/API YOK (yalnızca servis işlevi).
+- [ ] Gerçek bir FBL raporunun biçimi (`Original-Rcpt-To` gizleme, `Reported-Domain`, `message/rfc822` yerine `text/rfc822-headers` kullanımı) ayrıştırıcıyla uyumlu mu; raporun gerçekten kimlik doğrulamalı (DMARC `pass`) geldiği.
+- [ ] Raporun, bizim `Message-ID`'mizi aynen taşıması (Gmail Message-ID yeniden yazımı, bkz. Bölüm 2) ve raporlardaki gecikme süresi (30 günlük eşleşme penceresi yeterli mi).
+- [ ] ARF'nin gerçek şikâyet kapsamı (hangi sağlayıcılar kapsanıyor; kapsam doğrulanmadan şikâyet oranı kullanılmaz).
+
+### 4.1 Aşama 15.8 güvenlik incelemesi: bulgular
+
+- **Dizi durumu (migrasyon yok):** Şikâyetle durdurulan diziler geçici olarak `unsubscribed` durumunu kullanır; bu, çıkış talebiyle KARIŞMASIN diye sıraya `exclusionReasons=["arf_complaint"]` işareti yazılır. Arayüz (kuyruk, işletme sayfası) bunu "Şikâyet nedeniyle durduruldu" olarak gösterir; çıkış talebi "Listeden çıkmak istedi" kalır. Kampanya özet sayaçları ise ikisini hâlâ aynı `unsubscribed` kovasında sayar (düzeltme: Aşama 15.10).
+- **Yeniden etkinleşme:** Durum geçişlerinin hepsi kaynak durum kümesiyle sınırlıdır (`LINKABLE_FROM`, dağıtıcı `defer/exclude`, başlatma yalnızca `pending`); durdurulmuş dizi hiçbir kampanya eylemiyle canlanmaz. Durum bir hatayla geri alınsa bile ikinci güvence olarak şikâyet ENGELİ gönderimi durdurur. Gönderim sürerken (`in_flight`) gelen şikâyette dizi durumu değişmez ama engel yazılır; sonuç kaydedildikten sonra sonraki adım engelden dolayı gönderilmez.
+- **Engel korumalıdır:** sıradan kaldırma (servis ve API) reddedilir; daha zayıf nedenler (elle, olumsuz yanıt, bounce, çıkış, CSV) engeli zayıflatmaz; yalnızca silme talebi güçlendirir; engel tablosunu değiştiren tek modül `suppression.ts`'tir (kaynak taraması testi) ve API'de silme/güncelleme ucu yoktur.
+- **Tekrar işleme:** aynı ham rapor `duplicate`; aynı alıcı hakkında farklı raporlar tek engel ve tek alıcı sayacı üretir; engel belgelenmiş talepte kaldırıldıktan sonra eski raporun tekrarı yeniden engel koymaz, gerçekten yeni bir rapor koyar.
+- **Sahte rapor:** görünen ad/benzer alan adı/alt alan adı sahteciliği, ARF olmayan türler ve DSN/yanıt içeriği doğrulanmış şikâyet, engel, dizi durdurma veya sayaç doğurmaz.
+- **Denetim ve arayüz ayrımı:** `inbound.complaint` + `suppression.added(reason=complaint)` ile `inbound.unsubscribe` / `unsubscribe.one_click` + `reason=unsubscribe` ayrıdır; çıkıştan şikâyete geçiş `suppression.strengthened (from=unsubscribe,to=complaint)` olarak ayrıca kaydedilir.

@@ -174,3 +174,80 @@ export const NO_NULL_PATH: Attestation = {
   senderAuth: "pass",
   nullReturnPath: false,
 };
+
+/** RFC 5965 (ARF) geri bildirim raporu; alanlar ve yapı çağıran tarafından değiştirilebilir. */
+export function rawArf(o: {
+  outboundMessageId: string;
+  /** `Original-Rcpt-To` (yoksa alan hiç yazılmaz: birçok sağlayıcı gizler). */
+  rcptTo?: string | string[] | null;
+  /** Özgün iletinin `To` başlığı (null: başlık yok). */
+  originalTo?: string | null;
+  feedbackType?: string | null;
+  version?: string | null;
+  from?: string;
+  to?: string;
+  nonce: string;
+  /** false: yalnızca `multipart/mixed` (rapor değil) ama aynı parçalar. */
+  reportType?: string | null;
+  /** İkinci bir feedback-report parçası ekler. */
+  duplicateReport?: boolean;
+  /** İkinci, FARKLI bir özgün ileti parçası ekler. */
+  secondOriginal?: string;
+  omitOriginal?: boolean;
+  extraHeaders?: string[];
+}): string {
+  const b = `arf-${o.nonce}`;
+  const rcpts = o.rcptTo === undefined || o.rcptTo === null ? [] : [o.rcptTo].flat();
+  const report = [
+    "Content-Type: message/feedback-report",
+    "",
+    ...(o.feedbackType === null ? [] : [`Feedback-Type: ${o.feedbackType ?? "abuse"}`]),
+    "User-Agent: SomeFblGenerator/1.0",
+    ...(o.version === null ? [] : [`Version: ${o.version ?? "1"}`]),
+    "Original-Mail-From: <demo@universal-mail.invalid>",
+    ...rcpts.map((r) => `Original-Rcpt-To: <${r}>`),
+    "Arrival-Date: Mon, 02 Nov 2026 10:00:00 +0000",
+    "Reported-Domain: universal-mail.invalid",
+    "Source-IP: 192.0.2.1",
+    "",
+  ];
+  const original = (id: string) => [
+    "Content-Type: message/rfc822",
+    "Content-Disposition: inline",
+    "",
+    "From: <demo@universal-mail.invalid>",
+    ...(o.originalTo === null
+      ? []
+      : [`To: ${o.originalTo ?? rcpts[0] ?? "redacted@example.invalid"}`]),
+    "Subject: Merhaba",
+    `Message-ID: ${id}`,
+    "",
+    "Orijinal iletinin gövdesi.",
+    "",
+  ];
+  return [
+    `From: <${o.from ?? "fbl@fbl.reporter-ornek.com"}>`,
+    `To: ${o.to ?? "demo@universal-mail.invalid"}`,
+    "Subject: FW: Merhaba",
+    `Message-ID: <arf-${o.nonce}@fbl.reporter-ornek.com>`,
+    "Date: Mon, 02 Nov 2026 10:05:00 +0000",
+    "MIME-Version: 1.0",
+    ...(o.extraHeaders ?? []),
+    o.reportType === null
+      ? `Content-Type: multipart/mixed; boundary="${b}"`
+      : `Content-Type: multipart/report; report-type=${o.reportType ?? "feedback-report"}; boundary="${b}"`,
+    "",
+    `--${b}`,
+    "Content-Type: text/plain; charset=US-ASCII",
+    "",
+    "Bu bir e-posta kötüye kullanım raporudur.",
+    "",
+    `--${b}`,
+    ...report,
+    ...(o.duplicateReport ? [`--${b}`, ...report] : []),
+    ...(o.omitOriginal ? [] : [`--${b}`, ...original(o.outboundMessageId)]),
+    ...(o.secondOriginal ? [`--${b}`, ...original(o.secondOriginal)] : []),
+    `--${b}--`,
+    "",
+  ].join("\r\n");
+}

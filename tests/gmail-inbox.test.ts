@@ -29,7 +29,8 @@ import { createGmailMailbox, setGmailClient } from "@/lib/mail/mailbox-service";
 import { mailboxRefreshTokenName, setSecret } from "@/lib/secrets/store";
 import { createCampaign, openMemoryDb, seedBase } from "./helpers/campaign-fixture";
 import { gmailWrap, startFakeGmailInbox, type FakeGmailInbox } from "./helpers/fake-gmail-inbox";
-import { NOW, rawDsn, rawMessage, seedSent, type Sent } from "./helpers/inbound-fixture";
+import { NOW, rawArf, rawDsn, rawMessage, seedSent, type Sent } from "./helpers/inbound-fixture";
+import { setTrustedReporters } from "@/lib/mail/inbound/arf";
 import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 
 /**
@@ -1103,5 +1104,102 @@ describe("güven kilidi (GMAIL_HEADER_TRUST_VERIFIED, varsayılan KAPALI)", () =
     } finally {
       env.NODE_ENV = prev;
     }
+  });
+});
+
+describe("ARF (RFC 5965) şikâyet raporları Gmail gelen kutusundan (Aşama 15.8)", () => {
+  const REPORTER = "fbl.reporter-ornek.com";
+  const arfRaw = () =>
+    gmailWrap(
+      rawArf({
+        outboundMessageId: sent.rfc,
+        rcptTo: RCPT,
+        to: ADDRESS,
+        nonce: "g1",
+        from: `fbl@${REPORTER}`,
+      }),
+      { mailbox: ADDRESS, headerFrom: REPORTER },
+    );
+
+  it("bizim iletimizle ilişkili ARF ön elemeden geçer (saklanır); ilgisiz ARF saklanmaz", async () => {
+    inbox.add({ id: "arf1", labels: ["INBOX"], raw: arfRaw() });
+    inbox.add({
+      id: "arf2",
+      labels: ["INBOX"],
+      raw: gmailWrap(
+        rawArf({
+          outboundMessageId: "<baskasinin.mesaji@baska.example>",
+          rcptTo: RCPT,
+          to: ADDRESS,
+          nonce: "g2",
+          from: `fbl@${REPORTER}`,
+        }),
+        { mailbox: ADDRESS, headerFrom: REPORTER },
+      ),
+    });
+    const r = await drain();
+    expect(r.errors).toEqual([]);
+    expect(await inboundRows()).toHaveLength(1);
+    expect(r.skipped).toBeGreaterThanOrEqual(1);
+  });
+
+  it("başlık güven kilidi KAPALIYKEN (varsayılan) şikâyet yalnızca incelemeye kaydedilir: engel/durdurma YOK", async () => {
+    await setTrustedReporters(db, [REPORTER], NOW);
+    const strict = newReader({ headerTrustVerified: undefined });
+    inbox.add({ id: "arf3", labels: ["INBOX"], raw: arfRaw() });
+    for (let i = 0; i < 3; i++) expect((await sync({ r: strict })).error).toBeNull();
+    const [row] = await inboundRows();
+    expect(row).toMatchObject({
+      status: "received",
+      errorCode: "arf_complaint:no_attestation",
+      classification: "other",
+    });
+    expect(await suppressedCount()).toBe(0);
+    expect(await clStatus()).toBe("waiting_next");
+  });
+
+  it("kilit açık varsayımıyla (yalnızca test) + güvenilir rapor sağlayıcısı + tam kanıt: doğrulanmış şikâyet engel ve durdurma üretir", async () => {
+    await setTrustedReporters(db, [REPORTER], NOW);
+    inbox.add({ id: "arf4", labels: ["INBOX"], raw: arfRaw() });
+    await drain();
+    expect(await suppressedCount()).toBe(1);
+    expect(await clStatus()).toBe("unsubscribed");
+    expect((await inboundRows())[0]).toMatchObject({
+      status: "matched",
+      errorCode: "arf_complaint",
+    });
+  });
+
+  it("ARF'nin konuşma kimliği bizim konuşmamızla aynı olsa bile konuşma yedeğiyle EŞLEŞTİRİLMEZ (yalnızca Message-ID)", async () => {
+    await setTrustedReporters(db, [REPORTER], NOW);
+    inbox.add({
+      id: "arf6",
+      threadId: "t-out1",
+      labels: ["INBOX"],
+      raw: gmailWrap(
+        rawArf({
+          outboundMessageId: "<yeniden.yazilmis@mail.gmail.com>",
+          rcptTo: RCPT,
+          to: ADDRESS,
+          nonce: "g6",
+          from: `fbl@${REPORTER}`,
+        }),
+        { mailbox: ADDRESS, headerFrom: REPORTER },
+      ),
+    });
+    await drain();
+    expect(await suppressedCount()).toBe(0);
+    expect(await clStatus()).toBe("waiting_next");
+    expect((await inboundRows())[0]).toMatchObject({ status: "unmatched" });
+  });
+
+  it("rapor sağlayıcısı güvenilir listede değilse kilit açık olsa bile doğrulanmaz", async () => {
+    inbox.add({ id: "arf5", labels: ["INBOX"], raw: arfRaw() });
+    await drain();
+    expect(await suppressedCount()).toBe(0);
+    expect((await inboundRows())[0]).toMatchObject({
+      status: "received",
+      errorCode: "arf_complaint:reporter_untrusted",
+    });
   });
 });

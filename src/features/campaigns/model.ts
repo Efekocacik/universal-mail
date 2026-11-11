@@ -186,6 +186,19 @@ function has(key: string): key is TrKey {
   return Object.prototype.hasOwnProperty.call(tr, key);
 }
 
+/**
+ * Dizi durumu etiketi. `unsubscribed` hem çıkış talebi hem ARF şikâyeti için ortak geçici durumdur (migrasyon 15.10'da);
+ * şikâyetle durdurulan dizi `arf_complaint` gerekçe işaretiyle ayrı etiketlenir.
+ */
+export function sequenceStatusLabel(
+  status: CampaignLeadStatus,
+  reasons?: readonly string[],
+): string {
+  return status === "unsubscribed" && reasons?.includes("arf_complaint")
+    ? t("sequenceStatus.complaint")
+    : t(`sequenceStatus.${status}`);
+}
+
 /** Uygunluk, engel ve hata kodlarının okunur karşılığı; sözlükte yoksa kodun kendisi. */
 export function reasonLabel(code: string): string {
   const key = `reason.${code}`;
