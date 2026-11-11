@@ -3,7 +3,8 @@ import path from "node:path";
 import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
-import { isDemoSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
+import { isMailSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
 import { startUnsubscribeDrain } from "@/lib/unsubscribe/drain-job";
 import { getSetting } from "@/lib/settings";
@@ -38,8 +39,9 @@ async function main(): Promise<void> {
   registerEmailHandlers();
   bindEmailEvents();
   const db = await getDb();
-  // Faz 3 demo zamanlayıcısı: varsayılan KAPALI (FAZ3_DEMO_SCHEDULER_ENABLED). Kapalıyken veritabanına yazmaz.
-  const schedulerEnabled = isDemoSchedulerEnabled(process.env);
+  // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim
+  // kapısı (isLiveSendingPermitted; kodda sabit, bu sürümde kapalı) ile açılır. Kapalıyken veritabanına yazmaz.
+  const schedulerEnabled = isMailSchedulerEnabled(process.env);
   const inboxEnabled = isDemoInboxEnabled(process.env);
   registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });
   const inbox = await startInboxScheduler(db, { env: process.env });
@@ -51,7 +53,11 @@ async function main(): Promise<void> {
     log: (m) => console.log(`[worker] ${m}`),
   });
   if (mailScheduler.enabled)
-    console.log("[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).");
+    console.log(
+      isLiveSendingPermitted()
+        ? "[worker] gönderim zamanlayıcısı açık (canlı gönderim kapısı açık)."
+        : "[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).",
+    );
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 
   // Zamanla sona eren yenilik sinyallerini (ör. "son 60 gün") düzenli yenile.

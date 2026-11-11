@@ -41,14 +41,17 @@ export class ProviderUnavailableError extends Error {
 let demoProvider: FakeMailProvider | null = null;
 
 /**
- * Posta kutusuna göre sağlayıcı. Bu sürümde YALNIZCA demo kutusu için sahte sağlayıcı döner; Gmail, SMTP ve diğer
- * her sağlayıcı için hata verir (gerçek gönderim kapalıdır). Testler kendi sağlayıcısını doğrudan verebilir.
+ * DEMO kapsamındaki posta kutusu için sağlayıcı: yalnızca demo kutusuna sahte sağlayıcı döner; Gmail, SMTP ve diğer
+ * her sağlayıcı için hata verir. Testler kendi sağlayıcısını doğrudan verebilir.
+ *
+ * Canlı kapsam bu fabrikadan GEÇMEZ: `sendCampaignStep` canlı kutu için önce canlı gönderim kapısını
+ * (`isLiveSendingPermitted`) denetler, sonra `getLiveProvider` (`../gmail/provider`) ile Gmail bağdaştırıcısını kurar.
  */
 export function getProvider(mailbox: { provider: string }): MailProvider {
   if (policyScopeForMailbox(mailbox.provider) === "demo") {
     demoProvider ??= new FakeMailProvider();
     return demoProvider;
   }
-  // Gerçek sağlayıcı (Gmail, SMTP) bu sürümde YAZILMADI; LIVE_SENDING_ENABLED açılsa bile kullanılamaz.
+  // Canlı sağlayıcı burada kurulmaz (bkz. `getLiveProvider`); SMTP sağlayıcısı yoktur.
   throw new ProviderUnavailableError(mailbox.provider);
 }

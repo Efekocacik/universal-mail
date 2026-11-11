@@ -47,7 +47,7 @@ export const updateMailboxSchema = z
   .strict();
 
 export const gmailClientSchema = z
-  .object({ clientId: z.string().max(200), clientSecret: z.string().max(300).optional() })
+  .object({ clientId: z.string().max(200), clientSecret: z.string().max(200).optional() })
   .strict();
 
 export const oauthStartSchema = z.object({ level: z.enum(["send", "send_read"]) }).strict();

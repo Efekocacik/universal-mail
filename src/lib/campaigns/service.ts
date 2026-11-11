@@ -1,4 +1,5 @@
 import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
@@ -15,6 +16,7 @@ import {
 import { isSupportedLanguage } from "@/lib/mail/language";
 import { MIN_GAP_S } from "@/lib/mail/scheduler/throttle";
 import { DEFAULT_SEND_WINDOW, effectiveWindow } from "@/lib/mail/scheduler/window";
+import { getSetting } from "@/lib/settings";
 import { bumpUpdatedAt, CampaignError } from "./errors";
 
 /**
@@ -23,7 +25,8 @@ import { bumpUpdatedAt, CampaignError } from "./errors";
  * - Kampanya her zaman `draft` olarak oluşturulur; durum yalnızca `lifecycle.ts` geçişleriyle değişir.
  * - Ayarlar, adımlar ve posta kutusu yalnızca `draft` durumunda değiştirilebilir.
  * - Eşzamanlı düzenlemeler `updated_at` iyimser kilidiyle yakalanır (bkz. `bumpUpdatedAt`).
- * - Yalnızca bağlı DEMO posta kutusu atanabilir; gerçek gönderim bu sürümde kapalıdır.
+ * - Bağlı DEMO posta kutusu her zaman atanabilir. Gmail posta kutusu YALNIZCA canlı gönderim kapısı
+ *   (`isLiveSendingPermitted`) açıkken ve kutu gönderim izniyle bağlıyken atanabilir; kapı bu sürümde kapalıdır.
  */
 
 export const MAX_STEPS = 3;
@@ -48,11 +51,19 @@ export interface StepInput {
 
 type CampaignRow = typeof campaigns.$inferSelect;
 
-/** Bağlı demo posta kutusu mu? Değilse ayrıntılı hata. */
-export async function assertDemoMailbox(db: DbExecutor, mailboxId: number): Promise<void> {
+/**
+ * Posta kutusu kampanyaya atanabilir ve gönderime uygun mu? Değilse ayrıntılı hata.
+ *
+ * - Demo kutusu: bağlıysa her zaman.
+ * - Gmail kutusu: YALNIZCA canlı gönderim kapısı açıkken (`isLiveSendingPermitted`) ve kutu bağlı + `gmail.send` izni
+ *   verilmişken. Kapı kapalıyken sonuç önceki demo-yalnız davranışla aynıdır (`live_disabled`); izin bilgisi okunmaz.
+ * - Diğer her sağlayıcı (SMTP, bilinmeyen): `live_disabled` (gerçek sağlayıcısı yok).
+ */
+export async function assertSendableMailbox(db: DbExecutor, mailboxId: number): Promise<void> {
   const [mb] = await db.select().from(mailboxes).where(eq(mailboxes.id, mailboxId)).limit(1);
   if (!mb) throw new CampaignError("not_found", "Posta kutusu bulunamadı.");
-  if (policyScopeForMailbox(mb.provider) !== "demo") {
+  const live = policyScopeForMailbox(mb.provider) !== "demo";
+  if (live && (mb.provider !== "gmail" || !isLiveSendingPermitted())) {
     throw new CampaignError(
       "live_disabled",
       "Gerçek posta kutusuyla gönderim bu sürümde kapalıdır; yalnızca demo posta kutusu kullanılabilir.",
@@ -62,6 +73,16 @@ export async function assertDemoMailbox(db: DbExecutor, mailboxId: number): Prom
     throw new CampaignError("invalid_input", "Posta kutusu hazır değil.", {
       mailboxStatus: mb.status,
     });
+  }
+  if (live) {
+    // Gönderim izni (`gmail.send`) ayrı kaydedilir; bağlı ama yalnızca okuma izni olan kutu gönderemez.
+    const grant = (await getSetting(db, "mail.gmailGrants"))[String(mb.id)];
+    if (!grant?.send) {
+      throw new CampaignError("invalid_input", "Posta kutusunun gönderim izni yok.", {
+        mailboxStatus: mb.status,
+        sendGrant: false,
+      });
+    }
   }
 }
 
@@ -117,7 +138,7 @@ export async function createCampaign(
   const now = opts.now ?? Date.now();
   const s = validateSettings(input, null);
   return db.transaction(async (tx) => {
-    if (input.mailboxId != null) await assertDemoMailbox(tx, input.mailboxId);
+    if (input.mailboxId != null) await assertSendableMailbox(tx, input.mailboxId);
     const [row] = await tx
       .insert(campaigns)
       .values({
@@ -195,7 +216,7 @@ export async function updateCampaign(
     const [cur] = await tx.select().from(campaigns).where(eq(campaigns.id, id)).limit(1);
     if (!cur) throw new CampaignError("not_found", "Kampanya bulunamadı.");
     const s = validateSettings(patch, cur);
-    if (patch.mailboxId != null) await assertDemoMailbox(tx, patch.mailboxId);
+    if (patch.mailboxId != null) await assertSendableMailbox(tx, patch.mailboxId);
     const updatedAt = await casDraft(
       tx,
       id,

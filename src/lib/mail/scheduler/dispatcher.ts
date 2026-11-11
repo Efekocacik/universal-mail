@@ -1,6 +1,7 @@
 import { and, asc, eq, exists, gt, inArray, isNull, lte, min, not, or, sql } from "drizzle-orm";
 import type { IneligibleCode, IneligibleReason } from "@/lib/compliance/eligibility";
 import { DAY_MS, type FrequencyLimits } from "@/lib/compliance/frequency";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { bumpUpdatedAt } from "@/lib/campaigns/errors";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes, type CampaignLeadStatus } from "@/lib/db/schema";
@@ -21,7 +22,9 @@ import {
  * Kampanya gönderim dağıtıcısı (Aşama 9). Her çağrıda EN FAZLA BİR ileti gönderir; zamanlamanın doğru kaynağı
  * `campaign_leads` / `messages` tablolarıdır, iş kuyruğu yalnızca dağıtıcıyı uyandırır.
  *
- * - Yalnızca `running` durumundaki ve DEMO posta kutulu kampanyalar seçilir (gerçek gönderim kapalıdır).
+ * - Yalnızca `running` durumundaki kampanyalar seçilir: DEMO posta kutulu olanlar her zaman, GMAIL posta kutulu olanlar
+ *   YALNIZCA canlı gönderim kapısı (`isLiveSendingPermitted`) açıkken. Kapı kapalıyken gerçek posta kutulu kampanyalar
+ *   aday bile olmaz (önceki davranış); açıkken de her ileti `sendCampaignStep` içinde aynı kapıdan yeniden geçer.
  * - Her aday için bütün kurallar (uygunluk, suppression, ülke politikası, pencere, tavanlar, ısınma, bekleme)
  *   gönderimden hemen önce `sendCampaignStep` içinde, ayırma işleminde yeniden denetlenir.
  * - `unknown`/`sending`/`sent` olan adımlar seçilmez ve yeniden gönderilmez (dizi `in_flight` kalır).
@@ -114,7 +117,7 @@ export function classifyReasons(
 
 export interface DispatchOptions {
   now?: () => number;
-  /** Testler için; verilmezse posta kutusuna göre (yalnızca demo). */
+  /** Testler için; verilmezse posta kutusuna göre (demo sağlayıcısı veya canlı kapı açıksa `getLiveProvider`). */
   provider?: MailProvider;
   timeoutMs?: number;
   limits?: FrequencyLimits;
@@ -203,7 +206,9 @@ export class MailDispatcher {
       .where(
         and(
           eq(campaigns.status, "running"),
-          eq(mailboxes.provider, "demo"),
+          isLiveSendingPermitted()
+            ? inArray(mailboxes.provider, ["demo", "gmail"])
+            : eq(mailboxes.provider, "demo"),
           inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
           or(isNull(campaignLeads.nextSendAt), lte(campaignLeads.nextSendAt, now)),
         ),
