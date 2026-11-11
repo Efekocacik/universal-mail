@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, inArray } from "drizzle-orm";
+import { and, asc, count, eq, gt, inArray, isNull } from "drizzle-orm";
 import { evaluateEnrollment, type IneligibleCode } from "@/lib/compliance/eligibility";
 import type { FrequencyLimits } from "@/lib/compliance/frequency";
 import { hashEmail, maskEmail } from "@/lib/compliance/suppression";
@@ -20,6 +20,9 @@ import { bumpUpdatedAt, CampaignError } from "./errors";
  * - Ekleme yalnızca `draft`/`ready` kampanyada yapılır. Her lead `evaluateEnrollment` ile denetlenir: uygun olanlar
  *   alıcının o anki görüntüsüyle `pending`, olmayanlar gerekçe kodlarıyla `excluded` eklenir.
  * - Aynı lead aynı kampanyaya ikinci kez eklenemez (çıkarılmış olsa bile): benzersiz dizin + `already_in_campaign`.
+ *   İstisna: `excluded` satır yeni satır açılmadan YENİDEN DEĞERLENDİRİLİR (gerekçelerin çoğu geçicidir: posta kutusu,
+ *   gönderen profili, doğrulama, dinlenme süresi, canlı gönderim kapısı…). Uygunsa `pending` olur, değilse gerekçeleri
+ *   yenilenir. `removed` kesindir; yeniden değerlendirilmez.
  * - Filtreyle seçim eklendiği andaki görüntüdür; sonradan oluşan lead'ler kampanyaya kendiliğinden girmez.
  * - Çıkarma, henüz gönderimde olmayan diziler içindir (`in_flight` çıkarılamaz); dağıtıcının ayırmasıyla aynı
  *   karşılaştırmalı güncelleme kullanıldığı için çıkarılan dizi gönderilmez.
@@ -35,10 +38,88 @@ const REMOVABLE: readonly CampaignLeadStatus[] = [
 ];
 
 export interface AddLeadsResult {
+  /** `pending` olan diziler (yeni eklenen + yeniden değerlendirmede uygun çıkan). */
   added: number;
   excluded: { leadId: number; reasons: IneligibleCode[] }[];
+  /** Kampanyada zaten `excluded` dışındaki bir durumda bulunan lead'ler. */
   duplicates: number[];
+  /** Daha önce `excluded` olup bu istekte yeniden değerlendirilen diziler (sonuçları `added`/`excluded` içindedir). */
+  reevaluated: number;
   updatedAt: number;
+}
+
+/** Süzgeçle (sayfa sayfa) ekleme yanıtı: `remaining` ekleme sonrası kampanyaya hiç eklenmemiş, süzgece uyan lead sayısı. */
+export interface AddLeadsByFilterResult extends AddLeadsResult {
+  matched: number;
+  taken: number;
+  remaining: number;
+}
+
+type CampaignLeadRow = typeof campaignLeads.$inferSelect;
+
+/**
+ * Bir `excluded` diziyi aynı işlem içinde yeniden değerlendirir. Kendi satırı "zaten kampanyada" sayılmaz; diğer
+ * bütün denetimler (alan adı, başka kampanyada süren dizi, sıklık, politika, kapılar) aynen uygulanır. Uygunsa
+ * alıcının O ANKİ görüntüsüyle `pending` olur; değilse yalnızca gerekçeler ve zaman damgası yenilenir.
+ * Karşılaştırmalı güncelleme: satır bu arada başka bir duruma geçtiyse dokunulmaz (`null`).
+ */
+async function reevaluateRow(
+  tx: DbExecutor,
+  row: CampaignLeadRow,
+  opts: { now: number; limits?: FrequencyLimits },
+): Promise<{ eligible: true } | { eligible: false; reasons: IneligibleCode[] } | null> {
+  const verdict = await evaluateEnrollment(
+    tx,
+    { campaignId: row.campaignId, leadId: row.leadId },
+    { now: opts.now, limits: opts.limits, ignoreCampaignLeadId: row.id },
+  );
+  const [lead] = await tx
+    .select({ countryCode: leads.countryCode })
+    .from(leads)
+    .where(eq(leads.id, row.leadId))
+    .limit(1);
+  const [primary] = verdict.eligible
+    ? await tx
+        .select()
+        .from(leadEmails)
+        .where(and(eq(leadEmails.leadId, row.leadId), eq(leadEmails.isPrimary, true)))
+        .limit(1)
+    : [];
+  const guard = and(
+    eq(campaignLeads.id, row.id),
+    eq(campaignLeads.status, "excluded"),
+    isNull(campaignLeads.redactedAt),
+  );
+  if (verdict.eligible && primary && lead) {
+    const updated = await tx
+      .update(campaignLeads)
+      .set({
+        status: "pending",
+        emailId: primary.id,
+        recipientEmail: primary.email,
+        recipientHash: hashEmail(primary.email),
+        recipientDomain: primary.domain,
+        countryCode: lead.countryCode,
+        language: suggestLanguage(lead.countryCode),
+        exclusionReasons: [],
+        nextStep: 0,
+        nextSendAt: null,
+        lastError: null,
+        updatedAt: opts.now,
+      })
+      .where(guard)
+      .returning({ id: campaignLeads.id });
+    return updated.length > 0 ? { eligible: true } : null;
+  }
+  const reasons = verdict.eligible
+    ? (["no_email"] as IneligibleCode[])
+    : [...new Set(verdict.reasons.map((r) => r.code))];
+  const updated = await tx
+    .update(campaignLeads)
+    .set({ exclusionReasons: reasons, updatedAt: opts.now })
+    .where(guard)
+    .returning({ id: campaignLeads.id });
+  return updated.length > 0 ? { eligible: false, reasons } : null;
 }
 
 export async function addLeadsToCampaign(
@@ -73,19 +154,36 @@ export async function addLeadsToCampaign(
         },
       );
     }
-    const existing = new Set(
+    const existing = new Map(
       (
         await tx
-          .select({ leadId: campaignLeads.leadId })
+          .select()
           .from(campaignLeads)
           .where(and(eq(campaignLeads.campaignId, campaignId), inArray(campaignLeads.leadId, ids)))
-      ).map((r) => r.leadId),
+      ).map((r) => [r.leadId, r]),
     );
 
-    const res: AddLeadsResult = { added: 0, excluded: [], duplicates: [], updatedAt: c.updatedAt };
+    const res: AddLeadsResult = {
+      added: 0,
+      excluded: [],
+      duplicates: [],
+      reevaluated: 0,
+      updatedAt: c.updatedAt,
+    };
     for (const leadId of ids) {
-      if (existing.has(leadId)) {
-        res.duplicates.push(leadId);
+      const row = existing.get(leadId);
+      if (row) {
+        // Hariç tutulmuş dizi yeniden değerlendirilir; diğer durumlar (çıkarılmış dahil) tekrar sayılır.
+        const r =
+          row.status === "excluded" && row.redactedAt === null
+            ? await reevaluateRow(tx, row, { now, limits: opts.limits })
+            : null;
+        if (!r) res.duplicates.push(leadId);
+        else {
+          res.reevaluated++;
+          if (r.eligible) res.added++;
+          else res.excluded.push({ leadId, reasons: r.reasons });
+        }
         continue;
       }
       const [lead] = await tx
@@ -160,7 +258,87 @@ export async function addLeadsToCampaign(
         added: res.added,
         excluded: res.excluded.length,
         duplicates: res.duplicates.length,
+        reevaluated: res.reevaluated,
         selection: opts.selection ?? null,
+      },
+      now,
+    );
+    return res;
+  });
+}
+
+export interface ReevaluateResult {
+  /** Yeniden değerlendirilen `excluded` dizi sayısı. */
+  reevaluated: number;
+  /** Uygun çıkıp `pending` olanlar. */
+  nowPending: number;
+  /** Hâlâ uygun olmayanlar (gerekçeleri yenilendi). */
+  stillExcluded: number;
+  updatedAt: number;
+}
+
+/**
+ * Taslak/hazır kampanyadaki BÜTÜN `excluded` dizileri tek işlemde, kimlik sırasıyla yeniden değerlendirir. Öndeki
+ * dizilerin `pending` olması (ör. aynı alan adı) sonrakilerin değerlendirmesinde görünür. Gerçek gönderim izni
+ * vermez: canlı kapılar kapalıyken canlı kampanyadaki diziler `live_sending_disabled` ile hariç kalır.
+ */
+export async function reevaluateExcluded(
+  db: Db,
+  campaignId: number,
+  opts: { now?: number; limits?: FrequencyLimits } = {},
+): Promise<ReevaluateResult> {
+  const now = opts.now ?? Date.now();
+  return db.transaction(async (tx) => {
+    const [c] = await tx.select().from(campaigns).where(eq(campaigns.id, campaignId)).limit(1);
+    if (!c) throw new CampaignError("not_found", "Kampanya bulunamadı.");
+    if (!ADDABLE.includes(c.status)) {
+      throw new CampaignError(
+        "not_editable",
+        "Hariç tutulan alıcılar yalnızca taslak veya hazır kampanyada yeniden denetlenebilir.",
+        { status: c.status },
+      );
+    }
+    const rows = await tx
+      .select()
+      .from(campaignLeads)
+      .where(
+        and(
+          eq(campaignLeads.campaignId, campaignId),
+          eq(campaignLeads.status, "excluded"),
+          isNull(campaignLeads.redactedAt),
+        ),
+      )
+      .orderBy(asc(campaignLeads.id));
+    const res: ReevaluateResult = {
+      reevaluated: 0,
+      nowPending: 0,
+      stillExcluded: 0,
+      updatedAt: c.updatedAt,
+    };
+    for (const row of rows) {
+      const r = await reevaluateRow(tx, row, { now, limits: opts.limits });
+      if (!r) continue;
+      res.reevaluated++;
+      if (r.eligible) res.nowPending++;
+      else res.stillExcluded++;
+    }
+    if (res.reevaluated === 0) return res; // değişiklik yok: kilit belirteci ve kayıt aynı kalır
+
+    const [bumped] = await tx
+      .update(campaigns)
+      .set({ updatedAt: bumpUpdatedAt(now) })
+      .where(eq(campaigns.id, campaignId))
+      .returning({ updatedAt: campaigns.updatedAt });
+    res.updatedAt = bumped!.updatedAt;
+    await audit(
+      tx,
+      "campaign.leads_reevaluated",
+      "campaign",
+      campaignId,
+      {
+        reevaluated: res.reevaluated,
+        nowPending: res.nowPending,
+        stillExcluded: res.stillExcluded,
       },
       now,
     );

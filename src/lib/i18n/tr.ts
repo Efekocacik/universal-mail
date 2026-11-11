@@ -945,6 +945,20 @@ export const tr = {
   "queue.col.status": "Durum",
   "queue.col.when": "Adım ve zaman",
   "queue.col.action": "İşlem",
+  // C9: süzgeçle sayfa sayfa ekleme ve hariç tutulanları yeniden denetleme
+  "addToCampaign.bodyPaged":
+    "Süzgece uyan {total} işletmeden bu kampanyada henüz olmayanların ilk {n} tanesi eklenir. Her biri uygunluk denetiminden geçer; daha önce hariç tutulanlar yeniden denetlenir.",
+  "addToCampaign.remaining":
+    "Süzgece uyan {n} işletme daha bu kampanyaya eklenmedi. Devam etmek için sıradakileri ekleyin.",
+  "addToCampaign.allDone": "Süzgece uyan bütün işletmeler bu kampanyada.",
+  "addToCampaign.next": "Sıradaki {n} işletmeyi ekle",
+  "addToCampaign.reevaluated": "Daha önce hariç tutulan {n} işletme yeniden denetlendi.",
+  "queue.reevaluate": "Hariç tutulanları yeniden denetle",
+  "queue.reevaluate.help":
+    "{n} alıcı hariç tutuldu. Gerekçe giderildiyse (posta kutusu, gönderen profili, e-posta doğrulaması…) yeniden denetleyin; uygun olanlar kuyruğa alınır.",
+  "queue.reevaluate.done":
+    "{pending} alıcı kuyruğa alındı · {excluded} alıcı hâlâ hariç tutuluyor.",
+  "queue.reevaluate.none": "Yeniden denetlenecek hariç tutulan alıcı yok.",
   "messages.col.recipient": "Alıcı",
   "messages.col.status": "Durum",
   "messages.col.when": "Adım ve zaman",

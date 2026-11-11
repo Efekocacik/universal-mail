@@ -1,7 +1,14 @@
 import { and, asc, desc, eq, gte, inArray, lte, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
-import { leadEmails, leadEnrichment, leads, placeSnapshots, places } from "@/lib/db/schema";
+import {
+  campaignLeads,
+  leadEmails,
+  leadEnrichment,
+  leads,
+  placeSnapshots,
+  places,
+} from "@/lib/db/schema";
 import type { LeadStatus } from "@/lib/db/schema";
 import type { BBox, NoveltyLabel } from "@/lib/domain/types";
 
@@ -409,17 +416,63 @@ export async function queryUncachedPlaceIds(
   return rows.map((r) => r.placeId);
 }
 
+export interface LeadIdQueryOptions {
+  /**
+   * Kampanyaya süzgeçle sayfa sayfa ekleme: bu kampanyada `excluded` DIŞINDAKİ bir durumda bulunan lead'ler atlanır.
+   * `excluded` satırlar seçilebilir kalır (ekleme onları yeniden değerlendirir), ama hiç eklenmemiş lead'lerden SONRA
+   * ve en uzun süredir değerlendirilmemişten başlayarak gelir; böylece art arda tıklamalar hep ilerler.
+   */
+  notInCampaignId?: number;
+  /** `false`: `excluded` satırı olan lead'ler de atlanır (yalnızca kampanyaya hiç eklenmemiş olanlar). */
+  includeExcluded?: boolean;
+}
+
+function campaignMembership(opts: LeadIdQueryOptions): SQL | undefined {
+  if (opts.notInCampaignId === undefined) return undefined;
+  const status = opts.includeExcluded === false ? sql`` : sql` AND cl.status <> 'excluded'`;
+  return sql`NOT EXISTS (SELECT 1 FROM ${campaignLeads} cl WHERE cl.campaign_id = ${opts.notInCampaignId} AND cl.lead_id = ${leads.id}${status})`;
+}
+
 /** Süzgece uyan lead kimlikleri (toplu işlemler için; en fazla `limit`). */
-export async function queryLeadIds(db: Db, filters: LeadFilters, limit = 2000): Promise<number[]> {
-  const where = await buildWhere(db, filters);
+export async function queryLeadIds(
+  db: Db,
+  filters: LeadFilters,
+  limit = 2000,
+  opts: LeadIdQueryOptions = {},
+): Promise<number[]> {
+  const where = and(await buildWhere(db, filters), campaignMembership(opts));
   const base = db
     .select({ id: leads.id })
     .from(leads)
     .innerJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
+  // Kampanyada hiç olmayanlar önce (NULL), sonra en eski değerlendirilmiş `excluded` satırlar.
+  const order: SQL[] =
+    opts.notInCampaignId === undefined
+      ? []
+      : [
+          sql`(SELECT cl.updated_at FROM ${campaignLeads} cl WHERE cl.campaign_id = ${opts.notInCampaignId} AND cl.lead_id = ${leads.id}) ASC NULLS FIRST`,
+        ];
   const rows = await (where ? base.where(where) : base)
-    .orderBy(desc(leads.noveltyScore), asc(leads.id))
+    .orderBy(...order, desc(leads.noveltyScore), asc(leads.id))
     .limit(limit);
   return rows.map((r) => r.id);
+}
+
+/** `queryLeadIds` ile aynı süzgeç ve kampanya koşuluna uyan lead sayısı (sınırsız). */
+export async function countLeadIds(
+  db: Db,
+  filters: LeadFilters,
+  opts: LeadIdQueryOptions = {},
+): Promise<number> {
+  const where = and(await buildWhere(db, filters), campaignMembership(opts));
+  const base = db
+    .select({ n: sql<number>`count(DISTINCT ${leads.id})` })
+    .from(leads)
+    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
+  const [r] = await (where ? base.where(where) : base);
+  return Number(r?.n ?? 0);
 }
