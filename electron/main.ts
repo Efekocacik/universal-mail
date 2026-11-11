@@ -17,6 +17,12 @@ import net from "node:net";
 import path from "node:path";
 import { SESSION_CACHE_FILENAME } from "../src/lib/config/paths";
 import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
+import {
+  loadOrRecoverMasterKey,
+  MASTER_KEY_FILENAME,
+  MasterKeyQuit,
+  SECRETS_FILENAME,
+} from "./master-key";
 
 /**
  * Universal Mail masaüstü kabuğu.
@@ -81,8 +87,9 @@ function dataDir(): string {
 
 /**
  * Gizli depo (API anahtarları) için ana anahtar. Rastgele üretilir, işletim sistemi anahtarlığıyla
- * (macOS Keychain / Windows DPAPI) şifrelenip diske yazılır. Anahtar çözülemezse eski gizli depo kullanılamaz
- * hale gelir; yeni anahtar üretilir ve kullanıcıdan API anahtarlarını yeniden girmesi beklenir.
+ * (macOS Keychain / Windows DPAPI) şifrelenip diske yazılır. Anahtar çözülemezse SESSİZCE yenisi üretilmez:
+ * engelleyici bir iletişim kutusu kapatma, yeniden deneme veya (ikinci onayla) sıfırlama sunar; sıfırlamada eski
+ * anahtar dosyası ve secrets.json silinmez, yedek adla saklanır (bkz. ./master-key.ts).
  */
 function loadMasterKey(): string {
   try {
@@ -111,25 +118,24 @@ function loadMasterKeyUnsafe(): string {
     app.exit(1);
     return "";
   }
-  const file = path.join(app.getPath("userData"), "master.key.enc");
-  if (fs.existsSync(file)) {
-    try {
-      const key = safeStorage.decryptString(fs.readFileSync(file));
-      if (/^[0-9a-f]{64}$/i.test(key)) return key;
-      throw new Error("beklenmeyen biçim");
-    } catch (e) {
-      log(
-        "main",
-        `Ana anahtar çözülemedi (${(e as Error).message}); yenisi üretiliyor, eski gizli depo yedeğe alınıyor.`,
-      );
-      fs.renameSync(file, `${file}.bak-${Date.now()}`);
-      const secrets = path.join(dataDir(), "secrets.json");
-      if (fs.existsSync(secrets)) fs.renameSync(secrets, `${secrets}.bak-${Date.now()}`);
-    }
-  }
-  const key = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(file, safeStorage.encryptString(key), { mode: 0o600 });
-  return key;
+  const result = loadOrRecoverMasterKey({
+    keyFile: path.join(app.getPath("userData"), MASTER_KEY_FILENAME),
+    secretsFile: path.join(dataDir(), SECRETS_FILENAME),
+    smoke: SMOKE,
+    exists: (p) => fs.existsSync(p),
+    readFile: (p) => fs.readFileSync(p),
+    writeKeyFile: (p, data) => fs.writeFileSync(p, data, { mode: 0o600 }),
+    rename: (from, to) => fs.renameSync(from, to),
+    decrypt: (data) => safeStorage.decryptString(data),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    randomKey: () => crypto.randomBytes(32).toString("hex"),
+    showDialog: (spec) => dialog.showMessageBoxSync(spec),
+    reveal: (p) => shell.showItemInFolder(p),
+    log: (message) => log("main", message),
+    now: () => Date.now(),
+  });
+  if (result.kind === "quit") throw new MasterKeyQuit();
+  return result.key;
 }
 
 /* ------------------------------ alt süreçler ------------------------------ */
@@ -473,6 +479,13 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     try {
       origin = new URL(await startBackend()).origin;
     } catch (e) {
+      if (e instanceof MasterKeyQuit) {
+        // Kullanıcının bilinçli seçimi: ek hata kutusu gösterilmez, hiçbir dosya değiştirilmedi.
+        log("main", e.message);
+        await shutdown();
+        app.exit(0);
+        return;
+      }
       log("main", `Başlatma hatası: ${(e as Error).message}`);
       if (SMOKE) {
         console.log(
