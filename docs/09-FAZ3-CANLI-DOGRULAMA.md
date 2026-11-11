@@ -1,6 +1,22 @@
 # Faz 3 — Canlı Doğrulama Kontrol Listesi
 
-**Durum: TASLAK (Aşama 15.5 ile başlatıldı; Aşama 15.9'da tamamlanacak).** Bu belge, yalnızca **gerçek bir hesapla** (Gmail, DNS, Google Cloud OAuth istemcisi) kanıtlanabilecek varsayımları ve bu varsayımlar doğrulanana kadar kodun nasıl güvenli tarafta kaldığını listeler. Burada işaretlenmeyen hiçbir madde "doğrulandı" sayılmaz. Gerçek gönderim ve gerçek gelen kutusu okuma kodda **kapalıdır** (`LIVE_SENDING_ENABLED`, `LIVE_INBOX_READING_ENABLED`) ve bu belge o kapıları açmaz.
+**Durum (11 Kasım 2026, Aşama 15.9): kontrol listesi TAMAMLANDI; içindeki doğrulamaların HİÇBİRİ henüz yapılmadı.** Bu belge, yalnızca **gerçek bir hesapla** (Gmail, DNS, Google Cloud OAuth istemcisi, alan adı, barındırılan sunucu) kanıtlanabilecek varsayımları, bu varsayımlar doğrulanana kadar kodun nasıl güvenli tarafta kaldığını ve kilitlerin hangi sırayla açılabileceğini listeler. Burada işaretlenmeyen (`[ ]`) hiçbir madde "doğrulandı" sayılmaz. Gerçek gönderim, gerçek gelen kutusu okuma ve Gmail başlık güveni kodda **kapalıdır** (`LIVE_SENDING_ENABLED`, `LIVE_INBOX_READING_ENABLED`, `GMAIL_HEADER_TRUST_VERIFIED`; ayrıca `LEGAL_APPROVALS` hepsi `false`) ve bu belge o kapıları açmaz. Genel durum, kararlar ve açık teknik borç: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md).
+
+> Bölüm numaraları (özellikle 1.3, 3.1 ve K1–K12) kaynak kod yorumlarından anılır; numaralar bilerek korunmuştur. Yeni bölümler sona (5–9) eklendi.
+
+## 0. Nasıl kullanılır ve kilit özeti
+
+Her madde için kanıt, Bölüm 9'daki biçimde kaydedilir (tarih, yapan, ortam, yöntem, sonuç; **kişisel veri veya gerçek alıcı verisi içermez**). Test hesapları şirket dışı, tek kullanımlık ve gerçek müşteri verisinden bağımsız olmalıdır. Hiçbir kilit çalışma anında, ayar veya ortam değişkeniyle açılmaz; her kilit yalnızca kaydı tutulan bilinçli bir yazılım sürümüyle değişir (Bölüm 8).
+
+| Kilit (kodda sabit) | Şu an | Neyi engeller | Açılmadan önce | Bölüm |
+|---|---|---|---|---|
+| `GMAIL_HEADER_TRUST_VERIFIED` | `false` | Gmail başlıklarından tasdik üretme (gelen kutusundan otomatik suppression/durdurma) | Gerçek test hesabıyla başlık doğrulaması | 1.3 |
+| `LIVE_INBOX_READING_ENABLED` | `false` | Gerçek gelen kutusunu okuma | Okuma izni, `historyId`/hata davranışı doğrulaması, başlık güveni kararı | 1.3, 2 |
+| `LEGAL_APPROVALS.*` (7 madde) | hepsi `false` | Gönderim yolu (birleşik kapı) ve hazırlık | Yazılı hukuki/operasyonel onaylar | 6 |
+| `LIVE_SENDING_ENABLED` | `false` | Gerçek gönderim | Yukarıdakilerin ve Bölüm 2–5, 7'nin tamamı | 8 |
+| Canlı ülke politikası kilidi (`country_policies`, `scope=live`) | tamamı engelli ve kilitli | Ülke bazında canlı gönderim | Ülke bazında yazılı hukuki onay | 6 |
+| `oneClickEndpointVerified` (türetilmiş) | kanıt yok → `List-Unsubscribe-Post` eklenmez | Tek tıklamalı çıkış başlığı ve canlı iletiye çıkış bağlantısı | Gerçek uç noktaya karşı uçtan uca doğrulama | 3 |
+| `mail.arfReporters` (ayar) | boş | ARF şikâyetinin otomatik doğrulanması | Gerçek FBL sağlayıcıları ve rapor biçimi | 4 |
 
 ## 1. Gmail gelen ileti başlıklarına güven (Aşama 15.5)
 
@@ -40,7 +56,7 @@ Kilit (`GMAIL_HEADER_TRUST_VERIFIED = true`) yalnızca bilinçli bir sürüm de�
 
 Bir madde doğrulanamazsa kilit **kapalı kalır**; otomatik bounce/yanıt işleme yerine inceleme akışı kullanılır.
 
-## 2. Diğer canlı doğrulama maddeleri (Aşama 15.9'da genişletilecek)
+## 2. Gmail OAuth, gönderim ve diğer canlı doğrulama maddeleri
 
 - [ ] **Message-ID yeniden yazımı:** Gmail API ile gönderilen iletinin `Message-ID` başlığı korunuyor mu? Korunmuyorsa yanıt eşleştirmesi `threadId` yedeğiyle (aynı kutuda, aynı konuşmada **tek** kabul edilmiş kampanya iletisi) çalışır; bu yedeğin gerçek konuşma davranışıyla örtüştüğü doğrulanmalı.
 - [ ] **JWKS biçimi ve kimlik belirteci:** Google'ın gerçek `jwks_uri` yanıtı ve gerçek ID token'ın `iss`/`aud`/`nonce`/`azp` biçimi 15.3'te sınanan kurallarla uyumlu.
@@ -49,6 +65,12 @@ Bir madde doğrulanamazsa kilit **kapalı kalır**; otomatik bounce/yanıt işle
 - [ ] **Kısıtlı kapsam doğrulaması:** Dış kullanıcılar için `gmail.readonly` (kısıtlı kapsam) uygulama doğrulaması/güvenlik değerlendirmesi gerekliliği ve Workspace yapılandırması (Dahili/Harici) **varsayılmamıştır**; şirket bilgileri geldikten sonra netleşecek.
 - [ ] **Gmail API hata zarfları:** `messages.send` 400/403/404/413 ve 401 yanıtlarının gerçek biçimi, `googleError` doğrulamasındaki beklenen `error.code` / `error.status` kümeleriyle uyumlu (uyumsuzluk güvenli tarafta "belirsiz" sayılır, ancak sürekli belirsiz sonuç üretirse kümeler gözden geçirilmeli).
 - [ ] **`historyId` ömrü:** `history.list` için gerçek geçerlilik süresi ve 404 davranışı.
+- [ ] **OAuth yönlendirme adresi:** İstemci türü ("Desktop app") ile yerel döngü adresi (`127.0.0.1`) yönlendirmesinin Google tarafından kabul edildiği; `state`/PKCE/`nonce` akışının gerçek yanıtla çalıştığı.
+- [ ] **Kademeli yetki:** Yalnızca `gmail.send` ile bağlanmanın çalıştığı; `gmail.readonly` yükseltmesinin ayrı onay ekranıyla geldiği ve iptal edilince yalnızca ilgili izin düştüğü; `gmail.modify`/tam erişimin hiçbir yolla istenmediği.
+- [ ] **Gönderilen iletinin başlıkları:** Gmail API ile gönderilen iletide `List-Unsubscribe` ve `List-Unsubscribe-Post` başlıklarının korunduğu, alıcı tarafında görüldüğü ve `From`/`Message-ID` başlıklarının değiştirilmediği ya da değiştirilme biçiminin eşleştirmeyle uyumlu olduğu.
+- [ ] **Kota ve oran sınırı davranışı:** Gerçek günlük/kullanıcı kotası aşımı yanıtları (`429`, `403 rateLimitExceeded/dailyLimitExceeded`) ve `Retry-After` başlığının varlığı; uygulamadaki ret sınıflandırmasının (yeniden denenebilir ret) gerçek yanıtlarla örtüştüğü.
+- [ ] **Belirsiz sonuç davranışı:** Bağlantı koptuğunda/zaman aşımında Gmail'in iletiyi yine de gönderip göndermediği (belirsiz sonucun gerçekte nasıl göründüğü); belirsiz iletinin hiçbir zaman otomatik tekrarlanmadığı (uygulamada testli, canlıda gözlenmeli).
+- [ ] **İtibar ve spam:** İlk gönderimlerin alıcı gelen kutusuna mı spam'a mı düştüğü (pilot sırasında, günde ≤ 20; hukuki onaydan önce yapılmaz).
 
 ## 3. HTTPS tek tıklamalı çıkış (Aşama 15.6)
 
@@ -56,7 +78,7 @@ Kod tarafı hazırdır (imzalı belirteç, taşınabilir aktarıcı işleyicisi,
 
 - [ ] **Gerçek HTTPS uç noktası:** Aktarıcı işleyicisi (`src/lib/unsubscribe/relay.ts`) genel bir HTTPS alan adında, geçerli TLS sertifikasıyla çalışır; `https://<alan>/u/<belirteç>` adresine dışarıdan ulaşılır.
 - [ ] **RFC 8058 uyumu gerçek istemcilerle:** Gmail ve Yahoo gibi istemcilerin gönderdiği gerçek `POST` isteği (başlıklar, gövde, yönlendirme izlememe, zaman aşımı) işleyici tarafından 2xx ile karşılanır; `List-Unsubscribe` ve `List-Unsubscribe-Post` başlıkları gerçek bir iletide doğru görünür.
-- [ ] **Olay iletim kanalı:** Aktarıcıdan yerel uygulamaya olayların dayanıklı iletimi (kuyruk, kimlik doğrulama, ağ erişimi) henüz YOK; yalnızca arayüzleri (`EventSink`, `UnsubscribeEventSource`) ve bellek içi gerçeklemeleri vardır. Ele geçirilmiş/çalışmayan aktarıcı olayları geciktirebilir veya atabilir (erişilebilirlik); bu katman bunu çözmez, izleme ve uyarı gerekir.
+- [ ] **Olay iletim kanalı:** Yazılım tarafı Aşama 15.7'de eklendi (dosya tabanlı dayanıklı kuyruk `FileSpool`, Ed25519 imzalı çekme/onay kanalı; Bölüm 3.2) ve yalnızca yerel testlerle sınandı; **gerçek ağ, TLS ve gerçek sunucu diskinde doğrulanmadı**. Ele geçirilmiş/çalışmayan aktarıcı olayları geciktirebilir veya atabilir (erişilebilirlik); bu katman bunu çözmez, izleme ve uyarı gerekir (uyarı kanalı yok: `08` TB-4).
 - [ ] **Anahtar dağıtımı:** Aktarıcıya yalnızca GENEL anahtar kümesi (`exportRelayKeySet`) verilir; döndürme ve iptal sonrası aktarıcının kümeyi güncellediği doğrulanmalıdır.
 - [ ] **Saat ve süre:** Aktarıcı sunucu saatinin doğruluğu (belirteç süresi tıklama anına göre işlenir); 180 günlük varsayılan geçerlilik hukuki danışmanlıkla gözden geçirilmelidir.
 - [ ] **Hız sınırı ve istemci adresi:** Aktarıcı önündeki ters vekilin güvenilir istemci adresi başlığı (`clientKey`) belirlenmeli; sınırlar gerçek trafikle ayarlanmalı.
@@ -148,7 +170,7 @@ Kod tarafı hazırdır (ayrıştırıcı, sınıflandırma, kanıt katmanları, 
 
 **Kısmi kapsam (şikâyet ORANI güvenilir değildir):** Şikâyet oranı kuralı (%0,1) HER ZAMAN "ölçülemiyor" gösterilir ve hiçbir otomatik durdurma kararına girmez. Çünkü ARF yalnızca FBL sunan sağlayıcılardan gelir (Gmail dahil birçoğu göndermez) ve alıcıların çoğu şikâyetini bildirmez; paydaya karşılık gelen şikâyet kapsamı bilinmez. Gösterilen sayı yalnızca son 30 gündeki doğrulanmış şikâyetli **alıcı** sayısının alt sınırıdır; incelemede bekleyen raporlar ayrı sayılır.
 
-**Veri modeli sınırı (migrasyon yok):** `messages.classification` CHECK kısıtı `complaint` kabul etmediğinden şikâyet `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak saklanır; dizi durumu için ayrı bir "şikâyet" değeri olmadığından `unsubscribed` kullanılır. Her ikisi de **Aşama 15.10 (ayrıca onay gerektiren migrasyon)** ile düzeltilecektir.
+**Veri modeli sınırı (migrasyon yok):** `messages.classification` CHECK kısıtı `complaint` kabul etmediğinden şikâyet `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak saklanır; dizi durumu için ayrı bir "şikâyet" değeri olmadığından `unsubscribed` kullanılır. Her ikisi de **Aşama 15.10 (ayrıca onay gerektiren migrasyon)** ile düzeltilecek açık teknik borçtur: sınıflandırma sütunu (`08` TB-1) ve şikâyet/çıkış durumu ile sayaçlarının ayrılması (`08` TB-2).
 
 Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 - [ ] Hangi posta sağlayıcılarının FBL/JMRP sunduğu ve şirketin posta düzeni için kaydolunacak olanlar; rapor göndericisi alan adlarının listesi (`mail.arfReporters`; bu sürümde bilinmez, **varsayılan boş**). Listeyi ayarlamak için arayüz/API YOK (yalnızca servis işlevi).
@@ -164,3 +186,66 @@ Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 - **Tekrar işleme:** aynı ham rapor `duplicate`; aynı alıcı hakkında farklı raporlar tek engel ve tek alıcı sayacı üretir; engel belgelenmiş talepte kaldırıldıktan sonra eski raporun tekrarı yeniden engel koymaz, gerçekten yeni bir rapor koyar.
 - **Sahte rapor:** görünen ad/benzer alan adı/alt alan adı sahteciliği, ARF olmayan türler ve DSN/yanıt içeriği doğrulanmış şikâyet, engel, dizi durdurma veya sayaç doğurmaz.
 - **Denetim ve arayüz ayrımı:** `inbound.complaint` + `suppression.added(reason=complaint)` ile `inbound.unsubscribe` / `unsubscribe.one_click` + `reason=unsubscribe` ayrıdır; çıkıştan şikâyete geçiş `suppression.strengthened (from=unsubscribe,to=complaint)` olarak ayrıca kaydedilir.
+
+## 5. DNS (SPF / DKIM / DMARC)
+
+Kod hazırdır: denetim yalnızca kullanıcı "Kontrol et"e bastığında ve yalnızca kutunun kendi alan adı için çalışır; sonuç durumlar halinde saklanır (ham TXT yok); hazırlık ekranında "tamam" için üç denetim de taze (30 gün) ve `pass` olmalıdır. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
+
+- [ ] **Gönderim alan adı kayıtları:** SPF (tek kayıt, `-all` veya `~all`, arama sınırı ≤ 10), DKIM (seçici adıyla), DMARC (en az `p=none`; hedef politika şirket kararı) yayımlandı.
+- [ ] **Gerçek denetim:** Uygulamadaki "Kontrol et" gerçek kayıtlarla üç denetimi `pass` döndürüyor; yanlış yapılandırılmış bir kayıtla (ör. SPF yok) doğru biçimde `fail` döndürüyor.
+- [ ] **Gönderim alan adının Gmail/Workspace ile uyumu:** Gmail üzerinden gönderilen iletinin gerçekten bu alan adıyla imzalandığı (DKIM `d=`), `From` alan adıyla DMARC hizalaması.
+- [ ] **Tazelik:** Sonucun 30 gün sonra "doğrulanmadı"ya düştüğü ve kayıt değişince yeniden denetimin gerektiği (uygulamada testli).
+
+## 6. Hukuki onaylar ve şirket girdileri (özet)
+
+Ayrıntılı, zorunlu/koşullu/isteğe bağlı sınıflandırma ve nedenler: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 8. Burada yalnızca kilitlerle eşleşme verilir. `LEGAL_APPROVALS` maddeleri **yazılı onayla, kayıt altında, yeni bir yazılım sürümünde** `true` yapılır; kullanıcı beyanı, ayar veya ortam değişkeni bunların yerine geçmez.
+
+| `LEGAL_APPROVALS` maddesi | Onay konusu | Sahibi |
+|---|---|---|
+| `lia` | LIA (`docs/LIA.md`) şirket ve hukuk tarafından tamamlandı ve onaylandı | Şirket + hukuk |
+| `uyum` | `docs/UYUM.md` kullanıcıya sunulacak biçimiyle onaylandı | Hukuk |
+| `liveCountryPolicies` | Canlı ülke politikası kilidinin ülke bazında açılması | Hukuk |
+| `erasureOfTransmissionRecords` | Silme talebinde gerçek gönderim kayıtlarının işlenmesi | Hukuk |
+| `suppressionHashRetention` | Silme sonrası e-posta özetinin saklanma dayanağı | Hukuk |
+| `trSenderIdentifierRules` | TR'ye gönderimde MERSİS/sicil zorunluluk kuralı | Hukuk |
+| `httpsUnsubscribeEndpoint` | Genel HTTPS çıkış uç noktasının kurulduğunun/doğrulandığının sürüm kaydı (teknik kanıt Bölüm 3'te ayrıca aranır) | Yazılım + şirket |
+
+- [ ] Her madde için onay belgesi/kaydı referansı Bölüm 9 biçiminde tutuldu (belgenin kendisi bu depoda saklanmaz; kişisel veri veya gizli bilgi içermez).
+
+## 7. Pilot (SRS Bölüm 13, madde 6–8)
+
+Başlamadı. Yalnızca Bölüm 2–6'nın ilgili maddeleri tamamlanıp hukuki onaylar alındıktan ve kilitler açıldıktan sonra:
+
+- [ ] İlk hafta günde ≤ 20 e-posta; yalnızca yetkilendirilmiş test alıcıları.
+- [ ] Günlük gözlem: bounce oranı (posta kutusu sağlığı), yanıtlar ve çıkış talepleri (suppression/dizi durdurma doğru işliyor), kuyruk sağlığı (`event_delivery`), varsa ARF raporları.
+- [ ] SRS Bölüm 13/6–8 kabul ölçütlerinin geçtiği yazılı kaydedildi.
+- [ ] Beklenmeyen davranışta (belirsiz sonuç, artan bounce, şikâyet) gönderimin elle durdurulduğu ve nedeninin kaydedildiği.
+
+## 8. Kilitleri açma sırası (öneri)
+
+Her adım ayrı bir sürüm ve kayıt gerektirir; bir adım doğrulanamazsa sonraki adıma geçilmez ve ilgili kilit kapalı kalır. **Aşağıdaki sıra bir öneridir; açma kararı şirketin ve hukukun onayına bağlıdır.**
+
+1. Şirket girdileri ve hukuki hazırlık (Bölüm 6; `08` Bölüm 8.1). Kilitler kapalı.
+2. Gmail OAuth bağlantısı yalnızca gönderim izniyle, test hesabıyla (Bölüm 2). Kilitler kapalı; bağlantı kurulur ama gönderim yok.
+3. DNS doğrulaması (Bölüm 5).
+4. HTTPS çıkış aktarıcısı dağıtımı, uçtan uca doğrulama ve K2 disk dayanıklılığı (Bölüm 3). Bu adımdan sonra `List-Unsubscribe-Post` doğrulanmış kanıtla türer.
+5. (İsteğe bağlı, otomatik gelen kutusu işleme için) okuma izni; Bölüm 1.3 doğrulaması; önce `LIVE_INBOX_READING_ENABLED`, ancak başlık doğrulaması tamamlandıysa `GMAIL_HEADER_TRUST_VERIFIED`. Aksi halde gelen iletiler elle incelenir (güvenli).
+6. ARF: güvenilir rapor sağlayıcı listesi (Bölüm 4).
+7. Aşama 15.10 kararı: TB-1/TB-2 tamamlandı veya pilot için yazılı kabul edildi (`08` Bölüm 6).
+8. Hukuki onaylar → `LEGAL_APPROVALS`; ülke bazında canlı politika kilidi.
+9. Son olarak `LIVE_SENDING_ENABLED`; pilot (Bölüm 7).
+
+## 9. Kanıt kaydı biçimi
+
+Her doğrulanan madde için (yalnızca `[x]` işaretlemek yetmez):
+
+| Alan | İçerik |
+|---|---|
+| Madde | Bölüm ve madde adı |
+| Tarih / yapan | Kim, ne zaman (kişisel veri yerine rol/kısaltma yeterli) |
+| Ortam | Hangi hesap/alan adı/sunucu (gizli bilgi, belirteç veya adres yazılmaz) |
+| Yöntem | Ne yapıldı, hangi girdilerle |
+| Sonuç | Beklenenle karşılaştırma; sapma varsa nedeni |
+| Kayıt | Sürüm/commit veya kanıt referansı |
+
+Doğrulama sırasında beklenmeyen bir davranış çıkarsa kilit kapalı kalır, bulgu `08` Bölüm 6'ya (teknik borç) veya ilgili aşamaya yazılır.

@@ -23,6 +23,7 @@
 
 - Amaca daha az müdahaleci yolla ulaşılabilir mi? `[DOLDURULACAK]`
 - İşlenen veri kategorileri (uygulamanın fiilen tuttukları): işletme adı ve konumu (Google kaynaklı alanlar kalıcı saklanmaz), web sitesinden bulunan e-posta adresi ve kaynağı, doğrulama sonucu, gönderim kayıtları (maskeli konu, durum), engel listesi (e-posta özeti). Gerekli/gereksiz değerlendirmesi: `[DOLDURULACAK]`
+- Canlı entegrasyonun ek olarak tutacağı veya işleyeceği veriler (yazılım hazır, **kapalı**; teknik olgu, hukuki değerlendirme değil): Gmail yenileme belirteci (yalnızca şifreli yerel gizli depoda; veritabanına/günlüğe yazılmaz; varsayılan izin yalnızca gönderim, okuma ayrı izin); gelen kutusundan yalnızca bizim gönderdiğimiz iletilerle ilişkili iletilerin **özeti** (gövde ve gönderen adresi saklanmaz, ilgisiz posta saklanmaz); teslim hatası/yanıt/çıkış/şikâyet (ARF) sınıflandırması ve durumu; çıkış belirteci (adres içermez, alıcıya gizli anahtarlı etiketle bağlı, süreli) ve çıkış olayı kuyruğu (belirteç ve zaman; adres yok); SPF/DKIM/DMARC denetim sonucunun yalnızca durumları. Gerekli/orantılı değerlendirmesi: `[DOLDURULACAK]`
 - Kişiye ait (`ad.soyad@…`) ve genel (`info@…`) adresler için ayrı değerlendirme: `[DOLDURULACAK]`
 
 ## 4. Denge testi
@@ -39,6 +40,9 @@
 - Engel listesi, çıkış/itiraz/şikâyet kayıtlarının kaldırılamaması; temas sıklığı sınırları; ülke politikası kilidi.
 - Gönderen kimliğinin ve çıkış yönteminin otomatik eklenmesi.
 - Silme talebi akışı ve 72 saatlik operasyonel hedef (hukuki yanıt sürelerinin yerine geçmez).
+- Çıkış ve şikâyet kayıtlarının ayrı nedenlerle tutulması; imzalı, süreli, kişisel veri içermeyen çıkış bağlantısı ve yalnızca onayla işleyen (GET işlem yapmaz) çıkış sayfası; çıkış olaylarının kaybolmayacak biçimde kaydedilmesi (dayanıklı kuyruk) ve tekrar işlemede çift kayıt oluşmaması.
+- Gelen kutusunda otomatik işlem için çok katmanlı kanıt zorunluluğu; kanıtı eksik veya sahte olabilecek iletinin hiçbir engel/durdurma üretmemesi (yalnızca insan incelemesi); olumsuz yanıtın asla otomatik engel üretmemesi.
+- Gerçek gönderimin yazılım anahtarı ve kayıtlı hukuki onayların **birlikte** verilmesine bağlı olması.
 - Maskeli dışa aktarma; kullanım telemetrisi yok; veriler yerelde.
 - Açık hukuki sorular: gönderilmiş ileti kayıtlarının saklanması/silinmesi, engel listesinde e-posta özetinin saklanması, yedeklerde kalan eski veriler. `[DOLDURULACAK]`
 
