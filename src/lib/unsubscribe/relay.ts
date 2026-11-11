@@ -5,10 +5,12 @@ import { verifyToken, type PublicKeyEntry } from "./token";
  *
  * Bu modül yalnızca web standardı `Request`/`Response` ve `./token` (saf, GENEL anahtarla doğrulama) kullanır:
  * veritabanı, dosya sistemi, gizli depo, ağ ÇIKIŞI yoktur. Herhangi bir Node tabanlı HTTPS sunucusuna bağlanabilir.
- * Bu sürümde dağıtım dosyası/alan adı YOKTUR; gerçek HTTPS ve alan adı kararı sonraki aşamalara aittir.
+ * Bağımsız sunucu girişi ve dağıtım dosyaları: src/relay/ ve deploy/relay/ (bu modül onlardan habersizdir).
  *
  * Protokol kuralları:
- *  - POST + `application/x-www-form-urlencoded` gövde `List-Unsubscribe=One-Click`: çıkışı kaydeder (RFC 8058).
+ *  - POST + gövde alanı `List-Unsubscribe=One-Click`: çıkışı kaydeder (RFC 8058). İçerik türü
+ *    `multipart/form-data` (RFC 8058 §3.1 "SHOULD") VEYA `application/x-www-form-urlencoded` ("MAY") olabilir;
+ *    başka tür 415. Gövde sınırı (1 KiB) her iki türde de AYRIŞTIRMADAN ÖNCE uygulanır.
  *    Çerez, kimlik doğrulama veya yönlendirme YOKTUR; yanıt 3xx ASLA olmaz.
  *  - GET/HEAD durum DEĞİŞTİRMEZ (tarayıcı önizleme, güvenlik tarayıcısı, bağlantı ön yüklemesi çıkış yaptırmasın):
  *    yalnızca onay formu gösterir; onay POST ile yapılır.
@@ -213,10 +215,10 @@ function html(status: number, body: string, head: boolean): Response {
 }
 
 /** Gövdeyi en çok `MAX_BODY_BYTES` bayt okur; aşılırsa null. */
-async function readLimited(req: Request): Promise<string | null> {
+async function readLimited(req: Request): Promise<Uint8Array<ArrayBuffer> | null> {
   const len = req.headers.get("content-length");
   if (len !== null && (!/^\d{1,9}$/.test(len) || Number(len) > MAX_BODY_BYTES)) return null;
-  if (!req.body) return "";
+  if (!req.body) return new Uint8Array(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -236,7 +238,36 @@ async function readLimited(req: Request): Promise<string | null> {
     buf.set(c, off);
     off += c.byteLength;
   }
-  return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+  return buf;
+}
+
+const FORM_URLENCODED = "application/x-www-form-urlencoded";
+const MULTIPART_FORM = "multipart/form-data";
+
+/**
+ * Sınırlı gövdeden `List-Unsubscribe` alanının DÜZ METİN değerini çıkarır; ayrıştırılamazsa null.
+ * `multipart/form-data` ayrıştırması platformun standart `FormData` ayrıştırıcısıyla yapılır (sınır/boundary eksik
+ * veya gövde bozuksa hata → null → 400). Dosya olarak gönderilen alan (filename) kabul EDİLMEZ.
+ */
+async function oneClickField(
+  mediaType: string,
+  rawContentType: string,
+  body: Uint8Array<ArrayBuffer>,
+): Promise<string | null> {
+  if (mediaType === FORM_URLENCODED) {
+    return new URLSearchParams(new TextDecoder("utf-8", { fatal: false }).decode(body)).get(
+      ONE_CLICK_FIELD,
+    );
+  }
+  try {
+    const form = await new Response(body, {
+      headers: { "Content-Type": rawContentType },
+    }).formData();
+    const value = form.get(ONE_CLICK_FIELD);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createRelayHandler(opts: RelayOptions): (req: Request) => Promise<Response> {
@@ -326,11 +357,15 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
     }
 
     // POST: RFC 8058 tek tıklamalı çıkış.
-    const ct = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-    if (ct !== "application/x-www-form-urlencoded") return text(415, "Unsupported media type");
+    // RFC 8058 §3.1: multipart/form-data (SHOULD) veya application/x-www-form-urlencoded (MAY).
+    const rawCt = req.headers.get("content-type") ?? "";
+    const ct = rawCt.split(";")[0]!.trim().toLowerCase();
+    if (ct !== FORM_URLENCODED && ct !== MULTIPART_FORM) {
+      return text(415, "Unsupported media type");
+    }
     const body = await readLimited(req);
     if (body === null) return text(413, "Payload too large");
-    if (new URLSearchParams(body).get(ONE_CLICK_FIELD) !== ONE_CLICK_VALUE) {
+    if ((await oneClickField(ct, rawCt, body)) !== ONE_CLICK_VALUE) {
       return text(400, "Invalid request");
     }
     if (!verdict.ok) {

@@ -1,0 +1,47 @@
+# Universal Mail abonelikten çıkış aktarıcısı (systemd birimi).
+# Kurulum: deploy/relay/README.md. RELAY_PUBLIC_ORIGIN satırını kendi alt alan adınızla değiştirin.
+# TEK örnek çalıştırın: dosya kuyruğu tek yazar varsayar.
+
+[Unit]
+Description=Universal Mail unsubscribe relay
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=umrelay
+Group=umrelay
+Environment=NODE_ENV=production
+Environment=RELAY_PUBLIC_ORIGIN=https://cikis.firma.com
+Environment=RELAY_HOST=127.0.0.1
+Environment=RELAY_PORT=8787
+Environment=RELAY_DATA_DIR=/var/lib/um-relay
+Environment=RELAY_KEYS_FILE=/etc/um-relay/keys.json
+ExecStart=/usr/bin/node /opt/um-relay/relay.cjs
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+
+# Kalıcı veri: /var/lib/um-relay (kuyruk: spool/, tekrar kaydı: replay.log). Yalnızca bu dizin yazılabilir.
+StateDirectory=um-relay
+StateDirectoryMode=0700
+ReadWritePaths=/var/lib/um-relay
+UMask=0077
+
+# Sertleştirme
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target
