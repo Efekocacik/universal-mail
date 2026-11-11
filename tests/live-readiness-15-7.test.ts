@@ -217,6 +217,9 @@ describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () =>
     await ensureChannelKey(db, NOW);
     expect((await by()).event_delivery).toBe("blocked"); // adres yok
     await setUnsubscribeBaseUrl(db, "https://cikis.firma-ornek.com", NOW);
+    // Çekme işi kapalıyken (varsayılan) çıkış talepleri uygulamaya hiç ulaşmaz: engel.
+    expect((await by()).event_delivery).toBe("blocked");
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
     expect((await by()).event_delivery).toBe("unknown");
     await checkDeliveryHealth(
       db,
@@ -225,6 +228,15 @@ describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () =>
     );
     expect((await by(NOW + 1000)).event_delivery).toBe("ok");
     expect((await by(NOW + 25 * 3600_000)).event_delivery).toBe("unknown");
+    // Ortam bayrağı da çekmeyi açar (ayar kapalıyken).
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    expect((await by(NOW + 1000)).event_delivery).toBe("blocked");
+    const viaEnv = await getLiveReadiness(db, {
+      now: NOW + 1000,
+      env: { UM_UNSUBSCRIBE_DRAIN_ENABLED: "1" },
+    });
+    expect(viaEnv.items.find((i) => i.key === "event_delivery")?.status).toBe("ok");
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
     await checkDeliveryHealth(
       db,
       { getStats: async () => ({ depth: 3, oldestAgeMs: 2 * 3600_000, corrupt: 0 }) },

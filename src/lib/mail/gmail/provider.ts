@@ -57,6 +57,12 @@ export interface GmailProviderOptions {
   apiBase?: string;
   /** YALNIZCA testlerde (`NODE_ENV=test`): canlı gönderim anahtarı. Varsayılan `LIVE_SENDING_ENABLED`. */
   liveEnabled?: () => boolean;
+  /**
+   * KENDİNE TEST (C11; yalnızca `getSelfTestProvider`): canlı gönderim kilidi yerine DAHA DAR bir kural uygulanır:
+   * alıcı, posta kutusunun KENDİ adresiyle birebir aynı olmalıdır (aksi halde ağ isteği atılmadan `rejected`).
+   * Diğer bütün kapılar (gönderim izni, girdi doğrulaması, sonuç sınıflandırması) aynen geçerlidir.
+   */
+  selfTest?: boolean;
 }
 
 const rej = (code: string, permanent: boolean, retryAfterMs?: number): ProviderResult => ({
@@ -164,8 +170,15 @@ export class GmailProvider implements MailProvider {
   }
 
   async send(input: ProviderSendInput): Promise<ProviderResult> {
-    // 1. Canlı gönderim kilidi: kapalıysa HİÇBİR G/Ç yapılmaz.
-    if (!this.liveEnabled()) return rej("live_sending_disabled", true);
+    // 1. Canlı gönderim kilidi: kapalıysa HİÇBİR G/Ç yapılmaz. Kendine testte bunun yerine (kilit açık olsa bile)
+    //    yalnızca kutunun kendi adresine izin verilir.
+    if (this.opts.selfTest) {
+      const self = this.opts.mailbox.address ? parseEmail(this.opts.mailbox.address) : null;
+      const to = parseEmail(input.to);
+      if (!self || !to || to.email !== self.email || input.to !== self.email) {
+        return rej("self_test_recipient", true);
+      }
+    } else if (!this.liveEnabled()) return rej("live_sending_disabled", true);
     if (input.signal.aborted) return rej("aborted_before_send", false);
 
     // 2. Girdi doğrulaması (ağ yok).
@@ -304,4 +317,17 @@ export function getLiveProvider(
     throw new ProviderUnavailableError(mailbox.provider);
   }
   return new GmailProvider({ db, mailbox });
+}
+
+/**
+ * KENDİNE TEST fabrikası (C11): canlı gönderim kilidinden ve hukuki onaylardan BAĞIMSIZDIR (açılış öncesi doğrulama
+ * adımıdır); yalnızca Gmail kutusu için ve yalnızca kutunun KENDİ adresine gönderebilen bir bağdaştırıcı kurar.
+ * Kampanya yolu bunu kullanmaz (`getLiveProvider`).
+ */
+export function getSelfTestProvider(
+  db: Db,
+  mailbox: { id: number; provider: string; address: string | null },
+): MailProvider {
+  if (mailbox.provider !== "gmail") throw new ProviderUnavailableError(mailbox.provider);
+  return new GmailProvider({ db, mailbox, selfTest: true });
 }

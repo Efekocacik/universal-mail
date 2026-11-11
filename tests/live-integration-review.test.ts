@@ -157,6 +157,7 @@ async function bestCaseSoftwareState() {
       })
     ).ok,
   ).toBe(true);
+  await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
   await checkDeliveryHealth(db, source, NOW);
   await recordInboxSync(db, gid, { ok: true, code: "ok" }, NOW);
   return gid;
@@ -203,6 +204,10 @@ describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", ()
     expect((await by(NOW + 1000)).dns_auth).toBe("unknown");
 
     expect((await by(NOW + 1000)).event_delivery).toBe("ok");
+    // Çekme işi kapatılırsa sağlıklı kayıt olsa bile teslimat engel olur (canlı kampanya da ertelenir).
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    expect((await by(NOW + 1000)).event_delivery).toBe("blocked");
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
     await setSetting(db, "mail.unsubscribeEndpoint", {
       ...(await getSetting(db, "mail.unsubscribeEndpoint")),
       delivery: null,

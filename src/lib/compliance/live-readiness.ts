@@ -5,6 +5,7 @@ import { evaluateDnsReadiness } from "@/lib/mail/dns-store";
 import { evaluateInboxSync } from "@/lib/mail/inbound/sync-status";
 import { getSetting, settingSchemas } from "@/lib/settings";
 import { channelPrivateKeyMissing } from "@/lib/unsubscribe/channel";
+import { isUnsubscribeDrainActive, type Env } from "@/lib/unsubscribe/drain-job";
 import { evaluateDelivery, isOneClickEndpointVerified } from "@/lib/unsubscribe/endpoint";
 import { signingPrivateKeyMissing } from "@/lib/unsubscribe/keys";
 import { LEGAL_APPROVALS, type LegalApprovalKey } from "./legal-status";
@@ -69,7 +70,7 @@ const legal = (key: ReadinessKey, flag: LegalApprovalKey): ReadinessItem => ({
 
 export async function getLiveReadiness(
   db: DbExecutor,
-  opts: { now?: number } = {},
+  opts: { now?: number; env?: Env } = {},
 ): Promise<LiveReadiness> {
   const now = opts.now ?? Date.now();
   const consent = await getSetting(db, "consent");
@@ -94,7 +95,10 @@ export async function getLiveReadiness(
     !(await channelPrivateKeyMissing(db));
   const endpointVerified =
     (await isOneClickEndpointVerified(db, now)) && !(await signingPrivateKeyMissing(db));
-  const delivery = await evaluateDelivery(db, hasChannelKey, now);
+  // Teslimat: çekme işi KAPALIYSA gerçek çıkış talepleri uygulamaya hiç ulaşmaz → engel (canlı kampanya gönderimi de
+  // bu durumda ertelenir; bkz. `evaluateDrainGate`). Açıksa saklanan son sağlık kaydından (bayat → doğrulanmadı).
+  const drainActive = await isUnsubscribeDrainActive(db, opts.env ?? process.env);
+  const delivery = drainActive ? await evaluateDelivery(db, hasChannelKey, now) : "blocked";
   const dns = await evaluateDnsReadiness(db, realConnected, now);
   const inboxSync = await evaluateInboxSync(db, realConnected, now);
 

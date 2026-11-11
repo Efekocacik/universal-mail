@@ -20,6 +20,7 @@ import {
   type CampaignLeadStatus,
 } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
+import { evaluateDrainGate } from "@/lib/unsubscribe/delivery-alert";
 import { EndpointError, prepareLiveUnsubscribe } from "@/lib/unsubscribe/endpoint";
 import { getLiveProvider } from "./gmail/provider";
 import { mailboxSendBlock } from "./mailbox-health";
@@ -69,6 +70,8 @@ export const STALE_SENDING_MS = 10 * 60_000;
  * eşik dolmadan bitmemiş olamaz, yani aktif bir gönderim yanlışlıkla `unknown` yapılmaz.
  */
 export const MAX_PROVIDER_TIMEOUT_MS = STALE_SENDING_MS / 2;
+/** Çekme kapısı kapalıyken (`unsubscribe_drain_unhealthy`) dizinin yeniden deneneceği süre. */
+export const DRAIN_GATE_RETRY_MS = 15 * 60_000;
 
 export type NotSendableCode =
   | "provider_unavailable"
@@ -84,7 +87,12 @@ export type NotSendableCode =
   | "compose_failed"
   | "build_failed"
   /** Canlı ileti için doğrulanmış çıkış uç noktası/bağlantısı hazırlanamadı: gönderim YOK. */
-  | "unsubscribe_unavailable";
+  | "unsubscribe_unavailable"
+  /**
+   * Canlı ileti: çıkış talepleri çekilmiyor (çekme işi kapalı, son sağlık kaydı kötü ya da 24 saatten eski).
+   * Gönderim YOK; dizi ERTELENİR (dışlanmaz, başarısız sayılmaz). `detail`: `DrainGateCode`.
+   */
+  | "unsubscribe_drain_unhealthy";
 
 /** Gönderim kaydı yazılamadığında yeniden denemek için gereken asgari bilgi (ham ileti ve alıcı İÇERMEZ). */
 export interface PendingRecord {
@@ -250,6 +258,21 @@ export async function sendCampaignStep(
             outcome: "not_sendable",
             code: "unsubscribe_unavailable",
             detail: e.code,
+          });
+        }
+      }
+
+      // Çıkış talepleri gerçekten çekiliyor mu? Çekme kapalı/sağlıksız/bayatken canlı kampanya ERTELENİR: aksi halde
+      // gerçek çıkış tıklamaları aktarıcıda birikirken gönderim sürerdi. (Uç nokta eksikliği ise yapılandırma
+      // hatasıdır ve yukarıda kampanyayı duraklatır; bu geçici bir işletim durumudur.)
+      if (mode === "live") {
+        const drain = await evaluateDrainGate(tx, { now });
+        if (!drain.ok) {
+          throw new Abort({
+            outcome: "not_sendable",
+            code: "unsubscribe_drain_unhealthy",
+            detail: drain.code,
+            retryAt: now + DRAIN_GATE_RETRY_MS,
           });
         }
       }

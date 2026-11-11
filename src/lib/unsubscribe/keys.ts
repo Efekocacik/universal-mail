@@ -207,6 +207,8 @@ export async function mintUnsubscribeToken(
 export async function mintProbeToken(
   db: DbExecutor,
   now = Date.now(),
+  /** Yalnızca kendine test gönderimi için uzatılır (bkz. `prepareSelfTestUnsubscribe`); varsayılan 15 dk. */
+  ttlMs = 15 * 60_000,
 ): Promise<{ token: string; jti: string; kid: string }> {
   const signer = await getSigner(db);
   const claims = newClaims({
@@ -214,7 +216,7 @@ export async function mintProbeToken(
     campaignLeadId: 1,
     recipientTag: recipientTag("um-endpoint-probe"),
     now,
-    ttlMs: 15 * 60_000,
+    ttlMs,
     scope: "p",
   });
   return { token: signToken(claims, signer.privateKey), jti: claims.j, kid: signer.kid };

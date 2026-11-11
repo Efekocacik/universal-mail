@@ -317,6 +317,16 @@ export class MailDispatcher {
             log(`dizi #${c.id} sonlandırıldı: ${out.code}`);
           }
           break;
+        case "unsubscribe_drain_unhealthy": {
+          // Çıkış talepleri çekilmiyor: kampanya ve dizi bozulmaz, yalnızca ERTELENİR (dışlama/başarısızlık yok).
+          // Koşul posta kutusundan bağımsız ve geneldir: bu turda aynı kutunun başka dizisi de denenmez.
+          const at = out.retryAt ?? now + SHORT_DEFER_MS;
+          if (await this.defer(c.id, at, out.code, now)) res.deferred++;
+          log(`dizi #${c.id} ertelendi: ${out.code}${out.detail ? ` (${out.detail})` : ""}`);
+          blockedMailboxes.add(c.mailboxId);
+          wakeCandidates.push(at);
+          break;
+        }
         case "step_template_missing":
         case "invalid_send_window":
         case "provider_unavailable":

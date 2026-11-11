@@ -6,7 +6,10 @@ import { testSendSchema } from "../../../mail/schema";
 
 export const dynamic = "force-dynamic";
 
-/** "Kendime test gönder": yalnızca demo posta kutusu; alıcı her zaman kutunun kendi adresi (FR-TPL-07). */
+/**
+ * "Kendime test gönder" (FR-TPL-07, C11): demo kutusu veya bağlı, gönderim izinli Gmail kutusu. Alıcı her zaman kutunun
+ * KENDİ adresidir (istekte alıcı alanı yoktur); Gmail kutusunda gerçek bir e-posta kendi adresinize gider.
+ */
 export const POST = domainRoute(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const db = await database();
   const mailboxId = intParam((await ctx.params).id);

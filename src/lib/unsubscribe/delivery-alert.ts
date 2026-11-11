@@ -1,5 +1,6 @@
 import type { DbExecutor } from "@/lib/db/client";
 import { getSetting, type SettingValue } from "@/lib/settings";
+import { isUnsubscribeDrainActive, type Env } from "./drain-job";
 import { DELIVERY_FRESH_MS, VERIFICATION_TTL_MS } from "./endpoint";
 
 /**
@@ -78,4 +79,54 @@ export async function getDeliveryAlerts(
   const keys = await getSetting(db, "mail.unsubscribeKeys");
   const current = keys.keys.find((k) => k.kid === keys.current && k.revokedAt === null);
   return computeDeliveryAlerts({ endpoint, currentKid: current?.kid ?? null }, now);
+}
+
+/* ---------------------------------------------------------------------------------------------- */
+/* Canlı kampanya gönderim kapısı: çıkış talepleri gerçekten çekiliyor mu?                          */
+
+/**
+ * Neden canlı KAMPANYA gönderimi ertelenmeli:
+ *  - `drain_disabled`: çekme işi kapalı (ne ortam bayrağı ne Ayarlar anahtarı): gerçek çıkış tıklamaları aktarıcıda
+ *    birikir ve uygulamaya hiç ulaşmaz.
+ *  - `drain_unhealthy`: son sağlık kaydı kötü (`queue_deep`, `events_stale`, `corrupt_events`, `unreachable`,
+ *    `no_channel_key`).
+ *  - `drain_stale`: son 24 saatte (`DELIVERY_FRESH_MS`) hiç sağlık kaydı yok: iş çalışmıyor veya takılmış olabilir.
+ */
+export type DrainGateCode = "drain_disabled" | "drain_unhealthy" | "drain_stale";
+
+export type DrainGate = { ok: true } | { ok: false; code: DrainGateCode };
+
+/** Saf karar (ağ/yazma yok): açma anahtarı ve saklanan son sağlık kaydından. */
+export function computeDrainGate(
+  input: {
+    active: boolean;
+    delivery: Pick<
+      NonNullable<SettingValue<"mail.unsubscribeEndpoint">["delivery"]>,
+      "ok" | "checkedAt"
+    > | null;
+  },
+  now: number,
+): DrainGate {
+  if (!input.active) return { ok: false, code: "drain_disabled" };
+  const d = input.delivery;
+  // Gelecekteki (saat kayması) kayıt da taze sayılmaz.
+  if (!d || now - d.checkedAt > DELIVERY_FRESH_MS || d.checkedAt > now + 5 * 60_000) {
+    return { ok: false, code: "drain_stale" };
+  }
+  return d.ok ? { ok: true } : { ok: false, code: "drain_unhealthy" };
+}
+
+/**
+ * Canlı KAMPANYA gönderiminden önce (kendine test gönderimi bu kapıya tabi DEĞİLDİR): çekme işi açık olmalı VE son
+ * 24 saat içinde başarılı bir çekme/sağlık kaydı bulunmalı. Aksi halde çıkış talepleri aktarıcıda birikirken kampanya
+ * göndermeye devam ederdi. SALT OKUNUR; ağ yok.
+ */
+export async function evaluateDrainGate(
+  db: DbExecutor,
+  opts: { env?: Env; now?: number } = {},
+): Promise<DrainGate> {
+  const now = opts.now ?? Date.now();
+  const active = await isUnsubscribeDrainActive(db, opts.env ?? process.env);
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  return computeDrainGate({ active, delivery: cfg.delivery }, now);
 }

@@ -29,6 +29,7 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 /**
  * Canlı gönderim yolu, mevcut GERÇEK kontrolleri atlayamaz (Aşama 15.7 incelemesi). Bu dosyada YALNIZCA şu kapılar test
@@ -124,6 +125,7 @@ beforeEach(async () => {
     attempts: 2,
   });
   expect(v.ok).toBe(true);
+  await enableHealthyDrain(db, T0);
 });
 afterEach(() => {
   expect(globalFetch).not.toHaveBeenCalled(); // gerçek ağ isteği YOK

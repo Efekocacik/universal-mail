@@ -14,10 +14,11 @@ import {
 } from "@/lib/campaigns/service";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db } from "@/lib/db/client";
-import { campaigns, jobs, mailboxes } from "@/lib/db/schema";
+import { campaignLeads, campaigns, jobs, mailboxes, messages } from "@/lib/db/schema";
 import { getLiveProvider } from "@/lib/mail/gmail/provider";
 import type { MailProvider, ProviderSendInput } from "@/lib/mail/provider/provider";
 import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
+import { DRAIN_GATE_RETRY_MS } from "@/lib/mail/send-service";
 import {
   createMailSendHandler,
   isMailSchedulerEnabled,
@@ -33,7 +34,11 @@ import {
   exportChannelPublicKeys,
   getChannelSigner,
 } from "@/lib/unsubscribe/channel";
-import { setUnsubscribeBaseUrl, verifyOneClickEndpoint } from "@/lib/unsubscribe/endpoint";
+import {
+  DELIVERY_FRESH_MS,
+  setUnsubscribeBaseUrl,
+  verifyOneClickEndpoint,
+} from "@/lib/unsubscribe/endpoint";
 import { ensureSigningKey, loadPublicKeys } from "@/lib/unsubscribe/keys";
 import { createRelayHandler } from "@/lib/unsubscribe/relay";
 import { FileSpool } from "@/lib/unsubscribe/spool";
@@ -46,6 +51,7 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 // Bu dosyada YALNIZCA test içinde (mevcut geçersiz kılma yöntemi, bkz. live-send-wiring.test.ts): canlı kilit "açık",
 // bütün hukuki onaylar "verilmiş" ve uygunluk "uygun" varsayılır. Gerçek sabitler DEĞİŞMEZ.
@@ -174,6 +180,7 @@ async function verifiedEndpoint() {
     attempts: 2,
   });
   expect(r.ok).toBe(true);
+  await enableHealthyDrain(db, T0);
 }
 
 describe("canlı kapı açık (test): zamanlayıcı", () => {
@@ -296,5 +303,50 @@ describe("canlı kapı açık (test): dağıtıcı", () => {
       shouldStop: () => false,
     });
     expect(live.sent).toHaveLength(1);
+  });
+});
+
+describe("canlı kapı açık (test): çekme kapısı dağıtıcıda ERTELER (dışlamaz, başarısız saymaz)", () => {
+  it("çekme kapalı → dizi ertelenir, kampanya sürer, ileti yok; sağlık dönünce ertelenen dizi gönderilir", async () => {
+    await verifiedEndpoint();
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    const id = await createCampaign(db, { status: "running", mailboxId: gid });
+    const s = await addSequence(db, id, { nextSendAt: null, email: "kisi@alici-ornek.com" });
+
+    const r = await new MailDispatcher(db).dispatchOnce({ now: () => T0 });
+    expect(r).toMatchObject({ send: null, deferred: 1, excluded: 0, pausedCampaigns: [] });
+    expect(r.nextWakeAt).toBeLessThanOrEqual(T0 + DRAIN_GATE_RETRY_MS);
+    expect(live.sent).toHaveLength(0);
+    expect(await db.select().from(messages)).toHaveLength(0);
+    const [cl] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, s.cl));
+    expect(cl).toMatchObject({
+      status: "scheduled",
+      nextSendAt: T0 + DRAIN_GATE_RETRY_MS,
+      lastError: "unsubscribe_drain_unhealthy",
+      exclusionReasons: [],
+    });
+    const [c] = await db.select().from(campaigns).where(eq(campaigns.id, id));
+    expect(c!.status).toBe("running");
+
+    // Erteleme süresi dolmadan yeniden denenmez.
+    const early = await new MailDispatcher(db).dispatchOnce({ now: () => T0 + 60_000 });
+    expect(early).toMatchObject({ send: null, deferred: 0 });
+
+    // Çekme açılıp sağlıklı kayıt gelince aynı dizi gönderilir.
+    const later = T0 + DRAIN_GATE_RETRY_MS;
+    await enableHealthyDrain(db, later);
+    const ok = await new MailDispatcher(db).dispatchOnce({ now: () => later });
+    expect(ok.send).toMatchObject({ outcome: "sent" });
+    expect(live.sent).toHaveLength(1);
+  });
+
+  it("sağlık kaydı 24 saatten eskiyse de ertelenir (drain_stale)", async () => {
+    await verifiedEndpoint();
+    const id = await createCampaign(db, { status: "running", mailboxId: gid });
+    await addSequence(db, id, { nextSendAt: null, email: "kisi@alici-ornek.com" });
+    const at = T0 + DELIVERY_FRESH_MS + 60_000;
+    const r = await new MailDispatcher(db).dispatchOnce({ now: () => at });
+    expect(r).toMatchObject({ send: null, deferred: 1, excluded: 0, pausedCampaigns: [] });
+    expect(live.sent).toHaveLength(0);
   });
 });

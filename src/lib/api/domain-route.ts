@@ -186,7 +186,10 @@ const TEST_SEND_STATUS: Record<TestSendError["kind"], number> = {
   mailbox_not_found: 404,
   live_scope: 409,
   mailbox_not_ready: 409,
+  send_scope_missing: 409,
+  profile_incomplete: 409,
   rate_limited: 429,
+  in_progress: 409,
   build_failed: 409,
 };
 

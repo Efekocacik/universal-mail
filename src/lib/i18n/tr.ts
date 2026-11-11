@@ -1130,6 +1130,8 @@ export const tr = {
   "reason.provider_unavailable": "Posta servisi kullanılamıyor",
   "reason.arf_complaint": "Şikâyet raporu (ARF)",
   "reason.unsubscribe_unavailable": "Doğrulanmış çıkış bağlantısı hazırlanamadı",
+  "reason.unsubscribe_drain_unhealthy":
+    "Çıkış talepleri çekilmiyor (çekme kapalı veya son 24 saatte sağlıklı kayıt yok); gönderim ertelendi",
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
@@ -1557,6 +1559,31 @@ export const tr = {
   "health.test.sent": "Test iletisi demo kutusuna gönderildi.",
   "health.test.notSendable": "Şablon gönderime hazır değil; eksik bilgileri tamamlayın.",
   "health.test.failed": "Test iletisi gönderilemedi.",
+  "health.test.liveTitle": "Kendime gerçek test e-postası gönder (Gmail)",
+  "health.test.liveHelp":
+    "Gerçek bir e-posta, bağlı Gmail kutusu üzerinden YALNIZCA bu kutunun kendi adresine ({address}) gönderilir; başka alıcı seçilemez. Canlıya geçişten önce iletinin görünümünü, alt bilgisini ve başlıklarını kendi gelen kutunuzda doğrulamak içindir. Konu “[TEST]” önekli, alt bilgi “[TEST]” işaretlidir. Kampanya sayaçlarını etkilemez; kutu başına günde en fazla 10 test.",
+  "health.test.liveLeadHint":
+    "İşletme yalnızca değişkenleri doldurmak için kullanılır; bu işletmeye hiçbir e-posta gitmez.",
+  "health.test.liveSend": "Kendime gerçek test gönder",
+  "health.test.liveConfirmTitle": "Kendinize gerçek bir e-posta gönderilsin mi?",
+  "health.test.liveConfirmBody":
+    "Gmail üzerinden {address} adresine gerçek bir test e-postası gönderilecek. Başka hiçbir alıcıya gönderilmez.",
+  "health.test.liveConfirm": "Gönder",
+  "health.test.liveSent":
+    "Test e-postası {address} adresine gönderildi. Gmail gelen kutunuzu kontrol edin.",
+  "health.test.liveNoUnsubscribe":
+    "Çıkış uç noktası henüz doğrulanmadığı için iletide tek tıklamalı çıkış (List-Unsubscribe) başlığı yoktur.",
+  "health.test.liveFailed": "Gmail iletiyi kabul etmedi; gönderilmedi (kod: {code}).",
+  "health.test.liveUnknown":
+    "Gönderim sonucu belirsiz: ileti gitmiş olabilir. Otomatik olarak yeniden gönderilmez; gelen kutunuzu kontrol edin ve Kampanyalar › İnceleme ekranından karar verin.",
+  "health.test.error.SEND_SCOPE_MISSING":
+    "Bu Gmail kutusu için gönderim izni yok. Ayarlar'dan kutuyu gönderim izniyle yeniden bağlayın.",
+  "health.test.error.PROFILE_INCOMPLETE":
+    "Firma profili eksik veya geçersiz. Ayarlar'dan firma bilgilerini tamamlayın.",
+  "health.test.error.MAILBOX_NOT_READY": "Posta kutusu bağlı değil veya adresi yok.",
+  "health.test.error.IN_PROGRESS": "Bu kutuda süren bir test gönderimi var; bitmesini bekleyin.",
+  "health.test.error.BUILD_FAILED": "Test iletisi oluşturulamadı.",
+  "health.test.error.LIVE_SCOPE": "Bu posta kutusuyla test gönderimi yapılamaz.",
   "unsub.title": "İletişimden çıkma",
   "unsub.body": "Bu adrese bir daha ticari e-posta gönderilmeyecek. Onaylıyor musunuz?",
   "unsub.confirm": "Çıkışı onayla",
@@ -1620,7 +1647,7 @@ export const tr = {
   "ready.item.inbox_header_trust":
     "Gmail başlık güven kilidi (gerçek hesapla doğrulanana kadar kapalı)",
   "ready.item.event_delivery":
-    "Çıkış olaylarının dayanıklı teslimatı (kuyruk sağlığı ve imzalı kanal)",
+    "Çıkış olaylarının dayanıklı teslimatı (çekme açık, son 24 saatte sağlıklı kuyruk kaydı, imzalı kanal)",
   "ready.item.https_unsubscribe":
     "Genel HTTPS tek tıklamalı çıkış uç noktası (uçtan uca doğrulanmış)",
   "ready.item.live_country_policies": "Canlı ülke politikaları (kilitli)",

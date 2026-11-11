@@ -4,6 +4,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { LoadError, Notice } from "@/features/campaigns/parts";
@@ -190,11 +191,40 @@ function DnsCard({ mailboxId }: { mailboxId: number }) {
 
 /* Kendime test gönder -------------------------------------------------------------------------------- */
 
-function TestSendCard({ mailboxId }: { mailboxId: number }) {
+/** Sunucunun satır içinde gösterilen (bildirim yerine) test gönderimi hata kodları. */
+const TEST_SEND_INLINE_CODES = [
+  "SEND_SCOPE_MISSING",
+  "PROFILE_INCOMPLETE",
+  "MAILBOX_NOT_READY",
+  "IN_PROGRESS",
+  "BUILD_FAILED",
+  "LIVE_SCOPE",
+] as const;
+
+type TestSendFeedback =
+  | { kind: "not_sendable" }
+  | { kind: "error"; code: (typeof TEST_SEND_INLINE_CODES)[number] }
+  | { kind: "sent"; listUnsubscribe: boolean }
+  | { kind: "failed"; code: string }
+  | { kind: "unknown" };
+
+/**
+ * Kendime test gönder. Demo kutusunda örnek ileti demo sağlayıcısına gider; GERÇEK (Gmail) kutuda gerçek bir e-posta
+ * yalnızca kutunun kendi adresine gider (alıcı seçilemez) ve gönderimden önce onay istenir.
+ */
+function TestSendCard({
+  mailbox,
+}: {
+  mailbox: { id: number; address: string | null; scope: "demo" | "live" };
+}) {
+  const live = mailbox.scope === "live";
+  const address = mailbox.address ?? "";
+  const ids = `test-${mailbox.id}`;
   const templates = useTemplates();
   const [templateId, setTemplateId] = useState("");
   const [search, setSearch] = useState("");
   const [leadId, setLeadId] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const q = useDebounced(search.trim(), 300);
   const leads = useQuery({
     queryKey: ["mail-ops", "lead-options", q],
@@ -214,28 +244,40 @@ function TestSendCard({ mailboxId }: { mailboxId: number }) {
   useEffect(() => {
     if (!templateId && tpls.length > 0) setTemplateId(String(tpls[0]!.id));
   }, [tpls, templateId]);
-  const [notSendable, setNotSendable] = useState(false);
+  const [feedback, setFeedback] = useState<TestSendFeedback | null>(null);
   const send = useSafeMutation(
     () =>
-      mailOpsApi.testSend(mailboxId, { templateId: Number(templateId), leadId: Number(leadId) }),
+      mailOpsApi.testSend(mailbox.id, { templateId: Number(templateId), leadId: Number(leadId) }),
     {
       invalidate: [mk.all],
-      successMessage: t("health.test.sent"),
-      onSuccess: () => setNotSendable(false),
-      onError: (info) => setNotSendable(info.code === "NOT_SENDABLE"),
+      ...(live ? {} : { successMessage: t("health.test.sent") }),
+      silentCodes: live ? TEST_SEND_INLINE_CODES : [],
+      onSuccess: (r) => {
+        if (!live) return setFeedback(null);
+        if (r.outcome === "sent") setFeedback({ kind: "sent", listUnsubscribe: r.listUnsubscribe });
+        else if (r.outcome === "failed") setFeedback({ kind: "failed", code: r.code ?? "" });
+        else setFeedback({ kind: "unknown" });
+      },
+      onError: (info) => {
+        if (info.code === "NOT_SENDABLE") return setFeedback({ kind: "not_sendable" });
+        const inline = TEST_SEND_INLINE_CODES.find((c) => c === info.code);
+        setFeedback(live && inline ? { kind: "error", code: inline } : null);
+      },
     },
   );
   return (
-    <section aria-labelledby="test-title" className="space-y-3 rounded-xl border bg-card p-4">
-      <h2 id="test-title" className="text-sm font-semibold">
-        {t("health.test.title")}
+    <section aria-labelledby={`${ids}-title`} className="space-y-3 rounded-xl border bg-card p-4">
+      <h2 id={`${ids}-title`} className="text-sm font-semibold">
+        {live ? t("health.test.liveTitle") : t("health.test.title")}
       </h2>
-      <p className="text-[13px] text-muted-foreground">{t("health.test.help")}</p>
+      <p className="text-[13px] text-muted-foreground">
+        {live ? t("health.test.liveHelp", { address }) : t("health.test.help")}
+      </p>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor="test-template">{t("health.test.template")}</Label>
+          <Label htmlFor={`${ids}-template`}>{t("health.test.template")}</Label>
           <Select
-            id="test-template"
+            id={`${ids}-template`}
             value={templateId}
             onChange={(e) => setTemplateId(e.target.value)}
           >
@@ -247,12 +289,12 @@ function TestSendCard({ mailboxId }: { mailboxId: number }) {
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="test-search">{t("health.test.search")}</Label>
-          <Input id="test-search" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <Label htmlFor={`${ids}-search`}>{t("health.test.search")}</Label>
+          <Input id={`${ids}-search`} value={search} onChange={(e) => setSearch(e.target.value)} />
         </div>
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="test-lead">{t("health.test.lead")}</Label>
-          <Select id="test-lead" value={leadId} onChange={(e) => setLeadId(e.target.value)}>
+          <Label htmlFor={`${ids}-lead`}>{t("health.test.lead")}</Label>
+          <Select id={`${ids}-lead`} value={leadId} onChange={(e) => setLeadId(e.target.value)}>
             {rows.length === 0 && <option value="">{t("health.test.noLeads")}</option>}
             {rows.map((l) => (
               <option key={l.leadId} value={l.leadId}>
@@ -262,16 +304,50 @@ function TestSendCard({ mailboxId }: { mailboxId: number }) {
               </option>
             ))}
           </Select>
+          {live && <FieldHint>{t("health.test.liveLeadHint")}</FieldHint>}
         </div>
       </div>
-      {notSendable && <Notice tone="warning">{t("health.test.notSendable")}</Notice>}
+      {feedback?.kind === "not_sendable" && (
+        <Notice tone="warning">{t("health.test.notSendable")}</Notice>
+      )}
+      {feedback?.kind === "error" && (
+        <Notice tone="warning">{t(`health.test.error.${feedback.code}`)}</Notice>
+      )}
+      {feedback?.kind === "sent" && (
+        <Notice>
+          {t("health.test.liveSent", { address })}
+          {!feedback.listUnsubscribe && <> {t("health.test.liveNoUnsubscribe")}</>}
+        </Notice>
+      )}
+      {feedback?.kind === "failed" && (
+        <Notice tone="danger">{t("health.test.liveFailed", { code: feedback.code })}</Notice>
+      )}
+      {feedback?.kind === "unknown" && (
+        <Notice tone="warning">{t("health.test.liveUnknown")}</Notice>
+      )}
       <Button
+        variant={live ? "success" : "default"}
         loading={send.isPending}
         disabled={!templateId || !leadId}
-        onClick={() => send.mutate(undefined)}
+        onClick={() => (live ? setConfirmOpen(true) : send.mutate(undefined))}
       >
-        {t("health.test.send")}
+        {live ? t("health.test.liveSend") : t("health.test.send")}
       </Button>
+      {live && (
+        <ConfirmDialog
+          open={confirmOpen}
+          onOpenChange={setConfirmOpen}
+          tone="success"
+          title={t("health.test.liveConfirmTitle")}
+          description={t("health.test.liveConfirmBody", { address })}
+          confirmLabel={t("health.test.liveConfirm")}
+          pending={send.isPending}
+          onConfirm={async () => {
+            setFeedback(null);
+            await send.mutateAsync(undefined).catch(() => undefined);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -280,13 +356,20 @@ function TestSendCard({ mailboxId }: { mailboxId: number }) {
 export function HealthPanel() {
   const boxes = useMailboxes();
   const demo = (boxes.data ?? []).find((m) => m.scope === "demo" && m.status === "connected");
+  // Gerçek kendine test (C11): bağlı Gmail kutuları (gönderim izni sunucuda denetlenir).
+  const gmail = (boxes.data ?? []).filter(
+    (m) => m.scope === "live" && m.provider === "gmail" && m.status === "connected" && m.address,
+  );
   return (
     <div className="space-y-4">
       <Notice>{t("health.demoNote")}</Notice>
       {demo && <MailboxHealthCard mailboxId={demo.id} />}
       <AutoStopCard />
       {demo && <DnsCard mailboxId={demo.id} />}
-      {demo && <TestSendCard mailboxId={demo.id} />}
+      {demo && <TestSendCard mailbox={demo} />}
+      {gmail.map((m) => (
+        <TestSendCard key={m.id} mailbox={m} />
+      ))}
       <ReadinessCard />
     </div>
   );

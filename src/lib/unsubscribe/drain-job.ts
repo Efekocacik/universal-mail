@@ -1,6 +1,6 @@
 import { and, eq, inArray, lt } from "drizzle-orm";
 import { audit } from "@/lib/db/audit";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobHandler } from "@/lib/jobs/registry";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -45,7 +45,7 @@ const RETRYABLE_VERIFY_CODES: ReadonlySet<string> = new Set([
 ]);
 const STALE_LOCK_MS = 5 * 60_000;
 
-type Env = NodeJS.ProcessEnv | Record<string, string | undefined>;
+export type Env = NodeJS.ProcessEnv | Record<string, string | undefined>;
 
 export function isUnsubscribeDrainEnabled(env: Env): boolean {
   const v = env[UNSUBSCRIBE_DRAIN_FLAG];
@@ -53,7 +53,7 @@ export function isUnsubscribeDrainEnabled(env: Env): boolean {
 }
 
 /** Çekme işi açık mı: ortam bayrağı VEYA kullanıcı ayarı (her çağrıda okunur). */
-export async function isUnsubscribeDrainActive(db: Db, env: Env): Promise<boolean> {
+export async function isUnsubscribeDrainActive(db: DbExecutor, env: Env): Promise<boolean> {
   if (isUnsubscribeDrainEnabled(env)) return true;
   return (await getSetting(db, "mail.unsubscribeDrain")).enabled;
 }

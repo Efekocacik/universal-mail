@@ -20,7 +20,7 @@ Canlıya geçiş hazırlık paketlerinin hepsi `feat/golive-prep` dalında birle
 | **[GELEN]** | Gerçek Gmail gelen kutusu işi (`inbox.sync`), yalnızca `LIVE_INBOX_READING_ENABLED` açıkken. Yalnızca bounce ve yanıtların **otomatik** işlenmesi isteniyorsa gerekir | C6 | Kodlandı; kilit kapalı |
 | **[BELİRSİZ]** | "Belirsiz" (`unknown`) sonuçlu gönderimi elle çözme: **Kampanyalar → İnceleme bekleyenler** | C7 | Kodlandı |
 
-Hâlâ açık olanlar: imzalı macOS sürümü (C5c), kapı açma sürümü (C10b), isteğe bağlı "kendime gönder" kapısı (C11), işletim sistemi/e-posta uyarı bildirimi (uyarılar yalnızca uygulama içinde görünür; `08` TB-4), aktarıcının gerçek dağıtımı ve **bu belgedeki canlı testlerin tamamı**.
+Hâlâ açık olanlar: imzalı macOS sürümü (C5c), kapı açma sürümü (C10b), işletim sistemi/e-posta uyarı bildirimi (uyarılar yalnızca uygulama içinde görünür; `08` TB-4), aktarıcının gerçek dağıtımı ve **bu belgedeki canlı testlerin tamamı**.
 
 ## 1. Şirket girdileri (26 madde)
 
@@ -129,7 +129,7 @@ Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; 
    - **Belirsiz gönderim** [BELİRSİZ]: **Kampanyalar → İnceleme bekleyenler**. Karar vermeden önce gönderen kutunun Gmail **Gönderilmiş** klasörüne bakın. İletiyi orada görüyorsanız **"Gönderildi"**; emin değilseniz **"Gönderimi durdur"** (en güvenli seçenek; dizi bu alıcı için durur); **"Gönderilmedi"** yalnızca iletinin gitmediği kesinse (adımı yeniden açar, yanlışsa alıcıya **kopya** gider; ayrıca onay ister).
    - **Hariç tutulan alıcılar:** kampanya alıcıları bir nedenle (posta kutusu, firma profili, doğrulama vb.) hariç tutulduysa ve neden giderildiyse kampanya kuyruğunda **"Hariç tutulanları yeniden denetle"** kullanılır; filtreyle eklemede kalan işletmeler **"Sıradaki {n} işletmeyi ekle"** ile sayfa sayfa eklenir.
 
-> **Tavuk-yumurta sorunu:** `09` Bölüm 2'deki bazı maddeler gerçek gönderim gerektirir; gerçek gönderim ise bütün hukuki onaylar olmadan açılmaz. Onaylardan önce kontrollü bir "kendime gönder" denemesi ancak ayrı ve dar bir kapıyla (C11, isteğe bağlı) mümkündür; bu kapı **şirketin ve İpek'in yazılı onayı olmadan yazılmaz**.
+> **Tavuk-yumurta sorunu (C11 ile çözüldü):** `09` Bölüm 2'deki bazı maddeler gerçek gönderim gerektirir. Kapılar açılmadan önce **Gönderim günlüğü → Sağlık → "Kendime gerçek test e-postası gönder (Gmail)"** ile bağlı ve gönderim izinli Gmail kutusundan **yalnızca kutunun kendi adresine** gerçek bir e-posta gönderilir (başka alıcı seçilemez; adres birebir eşleşmezse ileti oluşturulmaz ve Gmail bağdaştırıcısı istek atmadan reddeder). `LIVE_SENDING_ENABLED` ve `LEGAL_APPROVALS`'tan bağımsızdır; firma profili geçerli olmalıdır. Gerçek MIME/alt bilgi kod yolunu kullanır; konu ve alt bilgi "[TEST]" işaretlidir. Çıkış uç noktası doğrulanmışsa gerçek `List-Unsubscribe` + `List-Unsubscribe-Post` başlıkları (alıcıya bağlı olmayan sınama belirteciyle; düğmeye basmak kendi adresinizi engellemez) eklenir, değilse başlık yoktur. Kutu başına saatte ve günde en fazla 10; belirsiz sonuç yeniden gönderilmez, inceleme kuyruğuna düşer. Kampanya gönderimi bu yoldan GEÇMEZ.
 
 ## 4. Uygulamanın yönettiği anahtarlar ve özetler (kimse bir şey girmez)
 
@@ -153,7 +153,7 @@ Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; 
 | Hazırlık kartı yalnızca gösterimdir | DMARC `p=none` kartı "tamam" yapmaz ama gönderimi de durdurmaz | Aşama 3/2'de DNS ayrıca kontrol edilir |
 | OAuth akışı uygulamanın açık kalmasına bağlı | Uygulama kapanırsa (port değişir) bekleyen yetkilendirme kaybolur; akış baştan başlar | Aşama 1/5'teki talimat; sonuç hem tarayıcıda hem uygulamada görünür (C12) |
 | Uç nokta kanıtı 30 günde düşer; başarısız yeniden doğrulama kanıtı hemen düşürür | Canlı gönderim için çıkış bağlantısı hazırlanamaz ve gönderim durur | Düzenli çekme açıkken 25. günde kendiliğinden yeniden doğrulama (başarısızsa saatte bir); kampanya/uyum sayfalarında uyarı bandı (bitiyor, bitti, doğrulanamadı). Uygulama kapalıysa elle **Doğrula** |
-| Düzenli çekme kapalı veya çalışmıyor | Çıkış talepleri aktarıcıda birikir, uygulamaya ulaşmaz | Sağlık kaydı 24 saatten eskiyse uyarı bandı; Aşama 2/10 |
+| Düzenli çekme kapalı veya çalışmıyor | Çıkış talepleri aktarıcıda birikir, uygulamaya ulaşmaz | Canlı **kampanya** gönderimi kendiliğinden ERTELENİR (`unsubscribe_drain_unhealthy`; dizi dışlanmaz, başarısız sayılmaz, 15 dk sonra yeniden denenir): çekme açık VE son 24 saatte sağlıklı kuyruk kaydı yoksa gönderim yok. Hazırlık ekranında "teslimat" maddesi çekme kapalıyken engel. Sağlık kaydı 24 saatten eskiyse uyarı bandı; Aşama 2/10 |
 | Uyarılar yalnızca uygulama içinde | Uygulama açılmadıkça uyarı görülmez | E-posta/push veya işletim sistemi bildirimi açık iş (`08` TB-4) |
 
 ### 5.1 Gizli bilgiler sıfırlandıysa (ana anahtar penceresinde "Gizli bilgileri sıfırla…" seçildiyse)

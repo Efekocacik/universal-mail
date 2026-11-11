@@ -61,6 +61,12 @@ export interface BuildEmailInput {
   inReplyTo?: string | null;
   references?: readonly string[];
   unsubscribe?: Omit<UnsubscribeHeaderInput, "mode">;
+  /**
+   * KENDİNE TEST (C11): yalnızca `live` ile. Canlı gönderim kilidinden bağımsızdır AMA alıcı posta kutusunun KENDİ
+   * adresiyle birebir aynı olmalıdır (başka alıcı mümkün değildir). Çıkış bağlantısı verilmediyse (uç nokta
+   * doğrulanmadı) ileti `List-Unsubscribe` başlığı OLMADAN oluşturulur; verildiyse kampanyadaki kurallar aynen geçerlidir.
+   */
+  selfTest?: boolean;
 }
 
 export interface BuiltEmail extends MimeMessage {
@@ -85,7 +91,14 @@ export function buildEmailMessage(
   input: BuildEmailInput,
   random: (size: number) => Buffer = crypto.randomBytes,
 ): BuiltEmail {
-  if (input.mode === "live" && !isLiveSendingPermitted()) {
+  const selfTest = input.selfTest === true;
+  if (selfTest && input.mode !== "live") {
+    throw new MessageBuildError(
+      "scope_mismatch",
+      "Kendine test yalnızca gerçek posta kutusuyla yapılır.",
+    );
+  }
+  if (input.mode === "live" && !selfTest && !isLiveSendingPermitted()) {
     throw new MessageBuildError("live_sending_disabled", "Gerçek gönderim bu sürümde kapalıdır.");
   }
   if (policyScopeForMailbox(input.mailbox.provider) !== input.mode) {
@@ -107,7 +120,14 @@ export function buildEmailMessage(
   if (!to || to.email !== input.recipient) {
     throw new MessageBuildError("invalid_recipient", "Geçersiz veya normalleştirilmemiş alıcı.");
   }
-  if (input.mode === "live") {
+  if (selfTest && parseEmail(from)!.email !== to.email) {
+    throw new MessageBuildError(
+      "invalid_recipient",
+      "Test iletisi yalnızca posta kutusunun kendi adresine gönderilebilir.",
+    );
+  }
+  const omitUnsubscribe = selfTest && !input.unsubscribe?.url;
+  if (input.mode === "live" && !omitUnsubscribe) {
     // Başlıktaki bağlantı, alıcının gördüğü alt bilgi bağlantısıyla aynı olmalı.
     const url = input.unsubscribe?.url;
     if (!url || !input.composed.text.includes(url)) {
@@ -125,7 +145,9 @@ export function buildEmailMessage(
     if (!isValidMessageId(messageId)) {
       throw new MimeError("invalid_message_id", "Geçersiz Message-ID.");
     }
-    const unsubscribeHeaders = buildUnsubscribeHeaders({ ...input.unsubscribe, mode: input.mode });
+    const unsubscribeHeaders = omitUnsubscribe
+      ? []
+      : buildUnsubscribeHeaders({ ...input.unsubscribe, mode: input.mode });
     const mime = buildMimeMessage(
       {
         from: { address: from, name: `${contact} – ${legal}` },

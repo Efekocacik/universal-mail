@@ -335,3 +335,27 @@ export async function prepareLiveUnsubscribe(
   }
   return { url: buildUnsubscribeUrl(cfg.baseUrl, token), oneClick: true };
 }
+
+/** Kendine test iletisindeki sınama bağlantısının geçerlilik süresi (iletiyi açıp düğmeyi denemek için). */
+export const SELF_TEST_UNSUBSCRIBE_TTL_MS = 7 * 86_400_000;
+
+/**
+ * KENDİNE TEST gönderimi (C11) için çıkış bağlantısı: uç nokta doğrulanmışsa ve etkin imza anahtarı varsa, hiçbir
+ * alıcıya bağlı OLMAYAN bir SINAMA belirteci (kapsam "p") ile gerçek RFC 8058 bağlantısı döner. Posta istemcisinin
+ * "Abonelikten çık" düğmesine basılırsa olay aktarıcıya ulaşır, uygulamaya çekilir ve zararsızca yok sayılır (bekleyen
+ * sınamayla eşleşmez; kendi adresiniz engellenmez). Uç nokta yoksa/doğrulanmadıysa `null` (ileti List-Unsubscribe
+ * başlığı OLMADAN ve açıkça "test" olarak işaretlenerek oluşturulur). Hiçbir şey yazmaz.
+ */
+export async function prepareSelfTestUnsubscribe(
+  db: DbExecutor,
+  now = Date.now(),
+): Promise<{ url: string; oneClick: true } | null> {
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  if (!cfg.baseUrl || !(await isOneClickEndpointVerified(db, now))) return null;
+  try {
+    const { token } = await mintProbeToken(db, now, SELF_TEST_UNSUBSCRIBE_TTL_MS);
+    return { url: buildUnsubscribeUrl(cfg.baseUrl, token), oneClick: true };
+  } catch {
+    return null;
+  }
+}
