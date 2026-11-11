@@ -1,7 +1,7 @@
 import { database, HttpError, json } from "@/lib/api/http";
 import { domainRoute } from "@/lib/api/domain-route";
-import { buildHttpSource } from "@/lib/unsubscribe/drain-job";
-import { checkDeliveryHealth } from "@/lib/unsubscribe/endpoint";
+import { buildHttpSource, httpSourceProblem } from "@/lib/unsubscribe/drain-job";
+import { checkDeliveryHealth, recordDeliveryProblem } from "@/lib/unsubscribe/endpoint";
 import { requireConsent } from "../../../campaigns/schema";
 import { withUnsubscribeLock } from "../shared";
 
@@ -17,6 +17,14 @@ export const POST = domainRoute(async () => {
   return withUnsubscribeLock(async () => {
     const bundle = await buildHttpSource(db);
     if (!bundle) {
+      if ((await httpSourceProblem(db)) === "no_channel_key") {
+        await recordDeliveryProblem(db, "no_channel_key");
+        throw new HttpError(
+          409,
+          "Kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). Kanal anahtarında “Yeni anahtara geç”i seçin, anahtar dosyasını yeniden yükleyin.",
+          { code: "CHANNEL_KEY_UNREADABLE" },
+        );
+      }
       throw new HttpError(
         409,
         "Kuyruk denetimi için önce çıkış adresi ve kanal anahtarı tanımlanmalıdır.",

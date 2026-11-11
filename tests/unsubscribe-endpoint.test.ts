@@ -11,6 +11,7 @@ import {
   ChannelError,
   HttpEventSource,
   createSpoolPullHandler,
+  channelPrivateKeyMissing,
   ensureChannelKey,
   exportChannelPublicKeys,
   getChannelSigner,
@@ -42,7 +43,10 @@ import {
   mintUnsubscribeToken,
   rotateSigningKey,
   revokeSigningKey,
+  signingPrivateKeyMissing,
 } from "@/lib/unsubscribe/keys";
+import { buildUnsubscribeState } from "@/lib/unsubscribe/state";
+import { channelKeySecretName, secretExists } from "@/lib/secrets/store";
 import { createRelayHandler } from "@/lib/unsubscribe/relay";
 import { FileSpool } from "@/lib/unsubscribe/spool";
 import { verifyToken } from "@/lib/unsubscribe/token";
@@ -314,6 +318,61 @@ describe("uçtan uca doğrulama (kanıt yalnızca başarıdan sonra yazılır)",
   });
 });
 
+describe("gizli bilgiler sıfırlandıysa (özel anahtarlar okunamıyor)", () => {
+  it("işaretler doğru; ensure* yeni anahtara geçer (imza anahtarı emekli kalır, eski bağlantılar doğrulanır)", async () => {
+    const oldSign = (await getSetting(db, "mail.unsubscribeKeys")).current!;
+    const oldChan = (await getSetting(db, "mail.unsubscribeChannel")).current!;
+    const oldToken = await mintUnsubscribeToken(db, { campaignLeadId: a.cl, now: clock });
+    expect(await signingPrivateKeyMissing(db)).toBe(false);
+    expect(await channelPrivateKeyMissing(db)).toBe(false);
+    expect((await verify()).ok).toBe(true);
+
+    process.env.UM_MASTER_KEY = "cd".repeat(32); // ana anahtar değişti → eski gizli bilgiler çözülemez
+    expect(await signingPrivateKeyMissing(db)).toBe(true);
+    expect(await channelPrivateKeyMissing(db)).toBe(true);
+    expect(await getChannelSigner(db)).toBeNull();
+    // Saklanan kanıt artık geçerli sayılmaz (imza anahtarı kullanılamaz).
+    const state = await buildUnsubscribeState(db, {}, clock);
+    expect(state.signing.secretUnreadable).toBe(true);
+    expect(state.channel.secretUnreadable).toBe(true);
+    expect(state.verification.verified).toBe(false);
+    expect(state.keyFileReady).toBe(false);
+
+    const s2 = await ensureSigningKey(db, clock + 1);
+    const c2 = await ensureChannelKey(db, clock + 1);
+    expect(s2.kid).not.toBe(oldSign);
+    expect(c2.kid).not.toBe(oldChan);
+    expect(await signingPrivateKeyMissing(db)).toBe(false);
+    expect(await channelPrivateKeyMissing(db)).toBe(false);
+    const keys = await getSetting(db, "mail.unsubscribeKeys");
+    expect(keys.keys.find((k) => k.kid === oldSign)).toMatchObject({ revokedAt: null });
+    expect(keys.keys.find((k) => k.kid === oldSign)!.retiredAt).not.toBeNull();
+    // Önceden gönderilmiş bağlantı genel anahtarla hâlâ doğrulanır.
+    expect(verifyToken(oldToken.token, await loadPublicKeys(db), clock + 2).ok).toBe(true);
+  });
+
+  it("onay (ack) kanal hatası verse de sınama işlenip kanıt yazıldıysa doğrulama BAŞARILI sayılır", async () => {
+    const real = await source();
+    const ackFails = {
+      pull: (n: number) => real.pull(n),
+      ack: async () => {
+        throw new ChannelError("timeout");
+      },
+    };
+    expect(await verify({ source: ackFails })).toEqual({ ok: true, code: "verified" });
+    expect(await isOneClickEndpointVerified(db, clock)).toBe(true);
+    expect((await cfg()).lastAttempt).toMatchObject({ ok: true, code: "verified" });
+    // Çekme hiç başlamadan kanal hatası: kanıt yok (sınama işlenmedi).
+    const pullFails = {
+      pull: async () => {
+        throw new ChannelError("timeout");
+      },
+      ack: async () => undefined,
+    };
+    expect((await verify({ source: pullFails })).ok).toBe(false);
+  });
+});
+
 describe("sınama olaylarının işlenmesi: tekrar oynatma ve sahtecilik", () => {
   const ev = (token: string, at = clock + 1000) => ({
     v: 1,
@@ -555,12 +614,16 @@ describe("kanal anahtarları", () => {
     const k1 = await ensureChannelKey(db, clock);
     expect((await ensureChannelKey(db, clock)).kid).toBe(k1.kid);
     const k2 = await rotateChannelKey(db, clock + 1);
-    expect((await exportChannelPublicKeys(db)).map((k) => k.kid).sort()).toEqual(
-      [k1.kid, k2.kid].sort(),
-    );
+    // Döndürme eski kanal anahtarını İPTAL eder ve özel anahtarını siler: sızmış bir anahtar dosyası/özel anahtar
+    // döndürmeden sonra aktarıcıda geçerli kalmaz (yeni dosya yüklenene kadar çekme 401 verir).
+    expect((await exportChannelPublicKeys(db)).map((k) => k.kid)).toEqual([k2.kid]);
     expect((await getChannelSigner(db))!.kid).toBe(k2.kid);
-    expect(await revokeChannelKey(db, k1.kid, clock + 2)).toBe(true);
-    expect(await revokeChannelKey(db, k1.kid, clock + 3)).toBe(false);
+    expect(await revokeChannelKey(db, k1.kid, clock + 2)).toBe(false); // zaten iptal
+    const reg = await getSetting(db, "mail.unsubscribeChannel");
+    expect(reg.keys.find((k) => k.kid === k1.kid)!.revokedAt).toBe(clock + 1);
+    expect(await secretExists(channelKeySecretName(k1.kid))).toBe(false);
+    expect(await secretExists(channelKeySecretName(k2.kid))).toBe(true);
+    expect(await audits("unsubscribe.channel_key_revoked")).toHaveLength(1);
     expect((await exportChannelPublicKeys(db)).map((k) => k.kid)).toEqual([k2.kid]);
     await revokeChannelKey(db, k2.kid, clock + 4);
     expect(await getChannelSigner(db)).toBeNull();

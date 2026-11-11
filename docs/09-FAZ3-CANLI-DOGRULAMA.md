@@ -74,11 +74,11 @@ Bir madde doğrulanamazsa kilit **kapalı kalır**; otomatik bounce/yanıt işle
 
 ## 3. HTTPS tek tıklamalı çıkış (Aşama 15.6)
 
-Kod tarafı hazırdır (imzalı belirteç, taşınabilir aktarıcı işleyicisi, olay işleme); **gerçek HTTPS sunucusu, alan adı ve dağıtım YOKTUR**. Aşağıdakiler gerçek ortam olmadan kanıtlanamaz ve doğrulanana kadar `oneClickEndpointVerified` ASLA true yapılmaz (Aşama 15.7):
+Kod tarafı hazırdır (imzalı belirteç, aktarıcı işleyicisi, olay işleme) ve **dağıtılabilir bir aktarıcı sunucusu vardır** (`src/relay/main.ts` → `npm run build:relay` → `dist/relay/relay.cjs`; kurulum: `deploy/relay/README.md`); ancak **hiçbir sunucuya dağıtılmadı, gerçek alan adı ve TLS ile denenmedi**. Aşağıdakiler gerçek ortam olmadan kanıtlanamaz ve doğrulanana kadar `oneClickEndpointVerified` ASLA true yapılmaz (Aşama 15.7):
 
-- [ ] **Gerçek HTTPS uç noktası:** Aktarıcı işleyicisi (`src/lib/unsubscribe/relay.ts`) genel bir HTTPS alan adında, geçerli TLS sertifikasıyla çalışır; `https://<alan>/u/<belirteç>` adresine dışarıdan ulaşılır.
+- [ ] **Gerçek HTTPS uç noktası:** Dağıtılabilir aktarıcı (`dist/relay/relay.cjs`, systemd + Caddy; `deploy/relay/README.md`) genel bir HTTPS alan adında, geçerli TLS sertifikasıyla çalışır; `https://<alan>/u/<belirteç>` adresine dışarıdan ulaşılır.
 - [ ] **RFC 8058 uyumu gerçek istemcilerle:** Gmail ve Yahoo gibi istemcilerin gönderdiği gerçek `POST` isteği (başlıklar, gövde, yönlendirme izlememe, zaman aşımı) işleyici tarafından 2xx ile karşılanır; `List-Unsubscribe` ve `List-Unsubscribe-Post` başlıkları gerçek bir iletide doğru görünür.
-- [ ] **Olay iletim kanalı:** Yazılım tarafı Aşama 15.7'de eklendi (dosya tabanlı dayanıklı kuyruk `FileSpool`, Ed25519 imzalı çekme/onay kanalı; Bölüm 3.2) ve yalnızca yerel testlerle sınandı; **gerçek ağ, TLS ve gerçek sunucu diskinde doğrulanmadı**. Ele geçirilmiş/çalışmayan aktarıcı olayları geciktirebilir veya atabilir (erişilebilirlik); bu katman bunu çözmez, izleme ve uyarı gerekir (uyarı kanalı yok: `08` TB-4).
+- [ ] **Olay iletim kanalı:** Yazılım tarafı Aşama 15.7'de eklendi (dosya tabanlı dayanıklı kuyruk `FileSpool`, Ed25519 imzalı çekme/onay kanalı; Bölüm 3.2) ve yalnızca yerel testlerle sınandı; **gerçek ağ, TLS ve gerçek sunucu diskinde doğrulanmadı**. Ele geçirilmiş/çalışmayan aktarıcı olayları geciktirebilir veya atabilir (erişilebilirlik); bu katman bunu çözmez, izleme ve uyarı gerekir (yalnızca uygulama içi uyarı bandı var; e-posta/push kanalı yok: `08` TB-4).
 - [ ] **Anahtar dağıtımı:** Aktarıcıya yalnızca GENEL anahtar kümesi (`exportRelayKeySet`) verilir; döndürme ve iptal sonrası aktarıcının kümeyi güncellediği doğrulanmalıdır.
 - [ ] **Saat ve süre:** Aktarıcı sunucu saatinin doğruluğu (belirteç süresi tıklama anına göre işlenir); 180 günlük varsayılan geçerlilik hukuki danışmanlıkla gözden geçirilmelidir.
 - [ ] **Hız sınırı ve istemci adresi:** Aktarıcı önündeki ters vekilin güvenilir istemci adresi başlığı (`clientKey`) belirlenmeli; sınırlar gerçek trafikle ayarlanmalı.
@@ -108,7 +108,7 @@ Aşama 15.7'de bağlanacak gerçek iletim mekanizması için **kabul ölçütler
 | K11 | İzleme: kuyruk derinliği ve en eski onaysız olayın yaşı için uyarı eşiği (aksi halde olay gecikmesi fark edilmez) | 15.7'de readiness/sağlık görünümü |
 | K12 | Gerçek ortamda bellek içi sink yapılandırması hata verir (yanlışlıkla etkinleştirilemez) | `tests/unsubscribe-delivery.test.ts` (üretim/geliştirme ortamı testleri) |
 
-Sınırlar (kanıtlanamayanlar): Bir sink'in `durable: true` bildirmesi, gerçekten dayanıklı olduğunu **kanıtlamaz**; bunu yalnızca K1–K6'nın gerçek gerçekleme üzerinde geçmesi ve K2'nin gerçek ortamda denenmesi gösterir. Tekrar oynatma kaydı (`ReplayStore`) bellek içi varsayılandır; yeniden başlatmada kaybolması güvenlidir (kopya olay uygulamada tekilleştirilir) ama kopya trafiği artırır.
+Sınırlar (kanıtlanamayanlar): Bir sink'in `durable: true` bildirmesi, gerçekten dayanıklı olduğunu **kanıtlamaz**; bunu yalnızca K1–K6'nın gerçek gerçekleme üzerinde geçmesi ve K2'nin gerçek ortamda denenmesi gösterir. Tekrar oynatma kaydı (`ReplayStore`) kütüphanede bellek içi varsayılandır; dağıtılabilir aktarıcı dosya destekli kayıt (`replay.log`) kullanır. Kayıt yalnızca 10 dakikalık sel korumasıdır; kaybolması güvenlidir (kopya olay uygulamada tekilleştirilir).
 
 ### 3.2 Aşama 15.7: uygulanan kabul ölçütleri ve BEKLEYENLER
 
@@ -117,16 +117,16 @@ Yazılım tarafı uygulandı ve yerel testlerle (gerçek ağ/alan adı/hesap YOK
 | # | Ölçüt | Durum | Kanıt / bekleyen |
 |---|---|---|---|
 | K1 | Dayanıklı sink, makbuzlu `push` | ✔ yazılım | `FileSpool` (`src/lib/unsubscribe/spool.ts`) sink sözleşmesinden geçer (`tests/unsubscribe-spool.test.ts`) |
-| K2 | Yeniden başlatmada kayıp yok | ◐ | Yeniden başlatma (yeni örnek, yalnızca disk) testle; **güç kesintisi ve gerçek POSIX dosya sistemi dayanıklılığı gerçek ortamda sınanmadı** (Windows'ta dizin `fsync` desteklenmez) |
+| K2 | Yeniden başlatmada kayıp yok | ◐ | Yeniden başlatma (yeni örnek, yalnızca disk) testle; **güç kesintisi ve gerçek POSIX dosya sistemi dayanıklılığı gerçek ortamda sınanmadı** (Windows'ta dizin `fsync` desteklenmez). Gerçek ortam tatbikatı: `deploy/relay/README.md` §11 |
 | K3 | Uygulama çevrimdışıyken birikme | ✔ yazılım | Sözleşme + uçtan uca testler |
 | K4 | Yazma hatasında 200 yok | ✔ yazılım | Aktarıcı 503; gerçek disk hatası enjeksiyonu bekliyor |
 | K5 | Geri basınç, sessiz atma yok | ✔ yazılım | `maxPending` dolunca `queue_full` → 503 |
 | K6 | `pull` tüketmez, `ack` siler | ✔ yazılım | Sözleşme paketi |
-| K7 | İşlendikten sonra onay | ✔ yazılım | `drainUnsubscribeEvents`; zamanlanmış iş `unsubscribe.drain` **varsayılan kapalı** (`UM_UNSUBSCRIBE_DRAIN_ENABLED`) ve hiçbir yerde açılmadı |
+| K7 | İşlendikten sonra onay | ✔ yazılım | `drainUnsubscribeEvents`; zamanlanmış iş `unsubscribe.drain` **varsayılan kapalı**; `UM_UNSUBSCRIBE_DRAIN_ENABLED` ortam bayrağı VEYA Ayarlar'daki "Talepleri düzenli çek" ayarı ile ve yalnızca çıkış adresi tanımlıyken çalışır |
 | K8 | `push` zaman aşımı → 503 | ✔ yazılım | `sinkTimeoutMs` |
 | K9 | Kimliği doğrulanmış kanal | ✔ yazılım | Ed25519 imzalı çekme/onay/istatistik (`channel.ts`); paylaşılan sır yok. Gerçek TLS ve ağ yapılandırması bekliyor |
 | K10 | Saklama ≥ belirteç ömrü | ✔ yazılım | Otomatik silme yok; yalnızca `ack` siler |
-| K11 | Derinlik/yaş izleme | ◐ | `checkDeliveryHealth` + hazırlık ekranı `event_delivery`; **uyarı/bildirim kanalı (e-posta, push) YOK**, yalnızca ekran |
+| K11 | Derinlik/yaş izleme | ◐ | `checkDeliveryHealth` + hazırlık ekranı `event_delivery` + uygulama içi uyarı bandı (`GET /api/compliance/delivery-alerts`; sağlıksız/bayat sağlık kaydı, okunamayan kanal anahtarı, başarısız doğrulama, kanıt süresi); **e-posta/push veya işletim sistemi bildirimi YOK** |
 | K12 | Bellek içi sink gerçek ortamda engelli | ✔ | 15.6 |
 
 **Uç nokta doğrulaması (kanıt):** `oneClickEndpointVerified` ve hazırlık "https_unsubscribe" yalnızca saklanan uçtan uca sınamadan türer (`verifyOneClickEndpoint`): imzalı sınama belirteci (kapsam `p`, hiçbir alıcıya/engele dokunmaz) → gerçek RFC 8058 `POST` (yönlendirme izlenmez, 200 şart) → olay dayanıklı kuyruktan uygulamaya ulaşır → uygulama imzayı yeniden doğrular. Adres, imza anahtarı değişince veya 30 gün sonra kanıt düşer; başarısız yeniden doğrulama eski kanıtı da siler. Hazırlıkta madde ayrıca sürüm kapısını (`LEGAL_APPROVALS.httpsUnsubscribeEndpoint`) gerektirir; o kapı da `false`.
@@ -135,7 +135,7 @@ Yazılım tarafı uygulandı ve yerel testlerle (gerçek ağ/alan adı/hesap YOK
 
 **DNS:** SPF/DKIM/DMARC sonucu yalnızca kullanıcı "Kontrol et"e bastığında (gerçek kutu, kutunun kendi alan adı) durumlar halinde saklanır; hazırlıkta "tamam" için üçü de taze (30 gün) ve `pass` olmalı. **Gerçek alan adı üzerinde hiçbir sorgu çalıştırılmadı.**
 
-Gerçek ortam gerektiren BEKLEYEN maddeler (bu aşamada YAPILMADI): gerçek alan adı ve HTTPS sunucusunda aktarıcının dağıtımı; gerçek TLS; `setUnsubscribeBaseUrl` ile adresin girilmesi ve `verifyOneClickEndpoint`'in gerçek uç noktaya karşı çalıştırılması (şu an bunu tetikleyen arayüz/API YOK; yalnızca servis işlevi); gerçek DNS denetimi; Gmail hesabı, OAuth ve başlık güven doğrulaması (Bölüm 1.3); gerçek POSIX disk dayanıklılığı (K2); kuyruk uyarı kanalı (K11); hukuki onaylar.
+Gerçek ortam gerektiren BEKLEYEN maddeler (bu aşamada YAPILMADI): gerçek alan adı ve HTTPS sunucusunda aktarıcının dağıtımı; gerçek TLS; adresin girilmesi ve uçtan uca doğrulamanın gerçek uç noktaya karşı çalıştırılması (arayüz var: Ayarlar → Abonelikten çıkış altyapısı (HTTPS) → "Adresi kaydet", "Doğrula"; gerçek uç noktaya karşı henüz çalıştırılmadı); gerçek DNS denetimi; Gmail hesabı, OAuth ve başlık güven doğrulaması (Bölüm 1.3); gerçek POSIX disk dayanıklılığı (K2); kuyruk uyarı kanalı (K11); hukuki onaylar.
 
 ### 3.3 Aşama 15.7 entegrasyon ve güvenlik incelemesi: bulgular
 
@@ -151,12 +151,13 @@ Gerçek ortam gerektiren BEKLEYEN maddeler (bu aşamada YAPILMADI): gerçek alan
 
 **Doğrulananlar (testle):** canlı yol suppression (adres ve alan adı), çıkış yapmış dizi, duran kampanya, onay yokluğu, canlı ülke politikası, silinmiş alıcı, kişisel adres (`email_personal`), alan adı günlük sınırı, kutu günlük tavanı, gönderim aralığı, durdurulmuş posta kutusu, zamanlama penceresi ve doğrulanmış çıkış bağlantısı kontrollerini ATLAYAMAZ (`tests/live-send-gates.test.ts`); her hukuki onay anahtarı tek tek eksik bırakılınca gönderim durur. Hazırlık, yazılımın yerel olarak kanıtlayabildiği en iyi durumda bile `allOk=false` kalır. Tüm kapılar kapalıyken Gmail sağlayıcısı, okuyucu, eşitleme, kampanya gönderimi ve çekme işi HİÇBİR ağ isteği atmaz. İç durum anahtarları ayarlar API'sinden yazılamaz.
 
-**Açık kalan — şirket bilgisi olmadan yapılabilecekler (bu aşamada YAPILMADI):**
-1. `setUnsubscribeBaseUrl` ve `verifyOneClickEndpoint` için kullanıcı arayüzü/API YOK (yalnızca servis işlevi). Onay, kimlik doğrulama ve geri alma tasarımı gerekir.
-2. Kuyruk derinliği/yaş için UYARI kanalı YOK (yalnızca hazırlık ekranı).
-3. Aktarıcıda tek genel hız sınırı kovası (`clientKey` verilmezse): saldırgan tek kovayı doldurarak geçerli çıkış isteklerini 429'layabilir. Güvenilir istemci adresi başlığı dağıtım ortamına bağlıdır.
+**Açık kalan — şirket bilgisi olmadan yapılabilecekler (go-live hazırlığında güncellendi):**
+1. ~~Adres ve doğrulama için arayüz/API yok~~ → **yapıldı** (go-live C3+C4; `08` Bölüm 2 ve TB-3).
+2. Kuyruk uyarısı: **uygulama içi bant yapıldı** (go-live C14); e-posta/push veya işletim sistemi bildirimi hâlâ yok.
+3. ~~Tek genel hız sınırı kovası~~ → dağıtılabilir aktarıcıda istemci başına kova (`X-Real-IP`; IPv6 /64), `08` TB-5.
 4. `lead_not_found`: kampanya alıcısı kaydı silinmişse (gerçek kampanyalar silinmiyor; yalnızca demo temizliği siler) çıkış isteği uygulanamaz; belirteçte adres olmadığı için alternatif yoktur.
-5. `ReplayStore` aktarıcıda bellek içidir (yeniden başlatmada kopya olay üretir; uygulamada güvenle tekilleştirilir).
+5. ~~`ReplayStore` bellek içi~~ → dağıtılabilir aktarıcıda dosya destekli (`replay.log`), `08` TB-6.
+6. Ana anahtar değişimi (go-live C5): çıkış talepleri artık kaybolmaz (etiket uyuşmazlığında çıkış uygulanır, `unsubscribe.recipient_tag_mismatch` denetimi). "Gizli bilgileri sıfırla" sonrası imza ve kanal anahtarı **yenilenmelidir** (ayar kartı ve uyarı bandı gösterir; adımlar `10` Bölüm 5).
 
 **Açık kalan — gerçek ortam/şirket bilgisi gerektirenler:** gerçek alan adı ve HTTPS aktarıcı dağıtımı, TLS, gerçek POSIX disk dayanıklılığı (K2), gerçek DNS denetimi, Gmail hesabı/OAuth, Gmail başlık güven doğrulaması (Bölüm 1.3), gelen kutusu okumasının canlıda çalıştığının kanıtı (`inbox_sync`), hukuki onaylar (`LEGAL_APPROVALS`), canlı ülke politikası kilidi, pilot.
 

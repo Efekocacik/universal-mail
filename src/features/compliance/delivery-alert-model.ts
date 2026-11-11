@@ -6,7 +6,13 @@ export type { DeliveryAlert };
 
 /** Çıkış teslimat uyarısı bandının saf mantığı (C14; DOM'suz test edilir). */
 
-const UNHEALTHY_CODES = ["queue_deep", "events_stale", "corrupt_events", "unreachable"] as const;
+const UNHEALTHY_CODES = [
+  "queue_deep",
+  "events_stale",
+  "corrupt_events",
+  "unreachable",
+  "no_channel_key",
+] as const;
 
 export function deliveryAlertText(a: DeliveryAlert): string {
   switch (a.kind) {
@@ -19,6 +25,17 @@ export function deliveryAlertText(a: DeliveryAlert): string {
       return t("deliveryAlert.expiring", { days: a.daysLeft, at: fmtDate(a.expiresAt) });
     case "proof_expired":
       return t("deliveryAlert.expired", { at: fmtDate(a.expiredAt) });
+    case "delivery_stale":
+      return a.checkedAt === null
+        ? t("deliveryAlert.stale.never")
+        : t("deliveryAlert.stale", { at: fmtDateTime(a.checkedAt) });
+    case "verify_failed":
+      return t(
+        a.code === "no_channel_key"
+          ? "deliveryAlert.verifyFailed.noChannelKey"
+          : "deliveryAlert.verifyFailed",
+        { at: fmtDateTime(a.at) },
+      );
   }
 }
 

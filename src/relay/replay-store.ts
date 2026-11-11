@@ -3,8 +3,9 @@ import path from "node:path";
 import type { ReplayStore } from "@/lib/unsubscribe/relay";
 
 /**
- * Dosya destekli tekrar oynatma kaydı (TB-6): aktarıcı yeniden başlasa da aynı belirteç (jti) İKİNCİ kez kuyruğa
- * yazılmaz. Yalnızca bir iyileştirmedir; asıl tekilleştirme uygulama tarafındadır (ingest, `jti`). Bu yüzden kayıt
+ * Dosya destekli tekrar oynatma kaydı (TB-6): aktarıcı yeniden başlasa da aynı belirteç (jti) kısa pencere içinde
+ * (`REPLAY_WINDOW_MS`, 10 dk; bkz. relay.ts) İKİNCİ kez kuyruğa yazılmaz. Pencereden sonraki yeni bir tıklama yeniden
+ * iletilir (engel kaldırıldıktan sonraki tıklamayı uygulama yeni çıkış sayar). Yalnızca bir iyileştirmedir; asıl tekilleştirme uygulama tarafındadır (ingest, `jti`). Bu yüzden kayıt
  * yazılamazsa/okunamazsa hiçbir istek reddedilmez: en kötü durumda olay tekrar kuyruğa girer.
  *
  * Biçim: satır başına `<jti> <bitiş_ms>\n`, yalnızca ekleme (append-only). Açılışta süresi dolanlar atılır ve dosya

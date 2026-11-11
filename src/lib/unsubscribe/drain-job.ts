@@ -4,8 +4,13 @@ import type { Db } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobHandler } from "@/lib/jobs/registry";
 import { getSetting, setSetting } from "@/lib/settings";
-import { HttpEventSource, getChannelSigner } from "./channel";
-import { checkDeliveryHealth, verifyOneClickEndpoint, type VerifyOutcome } from "./endpoint";
+import { HttpEventSource, channelPrivateKeyMissing, getChannelSigner } from "./channel";
+import {
+  checkDeliveryHealth,
+  recordDeliveryProblem,
+  verifyOneClickEndpoint,
+  type VerifyOutcome,
+} from "./endpoint";
 import { drainUnsubscribeEvents, type UnsubscribeEventSource } from "./ingest";
 
 /**
@@ -149,6 +154,17 @@ export interface DrainSourceBundle {
   stats: { getStats(): Promise<{ depth: number; oldestAgeMs: number | null; corrupt: number }> };
 }
 
+/**
+ * Kaynak neden kurulamıyor? `not_configured`: temel adres veya etkin kanal anahtarı yok (kullanıcı henüz tanımlamadı).
+ * `no_channel_key`: ikisi de tanımlı ama etkin kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlandı):
+ * kullanıcı "Yeni anahtara geç" ile yeni anahtar üretip anahtar dosyasını yeniden yüklemelidir.
+ */
+export async function httpSourceProblem(db: Db): Promise<"not_configured" | "no_channel_key"> {
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  if (cfg.baseUrl && (await channelPrivateKeyMissing(db))) return "no_channel_key";
+  return "not_configured";
+}
+
 /** Yapılandırmadan kaynak kurar; yapılandırma/anahtar yoksa null (hiçbir şey yapılmaz). */
 export async function buildHttpSource(db: Db): Promise<DrainSourceBundle | null> {
   const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
@@ -174,12 +190,23 @@ export function createUnsubscribeDrainHandler(opts: {
   const isOn = (db: Db): Promise<boolean> =>
     typeof opts.enabled === "function" ? opts.enabled(db) : Promise.resolve(opts.enabled);
   return async (ctx) => {
-    if (!(await isOn(ctx.db))) {
+    const clock = opts.now ?? Date.now;
+    // Açma anahtarı okunamazsa (ör. geçici SQLITE_BUSY) zincir KOPMAMALI: iş tek denemelidir (maxAttempts 1), fırlatılan
+    // hata sonraki turu planlamadan işi bitirirdi. Okuma hatasında bu tur atlanır ve yine de sonraki tur planlanır;
+    // sonraki tur anahtarı yeniden okur (gerçekten kapalıysa orada durur).
+    let on: boolean;
+    try {
+      on = await isOn(ctx.db);
+    } catch (e) {
+      ctx.log(`çekme anahtarı okunamadı: ${e instanceof Error ? e.name : "unknown"}; tur atlandı.`);
+      await rescheduleNext(ctx, clock);
+      return;
+    }
+    if (!on) {
       throw new NonRetryableJobError(
         `Çıkış olayı çekme kapalı (${UNSUBSCRIBE_DRAIN_FLAG} / Ayarlar): çıkış olayları çekilmedi, hiçbir ağ isteği yapılmadı.`,
       );
     }
-    const clock = opts.now ?? Date.now;
     let bundle: DrainSourceBundle | null = null;
     try {
       bundle = await (opts.sourceFactory ?? buildHttpSource)(ctx.db);
@@ -187,7 +214,20 @@ export function createUnsubscribeDrainHandler(opts: {
       ctx.log(`çıkış kaynağı kurulamadı: ${e instanceof Error ? e.name : "unknown"}`);
     }
     if (!bundle) {
-      ctx.log("çıkış uç noktası/kanal anahtarı yapılandırılmadı: olay çekilmedi.");
+      let problem: "not_configured" | "no_channel_key" = "not_configured";
+      try {
+        if (!opts.sourceFactory) problem = await httpSourceProblem(ctx.db);
+        // Kanal anahtarı okunamıyorsa (gizli bilgiler sıfırlandı) bu SESSİZ kalmamalı: sağlık kaydına geçer, uyarı
+        // bandı ve hazırlık ekranı gösterir.
+        if (problem === "no_channel_key") await recordDeliveryProblem(ctx.db, problem, clock());
+      } catch (e) {
+        ctx.log(`kanal durumu kaydedilemedi: ${e instanceof Error ? e.name : "unknown"}`);
+      }
+      ctx.log(
+        problem === "no_channel_key"
+          ? "kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir): olay çekilmedi; Ayarlar'dan yeni kanal anahtarına geçin."
+          : "çıkış uç noktası/kanal anahtarı yapılandırılmadı: olay çekilmedi.",
+      );
     } else {
       try {
         const r = await drainUnsubscribeEvents(ctx.db, bundle.source, { now: clock });
@@ -225,18 +265,29 @@ export function createUnsubscribeDrainHandler(opts: {
       }
     }
     if (ctx.shouldStop()) return;
-    // Tur sürerken kullanıcı kapattıysa sonraki tur planlanmaz.
-    if (!(await isOn(ctx.db))) return;
+    // Tur sürerken kullanıcı kapattıysa sonraki tur planlanmaz. Anahtar okunamazsa yine planlanır (bkz. yukarı).
     try {
-      await scheduleUnsubscribeDrain(ctx.db, {
-        runAt: clock() + UNSUBSCRIBE_DRAIN_INTERVAL_MS,
-        now: clock(),
-        exceptJobId: ctx.job.id,
-      });
+      if (!(await isOn(ctx.db))) return;
     } catch (e) {
-      ctx.log(`sonraki tur planlanamadı: ${e instanceof Error ? e.name : "unknown"}`);
+      ctx.log(`çekme anahtarı okunamadı: ${e instanceof Error ? e.name : "unknown"}`);
     }
+    await rescheduleNext(ctx, clock);
   };
+}
+
+async function rescheduleNext(
+  ctx: { db: Db; job: { id: number }; log(msg: string): void },
+  clock: () => number,
+): Promise<void> {
+  try {
+    await scheduleUnsubscribeDrain(ctx.db, {
+      runAt: clock() + UNSUBSCRIBE_DRAIN_INTERVAL_MS,
+      now: clock(),
+      exceptJobId: ctx.job.id,
+    });
+  } catch (e) {
+    ctx.log(`sonraki tur planlanamadı: ${e instanceof Error ? e.name : "unknown"}`);
+  }
 }
 
 /** Worker başlangıcı: anahtar (bayrak veya ayar) VE yapılandırma varsa turu planlar; aksi halde veritabanına HİÇ yazmaz. */

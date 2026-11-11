@@ -205,10 +205,13 @@ describe("anahtarlar", () => {
     const ck = (await channel("ensure")).body.kid as string;
     const r2 = await channel("rotate");
     expect(r2.body).toMatchObject({ rotated: true });
-    expect((await revokeChannel(ck)).body).toEqual({ revoked: true });
+    // Döndürme eski kanal anahtarını zaten iptal eder (dışa aktarımda yalnızca yeni anahtar kalır).
     expect(await exportChannelPublicKeys(db)).toEqual([
       expect.objectContaining({ kid: r2.body.kid }),
     ]);
+    expect((await revokeChannel(ck)).status).toBe(404);
+    expect((await revokeChannel(r2.body.kid as string)).body).toEqual({ revoked: true });
+    expect(await exportChannelPublicKeys(db)).toEqual([]);
   });
 
   it("kullanım onayı yoksa anahtar üretilmez", async () => {
@@ -319,6 +322,41 @@ describe("doğrulama ve sağlık (yalnızca kullanıcı eylemi)", () => {
       code: "channel_failed",
       detail: "http_error_401",
     });
+  });
+
+  it("gizli bilgiler sıfırlandıysa: doğrulama/sağlık 409 CHANNEL_KEY_UNREADABLE (neden kaydedilir), anahtar dosyası 409 KEY_UNREADABLE; ağ yok", async () => {
+    await configureAll();
+    process.env.UM_MASTER_KEY = "cd".repeat(32); // ana anahtar değişti → özel anahtarlar çözülemez
+    const st = (await state()).body;
+    expect((st.signing as Json).secretUnreadable).toBe(true);
+    expect((st.channel as Json).secretUnreadable).toBe(true);
+    expect(st.keyFileReady).toBe(false);
+
+    const v = await verify();
+    expect(v.status).toBe(409);
+    expect(v.body.code).toBe("CHANNEL_KEY_UNREADABLE");
+    expect(((await state()).body.verification as Json).lastAttempt).toMatchObject({
+      ok: false,
+      code: "no_channel_key",
+    });
+    const h = await health();
+    expect(h.status).toBe(409);
+    expect(h.body.code).toBe("CHANNEL_KEY_UNREADABLE");
+    const d = (await state()).body.delivery as Json;
+    expect(d.status).toBe("blocked");
+    expect(d.last).toMatchObject({ ok: false, code: "no_channel_key" });
+    const k = await relayKeys();
+    expect(k.status).toBe(409);
+    expect(k.body.code).toBe("KEY_UNREADABLE");
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // Yeni anahtarlara geçince dosya yeniden indirilebilir.
+    expect((await signing("rotate")).status).toBe(200);
+    expect((await channel("rotate")).status).toBe(200);
+    expect((await relayKeys()).status).toBe(200);
+    const after = (await state()).body;
+    expect((after.signing as Json).secretUnreadable).toBe(false);
+    expect((after.channel as Json).secretUnreadable).toBe(false);
   });
 
   it("sağlık: kuyruk boşsa ok; kanal tanınmıyorsa unreachable olarak kaydedilir", async () => {

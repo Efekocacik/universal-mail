@@ -150,9 +150,11 @@ describe("canlıya geçiş belgeleri kodla tutarlı", () => {
     const doc = read("docs/10-CANLIYA-GECIS.md");
     const rows = [...doc.matchAll(/^\| (\d+) \|/gm)].map((m) => Number(m[1]));
     expect(rows).toEqual(Array.from({ length: 26 }, (_, i) => i + 1));
-    for (const tag of ["[AKTARICI]", "[TB-3]", "[GÖNDERİM]", "[SÜRÜM]"]) {
+    for (const tag of ["[AKTARICI]", "[ÇIKIŞ]", "[GÖNDERİM]", "[SÜRÜM]"]) {
       expect(doc, tag).toContain(tag);
     }
+    // TB-3 (çıkış altyapısı arayüzü) kodlandı: belge onu artık bekleyen paket olarak anmaz.
+    expect(doc).not.toContain("[TB-3]");
     // Gerçek kapılar belgede kapalı olarak anılır; belge hiçbir kapıyı açmaz.
     expect(doc).toMatch(/kodda \*\*kapalıdır\*\*/);
   });

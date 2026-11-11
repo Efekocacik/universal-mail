@@ -8,7 +8,7 @@ import { LIVE_INBOX_READING_ENABLED } from "@/lib/compliance/policies";
 import type { Db } from "@/lib/db/client";
 import { jobs, mailboxes, messages, settings } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobContext } from "@/lib/jobs/registry";
-import { GmailInboxReader } from "@/lib/mail/gmail/inbox";
+import { GmailInboxError, GmailInboxReader } from "@/lib/mail/gmail/inbox";
 import { resetOAuthMemoryForTests, type OAuthDeps } from "@/lib/mail/gmail/oauth";
 import type { InboxReader } from "@/lib/mail/inbound/sync";
 import { evaluateInboxSync } from "@/lib/mail/inbound/sync-status";
@@ -18,6 +18,7 @@ import {
   INBOX_SYNC_INTERVAL_MS,
   INBOX_SYNC_JOB,
   isInboxSyncEnabled,
+  MAX_INBOX_BACKOFF_MS,
   startInboxScheduler,
 } from "@/lib/mail/scheduler/inbox-job";
 import { mailboxRefreshTokenName, setSecret } from "@/lib/secrets/store";
@@ -242,6 +243,52 @@ describe("kilit açık (yalnızca test): okuma izni olan Gmail kutusu eşitlenir
     expect(next).toHaveLength(1);
     expect(next[0]).toMatchObject({ status: "queued", runAt: NOW + INBOX_SYNC_INTERVAL_MS });
     expect(logs.some((l) => l.startsWith("gmail gelen kutusu: 1 işlendi"))).toBe(true);
+  });
+
+  it("hız sınırı (Retry-After): kutu bekleme süresince OKUNMAZ, süre dolunca yeniden denenir; üst sınır 6 saat", async () => {
+    let t = NOW;
+    const calls: number[] = [];
+    let retryAfter: number | undefined = 15 * 60_000;
+    const limited: InboxReader = {
+      id: "gmail",
+      fetch: async (mailboxId) => {
+        calls.push(mailboxId);
+        throw new GmailInboxError("rate_limited", retryAfter);
+      },
+    };
+    const run = createInboxSyncHandler({
+      enabled: false,
+      gmailReader: () => limited,
+      liveInboxEnabled: () => true,
+      now: () => t,
+    });
+    await run(ctx());
+    expect(calls).toEqual([gid]);
+    expect(logs.some((l) => l.includes("15 dk ertelendi"))).toBe(true);
+    t += 60_000;
+    await run(ctx());
+    expect(calls).toHaveLength(1); // bekleme sürüyor: istek yok
+    t = NOW + 15 * 60_000;
+    retryAfter = undefined; // Retry-After yoksa yine en az 5 dk
+    await run(ctx());
+    expect(calls).toHaveLength(2);
+    t += 4 * 60_000;
+    await run(ctx());
+    expect(calls).toHaveLength(2);
+    t += 60_000;
+    retryAfter = 48 * 3_600_000; // aşırı değer 6 saate kırpılır
+    await run(ctx());
+    expect(calls).toHaveLength(3);
+    t += MAX_INBOX_BACKOFF_MS - 1;
+    await run(ctx());
+    expect(calls).toHaveLength(3);
+    t += 1;
+    await run(ctx());
+    expect(calls).toHaveLength(4);
+    expect((await getSetting(db, "mail.inboxSync"))[String(gid)]).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+    });
   });
 
   it("okuma izni olmayan (yalnızca gönderim) Gmail kutusu okunmaz, okuyucu oluşturulmaz", async () => {

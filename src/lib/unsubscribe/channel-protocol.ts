@@ -192,6 +192,45 @@ export interface HttpEventSourceOptions {
   allowLoopbackHttp?: boolean;
 }
 
+/** Yanıt gövdesini en çok `max` bayt okur; aşılırsa okumayı iptal eder (`bad_response`). Geçersiz UTF-8 de `bad_response`. */
+async function readCappedText(res: Response, max: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel().catch(() => undefined);
+    throw new ChannelError("bad_response");
+  }
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > max) {
+        await reader.cancel().catch(() => undefined);
+        throw new ChannelError("bad_response");
+      }
+      chunks.push(value);
+    }
+  } catch (e) {
+    if (e instanceof ChannelError) throw e;
+    throw new ChannelError("network");
+  }
+  const all = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    all.set(c, off);
+    off += c.byteLength;
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(all);
+  } catch {
+    throw new ChannelError("bad_response");
+  }
+}
+
 export class HttpEventSource implements UnsubscribeEventSource {
   private readonly base: string;
   private readonly doFetch: typeof fetch;
@@ -238,14 +277,13 @@ export class HttpEventSource implements UnsubscribeEventSource {
     } catch (e) {
       throw new ChannelError((e as Error)?.name === "TimeoutError" ? "timeout" : "network");
     }
-    let text: string;
-    try {
-      text = await res.text();
-    } catch {
-      throw new ChannelError("network");
+    // Durum ÖNCE denetlenir ve gövde boyutu OKUNURKEN sınırlanır: ele geçirilmiş/yanlış bir sunucu çok büyük bir gövde
+    // akıtarak süreci bellek dışına itemez.
+    if (res.status !== 200) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new ChannelError("http_error", res.status);
     }
-    if (res.status !== 200) throw new ChannelError("http_error", res.status);
-    if (text.length > MAX_RESPONSE) throw new ChannelError("bad_response");
+    const text = await readCappedText(res, MAX_RESPONSE);
     try {
       return JSON.parse(text) as unknown;
     } catch {

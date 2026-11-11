@@ -1680,9 +1680,9 @@ export const tr = {
   "settings.nav.mailbox": "Gönderim hesabı",
   "mbx.title": "Gönderim hesabı (Gmail)",
   "mbx.desc":
-    "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlarsınız. Bağlantı kurma bir sonraki aşamada eklenecek.",
+    "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlar, kutuyu Google izin ekranıyla Gmail'e bağlarsınız (gönderim izni; isteğe bağlı gelen kutusu okuma izni).",
   "mbx.note":
-    "Gerçek e-posta gönderimi bu sürümde kapalıdır. Eklediğiniz kutu “yapılandırılmadı” durumunda kalır; hiçbir hesaba bağlanılmaz ve hiçbir ileti gönderilmez. Kimlik bilgileri veritabanına değil, şifreli depoya yazılır.",
+    "Gerçek e-posta gönderimi ve gelen kutusu okuma bu sürümde kodda kapalıdır; Gmail bağlansa bile kilitler açılana kadar hiçbir ileti gönderilmez. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
   "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
   "mbx.status.connected": "Bağlı",
   "mbx.status.disabled": "Devre dışı",
@@ -1701,7 +1701,7 @@ export const tr = {
   "mbx.removed": "Posta kutusu silindi.",
   "mbx.client.title": "Google OAuth istemcisi",
   "mbx.client.help":
-    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Burada yalnızca saklanır; bu aşamada Google'a hiçbir istek gönderilmez ve geçerliliği sınanmaz.",
+    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Kaydederken geçerliliği sınanmaz; yalnızca “Gmail'e bağlan” ile başlattığınız Google OAuth bağlantısında kullanılır.",
   "mbx.client.id": "İstemci kimliği",
   "mbx.client.secret": "İstemci sırrı",
   "mbx.client.secret.hint":
@@ -1739,7 +1739,7 @@ export const tr = {
   "mbx.oauth.disconnected.norevoke":
     "Bağlantı kesildi, ancak Google'daki yetki iptal edilemedi; Google hesap ayarlarından kaldırabilirsiniz.",
   "mbx.oauth.reauth": "Yetki geçersiz veya iptal edilmiş; yeniden bağlanmanız gerekir.",
-  "mbx.oauth.result.ok": "Gmail kutusu bağlandı. Gerçek gönderim yine de kapalıdır.",
+  "mbx.oauth.result.ok": "Gmail kutusu bağlandı.",
   "mbx.oauth.result.readDenied":
     "Gelen kutusu okuma izni verilmedi; kutu yalnızca gönderim izniyle bağlandı.",
   "mbx.oauth.result.error": "Bağlantı kurulamadı.",
@@ -1779,7 +1779,7 @@ export const tr = {
     "Uygulama, çıkış sunucusunda bekleyen talepleri bu anahtarla imzalanmış isteklerle çeker. Sunucu yalnızca genel anahtarı bilir.",
   "unsubInfra.channel.rotate.title": "Kanal anahtarı yenilensin mi?",
   "unsubInfra.channel.rotate.body":
-    "Yeni anahtar etkin olur. Çıkış sunucusu yeni anahtar dosyasını alana kadar talepler çekilemez (talepler sunucuda bekler, kaybolmaz).",
+    "Yeni anahtar etkin olur; eski kanal anahtarı iptal edilir ve silinir (yeni dosya yüklenince sunucuda da tanınmaz). Çıkış sunucusu yeni anahtar dosyasını alana kadar talepler çekilemez (talepler sunucuda bekler, kaybolmaz).",
   "unsubInfra.channel.revoke.title": "Kanal anahtarı iptal edilsin mi?",
   "unsubInfra.channel.revoke.body":
     "Bu işlem GERİ ALINAMAZ. Anahtar silinir; etkin anahtarı iptal ederseniz yeni anahtar oluşturup sunucuya yükleyene kadar çıkış talepleri uygulamaya ulaşmaz.",
@@ -1790,6 +1790,10 @@ export const tr = {
     "Yeni anahtar etkin. Anahtar dosyasını yeniden indirip sunucuya yükleyin ve uç noktayı yeniden doğrulayın.",
   "unsubInfra.key.active": "Etkin",
   "unsubInfra.key.retired": "Emekli (eski bağlantılar için)",
+  "unsubInfra.key.unreadable": "Okunamıyor",
+  "unsubInfra.key.privateMissing":
+    "Bu anahtarın özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir); anahtar kullanılamaz. “Yeni anahtara geç” ile yeni anahtar oluşturun, ardından anahtar dosyasını yeniden indirip sunucuya yükleyin ve uç noktayı doğrulayın.",
+  "unsubInfra.channel.legacy": "Eski kanal anahtarı (sunucuda hâlâ geçerli; iptal edin)",
   "unsubInfra.key.createdAt": "Oluşturma: {at}",
   "unsubInfra.key.revoke": "Anahtarı iptal et",
   "unsubInfra.key.revoke.aria": "{kid} anahtarını iptal et",
@@ -1808,6 +1812,8 @@ export const tr = {
   "unsubInfra.base.change.body":
     "Mevcut doğrulama kanıtı silinir. Yeni adres doğrulanana kadar çıkış uç noktası doğrulanmamış sayılır.",
   "unsubInfra.base.change.confirm": "Adresi değiştir",
+  "unsubInfra.base.clear.body":
+    "Doğrulama kanıtı silinir. Yeni bir adres kaydedilip doğrulanana kadar canlı iletiler için çıkış bağlantısı hazırlanamaz ve çıkış sunucusundaki bekleyen talepler çekilmez.",
   "unsubInfra.file.title": "Anahtar dosyasını sunucuya yükleyin",
   "unsubInfra.file.help":
     "Dosya yalnızca GENEL anahtarları içerir. Yine de yalnızca SSH ile kopyalayın ve başkasıyla paylaşmayın.",
@@ -1815,7 +1821,7 @@ export const tr = {
   "unsubInfra.file.downloaded": "relay-keys.json indirildi.",
   "unsubInfra.file.needs": "Önce 1-3. adımları tamamlayın.",
   "unsubInfra.file.scp":
-    "Dosyayı sunucuya kopyalayın (SUNUCU yerine kendi sunucunuzu yazın). Sunucu dosyayı birkaç saniye içinde kendisi yükler; yeniden başlatma gerekmez.",
+    "Dosyayı sunucuya kopyalayın (KULLANICI yerine sunucudaki sudo yetkili kullanıcınızı, SUNUCU yerine kendi sunucunuzu yazın). Sunucu dosyayı birkaç saniye içinde kendisi yükler; yeniden başlatma gerekmez.",
   "unsubInfra.file.after":
     "Anahtar yenilediğinizde, iptal ettiğinizde veya adresi değiştirdiğinizde dosyayı yeniden indirip yükleyin.",
   "unsubInfra.verify.title": "Uçtan uca doğrula",
@@ -1836,6 +1842,8 @@ export const tr = {
   "unsubInfra.verify.code.verified": "Uç nokta doğrulandı.",
   "unsubInfra.verify.code.not_configured": "Çıkış sunucusu adresi tanımlı değil.",
   "unsubInfra.verify.code.no_key": "Etkin imza anahtarı yok; 1. adımı tamamlayın.",
+  "unsubInfra.verify.code.no_channel_key":
+    "Kanal anahtarının özel anahtarı okunamıyor; 2. adımda “Yeni anahtara geç”i seçip anahtar dosyasını yeniden yükleyin.",
   "unsubInfra.verify.code.post_failed":
     "Sunucuya ulaşılamadı (adres, DNS veya sertifika sorunu olabilir).",
   "unsubInfra.verify.code.bad_status":
@@ -1866,6 +1874,8 @@ export const tr = {
     "Bir saatten eski bekleyen talep var; düzenli çekme çalışmıyor olabilir.",
   "unsubInfra.health.code.unreachable":
     "Sunucuya ulaşılamadı veya sunucu kanal anahtarını tanımadı.",
+  "unsubInfra.health.code.no_channel_key":
+    "Kuyruk denetlenemedi: kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). Kanal anahtarında “Yeni anahtara geç”i seçin.",
   "unsubInfra.health.code.other": "Kuyruk durumu bilinmiyor.",
   "unsubInfra.drain.title": "Çıkış taleplerini düzenli çek",
   "unsubInfra.drain.help":
@@ -1897,7 +1907,7 @@ export const tr = {
   "mbx.oauth.hint.account_mismatch":
     "Google'da kutunun birincil adresiyle giriş yapın. Takma ad (alias) veya başka bir hesapla bağlanılamaz.",
   "mbx.oauth.hint.scope":
-    "İzin ekranında yalnızca istenen izinleri onaylayın. Sorun sürerse Google Cloud'daki izin ekranı ayarlarını (openid, email, gmail.send) kontrol edin.",
+    "İzin ekranında yalnızca istenen izinleri onaylayın. Sorun sürerse Google Cloud'daki izin ekranı ayarlarını (openid, email, gmail.send; gelen kutusu okuma için gmail.readonly) kontrol edin.",
   "mbx.oauth.hint.no_refresh_token":
     "Yeniden deneyin. Sorun sürerse Google hesabınızdaki üçüncü taraf erişimlerinden bu uygulamanın eski iznini kaldırıp tekrar bağlanın.",
   "mbx.oauth.keepOpen":
@@ -1938,7 +1948,17 @@ export const tr = {
     "Aktarıcıdaki çıkış talepleri 1 saatten uzun süredir işlenmedi.",
   "deliveryAlert.unhealthy.corrupt_events": "Aktarıcıda okunamayan (bozuk) çıkış olayları var.",
   "deliveryAlert.unhealthy.unreachable": "Çıkış aktarıcısına ulaşılamadı.",
+  "deliveryAlert.unhealthy.no_channel_key":
+    "Çıkış talepleri çekilemiyor: kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). Ayarlar'da imza ve kanal anahtarında “Yeni anahtara geç”i seçin, anahtar dosyasını yeniden yükleyin.",
   "deliveryAlert.unhealthy.other": "Çıkış taleplerinin teslimatı sağlıksız.",
+  "deliveryAlert.stale":
+    "Çıkış talep kuyruğu 24 saatten uzun süredir denetlenmedi (son denetim: {at}). Düzenli çekme kapalı veya çalışmıyor olabilir; talepler işlenmiyor olabilir.",
+  "deliveryAlert.stale.never":
+    "Çıkış talep kuyruğu hiç denetlenmedi. Ayarlar'da “Talepleri düzenli çek”i açın ve “Kuyruğu denetle” ile kontrol edin.",
+  "deliveryAlert.verifyFailed":
+    "Çıkış uç noktası doğrulanamadı ({at}); canlı gönderim için çıkış bağlantısı hazırlanamıyor. Ayarlar'da nedeni görüp yeniden doğrulayın.",
+  "deliveryAlert.verifyFailed.noChannelKey":
+    "Çıkış uç noktası doğrulanamadı ({at}): kanal anahtarının özel anahtarı okunamıyor. Ayarlar'da kanal anahtarında “Yeni anahtara geç”i seçin.",
   "deliveryAlert.checkedAt": "(Son denetim: {at})",
   "deliveryAlert.expiring":
     "Çıkış uç noktası doğrulaması {days} gün içinde ({at}) sona eriyor. Süresi dolarsa gerçek gönderim durur; yeniden doğrulayın.",

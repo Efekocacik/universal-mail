@@ -7,6 +7,7 @@ import {
   deleteSecret,
   getSecret,
   resolveMasterKey,
+  secretExists,
   setSecret,
   unsubscribeKeySecretName,
 } from "@/lib/secrets/store";
@@ -63,11 +64,29 @@ async function generate(db: Db, now: number): Promise<KeyRegistryEntry> {
   return { kid, x, createdAt: now, retiredAt: null, revokedAt: null };
 }
 
-/** Etkin anahtar yoksa üretir. Gizli depo yazılamazsa kayıt OLUŞTURULMAZ (önce özel anahtar, sonra ayar). */
+/**
+ * Etkin imza anahtarının ÖZEL anahtarı okunamıyor mu? (Kayıtta etkin anahtar var ama gizli depoda çözülebilir değeri
+ * yok: tipik olarak "Gizli bilgileri sıfırla" sonrası.) Etkin anahtar yoksa false (o durum "anahtar yok"tur).
+ */
+export async function signingPrivateKeyMissing(db: DbExecutor): Promise<boolean> {
+  const reg = await getSetting(db, "mail.unsubscribeKeys");
+  const cur = reg.keys.find((k) => k.kid === reg.current && k.revokedAt === null);
+  if (!cur) return false;
+  return !(await secretExists(unsubscribeKeySecretName(cur.kid)));
+}
+
+/**
+ * Etkin anahtar yoksa üretir. Gizli depo yazılamazsa kayıt OLUŞTURULMAZ (önce özel anahtar, sonra ayar).
+ * Etkin anahtarın özel anahtarı okunamıyorsa (gizli bilgiler sıfırlandıysa) yenisine geçilir; eskisi emekli kalır, böylece
+ * daha önce gönderilmiş bağlantılar genel anahtarla doğrulanmaya devam eder.
+ */
 export async function ensureSigningKey(db: Db, now = Date.now()): Promise<{ kid: string }> {
   const reg = await getSetting(db, "mail.unsubscribeKeys");
   const cur = reg.keys.find((k) => k.kid === reg.current && k.revokedAt === null);
-  if (cur) return { kid: cur.kid };
+  if (cur) {
+    if (await secretExists(unsubscribeKeySecretName(cur.kid))) return { kid: cur.kid };
+    return { kid: (await rotateSigningKey(db, now)).kid };
+  }
   const entry = await generate(db, now);
   await setSetting(db, "mail.unsubscribeKeys", {
     current: entry.kid,

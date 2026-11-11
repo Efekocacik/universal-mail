@@ -16,7 +16,7 @@ import { editedSince, savePatch, saveSnapshot } from "@/features/templates/save-
 import type { Db } from "@/lib/db/client";
 import { tr } from "@/lib/i18n/tr";
 import { getSetting, setSetting } from "@/lib/settings";
-import { VERIFICATION_TTL_MS } from "@/lib/unsubscribe/endpoint";
+import { DELIVERY_FRESH_MS, VERIFICATION_TTL_MS } from "@/lib/unsubscribe/endpoint";
 import {
   computeDeliveryAlerts,
   getDeliveryAlerts,
@@ -78,6 +78,17 @@ describe("sihirbaz: kaydedilmemiş değişiklik", () => {
     expect(basicsDirty(null, { ...NEW_BASICS, mailboxId: null })).toBe(false);
     expect(basicsDirty(null, { ...NEW_BASICS, mailboxId: 7, name: "Yeni" })).toBe(true);
     expect(basicsDirty(null, { ...NEW_BASICS, mailboxId: 7, dailyCap: 10 })).toBe(true);
+  });
+
+  it("kutusu olmayan kayıtlı kampanya: otomatik seçilen kutu kirli sayılmaz; kullanıcı seçerse kirli", () => {
+    const noBox = { ...CAMPAIGN, mailboxId: null };
+    expect(basicsDirty(noBox, values({ mailboxId: 7 }))).toBe(false);
+    expect(basicsDirty(noBox, values({ mailboxId: 7 }), { mailboxTouched: true })).toBe(true);
+    expect(basicsDirty(noBox, values({ mailboxId: null }), { mailboxTouched: true })).toBe(false);
+    expect(basicsDirty(noBox, values({ mailboxId: 7, name: "Kasım" }))).toBe(true);
+    // Kutusu olan kampanyada kutu değişikliği her zaman kirli.
+    expect(basicsDirty(CAMPAIGN, values({ mailboxId: 2 }), { mailboxTouched: false })).toBe(true);
+    expect(read("src/features/campaigns/campaign-wizard.tsx")).toContain("setMailboxTouched(true)");
   });
 
   it("adımlar: sıra önemsiz, ilk adımın gecikmesi yok sayılır; şablon/gecikme/dil farkı kirli", () => {
@@ -171,8 +182,17 @@ describe("şablon düzenleyici: kayıt anlık görüntüsü", () => {
 const NOW = Date.UTC(2026, 10, 11, 12, 0, 0);
 const KID = "0123456789abcdef";
 const BASE = "https://cikis.firma-ornek.com";
+/** Varsayılan: taze ve sağlıklı kuyruk kaydı, doğrulama denemesi yok (yalnızca test edilen alan değişir). */
+const FRESH_OK = {
+  checkedAt: NOW - 1000,
+  ok: true,
+  depth: 0,
+  oldestAgeMs: null,
+  corrupt: 0,
+  code: "ok",
+};
 const input = (over: Partial<DeliveryAlertInput["endpoint"]> = {}, kid: string | null = KID) => ({
-  endpoint: { baseUrl: BASE, verified: null, delivery: null, ...over },
+  endpoint: { baseUrl: BASE, verified: null, delivery: FRESH_OK, lastAttempt: null, ...over },
   currentKid: kid,
 });
 const verifiedAt = (msBeforeExpiry: number) => NOW - VERIFICATION_TTL_MS + msBeforeExpiry;
@@ -233,6 +253,67 @@ describe("çıkış teslimat uyarıları", () => {
     expect(computeDeliveryAlerts(input(v(DAY, KID, "https://eski.example")), NOW)).toEqual([]);
     expect(computeDeliveryAlerts(input(v(DAY, "fedcba9876543210")), NOW)).toEqual([]);
     expect(computeDeliveryAlerts(input(v(DAY), null), NOW)).toEqual([]);
+  });
+
+  it("doğrulanmış uçta kuyruk sağlığı hiç denetlenmediyse veya 24 saatten eskiyse 'bayat' uyarısı", () => {
+    const verified = { baseUrl: BASE, kid: KID, jti: "j", verifiedAt: NOW - DAY };
+    expect(computeDeliveryAlerts(input({ verified }), NOW)).toEqual([]);
+    expect(computeDeliveryAlerts(input({ verified, delivery: null }), NOW)).toEqual([
+      { kind: "delivery_stale", checkedAt: null },
+    ]);
+    const old = { ...FRESH_OK, checkedAt: NOW - DELIVERY_FRESH_MS - 1 };
+    expect(computeDeliveryAlerts(input({ verified, delivery: old }), NOW)).toEqual([
+      { kind: "delivery_stale", checkedAt: NOW - DELIVERY_FRESH_MS - 1 },
+    ]);
+    // Sınırda hâlâ taze; kötü kayıt bayatlıktan önce gelir (aynı anda ikisi gösterilmez).
+    const edge = { ...FRESH_OK, checkedAt: NOW - DELIVERY_FRESH_MS };
+    expect(computeDeliveryAlerts(input({ verified, delivery: edge }), NOW)).toEqual([]);
+    const bad = { ...old, ok: false, code: "unreachable" };
+    expect(
+      computeDeliveryAlerts(input({ verified, delivery: bad }), NOW).map((a) => a.kind),
+    ).toEqual(["delivery_unhealthy"]);
+    // Hiç doğrulanmamış (yeni girilmiş) adres: gürültü yok.
+    expect(computeDeliveryAlerts(input({ delivery: null }), NOW)).toEqual([]);
+    expect(
+      computeDeliveryAlerts(
+        input({ verified: { ...verified, baseUrl: "https://eski.example" }, delivery: null }),
+        NOW,
+      ),
+    ).toEqual([]);
+  });
+
+  it("kanıt yok ve son doğrulama başarısızsa 'doğrulanamadı'; başarılı/hiç denenmediyse yok", () => {
+    const at = NOW - 3600_000;
+    expect(
+      computeDeliveryAlerts(input({ lastAttempt: { at, ok: false, code: "bad_status" } }), NOW),
+    ).toEqual([{ kind: "verify_failed", code: "bad_status", at }]);
+    expect(
+      computeDeliveryAlerts(input({ lastAttempt: { at, ok: true, code: "verified" } }), NOW),
+    ).toEqual([]);
+    // Kanıt duruyorsa (ör. eski bir başarısız deneme sonrası yeniden doğrulandı) uyarı yok.
+    const verified = { baseUrl: BASE, kid: KID, jti: "j", verifiedAt: NOW - DAY };
+    expect(
+      computeDeliveryAlerts(
+        input({ verified, lastAttempt: { at, ok: false, code: "bad_status" } }),
+        NOW,
+      ),
+    ).toEqual([]);
+    const text = deliveryAlertText({ kind: "verify_failed", code: "bad_status", at });
+    expect(text).toContain(tr["deliveryAlert.verifyFailed"].split("{at}")[0]!.trim());
+    expect(deliveryAlertText({ kind: "verify_failed", code: "no_channel_key", at })).toContain(
+      tr["deliveryAlert.verifyFailed.noChannelKey"].split("{at}")[0]!.trim(),
+    );
+    expect(deliveryAlertText({ kind: "delivery_stale", checkedAt: null })).toBe(
+      tr["deliveryAlert.stale.never"],
+    );
+    expect(deliveryAlertText({ kind: "delivery_stale", checkedAt: NOW })).toContain(
+      tr["deliveryAlert.stale"].split("{at}")[0]!.trim(),
+    );
+    expect(
+      deliveryAlertText({ kind: "delivery_unhealthy", code: "no_channel_key", checkedAt: NOW }),
+    ).toContain(tr["deliveryAlert.unhealthy.no_channel_key"]);
+    expect(deliveryAlertTone([{ kind: "delivery_stale", checkedAt: null }])).toBe("danger");
+    expect(deliveryAlertTone([{ kind: "verify_failed", code: "x", at }])).toBe("danger");
   });
 
   it("metin ve ton: kötü teslimat/bitmiş kanıt kırmızı, yaklaşan süre sarı", () => {
@@ -318,9 +399,16 @@ describe("çıkış teslimat uyarıları", () => {
       expect((await getDeliveryAlerts(db, now)).map((a) => a.kind)).toEqual(["delivery_unhealthy"]);
     });
 
-    it("bant kampanyalar sayfasına bağlı ve ağa yalnızca bu yerel uçla çıkar", () => {
+    it("bant kampanyalar ve uyum sayfalarına bağlı ve ağa yalnızca bu yerel uçla çıkar", () => {
       expect(read("src/features/campaigns/campaigns-page.tsx")).toContain(
         "<DeliveryAlertBanner />",
+      );
+      expect(read("src/features/compliance/compliance-page.tsx")).toContain(
+        "<DeliveryAlertBanner />",
+      );
+      // Çıkış altyapısı değişiklikleri bandı da tazeler (aynı sorgu anahtarı).
+      expect(read("src/lib/client/unsubscribe.ts")).toMatch(
+        /UNSUBSCRIBE_INVALIDATE[^;]*DELIVERY_ALERTS_KEY/s,
       );
       const banner = read("src/features/compliance/delivery-alert.tsx");
       expect(banner).toContain('"/api/compliance/delivery-alerts"');

@@ -4,7 +4,9 @@ import { countryPolicies, mailboxes } from "@/lib/db/schema";
 import { evaluateDnsReadiness } from "@/lib/mail/dns-store";
 import { evaluateInboxSync } from "@/lib/mail/inbound/sync-status";
 import { getSetting, settingSchemas } from "@/lib/settings";
+import { channelPrivateKeyMissing } from "@/lib/unsubscribe/channel";
 import { evaluateDelivery, isOneClickEndpointVerified } from "@/lib/unsubscribe/endpoint";
+import { signingPrivateKeyMissing } from "@/lib/unsubscribe/keys";
 import { LEGAL_APPROVALS, type LegalApprovalKey } from "./legal-status";
 import {
   GMAIL_HEADER_TRUST_VERIFIED,
@@ -86,8 +88,12 @@ export async function getLiveReadiness(
 
   // Çıkış uç noktası ve teslimat: yalnızca SAKLANAN uçtan uca kanıttan (kullanıcı beyanı kanıt değildir).
   const channel = await getSetting(db, "mail.unsubscribeChannel");
-  const hasChannelKey = channel.keys.some((k) => k.kid === channel.current && k.revokedAt === null);
-  const endpointVerified = await isOneClickEndpointVerified(db, now);
+  // Özel anahtarı okunamayan (gizli bilgiler sıfırlanmış) anahtar "var" sayılmaz: imzalanamaz/çekilemez.
+  const hasChannelKey =
+    channel.keys.some((k) => k.kid === channel.current && k.revokedAt === null) &&
+    !(await channelPrivateKeyMissing(db));
+  const endpointVerified =
+    (await isOneClickEndpointVerified(db, now)) && !(await signingPrivateKeyMissing(db));
   const delivery = await evaluateDelivery(db, hasChannelKey, now);
   const dns = await evaluateDnsReadiness(db, realConnected, now);
   const inboxSync = await evaluateInboxSync(db, realConnected, now);

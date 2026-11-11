@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/ui/page";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CampaignsSubnav } from "@/features/campaigns/subnav";
 import { t } from "@/lib/i18n";
+import { DeliveryAlertBanner } from "./delivery-alert";
 import { ErasurePanel } from "./erasure-panel";
 import { PolicyPanel } from "./policy-panel";
 import { SuppressionPanel } from "./suppression-panel";
@@ -18,6 +19,7 @@ export function CompliancePage({ initialTab }: { initialTab?: string }) {
     <div className="um-scroll min-h-0 flex-1">
       <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
         <CampaignsSubnav />
+        <DeliveryAlertBanner />
         <PageHeader title={t("compliance.title")} description={t("compliance.subtitle")} />
         <Tabs value={tab} onValueChange={setTab}>
           <TabsList>

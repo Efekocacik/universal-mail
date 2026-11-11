@@ -23,6 +23,11 @@ export function useSafeMutation<TVars, TData>(
     invalidate?: readonly QueryKey[];
     /** Çakışma bildirimi (varsayılan: kampanya metni). */
     conflictMessage?: string;
+    /**
+     * Bildirim (toast) GÖSTERİLMEYECEK hata kodları: çağıranın kendi arayüzüyle karşıladığı olağan adımlar (ör.
+     * `CONFIRMATION_REQUIRED` → onay penceresi). Yenileme ve `onError` yine çalışır.
+     */
+    silentCodes?: readonly string[];
   } = {},
 ) {
   const qc = useQueryClient();
@@ -44,7 +49,9 @@ export function useSafeMutation<TVars, TData>(
     onError: async (error) => {
       const info = classifyMutationError(error);
       if (info.refresh) await refresh();
-      if (info.kind === "uncertain") {
+      if (info.code && opts.silentCodes?.includes(info.code)) {
+        // Çağıran bu kodu kendi arayüzüyle gösterir (bildirim yok).
+      } else if (info.kind === "uncertain") {
         toast.warning(t("campaign.error.uncertain"), {
           description: t("campaign.error.uncertain.body"),
           duration: 15_000,

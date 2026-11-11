@@ -22,8 +22,15 @@ export const uk = {
   arf: ["unsubscribe-infra", "arf-reporters"] as const,
 };
 
-/** Değişiklik sonrası yenilenecek sorgular: çıkış altyapısı + canlı gönderime hazırlık. */
-export const UNSUBSCRIBE_INVALIDATE: readonly QueryKey[] = [uk.all, mk.readiness];
+/** Çıkış teslimat uyarı bandının sorgu anahtarı (kampanya ve uyum sayfaları). */
+export const DELIVERY_ALERTS_KEY = ["compliance", "delivery-alerts"] as const;
+
+/** Değişiklik sonrası yenilenecek sorgular: çıkış altyapısı + canlı gönderime hazırlık + teslimat uyarı bandı. */
+export const UNSUBSCRIBE_INVALIDATE: readonly QueryKey[] = [
+  uk.all,
+  mk.readiness,
+  DELIVERY_ALERTS_KEY,
+];
 
 const getOpts = { retry: shouldRetryQuery, retryDelay: queryRetryDelay } as const;
 
@@ -132,6 +139,7 @@ const VERIFY_CODES = [
   "verified",
   "not_configured",
   "no_key",
+  "no_channel_key",
   "post_failed",
   "bad_status",
   "not_delivered",
@@ -142,7 +150,14 @@ export function healthCodeKey(code: string): string {
   return HEALTH_CODES.includes(code) ? code : "other";
 }
 
-const HEALTH_CODES = ["ok", "corrupt_events", "queue_deep", "events_stale", "unreachable"];
+const HEALTH_CODES = [
+  "ok",
+  "corrupt_events",
+  "queue_deep",
+  "events_stale",
+  "unreachable",
+  "no_channel_key",
+];
 
 /** Kalan gün sayısı (yukarı yuvarlanmış; geçmişse 0). */
 export function daysUntil(ms: number, now = Date.now()): number {

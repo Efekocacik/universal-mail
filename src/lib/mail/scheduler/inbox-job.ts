@@ -23,6 +23,8 @@ import { syncInbox, type InboxReader, type SyncSummary } from "../inbound/sync";
 export const INBOX_SYNC_JOB = "inbox.sync";
 export const INBOX_FLAG = "FAZ3_DEMO_INBOX_ENABLED";
 export const INBOX_SYNC_INTERVAL_MS = 60_000;
+/** Gmail hız sınırı geri çekilmesinin üst sınırı (kutu başına). */
+export const MAX_INBOX_BACKOFF_MS = 6 * 3_600_000;
 const STALE_INBOX_JOB_LOCK_MS = 60_000;
 
 export function isDemoInboxEnabled(
@@ -95,6 +97,12 @@ export function createInboxSyncHandler(opts: {
 }): JobHandler {
   assertTestOnly(opts.gmailReader !== undefined);
   const live = liveInboxGate(opts.liveInboxEnabled);
+  /**
+   * Kutu başına geri çekilme (Gmail 429/kota 403 `Retry-After`): kutu bu zamana kadar OKUNMAZ, diğer kutular 60 sn
+   * aralıkla sürer. Yalnızca bellekte (worker yeniden başlarsa ilk turda yeniden denenir; Gmail yine sınırlarsa yeniden
+   * geri çekilir). Üst sınır 6 saat.
+   */
+  const backoffUntil = new Map<number, number>();
   return async (ctx) => {
     const demoOn = opts.enabled;
     const liveOn = live();
@@ -145,15 +153,26 @@ export function createInboxSyncHandler(opts: {
           const reader = opts.gmailReader?.(ctx.db) ?? new GmailInboxReader({ db: ctx.db });
           for (const id of readable) {
             if (ctx.shouldStop()) break;
+            const until = backoffUntil.get(id);
+            if (until !== undefined && clock() < until) continue;
+            backoffUntil.delete(id);
             // Kutu başına ayrı: birinin hatası diğerlerini durdurmaz. syncInbox `mail.inboxSync` kaydını yazar.
             try {
-              report(
-                "gmail",
-                await syncInbox(ctx.db, reader, id, {
-                  now: clock,
-                  ...(opts.liveInboxEnabled ? { liveInboxEnabled: opts.liveInboxEnabled } : {}),
-                }),
-              );
+              const r = await syncInbox(ctx.db, reader, id, {
+                now: clock,
+                ...(opts.liveInboxEnabled ? { liveInboxEnabled: opts.liveInboxEnabled } : {}),
+              });
+              report("gmail", r);
+              // Retry-After yoksa hız sınırında yine de en az 5 dk beklenir (her dakika yeniden denenmez).
+              const retryAfter =
+                r.retryAfterMs ?? (r.error === "rate_limited" ? 5 * 60_000 : undefined);
+              if (retryAfter !== undefined) {
+                const wait = Math.min(retryAfter, MAX_INBOX_BACKOFF_MS);
+                backoffUntil.set(id, clock() + wait);
+                ctx.log(
+                  `gmail gelen kutusu hız sınırında: ${Math.ceil(wait / 60_000)} dk ertelendi.`,
+                );
+              }
             } catch (e) {
               ctx.log(`gmail gelen kutusu hatası: ${errName(e)}`);
             }

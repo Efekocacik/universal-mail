@@ -80,7 +80,7 @@ export function recoveryDialog(
         "",
         'Hiçbir dosya değiştirilmedi. Anahtarlık erişim isteğini reddettiyseniz "Tekrar dene"yi seçip izin verin.',
         "",
-        "Sıfırlarsanız kayıtlı API anahtarları, Gmail bağlantısı ve abonelikten çıkış imza anahtarları kullanılamaz; yeniden girmeniz gerekir. Eski dosyalar silinmez, yedek olarak saklanır.",
+        "Sıfırlarsanız kayıtlı API anahtarları, Gmail bağlantısı ve abonelikten çıkış imza/kanal anahtarları kullanılamaz; yeniden kurmanız gerekir. Eski dosyalar silinmez, yedek olarak saklanır.",
         "",
         `Anahtar dosyası: ${ctx.keyFile}`,
       ].join("\n"),
@@ -100,7 +100,7 @@ export function recoveryDialog(
     title: "Gizli bilgiler sıfırlansın mı?",
     message: "Yeni bir ana anahtar üretilecek ve kayıtlı gizli bilgiler kullanılamayacak.",
     detail: [
-      "API anahtarlarını, Gmail bağlantısını ve abonelikten çıkış imza anahtarını yeniden kurmanız gerekecek.",
+      'API anahtarlarını ve Gmail bağlantısını yeniden kurmanız gerekecek. Abonelikten çıkış altyapısında imza ve kanal anahtarı için "Yeni anahtara geç"i seçip anahtar dosyasını sunucuya yeniden yüklemeniz ve doğrulamanız gerekecek.',
       "Eski anahtar dosyası ve gizli depo silinmez; aynı klasörde yedek adla saklanır.",
       "",
       `Gizli depo: ${ctx.secretsFile}`,

@@ -1,12 +1,22 @@
 # Universal Mail abonelikten çıkış aktarıcısı: Caddy ters vekil (TLS + Let's Encrypt).
 #
-# "cikis.firma.com" yerine kendi alt alan adınızı yazın. Bu ad, uygulamadaki "Abonelikten çıkış adresi" ile
-# (ve aktarıcının RELAY_PUBLIC_ORIGIN değeriyle) BİREBİR aynı olmalıdır. Port YAZMAYIN: uygulama yalnızca :443 kabul eder.
+# "cikis.firma.com" yerine kendi alt alan adınızı yazın. Bu ad, uygulamadaki "Çıkış sunucusu adresi" ile
+# (Ayarlar → Abonelikten çıkış altyapısı (HTTPS)) ve aktarıcının RELAY_PUBLIC_ORIGIN değeriyle BİREBİR aynı olmalıdır.
+# Port YAZMAYIN: uygulama yalnızca :443 kabul eder.
 #
 # KURALLAR:
 #  - Yol yeniden yazma (rewrite), www yönlendirmesi, önbellek EKLEMEYİN: /spool/* imzası yolun ve sorgunun TAMAMINI kapsar.
 #  - Erişim günlüğü ("log" yönergesi) AÇMAYIN: istek yolu abonelikten çıkış belirtecini içerir.
+#  - Hata günlüğü aşağıda KAPALIDIR: aktarıcıya ulaşılamadığında (yeniden başlatma, çökme) Caddy'nin varsayılan hata
+#    kaydı isteğin tam yolunu (belirteç), istemci IP'sini ve X-UM-* kanal imza başlıklarını journald'a yazardı.
+#    Caddy günlük düzeyini DEBUG'a ÇIKARMAYIN.
 #  - 80 ve 443 portları açık olmalı (80 yalnızca sertifika doğrulaması ve HTTPS'e yönlendirme içindir).
+
+{
+	log default {
+		exclude http.log.error
+	}
+}
 
 cikis.firma.com {
 	request_body {
@@ -23,5 +33,18 @@ cikis.firma.com {
 
 	handle {
 		respond 404
+	}
+
+	# Hata yolu tanımlı olduğu için Caddy hatayı ERROR düzeyinde günlüğe yazmaz. Aktarıcıya ulaşılamazsa (502/504
+	# yerine) temiz bir 503: RFC 8058 istemcisi (Gmail) yeniden dener. Diğer hatalar (ör. 64KB'yi aşan gövde) 400.
+	handle_errors {
+		@unavailable expression `{err.status_code} >= 500`
+		handle @unavailable {
+			header Retry-After 60
+			respond "Service unavailable" 503
+		}
+		handle {
+			respond "Bad request" 400
+		}
 	}
 }

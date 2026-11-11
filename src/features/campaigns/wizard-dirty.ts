@@ -4,7 +4,7 @@ import { DEFAULT_WINDOW } from "./model";
 /**
  * Kampanya sihirbazının "kaydedilmemiş değişiklik" mantığı (C13; DOM'suz test edilir). Adımlar yerel durumlarını
  * kampanyanın sunucudaki değerleriyle karşılaştırır; fark varsa sihirbaz adım değiştirmeden, bağlantıyla sayfadan
- * çıkmadan veya (tarayıcıda) sekmeyi kapatmadan önce uyarır.
+ * çıkmadan veya pencereyi/sekmeyi kapatmadan önce uyarır.
  */
 
 export interface BasicsValues {
@@ -38,7 +38,8 @@ function sameWindow(a: SendWindow, b: SendWindow): boolean {
 
 /**
  * Temel ayarlar değişti mi? Yeni kampanyada varsayılanlarla karşılaştırılır; posta kutusu sayılmaz (tek uygun kutu
- * otomatik seçilir, bu bir kullanıcı düzenlemesi değildir).
+ * otomatik seçilir, bu bir kullanıcı düzenlemesi değildir). Aynı kural posta kutusu OLMADAN kaydedilmiş bir taslak için
+ * de geçerlidir: kullanıcı kutuyu kendisi seçmedikçe (`mailboxTouched`) otomatik seçim değişiklik sayılmaz.
  */
 export function basicsDirty(
   campaign: Pick<
@@ -46,11 +47,13 @@ export function basicsDirty(
     "name" | "mailboxId" | "sendWindow" | "dailyCap" | "minGapS" | "maxGapS"
   > | null,
   v: BasicsValues,
+  opts: { mailboxTouched?: boolean } = {},
 ): boolean {
   const base = campaign ?? { ...NEW_BASICS, mailboxId: v.mailboxId };
+  const autoMailbox = campaign !== null && campaign.mailboxId === null && !opts.mailboxTouched;
   return (
     v.name !== base.name ||
-    v.mailboxId !== base.mailboxId ||
+    (!autoMailbox && v.mailboxId !== base.mailboxId) ||
     !sameWindow(v.sendWindow, base.sendWindow) ||
     v.dailyCap !== base.dailyCap ||
     v.minGapS !== base.minGapS ||

@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Notice } from "@/features/campaigns/parts";
 import { api } from "@/lib/client/api";
+import { DELIVERY_ALERTS_KEY } from "@/lib/client/unsubscribe";
 import { queryRetryDelay, shouldRetryQuery } from "@/lib/client/retry";
 import { t } from "@/lib/i18n";
 import { deliveryAlertText, deliveryAlertTone, type DeliveryAlert } from "./delivery-alert-model";
@@ -15,7 +16,7 @@ import { deliveryAlertText, deliveryAlertTone, type DeliveryAlert } from "./deli
  */
 export function DeliveryAlertBanner() {
   const q = useQuery({
-    queryKey: ["compliance", "delivery-alerts"],
+    queryKey: DELIVERY_ALERTS_KEY,
     queryFn: () => api<{ alerts: DeliveryAlert[] }>("/api/compliance/delivery-alerts"),
     staleTime: 60_000,
     retry: shouldRetryQuery,

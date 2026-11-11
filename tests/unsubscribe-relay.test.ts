@@ -8,6 +8,7 @@ import {
   MemoryEventQueue,
   MemoryRateLimiter,
   MemoryReplayStore,
+  REPLAY_WINDOW_MS,
   createRelayHandler,
   type RelayOptions,
 } from "@/lib/unsubscribe/relay";
@@ -387,6 +388,38 @@ describe("bellek içi yardımcılar", () => {
     expect(l.check("k", 0)).toBeNull();
     expect(l.check("k", 10)).not.toBeNull();
     expect(l.check("k", 1500)).toBeNull();
+  });
+  it("tekrar oynatma kaydı süresi dolunca 'görülmedi' sayılır", () => {
+    let t = 1000;
+    const s = new MemoryReplayStore(10, () => t);
+    s.remember("a", 2000);
+    expect(s.seen("a")).toBe(true);
+    t = 2000;
+    expect(s.seen("a")).toBe(false);
+  });
+  it("hız sınırlayıcı: çok sayıda farklı anahtarla sel, sınırı AŞMIŞ istemcinin sayacını sıfırlamaz", () => {
+    const l = new MemoryRateLimiter(2, 60_000, 5);
+    for (let i = 0; i < 3; i++) l.check("saldırgan", 0);
+    expect(l.check("saldırgan", 1)).not.toBeNull();
+    for (let i = 0; i < 50; i++) expect(l.check(`sel-${i}`, 2 + i)).toBeNull();
+    expect(l.check("saldırgan", 100)).not.toBeNull(); // hâlâ sınırlı
+    expect(l.check("saldırgan", 60_001)).toBeNull(); // pencere dolunca normal sıfırlanır
+  });
+});
+
+describe("tekrar oynatma penceresi (aktarıcı)", () => {
+  it("aynı belirteç pencere içinde tekilleştirilir; pencereden sonra yeniden kuyruğa girer (uygulama tekilleştirir)", async () => {
+    let now = NOW + 60_000;
+    queue = new MemoryEventQueue();
+    const h = createRelayHandler({ keys: () => [K.entry], sink: queue, now: () => now });
+    const t = mint();
+    expect((await h(post(t))).status).toBe(200);
+    now += REPLAY_WINDOW_MS - 1;
+    expect((await h(post(t))).status).toBe(200);
+    expect(queue.events).toHaveLength(1);
+    now += 2;
+    expect((await h(post(t))).status).toBe(200);
+    expect(queue.events).toHaveLength(2); // bellek, belirtecin 180 günlük ömrü boyunca tutulmaz
   });
 });
 

@@ -178,6 +178,10 @@ export async function verifyOneClickEndpoint(db: Db, o: VerifyOptions): Promise<
     } catch (e) {
       // Kanal hatası (ör. aktarıcı kanal anahtarını tanımıyor): kanıt YAZILMAZ, neden kayda geçer (sessiz kalmaz).
       if (e instanceof ChannelError) {
+        // Sınama işlenip kanıt yazıldıktan SONRA yalnızca onay (ack) başarısız olduysa doğrulama başarılıdır: onaylanmayan
+        // sınama olayı sonra yeniden çekilir ve zararsızca yok sayılır.
+        const after = await getSetting(db, "mail.unsubscribeEndpoint");
+        if (after.verified?.jti === probe.jti) return finish({ ok: true, code: "verified" });
         return finish({ ok: false, code: "channel_failed", detail: channelDetail(e) });
       }
       throw e;
@@ -243,6 +247,47 @@ export async function checkDeliveryHealth(
       now,
     );
   return { ok: rec.ok, code: rec.code };
+}
+
+/**
+ * Kanal kurulamadığı için sağlık denetimi YAPILAMADI (ör. `no_channel_key`: etkin kanal anahtarının özel anahtarı gizli
+ * depoda okunamıyor). Kayda sağlıksız olarak geçer ki uyarı bandı ve hazırlık ekranı sessiz kalmasın. Denetim kaydı
+ * yalnızca durum DEĞİŞTİĞİNDE yazılır (her turda yeni satır üretilmez).
+ */
+export async function recordDeliveryProblem(
+  db: Db,
+  code: "no_channel_key",
+  now = Date.now(),
+): Promise<void> {
+  const cur = await getSetting(db, "mail.unsubscribeEndpoint");
+  const changed = !cur.delivery || cur.delivery.ok || cur.delivery.code !== code;
+  await setSetting(db, "mail.unsubscribeEndpoint", {
+    ...cur,
+    delivery: { checkedAt: now, ok: false, depth: 0, oldestAgeMs: null, corrupt: 0, code },
+  });
+  if (changed) {
+    await audit(
+      db,
+      "unsubscribe.delivery_unhealthy",
+      "unsubscribe_endpoint",
+      undefined,
+      { code },
+      now,
+    );
+  }
+}
+
+/** Doğrulama BAŞLATILAMADI (ör. `no_channel_key`): neden `lastAttempt` olarak kaydedilir (sessiz kalmaz). */
+export async function recordVerifyProblem(
+  db: Db,
+  code: "no_channel_key",
+  now = Date.now(),
+): Promise<void> {
+  const cur = await getSetting(db, "mail.unsubscribeEndpoint");
+  await setSetting(db, "mail.unsubscribeEndpoint", {
+    ...cur,
+    lastAttempt: { at: now, ok: false, code },
+  });
 }
 
 export type DeliveryStatus = "ok" | "blocked" | "unknown";

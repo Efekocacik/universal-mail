@@ -45,6 +45,8 @@ export interface SyncSummary {
   resynced: boolean;
   /** Okuyucu hata verdiyse güvenli hata kodu. İmleç İLERLETİLMEZ, hiçbir ileti kaybolmaz. */
   error: string | null;
+  /** Sağlayıcı hız sınırı uyguladıysa (`rate_limited`) bildirdiği bekleme (ms); çağıran bu kutuyu o kadar ertelemelidir. */
+  retryAfterMs?: number;
 }
 
 const hasEffect = (e: InboundEffects) =>
@@ -97,6 +99,10 @@ export async function syncInbox(
       typeof (e as { code?: unknown })?.code === "string"
         ? (e as { code: string }).code
         : "fetch_failed";
+    const retryAfter = (e as { retryAfterMs?: unknown })?.retryAfterMs;
+    if (typeof retryAfter === "number" && Number.isFinite(retryAfter) && retryAfter > 0) {
+      summary.retryAfterMs = retryAfter;
+    }
     if (!demoBox) await recordInboxSync(db, mailboxId, { ok: false, code: summary.error }, clock());
     return summary;
   }

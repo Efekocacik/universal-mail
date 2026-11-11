@@ -35,7 +35,7 @@ Simgeler: ✔ yapıldı ve test edildi · ◐ kısmen (sahte sunucu/demo/simüla
 | **Gmail OAuth çekirdeği (15.3)** | ◐ | PKCE, state, kademeli yetkilendirme (varsayılan yalnızca gönderim), imzalı kimlik belirteci doğrulaması (JWKS), belirteç yenileme; **yalnızca yerel sahte OAuth sunucusuyla** sınandı |
 | **Gmail gönderim bağdaştırıcısı (15.4)** | ◐ | `gmail.send`; kabul/kesin ret/belirsiz ayrımı, belirsiz asla tekrar gönderilmez; **yalnızca sahte Gmail sunucusu**; canlı kilit kapalı |
 | **Gmail gelen kutusu okuyucusu (15.5)** | ◐ | `gmail.readonly`, sayfalama, `historyId`, veri azaltma; **yalnızca sahte sunucu**; okuma kilidi ve başlık güven kilidi kapalı |
-| **HTTPS abonelikten çıkış altyapısı (15.6–15.7)** | ◐ | Ed25519 imzalı belirteç, RFC 8058 aktarıcı işleyicisi, dayanıklı dosya kuyruğu, imzalı çekme kanalı, uçtan uca doğrulama kanıtı; **gerçek alan adı/HTTPS sunucusu/TLS yok** |
+| **HTTPS abonelikten çıkış altyapısı (15.6–15.7, go-live C2–C4)** | ◐ | Ed25519 imzalı belirteç, RFC 8058 aktarıcı işleyicisi (`multipart/form-data` dahil), dayanıklı dosya kuyruğu, imzalı çekme kanalı, uçtan uca doğrulama kanıtı. **Dağıtılabilir aktarıcı sunucusu var** (`src/relay/`, `npm run build:relay` → `dist/relay/relay.cjs`, kurulum: `deploy/relay/README.md`) ve uygulamada yönetim ekranı var (Ayarlar → Abonelikten çıkış altyapısı (HTTPS)); **henüz hiçbir sunucuya dağıtılmadı, gerçek alan adı/TLS ile denenmedi** |
 | **Birleşik gönderim kapısı (15.7)** | ✔ | `isLiveSendingPermitted()`: sabit bayrak VE her `LEGAL_APPROVALS` maddesi |
 | **ARF (RFC 5965) şikâyet işleme (15.8)** | ◐ | Ayrıştırıcı, kanıt katmanları, korumalı `complaint` engeli, kısmi kapsam sayacı; **gerçek FBL yok**, güvenilir rapor sağlayıcı listesi boş |
 | SMTP | ✘ | Planlanmadı (yeni paket gerektirir; önce onay) |
@@ -70,7 +70,8 @@ Canlı hazırlık aşamaları (şirket bilgisinden bağımsız yazılım işleri
 |---|---|
 | `GET/POST /api/campaigns`, `GET/PATCH /api/campaigns/{id}`, `PUT …/steps`, `GET/POST …/leads`, `DELETE …/leads/{clId}`, `GET …/messages` | Kampanya oluşturma, adımlar, lead ekleme/çıkarma, kuyruk ve iletiler. Eşzamanlılık: monoton `updated_at` kilidi |
 | `GET /api/campaigns/{id}/preflight`, `POST …/control` | Başlat öncesi özet ve onay belirteci; `ready/draft/start/pause/resume/cancel` (tek işlem + denetim kaydı) |
-| `GET /api/campaigns/review` | Sonucu belirsiz (`unknown`) gönderimler |
+| `GET /api/campaigns/review`, `POST /api/campaigns/review/{messageId}` | Sonucu belirsiz (`unknown`) gönderimler ve elle çözümü (go-live C7): gövde `{decision: mark_sent \| mark_not_sent \| stop_sequence, confirm?, note?}`. Arayüz: Kampanyalar → İnceleme bekleyenler |
+| `POST /api/campaigns/{id}/leads/reevaluate` | Hariç tutulan kampanya alıcılarını yeniden değerlendirir (go-live C9; neden giderildiyse "Hariç tutulanları yeniden denetle") |
 | `GET/POST /api/templates`, `GET/PATCH …/{id}`, `POST …/{id}/archive`, `POST …/{id}/duplicate`, `POST …/preview` | Şablon yönetimi, sürüm kilidi, taslak önizleme |
 | `GET/PATCH /api/compliance/policies` | Ülke politikaları (PATCH yalnızca **demo** ve yalnızca sıkılaştırır) |
 | `GET/POST /api/compliance/suppressions`, `…/import`, `…/{id}/lift` | Engel listesi; kaldırma açık onay + gerekçe ister, korumalı nedenler (çıkış, şikâyet, silme) kaldırılamaz |
@@ -78,7 +79,7 @@ Canlı hazırlık aşamaları (şirket bilgisinden bağımsız yazılım işleri
 | `GET/PATCH /api/compliance/mailbox-limits` | Posta kutusu düzeyi eşikler (yalnızca sıkılaştırma) |
 | `GET/POST /api/mailboxes`, `PATCH/DELETE …/{id}` | Posta kutusu listesi, Gmail kutusu ekleme (bağlantısız), ad/durum değişikliği, silme (demo ve bağlı kutu değiştirilemez/silinemez) |
 | `GET/PUT/DELETE /api/mailboxes/gmail-client` | Gmail OAuth istemci kimliği ve sırrı (sır yalnızca şifreli gizli depoya yazılır, maskeli bile geri döndürülmez) |
-| `GET …/{id}/oauth`, `POST …/{id}/oauth/start`, `POST …/{id}/oauth/disconnect`, `GET /api/oauth/gmail/callback` | Yetkilendirme durumu, başlatma (varsayılan yalnızca gönderim; okuma ayrı yükseltme), bağlantıyı kesme (yetkiyi iptal etmeyi dener), geri çağrı. **Gerçek Google'a karşı hiç çalıştırılmadı** |
+| `GET …/{id}/oauth`, `POST …/{id}/oauth/start`, `POST …/{id}/oauth/disconnect`, `GET /api/oauth/gmail/callback`, `POST /api/oauth/gmail/callback/result` | Yetkilendirme durumu, başlatma (varsayılan yalnızca gönderim; okuma ayrı yükseltme), bağlantıyı kesme (yetkiyi iptal etmeyi dener), geri çağrı (tarayıcıda bağımsız sonuç sayfası; sekme yenilenirse ilk sonuç gösterilir) ve uygulama penceresi için sonuç sorgusu (go-live C12). **Gerçek Google'a karşı hiç çalıştırılmadı** |
 | `GET /api/mailboxes/{id}/health`, `POST …/{id}/health/reenable` | Sağlık görünümü (bounce oranı, şikâyet kısmi kapsam sayacı), onaylı yeniden etkinleştirme |
 | `POST /api/mailboxes/{id}/test-send`, `POST …/{id}/dns-check` | Kendime test (yalnızca demo); DNS denetimi (demo kutusunda sorgu yok; gerçek kutuda sonuç durumlar halinde saklanır) |
 | `GET /api/inbox/review`, `POST …/{id}` | İnceleme kuyruğu ve kullanıcı kararı (şikâyet raporunda yalnızca "yok say") |
@@ -88,8 +89,17 @@ Canlı hazırlık aşamaları (şirket bilgisinden bağımsız yazılım işleri
 | `GET /api/leads/{id}/campaigns` | Lead'in kampanyalardaki durumu (adres yok) |
 | `POST /api/unsubscribe/{token}` | **Yalnızca demo** çıkış çekirdeği (GET işlem yapmaz; alıcılar ulaşamaz) |
 | `POST /api/dev/inbox` | Demo gelen kutusu simülatörü; `FAZ3_DEMO_INBOX_ENABLED` kapalıyken **404** |
+| `GET /api/compliance/unsubscribe` | Çıkış altyapısının salt okunur durumu (anahtar kimlikleri, özel anahtarın okunup okunamadığı, adres, kanıt, kuyruk sağlığı, çekme) — ağ isteği yok |
+| `POST /api/compliance/unsubscribe/keys/signing`, `POST …/keys/signing/{kid}/revoke` | İmza anahtarı: `{action: ensure \| rotate}` (özel anahtarı okunamayan etkin anahtarda `ensure` yenisine geçer); iptal `{confirm: true}` ister |
+| `POST /api/compliance/unsubscribe/keys/channel`, `POST …/keys/channel/{kid}/revoke` | Kanal anahtarı: aynı biçim; döndürme eski kanal anahtarını iptal eder ve siler |
+| `PUT /api/compliance/unsubscribe/base-url` | Çıkış sunucusu adresi (`{baseUrl}`; `null` kaldırır); kanıtları sıfırlar |
+| `GET /api/compliance/unsubscribe/relay-keys` | `relay-keys.json` (yalnızca genel anahtarlar); yapılandırma eksikse 409 `NOT_CONFIGURED`, özel anahtar okunamıyorsa 409 `KEY_UNREADABLE` |
+| `POST /api/compliance/unsubscribe/verify`, `POST …/health` | Uçtan uca doğrulama ve kuyruk sağlığı (yalnızca kullanıcı eylemiyle ağ isteği); 409 `NOT_CONFIGURED` veya `CHANNEL_KEY_UNREADABLE` (neden kayda geçer) |
+| `PUT /api/compliance/unsubscribe/drain` | Düzenli çekme anahtarı (`{enabled}`; ayar `mail.unsubscribeDrain`) |
+| `GET/PUT /api/compliance/arf-reporters` | Güvenilir ARF rapor sağlayıcı alan adları (≤ 50) |
+| `GET /api/compliance/delivery-alerts` | Çıkış teslimat uyarıları (salt okunur; kampanya ve uyum sayfalarındaki bant) |
 
-**API'si olmayanlar (yalnızca servis işlevi):** HTTPS çıkış adresinin ayarlanması ve uç nokta doğrulaması (`setUnsubscribeBaseUrl`, `verifyOneClickEndpoint`), güvenilir ARF rapor sağlayıcı listesi (`setTrustedReporters`), imza/kanal anahtarı üretimi/döndürme/iptal. Aktarıcı (`src/lib/unsubscribe/relay.ts`) uygulamadan ayrı çalışacak taşınabilir bir modüldür; uygulamada bir rotası yoktur.
+Bütün değiştiren çıkış altyapısı uçları kullanım onayı ister (`requireConsent`) ve denetime yazılır. Aktarıcının kendisi (`src/lib/unsubscribe/relay.ts`, sunucu `src/relay/`) uygulamadan ayrı bir süreçte çalışır; uygulamada bir rotası yoktur.
 
 ## 3. Veri modeli, iç ayarlar, gizli bilgiler ve kilitler
 
@@ -109,7 +119,9 @@ Canlı hazırlık aşamaları (şirket bilgisinden bağımsız yazılım işleri
 | `LEGAL_APPROVALS` (`legal-status.ts`) | 7 madde, hepsi `false` | Gönderim yolu (birleşik kapı) ve hazırlık ekranı |
 | `isLiveSendingPermitted()` (`live-gate.ts`) | bayrak VE tüm onaylar | Uygunluk, gönderim, ileti kurucusu, içerik, Gmail sağlayıcısı |
 
-**İş türleri ve ortam bayrakları (hepsi varsayılan KAPALI; yalnızca E2E sunucusunda `e2e/serve.mjs` demo bayrakları açıktır):** `mail.send` (`FAZ3_DEMO_SCHEDULER_ENABLED`), `inbox.sync` (`FAZ3_DEMO_INBOX_ENABLED`), `unsubscribe.drain` (`UM_UNSUBSCRIBE_DRAIN_ENABLED` ve yapılandırılmış çıkış adresi birlikte gerekir; hiçbir yerde açılmadı).
+**İş türleri ve ortam bayrakları (hepsi varsayılan KAPALI; yalnızca E2E sunucusunda `e2e/serve.mjs` demo bayrakları açıktır):** `mail.send` (`FAZ3_DEMO_SCHEDULER_ENABLED` VEYA canlı gönderim kapısı `isLiveSendingPermitted()`; kapı bugün kapalı), `inbox.sync` (`FAZ3_DEMO_INBOX_ENABLED` VEYA `LIVE_INBOX_READING_ENABLED`; kilit bugün kapalı), `unsubscribe.drain` (`UM_UNSUBSCRIBE_DRAIN_ENABLED` ortam bayrağı VEYA Ayarlar'daki "Talepleri düzenli çek" ayarı (`mail.unsubscribeDrain`), ve yapılandırılmış çıkış adresi; worker zinciri her 10 dakikada bir idempotent olarak yeniden kurar).
+
+**Ana anahtar değişimi (go-live C5):** Ana anahtar çözülemezse uygulama sessizce yenisini üretmez; engelleyici bir pencere açılır ("Uygulamayı kapat", "Tekrar dene", "Veri klasörünü göster", "Gizli bilgileri sıfırla…"); sıfırlama ikinci onay ister ve `master.key.enc` ile `secrets.json` dosyalarını `.bak-<zaman>` adıyla saklar. Anahtar değişince eski belirteçlerdeki alıcı etiketi tutmaz, ama **çıkış talebi kaybolmaz**: belirtecin işaret ettiği kampanya alıcısına çıkış uygulanır ve ayrıca `unsubscribe.recipient_tag_mismatch` denetim kaydı yazılır. Sıfırlamadan sonra imza ve kanal özel anahtarları okunamaz: ayar kartı bunu gösterir ("özel anahtar okunamıyor"), çekme işi `no_channel_key` sağlık kaydı yazar ve uyarı bandı çıkar; kullanıcı iki anahtarda da "Yeni anahtara geç" seçip anahtar dosyasını yeniden yüklemeli ve yeniden doğrulamalıdır (adımlar: docs/10 Bölüm 5).
 
 ## 4. Google verisi ve kişisel veri
 
@@ -143,10 +155,10 @@ Bunlar bilinen, bilinçle ertelenmiş ve **belgelenmiş** eksiklerdir; hiçbiri 
 |---|---|---|---|---|
 | **TB-1** | **ARF şikâyeti kodda hâlâ ayrı sınıf olarak yazılmıyor.** 15.10-1'den (migrasyon `0003`) bu yana `messages.classification` CHECK kısıtı `complaint` kabul ediyor ve eski işaretli satırlar `complaint`'e taşındı (`error_code` işareti korundu). Ancak kod 15.10-2'ye kadar yeni şikâyeti hâlâ `other` + `error_code = arf_complaint` (doğrulanmış) / `arf_complaint:<neden>` (doğrulanmamış) olarak yazar ve işarete göre okur | Sorgular ve sayaç bir **metin işaretine** dayanır; dışa aktarım/ham sorguda sınıf `other` görünür; arayüz işareti etiketler (Şikâyet raporu (ARF)). İşaret yalnızca şikâyet yolunda yazılır, kullanıcı girdisiyle oluşamaz (testli) | Migrasyon ve taşıma **15.10-1'de yapıldı**. Kalan, **Aşama 15.10-2:** yazımın, sorgunun ve arayüzün sütuna geçirilmesi (geri alma sözleşmesi gereği `error_code` işaretiyle çift yazım) | **Evet — ayrıca açık onay** |
 | **TB-2** | **Şikâyet ve abonelikten çıkış sayaçları/durumları ayrılmadı.** Şikâyetle durdurulan diziler de `unsubscribed` durumunu kullanır. 15.10-1 ayrı durum yerine `campaign_leads.stop_reason` (`unsubscribe`/`complaint`) sütununu ekledi ve mevcut satırları geri doldurdu; kod henüz bu sütunu yazmadığından o tarihten sonraki yeni `unsubscribed` satırlarında `stop_reason` boş (`NULL`) kalır. Kampanya özet sayaçları (`counts`) ikisini aynı `unsubscribed` kovasında toplar | Ayrım yalnızca `exclusionReasons=["arf_complaint"]` işaretiyle ve arayüz etiketiyle ("Şikâyet nedeniyle durduruldu" / "Listeden çıkmak istedi") yapılır; **suppression nedeni (`complaint` / `unsubscribe`) ve denetim kayıtları (`inbound.complaint` / `inbound.unsubscribe`) zaten ayrıdır**. Özet sayaçlar, dışa aktarımlar ve ileride panolar şikâyeti çıkış olarak sayar | Sütun **15.10-1'de eklendi**. Kalan, **Aşama 15.10-2:** `stop_reason` yazımı + ayrı sayaçlar, özetler ve arayüz | **Evet — ayrıca açık onay** |
-| TB-3 | Çıkış adresi, uç nokta doğrulaması, ARF rapor sağlayıcı listesi ve kanal/imza anahtarı yönetimi için **arayüz/API yok** (yalnızca servis işlevleri) | Canlıya geçişte bu işlemler elle kod çağrısı gerektirir; kullanıcı hatasına karşı onay/geri alma akışı yok | Kimlik doğrulama, onay ve denetim tasarımıyla ayrı bir arayüz aşaması | Hayır (tasarım onayı önerilir) |
-| TB-4 | Çıkış olay kuyruğu için **uyarı kanalı yok** (derinlik/yaş yalnızca hazırlık ekranında) | Aktarıcı olayları geciktirir/atarsa fark edilmesi ekranı açmaya bağlı | E-posta/push uyarı eşiği | Hayır |
-| TB-5 | Aktarıcı hız sınırı `clientKey` verilmezse tek genel kova | Saldırgan kovayı doldurup geçerli çıkış isteklerini 429'latabilir | Dağıtım ortamında güvenilir istemci adresi başlığı | Hayır (dağıtım gerekir) |
-| TB-6 | Aktarıcı `ReplayStore` bellek içi | Yeniden başlatmada kopya olay üretir; uygulamada `jti` ile güvenle tekilleştirilir (yalnızca trafik artar) | Kalıcı tekrar oynatma kaydı | Hayır |
+| ~~TB-3~~ | **Çözüldü (go-live C3+C4):** çıkış adresi, uç nokta doğrulaması, ARF listesi, imza/kanal anahtarı ve düzenli çekme için API (Bölüm 2) ve arayüz: Ayarlar → Abonelikten çıkış altyapısı (HTTPS) | Değiştiren işlemler onay ister ve denetime yazılır; geri alınamaz iptaller kırmızı onay penceresiyle | — | — |
+| TB-4 | **Kısmen çözüldü (go-live C14):** uygulama içi uyarı bandı (kampanya ve uyum sayfaları; `GET /api/compliance/delivery-alerts`): sağlıksız kuyruk, 24 saatten eski/hiç yapılmamış sağlık denetimi, okunamayan kanal anahtarı, başarısız doğrulama, yaklaşan/dolmuş kanıt. **E-posta/push veya işletim sistemi bildirimi yok** | Uyarıyı görmek uygulamayı açmaya bağlı | E-posta/push veya Electron bildirimi | Hayır |
+| TB-5 | Aktarıcı hız sınırı `clientKey` verilmezse tek genel kova. **Dağıtılabilir aktarıcıda çözüldü:** güvenilir vekil başlığı (`X-Real-IP`) ile istemci başına kova; IPv6 istemciler /64 önekine göre gruplanır; kova sınırı dolunca hepsi değil önce süresi dolmuş/sınırı aşmamış eskiler atılır | Kütüphane varsayılanı (clientKey yok) yine tek kovadır | — | Hayır |
+| TB-6 | **Dağıtılabilir aktarıcıda çözüldü:** dosya destekli tekrar kaydı (`<RELAY_DATA_DIR>/replay.log`). Kayıt yalnızca 10 dakikalık sel korumasıdır (asıl tekilleştirme uygulamada `jti`); böylece engel kaldırıldıktan sonraki yeni bir tıklama yutulmaz. Kütüphane varsayılanı bellek içidir | — | — | Hayır |
 | TB-7 | Kampanya alıcısı kaydı silinirse çıkış isteği uygulanamaz (`lead_not_found`) | Gerçek kampanyalar silinmez (yalnızca demo temizliği siler); belirteçte adres olmadığından alternatif yok | Gerekirse silinen alıcı için özet tabanlı yedek akış | Hayır |
 | TB-8 | Yerel Windows testlerinde ~150 ortam hatası (`EPERM`, POSIX izni, yol biçimi) | Linux CI belirleyici ve yeşil; yerelde gizlenmedi | Windows uyumlu geçici dizin/kapatma stratejisi | Hayır |
 | TB-9 | 320 px üst çubuk taşması. (`README.md` durum paragrafı canlıya geçiş belgeleriyle birlikte güncellendi.) | Electron `minWidth: 760`; 760/800 px'te taşma yok | Küçük arayüz/belge düzeltmesi | Hayır |
@@ -201,7 +213,6 @@ Her girdinin uygulamada **nereye ve ne zaman** girildiği, gizli olup olmadığ�
 | Kuyruk/sağlık uyarı kanalı (e-posta veya push) | Çıkış olaylarının gecikmesinin ekrana bakmadan fark edilmesi (TB-4) |
 | İkinci (yedek) aktarıcı veya izleme hizmeti | Erişilebilirlik; yazılım için şart değil |
 | Google Cloud bütçe uyarısı / kota sınırları | Beklenmedik maliyet ve kota aşımı koruması (Places/Maps için zaten önerilir) |
-| Kalıcı tekrar oynatma kaydı için ek depolama (TB-6) | Aktarıcı yeniden başlatmalarında kopya trafiğini azaltır |
 
 ### 8.4 Hukuki kararlar (hukuk/şirket; yazılım bunları varsaymaz)
 
@@ -235,6 +246,6 @@ Faz 3 yalnızca şunların **hepsi** kayda geçtikten sonra "tamamlandı" olarak
 
 ## 11. Çalıştırma
 
-- Varsayılan: gerçek gönderim ve gerçek gelen kutusu kapalı; `FAZ3_DEMO_SCHEDULER_ENABLED`, `FAZ3_DEMO_INBOX_ENABLED` ve `UM_UNSUBSCRIBE_DRAIN_ENABLED` tanımsız (kapalı). Demo kampanya gönderimi için yalnızca geçici/test veri klasöründe `FAZ3_DEMO_SCHEDULER_ENABLED=1` verilir.
+- Varsayılan: gerçek gönderim ve gerçek gelen kutusu kapalı; `FAZ3_DEMO_SCHEDULER_ENABLED`, `FAZ3_DEMO_INBOX_ENABLED` ve `UM_UNSUBSCRIBE_DRAIN_ENABLED` tanımsız (kapalı); düzenli çekme ayrıca Ayarlar'dan ("Talepleri düzenli çek") açılabilir ve yalnızca çıkış adresi tanımlıyken çalışır. Demo kampanya gönderimi için yalnızca geçici/test veri klasöründe `FAZ3_DEMO_SCHEDULER_ENABLED=1` verilir.
 - Testler: `npm run typecheck`, `npm run lint`, `npm run format:check`, `npm test`, `npm run build`, `npx playwright test`. Windows'ta Vitest için ASCII bir geçici klasör (`TMPDIR`/`TMP`/`TEMP`) kullanın.
 - İlgili belgeler: [Canlı doğrulama listesi](09-FAZ3-CANLI-DOGRULAMA.md), [Canlıya geçiş](10-CANLIYA-GECIS.md) (şirket girdileri, paylaşım kuralları, canlı test sırası), [UYUM](UYUM.md) (taslak), [LIA](LIA.md) (iskelet), [UI Rehberi](07-UI-REHBERI.md).

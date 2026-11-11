@@ -24,7 +24,7 @@ Bu belge, Universal Mail'in **tek tıklamalı abonelikten çıkış aktarıcıs�
 | Sunucu | Debian 12 veya Ubuntu 24.04; 1 vCPU ve 512 MB RAM yeterli. **Kalıcı** ext4/xfs disk gerekir (geçici/tmpfs olmamalı). |
 | Erişim | SSH; 80 ve 443 portları internete açık olmalı. |
 | Saat | NTP açık olmalı. Kanal en çok ±5 dakika saat farkına izin verir. |
-| Uygulama tarafı | Uygulamada imza anahtarı, kanal anahtarı ve "Abonelikten çıkış adresi" tanımlı olmalı. Anahtar dosyası (`relay-keys.json`) uygulamadan indirilir. |
+| Uygulama tarafı | Uygulamada **Ayarlar → Abonelikten çıkış altyapısı (HTTPS)** ekranında imza anahtarı, kanal anahtarı ve "Çıkış sunucusu adresi" tanımlı olmalı. Anahtar dosyası (`relay-keys.json`) aynı ekrandaki "Anahtar dosyasını indir" düğmesiyle indirilir. |
 
 > **Port yazmayın.** Uygulama, çıkış adresinde açık port (`:8443` gibi) kabul etmez. Aktarıcı mutlaka standart
 > **443** portunda yayın yapmalıdır. `/u/*` ve `/spool/*` aynı kökende (aynı alt alan adında) olmalıdır.
@@ -147,6 +147,12 @@ Caddyfile'a şunları **eklemeyin**:
 - Erişim günlüğü (`log` yönergesi). İstek yolu abonelikten çıkış belirtecini içerir. Aktarıcının kendi günlüğü
   belirteç veya yol yazmaz; yalnızca yöntem, yol sınıfı (`u`, `spool`, `healthz`, `other`) ve durum kodunu yazar.
 
+Verilen Caddyfile Caddy'nin **hata günlüğünü de kapatır** (`log default { exclude http.log.error }`) ve hatalar için
+`handle_errors` tanımlar. Sebep: aktarıcıya ulaşılamadığında (yeniden başlatma, güncelleme, çökme) Caddy'nin varsayılan
+hata kaydı isteğin tam yolunu (yani çıkış belirtecini), alıcının IP adresini ve `/spool/*` için `X-UM-Kid/Ts/Sig` imza
+başlıklarını `journalctl -u caddy` içine yazardı. Bu iki bloğu kaldırmayın ve Caddy günlük düzeyini `DEBUG`'a
+çıkarmayın. Aktarıcıya ulaşılamazsa istemci `503` ve `Retry-After: 60` alır; Gmail yeniden dener.
+
 ## 6. Güvenlik duvarı
 
 ```bash
@@ -197,9 +203,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://cikis.firma.com/healthz # 308
 
 ## 9. Anahtar dosyasını yerleştirin
 
-1. Uygulamada sırasıyla şunları yapın: imza anahtarını oluşturun, kanal anahtarını oluşturun, "Abonelikten çıkış
-   adresi"ni `https://cikis.firma.com` olarak kaydedin ve **aktarıcı anahtar dosyasını** (`relay-keys.json`)
-   indirin.
+1. Uygulamada **Ayarlar → Abonelikten çıkış altyapısı (HTTPS)** ekranında sırasıyla: "İmza anahtarı" adımında
+   **Anahtar oluştur**, "Kanal anahtarı" adımında **Anahtar oluştur**, "Çıkış sunucusu adresi" alanına
+   `https://cikis.firma.com` yazıp **Adresi kaydet**, ardından **Anahtar dosyasını indir** (`relay-keys.json`).
 2. Dosyayı **yalnızca SSH ile** kopyalayın. E-posta, sohbet veya bulut paylaşımı kullanmayın:
 
    ```bash
@@ -255,36 +261,66 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST \
 curl -s -o /dev/null -w '%{http_code}\n' $H/spool/stats              # 401
 ```
 
-Ardından uygulamada **"Uç noktayı doğrula"** düğmesine basın. Beklenen sonuç `verified` olmalı. Doğrulama sınama
-belirteci kullanır ve hiçbir alıcıya dokunmaz. Sonra **teslimat sağlığını** denetleyin: `ok`, derinlik 0.
+Ardından uygulamada aynı ekranın **"Uçtan uca doğrula"** adımında **Doğrula** düğmesine basın. Beklenen ileti:
+**"Uç nokta doğrulandı."** (kod `verified`). Doğrulama sınama belirteci kullanır ve hiçbir alıcıya dokunmaz. Sonra
+**"Talep kuyruğu sağlığı"** adımında **Kuyruğu denetle**'ye basın. Beklenen ileti: **"Kuyruk sağlıklı."** (kod `ok`),
+derinlik 0. Son olarak **"Talepleri düzenli çek"** anahtarını açın: uygulama açıkken talepler her dakika çekilir ve
+kanıt 25 günden eskiyse kendiliğinden yeniden doğrulanır. Aktarıcı tek başına doğrulama başlatmaz.
 
-Uygulamadaki bu düğmeler TB-3 kapsamındadır (uygulama tarafı API ve arayüz). Aktarıcı tek başına doğrulama
-başlatmaz.
+Uygulamada görülen iletiler ve kodlar:
+
+| İleti (uygulama) | Kod |
+|---|---|
+| Uç nokta doğrulandı. | `verified` |
+| Sunucu isteği kabul etmedi… | `bad_status` |
+| Sunucu kanal anahtarını tanımıyor… | `channel_failed` (ayrıntı `http_error_401`) |
+| Kanal anahtarının özel anahtarı okunamıyor… | `no_channel_key` (gizli bilgiler sıfırlandı; bkz. §12) |
+| Kuyruk sağlıklı. | `ok` |
 
 ## 11. Dayanıklılık sınaması (isteğe bağlı, önerilir; docs/09 K2)
 
-1. Uygulamada doğrulamayı başlatın veya bir sınama POST'u gönderin.
-2. Sunucuda aktarıcıyı zorla öldürün: `sudo systemctl kill -s KILL um-relay`.
-3. Olay dosyasının durduğunu görün: `sudo ls /var/lib/um-relay/spool/pending/`.
-4. systemd aktarıcıyı 2 saniye içinde yeniden başlatır. Uygulamanın olayı çektiğini doğrulayın (kuyruk derinliği
-   0'a iner).
+"Doğrula" sınama olayını gönderir ve hemen ardından kuyruktan çekip onaylar; bu yüzden olayı kuyrukta tutmak için
+uygulamanın çekmesi geçici olarak engellenir. Elle bir sınama POST'u işe yaramaz: geçerli imzalı belirteç olmadan
+aktarıcı 400 döner ve hiçbir şey yazmaz.
+
+1. Uygulamada **Ayarlar → Abonelikten çıkış altyapısı (HTTPS)** ekranında "Kanal anahtarı" adımında
+   **Yeni anahtara geç**'i seçin ve yeni anahtar dosyasını **henüz yüklemeyin**. ("Talepleri düzenli çek" açıksa bu
+   sınama süresince kapatın.)
+2. **Doğrula**'ya basın. Beklenen ileti: "Sunucu kanal anahtarını tanımıyor: güncel anahtar dosyasını yükleyin."
+   Sınama POST'u 200 almış ve olay diske yazılmıştır, ama uygulama onu çekemez.
+3. Sunucuda olay dosyasını görün: `sudo ls /var/lib/um-relay/spool/pending/` (bir dosya).
+4. Aktarıcıyı zorla öldürün: `sudo systemctl kill -s KILL um-relay`. systemd yaklaşık 2 saniye içinde yeniden
+   başlatır; dosyanın hâlâ orada olduğunu yeniden `ls` ile doğrulayın.
+5. **Anahtar dosyasını indir** ile yeni dosyayı alıp 9. adımdaki gibi yerleştirin. **Doğrula**'ya basın (bu, bekleyen
+   olayları da çeker). Ardından **Kuyruğu denetle**: beklenen "Kuyruk sağlıklı." ve derinlik 0. "Kuyruğu denetle"
+   yalnızca sayıları okur, olay çekmez. Sınamadan önce kapattıysanız "Talepleri düzenli çek"i yeniden açın.
+
+Eski sınama olayı uygulamaya ulaştığında zararsızca onaylanır (hiçbir alıcıya dokunmaz).
 
 ## 12. Günlükler, bakım, güncelleme
 
 - **Günlük:** `journalctl -u um-relay -f`. İstek başına tek satır yazılır, örneğin
-  `2026-11-11T10:00:00.000Z POST u 200 3ms`. Belirteç ve yol hiçbir zaman yazılmaz.
+  `2026-11-11T10:00:00.000Z POST u 200 3ms`. Aktarıcının günlüğü belirteci ve yolu hiçbir zaman yazmaz. Caddy'nin
+  erişim ve hata günlükleri verilen Caddyfile ile kapalıdır (§5); bunları açmayın.
 - **Güncelleme:** yeni `relay.cjs` dosyasını 1. ve 3. adımlardaki gibi `/opt/um-relay/relay.cjs` yoluna kurun,
   sonra `sudo systemctl restart um-relay` çalıştırın. Kuyruk diskte durduğu için olay kaybolmaz.
 - **Anahtar döndürme:**
-  1. Uygulamada döndürün.
-  2. Doğrulama `bad_status` verir; bu beklenir.
-  3. Yeni anahtar dosyasını 9. adımdaki gibi yerleştirin.
-  4. Yeniden doğrulayın; sonuç `verified` olmalı.
+  1. Uygulamada ilgili adımda **Yeni anahtara geç**'i seçin.
+  2. Doğrulama "Sunucu isteği kabul etmedi…" (`bad_status`, imza anahtarı) veya "Sunucu kanal anahtarını
+     tanımıyor…" (`channel_failed`/`http_error_401`, kanal anahtarı) verir; bu beklenir.
+  3. **Anahtar dosyasını indir** ile yeni dosyayı alıp 9. adımdaki gibi yerleştirin.
+  4. **Doğrula**'ya basın; beklenen ileti "Uç nokta doğrulandı."
 
-  Eski imza anahtarı dosyada kaldıkça önceden gönderilmiş e-postalardaki bağlantılar çalışmayı sürdürür.
+  Eski (emekli) imza anahtarı dosyada kaldıkça önceden gönderilmiş e-postalardaki bağlantılar çalışmayı sürdürür.
+  Kanal anahtarı döndürülünce eski kanal anahtarı iptal edilir; yeni dosya yüklenince sunucuda da tanınmaz.
+- **Gizli bilgiler sıfırlandıysa** (uygulama açılışta ana anahtarı çözemedi ve "Gizli bilgileri sıfırla…" seçildi):
+  imza ve kanal özel anahtarları kaybolur; ekranda ilgili adımda "özel anahtar okunamıyor" uyarısı görünür ve
+  talepler çekilemez (talepler sunucuda bekler, kaybolmaz). Sırasıyla: "İmza anahtarı" ve "Kanal anahtarı"
+  adımlarında **Yeni anahtara geç**, **Anahtar dosyasını indir** ve 9. adımdaki gibi yerleştirme, **Doğrula**,
+  **Kuyruğu denetle**. Önceden gönderilmiş bağlantılar çalışmayı sürdürür (genel anahtarlar uygulamada kayıtlıdır).
 - **Yedek:** `/var/lib/um-relay/spool/pending/` onaylanmamış olayları tutar. Sunucuyu taşırken bu dizini koruyun.
   Olaylar uygulama onaylayana kadar silinmez.
-- **Disk:** kuyruk derinliği uygulamanın "teslimat sağlığı" ekranında görünür. 1000'i aşarsa `queue_deep` uyarısı
+- **Disk:** kuyruk derinliği uygulamanın "Talep kuyruğu sağlığı" adımında görünür. 1000'i aşarsa `queue_deep` uyarısı
   çıkar; bu, uygulamanın uzun süredir olay çekmediğini gösterir.
 
 ## 13. Docker alternatifi
@@ -306,7 +342,8 @@ systemd yerine Docker kullanmak isterseniz `deploy/relay/Dockerfile` dosyasına 
 | `/healthz` 503 | Anahtar dosyası yok, geçersiz ya da kanal/imza anahtarı boş; veya veri dizini yazılamıyor | `journalctl -u um-relay` içinde `keys rejected code=…` satırına bakın. 9. adımı yineleyin. |
 | `code=origin_mismatch` | Dosyadaki `origin` ile `RELAY_PUBLIC_ORIGIN` farklı | Uygulamadaki çıkış adresi ile birimdeki adresi eşitleyin. |
 | `code=kid_mismatch` / `bad_entry` | Dosya elle düzenlenmiş veya bozulmuş | Dosyayı uygulamadan yeniden indirin. |
-| Doğrulama `bad_status` | Aktarıcı kapalı veya güncel imza anahtarı dosyada yok | Hizmet durumunu denetleyin ve anahtar dosyasını yeniden yerleştirin. |
-| Doğrulama veya sağlık `channel_http_error 401` | Aktarıcıda kanal anahtarı yok ya da saat farkı 5 dakikadan büyük | Anahtar dosyasını yeniden yerleştirin; `timedatectl` çıktısını denetleyin. |
+| Doğrulama: "Sunucu isteği kabul etmedi…" (`bad_status`) | Aktarıcı kapalı veya güncel imza anahtarı dosyada yok | Hizmet durumunu denetleyin ve anahtar dosyasını yeniden yerleştirin. |
+| Doğrulama veya sağlık: "Sunucu kanal anahtarını tanımıyor…" (`channel_failed`, `http_error_401`) | Aktarıcıda güncel kanal anahtarı yok ya da saat farkı 5 dakikadan büyük | Anahtar dosyasını yeniden yerleştirin; `timedatectl` çıktısını denetleyin. |
+| "Kanal anahtarının özel anahtarı okunamıyor…" (`no_channel_key`) | Uygulamada gizli bilgiler sıfırlandı | §12 "Gizli bilgiler sıfırlandıysa" adımlarını izleyin. |
 | Sertifika alınamıyor | DNS kaydı yanlış veya 80/443 kapalı | `dig +short cikis.firma.com` ve güvenlik duvarını denetleyin; `journalctl -u caddy`. |
 | Çok sayıda 429 | Hız sınırı | Vekil başlığının iletildiğini denetleyin (Caddyfile `header_up X-Real-IP`); gerekirse `RELAY_RATE_LIMIT_POST` değerini artırın. |

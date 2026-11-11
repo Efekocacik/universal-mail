@@ -1,6 +1,6 @@
 import type { DbExecutor } from "@/lib/db/client";
 import { getSetting, type SettingValue } from "@/lib/settings";
-import { VERIFICATION_TTL_MS } from "./endpoint";
+import { DELIVERY_FRESH_MS, VERIFICATION_TTL_MS } from "./endpoint";
 
 /**
  * Çıkış (unsubscribe) teslimat uyarıları (C14 / TB-4). SALT OKUNUR ve AĞSIZ: yalnızca saklanan son sağlık kaydına ve
@@ -12,6 +12,11 @@ import { VERIFICATION_TTL_MS } from "./endpoint";
  *  - `proof_expiring`: uç nokta kanıtı `PROOF_WARN_MS` (5 gün) içinde sona eriyor. Süre dolunca canlı gönderim için
  *    çıkış bağlantısı hazırlanamaz (sessizce durur).
  *  - `proof_expired`: kanıt (aynı adres ve aynı etkin anahtar için) süresi dolmuş.
+ *  - `delivery_stale`: uç nokta doğrulanmış (kanıt bu adres için var) ama kuyruk sağlığı hiç denetlenmemiş ya da son
+ *    denetim `DELIVERY_FRESH_MS`'ten (24 saat) eski: düzenli çekme kapalı, çalışmıyor veya takılmış olabilir; talepler
+ *    aktarıcıda birikirken son "sağlıklı" kaydı sonsuza dek gösterilmez.
+ *  - `verify_failed`: kanıt yok (ör. kendiliğinden yeniden doğrulama başarısız olup kanıt düştü) ve son doğrulama
+ *    denemesi başarısız: canlı gönderim için çıkış bağlantısı hazırlanamaz.
  * Uç nokta hiç yapılandırılmadıysa uyarı YOKTUR (bugünkü varsayılan durum: gürültü üretmez).
  */
 
@@ -21,20 +26,35 @@ const DAY_MS = 86_400_000;
 export type DeliveryAlert =
   | { kind: "delivery_unhealthy"; code: string; checkedAt: number }
   | { kind: "proof_expiring"; expiresAt: number; daysLeft: number }
-  | { kind: "proof_expired"; expiredAt: number };
+  | { kind: "proof_expired"; expiredAt: number }
+  | { kind: "delivery_stale"; checkedAt: number | null }
+  | { kind: "verify_failed"; code: string; at: number };
 
 export interface DeliveryAlertInput {
-  endpoint: Pick<SettingValue<"mail.unsubscribeEndpoint">, "baseUrl" | "verified" | "delivery">;
+  endpoint: Pick<
+    SettingValue<"mail.unsubscribeEndpoint">,
+    "baseUrl" | "verified" | "delivery" | "lastAttempt"
+  >;
   /** Etkin (iptal edilmemiş) imza anahtarının kimliği; yoksa null. */
   currentKid: string | null;
 }
 
 export function computeDeliveryAlerts(input: DeliveryAlertInput, now: number): DeliveryAlert[] {
-  const { baseUrl, verified, delivery } = input.endpoint;
+  const { baseUrl, verified, delivery, lastAttempt } = input.endpoint;
   if (!baseUrl) return [];
   const out: DeliveryAlert[] = [];
   if (delivery && !delivery.ok) {
     out.push({ kind: "delivery_unhealthy", code: delivery.code, checkedAt: delivery.checkedAt });
+  } else if (
+    // Hiç doğrulanmamış (yeni girilmiş) bir adres için gürültü üretilmez; kanıt varsa sağlık kaydı taze olmalıdır.
+    verified &&
+    verified.baseUrl === baseUrl &&
+    (!delivery || now - delivery.checkedAt > DELIVERY_FRESH_MS)
+  ) {
+    out.push({ kind: "delivery_stale", checkedAt: delivery?.checkedAt ?? null });
+  }
+  if (!verified && lastAttempt && !lastAttempt.ok) {
+    out.push({ kind: "verify_failed", code: lastAttempt.code, at: lastAttempt.at });
   }
   // Kanıt yalnızca aynı adres ve şu anki imza anahtarı için anlamlıdır (anahtar döndürüldüyse süre değil yeniden
   // doğrulama sorunudur; bunu uç nokta ekranı gösterir).

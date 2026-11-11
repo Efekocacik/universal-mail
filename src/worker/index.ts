@@ -6,7 +6,10 @@ import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { isMailSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
-import { startUnsubscribeDrain } from "@/lib/unsubscribe/drain-job";
+import {
+  scheduleUnsubscribeDrainIfActive,
+  startUnsubscribeDrain,
+} from "@/lib/unsubscribe/drain-job";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import {
@@ -45,7 +48,12 @@ async function main(): Promise<void> {
   const inboxEnabled = isDemoInboxEnabled(process.env);
   registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });
   const inbox = await startInboxScheduler(db, { env: process.env });
-  if (inbox.enabled) console.log("[worker] demo gelen kutusu açık (yalnızca demo).");
+  if (inbox.enabled)
+    console.log(
+      inbox.live
+        ? "[worker] gelen kutusu eşitleme açık (gerçek Gmail okuma dahil)."
+        : "[worker] demo gelen kutusu açık (yalnızca demo).",
+    );
   const drain = await startUnsubscribeDrain(db, { env: process.env });
   if (drain.enabled) console.log("[worker] çıkış olayı çekme işi açık.");
   const mailScheduler = await startMailScheduler(db, {
@@ -87,12 +95,21 @@ async function main(): Promise<void> {
   };
   void housekeeping();
   const interval = setInterval(housekeeping, 6 * 3_600_000);
+  // Çıkış olayı çekme zinciri kendini yeniden planlar; beklenmedik bir kopmaya karşı (ör. iş başarısız işaretlendi)
+  // düzenli olarak yeniden kurulur. İdempotent: kuyrukta/çalışan tur varsa yenisi eklenmez; iş kapalıysa veya adres
+  // yoksa veritabanına yazmaz.
+  const rearmDrain = setInterval(() => {
+    scheduleUnsubscribeDrainIfActive(db, { env: process.env }).catch((e) =>
+      console.error("[worker] çıkış çekme işi yeniden kurulamadı:", e),
+    );
+  }, 10 * 60_000);
 
   const shutdown = () => {
     console.log("[worker] kapanış isteği alındı; iş güvenle durduruluyor...");
     worker.stop();
     mailScheduler.stop();
     clearInterval(interval);
+    clearInterval(rearmDrain);
     setTimeout(() => process.exit(0), 20_000).unref();
   };
   process.on("SIGINT", shutdown);

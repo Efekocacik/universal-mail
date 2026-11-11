@@ -2,7 +2,7 @@ import { database } from "@/lib/api/http";
 import { t } from "@/lib/i18n";
 import { completeAuthorization, getOAuthDeps, OAuthError } from "@/lib/mail/gmail/oauth";
 import { oauthResultText, type OAuthResultLike } from "@/lib/mail/gmail/oauth-messages";
-import { recordOAuthResult } from "@/lib/mail/gmail/oauth-result";
+import { lookupOAuthResult, recordOAuthResult } from "@/lib/mail/gmail/oauth-result";
 
 export const dynamic = "force-dynamic";
 
@@ -90,6 +90,12 @@ export async function GET(req: Request): Promise<Response> {
     };
   } catch (e) {
     const kind = e instanceof OAuthError ? e.kind : "token_exchange_failed";
+    if (kind === "invalid_state") {
+      // Aynı geri çağrı sekmesi yenilendi/geri yüklendi: state zaten kullanıldı. İlk sonuç kayıtlıysa onu göster
+      // (başarılı bir bağlantı "kurulamadı" diye gösterilmez); kayıt değiştirilmez.
+      const prev = lookupOAuthResult(state);
+      if (prev) return page({ ok: prev.ok, reason: prev.reason, readDenied: prev.readDenied });
+    }
     result = { ok: false, reason: kind, readDenied: false, mailboxId: null };
   }
   recordOAuthResult(state, result);

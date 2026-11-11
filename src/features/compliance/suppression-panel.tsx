@@ -209,6 +209,9 @@ function ImportDialog({
       suppressionImportApi.run(v.text, v.confirmIrreversible),
     {
       invalidate: INVALIDATE,
+      // Önizlemeden sonra veri değiştiyse 409 CONFIRMATION_REQUIRED olağan bir onay adımıdır: kırmızı hata bildirimi
+      // değil, yalnızca onay penceresi gösterilir (bkz. runImport).
+      silentCodes: ["CONFIRMATION_REQUIRED"],
       onSuccess: (r) => {
         setConfirmOpen(false);
         setReport(r);

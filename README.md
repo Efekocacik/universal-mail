@@ -15,6 +15,7 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Faz 3 Notları](docs/08-FAZ3-NOTLARI.md) — şablonlar, kampanya, gönderim, uyum; açık teknik borç ve şirketten beklenenler
 - [Faz 3 Canlı Doğrulama](docs/09-FAZ3-CANLI-DOGRULAMA.md) — yalnızca gerçek hesapla kanıtlanabilecek maddeler, kilitlerin açılma sırası, kanıt biçimi
 - [Canlıya Geçiş](docs/10-CANLIYA-GECIS.md) — şirket girdileri (nereye, ne zaman, gizli mi), paylaşım kuralları, aşamalı canlı test sırası
+- [Çıkış aktarıcısı kurulumu](deploy/relay/README.md) — HTTPS tek tıklamalı abonelikten çıkış aktarıcısının Linux sunucusuna (systemd + Caddy) kurulumu
 
 ## Kurulum modeli
 Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
@@ -47,5 +48,6 @@ npm run dev:demo   # aynısı, ayrı veri klasörü (.data-demo) + demo kampanya
 npm test           # birim ve entegrasyon testleri
 npm run build && npx playwright test   # uçtan uca testler
 npm run dist       # macOS/Windows kurulum paketi (bulutta: GitHub Actions)
+npm run build:relay  # dist/relay/relay.cjs — HTTPS çıkış aktarıcısı (bkz. deploy/relay/README.md)
 ```
 İlk denemede kurulum sihirbazında **Demo modu**'nu seçin: Google anahtarı olmadan yapay verilerle tüm akışı görebilirsiniz.

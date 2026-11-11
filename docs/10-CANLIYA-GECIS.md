@@ -4,21 +4,23 @@
 
 > Bu belge şirketten **hangi bilginin, nereye, ne zaman** girileceğini, neyin geliştiriciyle paylaşılabileceğini ve canlı testlerin hangi sırayla yapılacağını tek yerde toplar. Hesap kurulumunun ayrıntısı: [`04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). Durum, kararlar ve açık teknik borç: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md). Doğrulama maddeleri ve kanıt biçimi: [`09-FAZ3-CANLI-DOGRULAMA.md`](09-FAZ3-CANLI-DOGRULAMA.md). Bir çelişki görürseniz **kod belirleyicidir**.
 
-## 0. İşaretler ve bağımlı paketler
+## 0. İşaretler ve paket durumu
 
 **Zaman:** **ŞİMDİ** = bugünkü sürümle girilebilir ve denenebilir · **AKTARICI** = HTTPS tek tıklamalı çıkış aktarıcısı için gerekir · **PİLOT** = gerçek gönderimden önce gerekir.
 
-Bazı adımlar, henüz birleştirilmemiş yazılım paketlerine bağlıdır. Bu adımlar aşağıda köşeli parantezli işaretle gösterilir; **ilgili paket ana dala birleştirilmeden o adım yapılamaz** ve "yapıldı" sayılmaz.
+Canlıya geçiş hazırlık paketlerinin hepsi `feat/golive-prep` dalında birleştirildi (**ana dala henüz birleştirilmedi**; ana dala alınana kadar aşağıdaki adımlar o daldan derlenen sürümle yapılır). Köşeli parantezli işaretler, bir adımın hangi pakete dayandığını gösterir. Paketler kapıları AÇMAZ: hepsi kodda kapalı kilitlerin arkasındadır.
 
-| İşaret | Eksik olan | Paket |
-|---|---|---|
-| **[AKTARICI]** | Dağıtılabilir çıkış aktarıcısı sunucusu (Node süreci, dayanıklı kuyruk, anahtar dosyası, Caddy/systemd örnekleri) ve RFC 8058 `multipart/form-data` düzeltmesi. Bugün aktarıcı yalnızca kütüphane işlevidir; depoda onu başlatan bir sunucu yoktur | C2 |
-| **[TB-3]** | Çıkış altyapısı için API ve arayüz: imza ve kanal anahtarı, çıkış adresi, anahtar dosyasının indirilmesi, uçtan uca doğrulama, sağlık denetimi, sürekli çekme (drain) ayarı, ARF rapor sağlayıcı listesi. Bugün bunlar yalnızca servis işlevidir (`08` TB-3) | C3 + C4 |
-| **[GÖNDERİM]** | Canlı gönderim bağlantısı: zamanlayıcının, dağıtıcının ve kampanyaların gerçek (Gmail) kutuyu kabul etmesi. Bugün kampanya, zamanlayıcı ve dağıtıcı yalnızca demo kutuyla çalışır; kapılar açılsa bile gerçek kampanya gönderilmez | C1 |
-| **[ANAHTAR]** | Ana anahtar dayanıklılığı: anahtar çözülemezse sessizce yenisinin üretilmemesi, kaybolan çıkış taleplerinin önlenmesi, imzalı macOS sürümü (Bölüm 5) | C5 |
-| **[SÜRÜM]** | Kapıları açan bilinçli sürüm ve canlı ülke politikasını onay kaydıyla açan betik (`scripts/approve-live-country.ts`, planlandı). Uygulama içinden canlı ülke politikası açılamaz | C10 |
-| **[GELEN]** | Gerçek Gmail gelen kutusu işinin bağlanması. Yalnızca bounce ve yanıtların **otomatik** işlenmesi isteniyorsa gerekir; yoksa gelen iletiler elle incelenir | C6 |
-| **[BELİRSİZ]** | "Belirsiz" (`unknown`) sonuçlu gönderimi elle çözme akışı. Yoksa böyle bir dizi kalıcı olarak `in_flight` kalır ve kampanya bitmez | C7 |
+| İşaret | Ne sağlar | Paket | Durum |
+|---|---|---|---|
+| **[AKTARICI]** | Dağıtılabilir çıkış aktarıcısı (`src/relay/`, `npm run build:relay` → `dist/relay/relay.cjs`), dayanıklı kuyruk, anahtar dosyası, Caddy/systemd/Docker örnekleri, RFC 8058 `multipart/form-data` | C2 | Kodlandı; **hiçbir sunucuya dağıtılmadı** |
+| **[ÇIKIŞ]** | Çıkış altyapısı API'si ve arayüzü: **Ayarlar → Abonelikten çıkış altyapısı (HTTPS)** (imza ve kanal anahtarı, çıkış sunucusu adresi, anahtar dosyası, uçtan uca doğrulama, kuyruk sağlığı, "Talepleri düzenli çek", ARF sağlayıcıları); 25 günde kendiliğinden yeniden doğrulama; kampanya ve uyum sayfalarında uyarı bandı | C3 + C4 + C14 | Kodlandı |
+| **[GÖNDERİM]** | Canlı gönderim yolu: zamanlayıcı, dağıtıcı ve kampanyalar gerçek (Gmail) kutuyu yalnızca canlı gönderim kapısı açıkken kabul eder | C1 | Kodlandı; kapı kapalı |
+| **[ANAHTAR]** | Ana anahtar dayanıklılığı: çözülemezse sessizce yenisi üretilmez (engelleyici pencere, iki onaylı sıfırlama, `.bak` yedekleri); anahtar değişince çıkış talepleri kaybolmaz | C5 | Kodlandı; **imzalı/kararlı kimlikli macOS sürümü (C5c) açık** |
+| **[SÜRÜM]** | Kapıları açan bilinçli sürüm (C10b) ve canlı ülke politikasını onay kaydıyla açan betik `scripts/approve-live-country.ts` (C10a). Uygulama içinden canlı ülke politikası açılamaz | C10 | Betik var; **kapı açma sürümü yapılmadı** |
+| **[GELEN]** | Gerçek Gmail gelen kutusu işi (`inbox.sync`), yalnızca `LIVE_INBOX_READING_ENABLED` açıkken. Yalnızca bounce ve yanıtların **otomatik** işlenmesi isteniyorsa gerekir | C6 | Kodlandı; kilit kapalı |
+| **[BELİRSİZ]** | "Belirsiz" (`unknown`) sonuçlu gönderimi elle çözme: **Kampanyalar → İnceleme bekleyenler** | C7 | Kodlandı |
+
+Hâlâ açık olanlar: imzalı macOS sürümü (C5c), kapı açma sürümü (C10b), isteğe bağlı "kendime gönder" kapısı (C11), işletim sistemi/e-posta uyarı bildirimi (uyarılar yalnızca uygulama içinde görünür; `08` TB-4), aktarıcının gerçek dağıtımı ve **bu belgedeki canlı testlerin tamamı**.
 
 ## 1. Şirket girdileri (26 madde)
 
@@ -37,7 +39,7 @@ Bazı adımlar, henüz birleştirilmemiş yazılım paketlerine bağlıdır. Bu 
 | 9 | Hunter API anahtarı | Ayarlar → E-posta bulma (harici bulma açılırsa) | 8–300 karakter | **EVET** | İsteğe bağlı |
 | 10 | Gönderen posta kutusu: etiket ve adres | Ayarlar → **Gönderim hesabı** → "Kutu ekle" | Etiket 2–60; geçerli adres, ayrılmış uzantı yok; en çok 5 kutu. **Adres, Workspace hesabının birincil adresi olmalı; takma ad (alias) olursa bağlantı `account_mismatch` ile reddedilir** | Hayır | ŞİMDİ |
 | 11 | OAuth istemci kimliği | Aynı ekran → "Google OAuth istemcisi" | `<rakamlar>-<harf/rakam>.apps.googleusercontent.com` biçimi | Hayır | ŞİMDİ |
-| 12 | OAuth istemci sırrı | Aynı form; yalnızca yazılır, uygulama bir daha göstermez | 8–200 karakter, boşluksuz (API şeması 300'e izin verir, servis 200'de keser) | **EVET** | ŞİMDİ |
+| 12 | OAuth istemci sırrı | Aynı form; yalnızca yazılır, uygulama bir daha göstermez | 8–200 karakter, boşluksuz (API ve servis aynı sınır) | **EVET** | ŞİMDİ |
 | 13 | Gmail izni (arkadaş Google'ın kendi sayfasında giriş yapar) | "Gmail'e bağlan (yalnızca gönderim)"; okuma için "Gelen kutusu okumayı etkinleştir" | PKCE + `nonce`; kimlik belirtecindeki e-posta kutu adresiyle aynı olmalı; kalıcı yetki (yenileme belirteci) şart; **10 dakika içinde ve uygulama açıkken** bitirilmeli | Parola uygulamaya hiç gelmez | ŞİMDİ (gönderim); okuma yalnızca otomatik gelen kutusu isteniyorsa |
 | 14 | DKIM seçici adı (Workspace'te genellikle `google`) | Kampanyalar → Günlük → **Gönderim sağlığı** → "Kontrol et" | Seçici biçim denetimi | Hayır | PİLOT (bilgi amaçlı) |
 | 15 | Gönderim alan adı + Google Workspace (ücretli plan, iki adımlı doğrulama) + DNS kayıtları: SPF (tek kayıt, `~all`/`-all`, ≤ 10 arama), DKIM 2048 bit, DMARC, Postmaster TXT | Dış konsollar (`04` Adım 1–3) | DMARC `p=quarantine` veya `p=reject` → "tamam"; `p=none` → **uyarı**. Sonuç 30 gün sonra bayatlar | Kayıt şirketi ve Workspace parolaları **EVET** | Workspace ŞİMDİ (OAuth için); DNS PİLOT |
@@ -46,10 +48,10 @@ Bazı adımlar, henüz birleştirilmemiş yazılım paketlerine bağlıdır. Bu 
 | 18 | Harita anahtarı için HTTP referrer kısıtı | Google Cloud konsolu | Uygulama sayfası `http://127.0.0.1:<rastgele port>` adresinden açılır; konsolun her portu kabul edip etmediği denenmeli, olmuyorsa API kısıtı + kota ile yetinilir | — | ŞİMDİ |
 | 19 | Aktarıcı alt alan adı (örn. `cikis.sirket-export.com`) ve DNS A/AAAA kaydı | Kayıt şirketinin DNS ekranı | HTTPS; **port yazılmaz** (443); IP değil; ayrılmış uzantı değil; yol `/` | Hayır | AKTARICI |
 | 20 | Linux sunucu (VPS): kalıcı ext4/xfs disk, 80/443 açık, SSH, NTP; yaklaşık 1 vCPU / 512 MB. **Ücretli olabilir; sağlayıcı şirket kararı** | Sağlayıcı paneli | Kanal en çok ±5 dk saat farkını kabul eder (NTP şart) | SSH bilgileri **EVET** | AKTARICI |
-| 21 | İsteğe bağlı TLS sertifikası (ACME) iletişim e-postası; sürekli çekmenin (drain) açılması kararı | Sunucu yapılandırması / uygulama [TB-3] | — | Hayır | AKTARICI |
-| 22 | Geri bildirim döngüsü (FBL/ARF) rapor sağlayıcı alan adları | **Henüz arayüz yok** [TB-3] | ≤ 50 alan adı, biçim denetimi, genel sonek (ör. `co.uk`) olamaz | Hayır | İsteğe bağlı |
+| 21 | İsteğe bağlı TLS sertifikası (ACME) iletişim e-postası; düzenli çekmenin (drain) açılması kararı | Sunucu yapılandırması / Ayarlar → Abonelikten çıkış altyapısı (HTTPS) → **"Talepleri düzenli çek"** [ÇIKIŞ] | Çekme yalnızca çıkış sunucusu adresi tanımlıyken çalışır | Hayır | AKTARICI |
+| 22 | Geri bildirim döngüsü (FBL/ARF) rapor sağlayıcı alan adları | Aynı ekran → **"Şikâyet raporu sağlayıcıları (ARF)"** → "Listeyi kaydet" [ÇIKIŞ] | ≤ 50 alan adı, biçim denetimi, genel sonek (ör. `co.uk`) olamaz | Hayır | İsteğe bağlı |
 | 23 | Şirket dışı, tek kullanımlık test Gmail hesabı (başlık güveni, `09` Bölüm 1.3) | — | — | Parolası **EVET** (yalnızca arkadaşta) | Yalnızca otomatik gelen kutusu işleme isteniyorsa |
-| 24 | Yazılı hukuki onaylar: 7 `LEGAL_APPROVALS` maddesi (**`trSenderIdentifierRules` Türkiye hedeflenmese bile gerekir**, çünkü birleşik kapı yedisini birden ister); ülke bazında canlı onay kaydı (`approval_ref`, `approved_by`, `approved_at`); `docs/03` onayı; 180 günlük çıkış belirteci süresinin gözden geçirilmesi | Yalnızca sürümle [SÜRÜM] (kod sabitleri ve ülke onay betiği) | Veritabanı kısıtı, kilit açılırken üç onay alanını da ister | Hayır | PİLOT |
+| 24 | Yazılı hukuki onaylar: 7 `LEGAL_APPROVALS` maddesi (**`trSenderIdentifierRules` Türkiye hedeflenmese bile gerekir**, çünkü birleşik kapı yedisini birden ister); ülke bazında canlı onay kaydı (`approval_ref`, `approved_by`, `approved_at`); `docs/03` onayı; 180 günlük çıkış belirteci süresinin gözden geçirilmesi | Yalnızca sürümle [SÜRÜM] (kod sabitleri ve `scripts/approve-live-country.ts`) | Veritabanı kısıtı, kilit açılırken üç onay alanını da ister; betik `LEGAL_APPROVALS.liveCountryPolicies` `true` değilse reddeder | Hayır | PİLOT |
 | 25 | Yetkilendirilmiş pilot test alıcıları (ilk hafta günde ≤ 20) | — | Hazırlık ekranında `pilot` maddesi kodda sabit "bilinmiyor"dur; elle kayıt tutulur | Hayır | PİLOT |
 | 26 | Donanım: **Apple Silicon Mac** (macOS paketi yalnızca arm64 ve imzasızdır; ilk açılışta Sistem Ayarları → Gizlilik ve Güvenlik → "Yine de Aç" gerekir). Intel Mac desteklenmez; Windows x64 kurulum paketi ayrıca üretilir | — | — | — | ŞİMDİ |
 
@@ -72,7 +74,7 @@ Pratik kural: geliştirici ekran paylaşımıyla yönlendirebilir, ama **gizli b
 
 ### 2.3 Aktarıcı anahtar dosyası (özel durum)
 
-Aktarıcıya giden anahtar dosyası (`relay-keys.json`, [TB-3] ile indirilir) yalnızca **genel** anahtarları içerir; gizli değildir ama **bütünlüğü kritiktir**: kanal anahtarlarını değiştirebilen biri kuyruktaki olayları çekip onaylayabilir, yani çıkış taleplerini silebilir. Bu yüzden dosya yalnızca SSH (`scp`) ile kopyalanır; sunucuda sahibi `root:umrelay`, izni `0640` olur. E-posta veya mesajlaşma ile taşınmaz.
+Aktarıcıya giden anahtar dosyası (`relay-keys.json`; Ayarlar → Abonelikten çıkış altyapısı (HTTPS) → "Anahtar dosyasını indir") yalnızca **genel** anahtarları içerir; gizli değildir ama **bütünlüğü kritiktir**: kanal anahtarlarını değiştirebilen biri kuyruktaki olayları çekip onaylayabilir, yani çıkış taleplerini silebilir. Bu yüzden dosya yalnızca SSH (`scp`) ile kopyalanır; sunucuda `sudo install -o root -g umrelay -m 0640` ile yerleştirilir (`deploy/relay/README.md` §9; aynı komut uygulama ekranında da gösterilir). E-posta veya mesajlaşma ile taşınmaz.
 
 ## 3. Canlı test sırası
 
@@ -86,43 +88,46 @@ Her adımın kanıtı `09` Bölüm 9 biçiminde kaydedilir (tarih, yapan, ortam,
 2. [ ] **Tek şehir taraması ve harita:** küçük bir alanda tarama; tahmini maliyet onay ekranında görünür; sonuçlar liste ve haritada çıkar. Harita açılmıyorsa `04` "Sık karşılaşılan sorunlar".
 3. [ ] **E-posta bulma:** birkaç işletmede web sitesinden bulma; isteğe bağlı Hunter yedeği (madde 9).
 4. [ ] **Posta kutusu ve OAuth istemcisi:** Ayarlar → Gönderim hesabı; kutu (birincil adres) + istemci kimliği + istemci sırrı.
-5. [ ] **"Gmail'e bağlan (yalnızca gönderim)":** bağlantı **sistem tarayıcısında** açılır; Google oradan `http://127.0.0.1:<port>/api/oauth/gmail/callback` adresine döner ve sonuç (başarı ya da `account_mismatch`, `scope_excess`, `no_refresh_token` gibi hata nedeni) **o tarayıcı sekmesinde** görünür. Uygulama penceresi 10 dakika boyunca 3 saniyede bir kontrol eder ve yalnızca "bağlı" rozetini gösterir; hata nedenini göstermez. Bu sırada uygulama **kapatılmamalıdır**: yeniden başlatma portu değiştirir ve bekleyen yetkilendirme kaybolur, akış baştan başlar.
+5. [ ] **"Gmail'e bağlan (yalnızca gönderim)":** bağlantı **sistem tarayıcısında** açılır; Google oradan `http://127.0.0.1:<port>/api/oauth/gmail/callback` adresine döner. Sonuç **hem** tarayıcı sekmesindeki bağımsız sayfada ("Bağlantı tamamlandı" / "Bağlantı kurulamadı" + nedene özgü ipucu: `account_mismatch`, `scope_excess`, `no_refresh_token` vb.) **hem de** uygulamada kutunun altında (neden ve ipucuyla) görünür; uygulama 10 dakika boyunca 3 saniyede bir sorar, süre dolarsa zaman aşımı notu gösterir. Tarayıcı sekmesi yenilenirse ilk sonuç yeniden gösterilir. Bu sırada uygulama **kapatılmamalıdır**: yeniden başlatma portu değiştirir ve bekleyen yetkilendirme kaybolur, akış baştan başlar.
 6. [ ] **`09` Bölüm 2 maddelerinden gönderim gerektirmeyenler:** gerçek yanıttaki kapsam dizgileri; `127.0.0.1` döngü adresi yönlendirmesinin "Masaüstü uygulaması" istemcisiyle kabul edilmesi; Google hesabından izin iptali sonrası kutunun `reauthorization_required` durumuna geçmesi; kademeli yetki (önce yalnızca gönderim, sonra okuma).
 7. [ ] **DNS "Kontrol et":** Kampanyalar → Günlük → Gönderim sağlığı. SPF ve DKIM `pass`; DMARC `p=none` iken **uyarı** beklenir, `p=quarantine`/`p=reject` iken `pass`.
 8. [ ] **Hazırlık kartı ("Canlı gönderime hazırlık"):** kapılar, hukuki onaylar, çıkış uç noktası ve pilot maddeleri beklendiği gibi açık değil; bağlı kutu ve DNS maddeleri gerçek sonuca göre değişir. **Not:** hazırlık kartı yalnızca gösterimdir; gönderim yolu DNS, gelen kutusu veya pilot maddesini ayrıca denetlemez.
-9. [ ] **Güncelleme denemesi (gizli depo):** sürüm N kurulu ve Gmail bağlıyken sürüm N+1'i kurun. Anahtarlar ve Gmail bağlantısı korunmalı. Anahtarlık izin sorarsa "Her Zaman İzin Ver" seçilir. Anahtarlar kaybolursa bulguyu kaydedin: imzasız paket ana anahtarı çözemiyor demektir ve canlı gönderimden önce [ANAHTAR] şarttır (Bölüm 5).
+9. [ ] **Güncelleme denemesi (gizli depo):** sürüm N kurulu ve Gmail bağlıyken sürüm N+1'i kurun. Anahtarlar ve Gmail bağlantısı korunmalı. Anahtarlık izin sorarsa "Her Zaman İzin Ver" seçilir. **"Ana anahtar açılamadı" penceresi çıkarsa** bulguyu kaydedin ve yalnızca **"Tekrar dene"** (anahtarlık iznini verdikten sonra) veya **"Uygulamayı kapat"** seçin; deneme sırasında **asla "Gizli bilgileri sıfırla…" seçmeyin**. Pencere tekrarlıyorsa imzasız paket ana anahtarı çözemiyor demektir: canlı gönderimden önce imzalı sürüm (C5c) şarttır (Bölüm 5).
 
-İsteğe bağlı: "Gelen kutusu okumayı etkinleştir" ile okuma izni verilebilir; ancak gerçek gelen kutusu işi demo dışında çalışmaz [GELEN], bu yüzden bugün yalnızca iznin alındığı doğrulanır.
+İsteğe bağlı: "Gelen kutusu okumayı etkinleştir" ile okuma izni verilebilir; ancak gerçek gelen kutusu işi `LIVE_INBOX_READING_ENABLED` kapalıyken çalışmaz [GELEN], bu yüzden bugün yalnızca iznin alındığı doğrulanır.
 
-### 3.2 Aşama 2 — Aktarıcı ile [AKTARICI] [TB-3]
+### 3.2 Aşama 2 — Aktarıcı ile [AKTARICI] [ÇIKIŞ]
 
-Önkoşul: madde 19–21; aktarıcı paketi (C2) ve çıkış altyapısı arayüzü (C3 + C4) ana dalda. Komutlardaki `<alan>` aktarıcı alt alan adıdır. Aktarıcı ortam değişkenlerinin ve dosya yollarının kesin adları paketin `deploy/relay/README.md` belgesinde verilecektir; aşağıdakiler planlanan adlardır.
+Önkoşul: madde 19–21. Ortam değişkenleri, dosya yolları ve komutların kesin hâli [`deploy/relay/README.md`](../deploy/relay/README.md) belgesindedir (`RELAY_PUBLIC_ORIGIN`, `/etc/um-relay/keys.json`, `/var/lib/um-relay`, `um-relay.service`, Caddyfile). Komutlardaki `<alan>` aktarıcı alt alan adıdır. Uygulamadaki her adım **Ayarlar → Abonelikten çıkış altyapısı (HTTPS)** ekranındadır.
 
-1. [ ] **Kurulum:** sunucuda aktarıcı servisi (systemd, tek örnek) ve önünde Caddy (80/443, Let's Encrypt). Caddy yalnızca `/u/*`, `/spool/*` ve `/healthz` yollarını `127.0.0.1:8787`'ye iletir; **yol veya sorgu yeniden yazılmaz, önbellek yoktur** (kanal imzası tam yolu kapsar). `/u/*` ve `/spool/*` aynı kökende (origin) ve 443'te olmalıdır.
-2. [ ] **Anahtarsız sağlık:** `curl -sI https://<alan>/healthz` → `503` (henüz anahtar yok).
-3. [ ] **RFC 8058 içerik türü:** `curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: multipart/form-data; boundary=x' https://<alan>/u/u2.a.b` → `400` (geçersiz belirteç), **`415` değil**.
-4. [ ] **Uygulamada anahtarlar ve adres:** imza anahtarını oluştur → kanal anahtarını oluştur → çıkış adresini `https://<alan>/` olarak gir → anahtar dosyasını indir → `scp` ile sunucuya kopyala (Bölüm 2.3).
-5. [ ] **Anahtarlı sağlık:** `/healthz` → `200`.
-6. [ ] **Uçtan uca doğrulama:** uygulamada "Doğrula" → `verified`. Sınama belirteci `p` kapsamındadır; hiçbir alıcıya veya engel listesine dokunmaz. Kanıt 30 gün geçerlidir ve imza anahtarına bağlıdır.
-7. [ ] **Kuyruk sağlığı:** sağlık denetimi → `ok`, derinlik 0.
-8. [ ] **Dayanıklılık (K2):** 200 almış bir olay kuyruğun `pending/` dizinindeyken aktarıcı `kill -9` ile öldürülür, yeniden başlatılır; olay kaybolmamalı ve uygulama çektiğinde onaylanıp silinmelidir. Olayı uygulama çekmeden önce üretmenin yolu aktarıcı paketinin belgesinde verilir (uygulamadaki doğrulama olayı hemen çektiği için bu denemeye uygun değildir).
-9. [ ] **Döndürme tatbikatı:** imza anahtarını döndür → doğrulama `bad_status` (aktarıcı eski anahtarı biliyor) → yeni anahtar dosyasını kopyala → doğrulama `verified`.
-10. [ ] **Sürekli çekme (drain):** uygulamada açılır [TB-3]. Paket gelene kadar yalnızca deneme amaçlı geçici yol: uygulamayı Terminal'den `UM_UNSUBSCRIBE_DRAIN_ENABLED=1 "/Applications/Universal Mail.app/Contents/MacOS/Universal Mail"` ile başlatmak (`open -a` ortam değişkeni geçirmez). Bu yol kalıcı yapılandırma değildir.
-11. [ ] **Aylık yeniden doğrulama:** 30 günlük kanıt süresi dolunca `List-Unsubscribe-Post` ve canlı gönderim durur. Otomatik yeniden doğrulama (C4) gelene kadar ayda bir elle "Doğrula".
+1. [ ] **Derleme ve kurulum:** geliştirici bilgisayarında `npm run build:relay` (`dist/relay/relay.cjs`); sunucuda Node.js 22, `umrelay` sistem kullanıcısı, systemd birimi (tek örnek) ve önünde Caddy (80/443, Let's Encrypt) — README §1–7. Caddy yalnızca `/u/*`, `/spool/*` ve `/healthz` yollarını `127.0.0.1:8787`'ye iletir; **yol veya sorgu yeniden yazılmaz, önbellek yoktur** (kanal imzası tam yolu kapsar); erişim ve hata günlüğü kapalıdır (belirteç ve imza başlıkları günlüğe düşmesin). `/u/*` ve `/spool/*` aynı kökende (origin) ve 443'te olmalıdır.
+2. [ ] **Anahtarsız sağlık:** `curl -s -o /dev/null -w '%{http_code}' https://<alan>/healthz` → `503`; anahtarsız `POST /u/u2.a.b` → `503` (README §8).
+3. [ ] **Uygulamada anahtarlar ve adres:** "İmza anahtarı" → **Anahtar oluştur**; "Kanal anahtarı" → **Anahtar oluştur**; "Çıkış sunucusu adresi" → `https://<alan>` → **Adresi kaydet**; **Anahtar dosyasını indir** → `scp` ile sunucuya (Bölüm 2.3; README §9).
+4. [ ] **Anahtarlı sağlık:** `/healthz` → `200`.
+5. [ ] **RFC 8058 içerik türü** (anahtar dosyası yüklendikten SONRA; önce 503 döner): `curl -s -o /dev/null -w '%{http_code}' -X POST -H 'Content-Type: multipart/form-data; boundary=x' --data 'List-Unsubscribe=One-Click' https://<alan>/u/u2.a.b` → `400` (geçersiz belirteç), **`415` değil** (README §10).
+6. [ ] **Uçtan uca doğrulama:** **Doğrula** → "Uç nokta doğrulandı." (`verified`). Sınama belirteci `p` kapsamındadır; hiçbir alıcıya veya engel listesine dokunmaz. Kanıt 30 gün geçerlidir ve imza anahtarına bağlıdır.
+7. [ ] **Kuyruk sağlığı:** **Kuyruğu denetle** → "Kuyruk sağlıklı.", derinlik 0.
+8. [ ] **Dayanıklılık (K2):** README §11'deki tatbikat: kanal anahtarında **Yeni anahtara geç** (yeni dosyayı henüz yüklemeden) → **Doğrula** ("Sunucu kanal anahtarını tanımıyor…"; olay diskte bekler) → sunucuda `sudo ls /var/lib/um-relay/spool/pending/` (bir dosya) → `sudo systemctl kill -s KILL um-relay` → yeniden başlayınca dosya hâlâ orada → yeni anahtar dosyasını yükle → **Doğrula** (bekleyen olayları da çeker) → **Kuyruğu denetle** → derinlik 0. "Kuyruğu denetle" yalnızca sayıları okur, olay çekmez. (Doğrulama sınama olayını hemen çektiği için olay ancak çekme bu şekilde engellenerek kuyrukta tutulabilir.)
+9. [ ] **Döndürme tatbikatı:** imza anahtarında **Yeni anahtara geç** → **Doğrula** → "Sunucu isteği kabul etmedi…" (`bad_status`; aktarıcı yalnızca eski anahtarı biliyor) → yeni anahtar dosyasını yükle → **Doğrula** → `verified`.
+10. [ ] **Düzenli çekme (drain):** **"Talepleri düzenli çek"** anahtarını açın (ayar kalıcıdır; uygulama açıkken talepler dakikada bir çekilir). `UM_UNSUBSCRIBE_DRAIN_ENABLED=1` ortam bayrağı yalnızca geliştirici geçersiz kılmasıdır; kurulu uygulamada gerekmez.
+11. [ ] **Kanıtın yenilenmesi:** 30 günlük kanıt dolarsa `List-Unsubscribe-Post` ve canlı gönderim durur. Düzenli çekme açıkken ve uygulama açıkken kanıt **25 günden eskiyse kendiliğinden** yeniden doğrulanır (başarısızsa saatte bir yeniden denenir). Uygulama uzun süre kapalı kaldıysa veya çekme kapalıysa **Doğrula** elle yapılır. Kanıtın bitmesine 5 gün kala, bittiğinde, doğrulama başarısız olduğunda, kuyruk 24 saattir denetlenmediğinde veya kanal anahtarı okunamadığında kampanya ve uyum sayfalarının üstünde **uyarı bandı** çıkar (yalnızca uygulama içinde; işletim sistemi bildirimi yok).
 
 Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; gerçek bir ileti gönderilmesini gerektirir (Aşama 3).
 
 ### 3.3 Aşama 3 — Son: hukuki onaylar ve pilot [GÖNDERİM] [SÜRÜM] [ANAHTAR] [BELİRSİZ]
 
-Önkoşul: Aşama 1 ve 2 kanıtlı; madde 15 (DNS), 24 ve 25; ilgili paketler ana dalda.
+Önkoşul: Aşama 1 ve 2 kanıtlı; madde 15 (DNS), 24 ve 25; `feat/golive-prep` ana dalda; imzalı macOS sürümü (C5c).
 
 1. [ ] **Yazılı hukuki onaylar** (madde 24; `09` Bölüm 6). Belgeler bu depoda saklanmaz; yalnızca referansları kaydedilir.
 2. [ ] **DNS:** DMARC `p=quarantine` veya `p=reject`; üç denetim taze ve `pass` (`09` Bölüm 5).
 3. [ ] **Kapı açma sürümü** [SÜRÜM]: `LEGAL_APPROVALS` ve `LIVE_SENDING_ENABLED` değerlerini onay referanslarıyla değiştiren, bunları `false` olarak sabitleyen testleri güncelleyen ve `09` Bölüm 9 kanıt referanslarını yazan **tek, incelenmiş** bir sürüm. Ortam değişkeni veya ayar bunun yerine geçmez.
-4. [ ] **Canlı ülke onayı** [SÜRÜM]: yalnızca onaylı ülkeler için, onay betiğiyle (`approval_ref`, `approved_by`, `approved_at`), denetim kaydıyla ve kayıtlı bir sürüm sırasında. Uygulamanın politika ekranı canlı satırları değiştiremez.
+4. [ ] **Canlı ülke onayı** [SÜRÜM]: yalnızca onaylı ülkeler için, kayıtlı bir sürüm sırasında, repo kökünden ve uygulama kapalıyken. Önce plan (hiçbir şeyi değiştirmez), sonra aynı değerlerle `--apply`:
+   `npx tsx scripts/approve-live-country.ts --db <veritabanı dosyası> --countries GB,FR --mode allowed --approval-ref "<referans>" --approved-by "<ad>"` (`--mode generic_only` da olabilir). `--db` zorunludur (ortam değişkeni ve varsayılan yol kullanılmaz). Betik `LEGAL_APPROVALS.liveCountryPolicies` kodda `true` değilse **reddeder**; bütün ülkeler ve denetim kayıtları (`country_policy.live_approved`) tek işlemde yazılır. Uygulamanın politika ekranı canlı satırları değiştiremez; satırların açılması tek başına gönderim değildir.
 5. [ ] **Gönderim bağlantısı** [GÖNDERİM]: Gmail kutusuyla bir kampanyanın oluşturulup başlatılabildiği; kapı kapalıyken davranışın değişmediği.
 6. [ ] **Pilot:** ilk hafta günde **≤ 20** ileti, yalnızca yetkilendirilmiş test alıcılarına (madde 25). Bu sırada `09` Bölüm 2'nin gerçek gönderim isteyen maddeleri (`Message-ID` yeniden yazımı, `List-Unsubscribe` başlıklarının korunması, Gmail hata zarfları, kota yanıtları) ve gerçek Gmail tek tıklamalı çıkışı doğrulanır.
-7. [ ] **Günlük gözlem:** bounce, yanıt, çıkış talepleri, kuyruk sağlığı. Belirsiz sonuçlu gönderim [BELİRSİZ] veya beklenmeyen davranışta gönderim elle durdurulur ve nedeni kaydedilir (`09` Bölüm 7).
+7. [ ] **Günlük gözlem:** bounce, yanıt, çıkış talepleri, kuyruk sağlığı, uyarı bandı. Beklenmeyen davranışta gönderim elle durdurulur ve nedeni kaydedilir (`09` Bölüm 7).
+   - **Belirsiz gönderim** [BELİRSİZ]: **Kampanyalar → İnceleme bekleyenler**. Karar vermeden önce gönderen kutunun Gmail **Gönderilmiş** klasörüne bakın. İletiyi orada görüyorsanız **"Gönderildi"**; emin değilseniz **"Gönderimi durdur"** (en güvenli seçenek; dizi bu alıcı için durur); **"Gönderilmedi"** yalnızca iletinin gitmediği kesinse (adımı yeniden açar, yanlışsa alıcıya **kopya** gider; ayrıca onay ister).
+   - **Hariç tutulan alıcılar:** kampanya alıcıları bir nedenle (posta kutusu, firma profili, doğrulama vb.) hariç tutulduysa ve neden giderildiyse kampanya kuyruğunda **"Hariç tutulanları yeniden denetle"** kullanılır; filtreyle eklemede kalan işletmeler **"Sıradaki {n} işletmeyi ekle"** ile sayfa sayfa eklenir.
 
 > **Tavuk-yumurta sorunu:** `09` Bölüm 2'deki bazı maddeler gerçek gönderim gerektirir; gerçek gönderim ise bütün hukuki onaylar olmadan açılmaz. Onaylardan önce kontrollü bir "kendime gönder" denemesi ancak ayrı ve dar bir kapıyla (C11, isteğe bağlı) mümkündür; bu kapı **şirketin ve İpek'in yazılı onayı olmadan yazılmaz**.
 
@@ -130,11 +135,11 @@ Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; 
 
 | Ne | Nasıl üretilir | Nerede durur | Not |
 |---|---|---|---|
-| Ana anahtar | 32 bayt rastgele; işletim sistemi anahtarlığıyla şifrelenir | `master.key.enc` (uygulama veri klasörü) | Gizli depoyu (AES-256-GCM) açar. Çözülemezse uygulama bugün yenisini üretir ve eski depoyu yedeğe alır (Bölüm 5) |
+| Ana anahtar | 32 bayt rastgele; işletim sistemi anahtarlığıyla şifrelenir | `master.key.enc` (uygulama veri klasörü) | Gizli depoyu (AES-256-GCM) açar. Çözülemezse uygulama sessizce yenisini **üretmez**: engelleyici pencere ("Uygulamayı kapat", "Tekrar dene", "Veri klasörünü göster", "Gizli bilgileri sıfırla…"); sıfırlama ikinci onay ("Sıfırla ve devam et") ister ve `master.key.enc` ile `secrets.json` `.bak-<zaman>` adıyla saklanır (Bölüm 5) |
 | Gizli depo | Ana anahtarla AES-256-GCM | `secrets.json` | Google/Hunter anahtarları, OAuth istemci sırrı, yenileme belirteçleri, imza ve kanal özel anahtarları |
 | Çıkış belirteci imza anahtarı | Ed25519; anahtar kimliği (`kid`) = ham genel anahtarın SHA-256 özetinin ilk 16 onaltılık karakteri | Özel anahtar gizli depoda; yalnızca genel anahtar aktarıcıya gider | Belirteç biçimi `u2.<yük>.<imza>`, varsayılan ömür 180 gün |
 | Kanal anahtarı | Ed25519 | Aynı | Aktarıcıdan çekme/onay isteklerini imzalar; imza girdisi gövdenin `sha256` özetini içerir; ±5 dk saat farkı |
-| Alıcı etiketi (`r`) | Ana anahtardan HKDF ile türetilen anahtarla HMAC-SHA256 | Belirtecin içinde | Ana anahtar değişirse eski etiketler tutmaz (Bölüm 5) |
+| Alıcı etiketi (`r`) | Ana anahtardan HKDF ile türetilen anahtarla HMAC-SHA256 | Belirtecin içinde | Ana anahtar değişirse eski etiketler tutmaz; çıkış yine de belirtecin işaret ettiği kampanya alıcısına uygulanır ve `unsubscribe.recipient_tag_mismatch` denetim kaydı yazılır |
 | Engel ve alıcı özeti | Normalleştirilmiş adresin düz SHA-256 özeti (ek gizli değer yok) | Veritabanı | Engel listesi açık adres tutmaz |
 | Silme yer tutucusu | `sha256("um-erased-v1:" + rastgele 128 bit)` | Veritabanı | Başka bir adresle eşleşmez |
 | PKCE | S256 | Bellek (10 dk) | OAuth akışı başına |
@@ -144,8 +149,20 @@ Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; 
 
 | Risk | Etkisi | Önlem / paket |
 |---|---|---|
-| Ana anahtar çözülemezse sessizce yenisi üretilir | Bütün anahtarlar ve Gmail bağlantısı yeniden girilmeli. **Daha ağırı:** gönderilmiş iletilerdeki çıkış bağlantılarının alıcı etiketi artık tutmaz; tıklamalar `recipient_mismatch` ile reddedilip kuyruktan silinir, **çıkış talebi kaybolur** (yalnızca denetim kaydı kalır) | [ANAHTAR] (C5). C5 gelene kadar canlı gönderim başladıktan sonra uygulama başka bir bilgisayara taşınmaz ve Aşama 1/9 denemesi geçmeden canlıya geçilmez |
-| RFC 8058 `multipart/form-data` isteğine 415 | Bu biçimi kullanan uyumlu istemcilerin tek tıklamalı çıkışı başarısız olabilir | [AKTARICI] (C2); Aşama 2/3 ile doğrulanır |
+| İmzasız macOS paketi güncellemede ana anahtarı anahtarlıktan okuyamayabilir | "Ana anahtar açılamadı" penceresi; sıfırlanırsa API anahtarları, Gmail bağlantısı ve çıkış imza/kanal anahtarları yeniden kurulmalı. **Çıkış talepleri kaybolmaz** (etiket uyuşmazlığında çıkış uygulanır, ayrıca denetim kaydı) | Aşama 1/9 denemesi; imzalı ve kararlı kimlikli sürüm (C5c, açık). Pencerede önce "Tekrar dene"; sıfırlamadan sonra aşağıdaki adımlar |
 | Hazırlık kartı yalnızca gösterimdir | DMARC `p=none` kartı "tamam" yapmaz ama gönderimi de durdurmaz | Aşama 3/2'de DNS ayrıca kontrol edilir |
-| OAuth sonucu sistem tarayıcısında | Hata nedeni uygulama penceresinde görünmez; uygulama kapanırsa akış kaybolur | Aşama 1/5'teki talimat; arayüz iyileştirmesi C12 |
-| Uç nokta kanıtı 30 günde düşer | Fark edilmezse canlı gönderim her ay kendiliğinden durur | Aşama 2/11; otomatik yeniden doğrulama C4; uyarı kanalı C14 |
+| OAuth akışı uygulamanın açık kalmasına bağlı | Uygulama kapanırsa (port değişir) bekleyen yetkilendirme kaybolur; akış baştan başlar | Aşama 1/5'teki talimat; sonuç hem tarayıcıda hem uygulamada görünür (C12) |
+| Uç nokta kanıtı 30 günde düşer; başarısız yeniden doğrulama kanıtı hemen düşürür | Canlı gönderim için çıkış bağlantısı hazırlanamaz ve gönderim durur | Düzenli çekme açıkken 25. günde kendiliğinden yeniden doğrulama (başarısızsa saatte bir); kampanya/uyum sayfalarında uyarı bandı (bitiyor, bitti, doğrulanamadı). Uygulama kapalıysa elle **Doğrula** |
+| Düzenli çekme kapalı veya çalışmıyor | Çıkış talepleri aktarıcıda birikir, uygulamaya ulaşmaz | Sağlık kaydı 24 saatten eskiyse uyarı bandı; Aşama 2/10 |
+| Uyarılar yalnızca uygulama içinde | Uygulama açılmadıkça uyarı görülmez | E-posta/push veya işletim sistemi bildirimi açık iş (`08` TB-4) |
+
+### 5.1 Gizli bilgiler sıfırlandıysa (ana anahtar penceresinde "Gizli bilgileri sıfırla…" seçildiyse)
+
+Sıfırlama `secrets.json` dosyasını yedeğe alır; içindeki **imza ve kanal özel anahtarları** dahil bütün gizli bilgiler artık okunamaz. Ayar ekranı bunu gösterir (ilgili adımda "özel anahtar okunamıyor"), çekme işi `no_channel_key` sağlık kaydı yazar ve uyarı bandı çıkar; aktarıcıdaki talepler beklemeye devam eder, kaybolmaz. Sırasıyla:
+
+1. Ayarlar → Abonelikten çıkış altyapısı (HTTPS) → "İmza anahtarı" → **Yeni anahtara geç** (eski anahtar emekli kalır; önceden gönderilmiş bağlantılar genel anahtarla doğrulanmaya devam eder).
+2. "Kanal anahtarı" → **Yeni anahtara geç** (eski kanal anahtarı iptal edilir).
+3. **Anahtar dosyasını indir** ve sunucuya `deploy/relay/README.md` §9'daki gibi yükleyin.
+4. **Doğrula** → "Uç nokta doğrulandı." (bekleyen talepler bu sırada çekilir ve işlenir).
+5. **Kuyruğu denetle** → "Kuyruk sağlıklı."
+6. Places/Maps/Hunter anahtarlarını ve OAuth istemci sırrını yeniden girin; Gmail kutusunu yeniden bağlayın.

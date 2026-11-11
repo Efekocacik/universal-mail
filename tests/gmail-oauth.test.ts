@@ -694,7 +694,7 @@ describe("API uçları", () => {
     ).toBeGreaterThanOrEqual(400);
   });
 
-  it("geri çağrı: kod/state içermeyen yönlendirme; başarıda bağlanır; hata ve yeniden kullanımda 'error' kodu", async () => {
+  it("geri çağrı: kod/state içermeyen yönlendirme; başarıda bağlanır; yenilemede ilk sonuç, bilinmeyen state'te hata", async () => {
     const { id } = await createGmailMailbox(db, { label: "Satış", address: ADDRESS });
     const start = await startRoute.POST(
       post(`/api/mailboxes/${id}/oauth/start`, { level: "send" }),
@@ -725,9 +725,15 @@ describe("API uçları", () => {
     expect(ok.headers.get("referrer-policy")).toBe("no-referrer");
     expect((await mailbox(id)).status).toBe("connected");
 
+    // Aynı sekme yenilenirse (state kullanıldı) ilk sonuç yeniden gösterilir; kod yeniden takas edilmez.
     const again = await cb(`code=route-code-abcdef&state=${state}`);
-    expect(again.status).toBe(400);
-    expect(await again.text()).toContain("İstek geçersiz veya süresi dolmuş");
+    expect(again.status).toBe(200);
+    const againHtml = await again.text();
+    expect(againHtml).toContain("Bağlantı tamamlandı");
+    expect(againHtml).not.toContain(state);
+    const unknown = await cb("code=route-code-abcdef&state=bilinmeyen-state");
+    expect(unknown.status).toBe(400);
+    expect(await unknown.text()).toContain("İstek geçersiz veya süresi dolmuş");
     const denied = await cb("error=access_denied&state=yok");
     expect(await denied.text()).toContain("Bağlantı kurulamadı");
     expect(await (await cb("")).text()).toContain("İstek geçersiz veya süresi dolmuş");

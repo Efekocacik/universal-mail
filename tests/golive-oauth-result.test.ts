@@ -170,8 +170,21 @@ describe("uygulama penceresi için sonuç ucu", () => {
     expect(done.body).toMatchObject({ status: "done", ok: true, reason: null, readDenied: false });
     expect(JSON.stringify(done.body)).not.toContain(b.code);
 
-    await callback(`code=${b.code}&state=${b.state}`); // sekme yenilendi: state zaten kullanıldı
+    // Sekme yenilendi: state zaten kullanıldı; sayfa kayıtlı BAŞARIYI gösterir ("kurulamadı" değil).
+    const again = await callback(`code=${b.code}&state=${b.state}`);
+    expect(again.status).toBe(200);
+    const html = await again.text();
+    expect(html).toContain(tr["mbx.oauth.page.ok"]);
+    expect(html).not.toContain(tr["mbx.oauth.reason.invalid_state"]);
     expect((await result({ state: b.state })).body).toMatchObject({ status: "done", ok: true });
+  });
+
+  it("başarısız sonucun sekmesi yenilenirse kayıtlı neden gösterilir", async () => {
+    const b = await begin("takma-ad@firma-ornek.com");
+    await callback(`code=${b.code}&state=${b.state}`);
+    const again = await callback(`code=${b.code}&state=${b.state}`);
+    expect(again.status).toBe(400);
+    expect(await again.text()).toContain(tr["mbx.oauth.reason.account_mismatch"]);
   });
 
   it("hata nedeni (account_mismatch) pencereye iletilir; başka state'in sonucu görünmez", async () => {

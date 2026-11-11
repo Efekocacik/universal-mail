@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import http from "node:http";
-import type { AddressInfo } from "node:net";
+import net, { type AddressInfo } from "node:net";
 import path from "node:path";
 import { createSpoolPullHandler } from "@/lib/unsubscribe/channel-protocol";
 import {
@@ -121,10 +121,33 @@ export class MethodAwareRateLimiter implements RateLimiter {
   }
 }
 
+/**
+ * Hız sınırı için istemci kimliği: IPv4 olduğu gibi; IPv6 ise /64 öneki (tek bir istemci genellikle bütün bir /64'ü
+ * denetler; tam adresle her istek yeni bir kova alırdı). Geçersiz değer olduğu gibi döner.
+ */
+export function rateLimitSubject(ip: string): string {
+  if (!net.isIPv6(ip)) return ip;
+  const lower = ip.toLowerCase();
+  const compressed = lower.includes("::");
+  const [head = "", tail = ""] = lower.split("::", 2);
+  const h = head ? head.split(":") : [];
+  const t = compressed && tail ? tail.split(":") : [];
+  // Gömülü IPv4 (a.b.c.d) son iki 16 bitlik grubu kaplar.
+  const width = (gs: string[]) => gs.reduce((n, g) => n + (g.includes(".") ? 2 : 1), 0);
+  const groups = compressed
+    ? [...h, ...Array<string>(Math.max(0, 8 - width(h) - width(t))).fill("0"), ...t]
+    : h;
+  const norm = groups.map((g) => (g.includes(".") ? g : (parseInt(g, 16) || 0).toString(16)));
+  // IPv4 eşlemeli/uyumlu adres (onaltılık biçim dahil, ör. ::ffff:c000:201): ilk 80 bit sıfırdır; /64'e indirgemek
+  // bütün IPv4 istemcilerini TEK kovada toplardı, bu yüzden adresin kendisi kullanılır.
+  if (norm.slice(0, 5).every((g) => g === "0")) return lower;
+  return `${norm.slice(0, 4).join(":")}::/64`;
+}
+
 /** Hız sınırı anahtarı: yöntem + bağdaştırıcının koyduğu güvenilir istemci adresi (gelen kopya silinmiştir). */
 export function relayClientKey(req: Request): string {
   const method = req.method.toUpperCase() === "POST" ? "POST" : "GET";
-  return `${method}:${req.headers.get(CLIENT_HEADER) ?? "unknown"}`;
+  return `${method}:${rateLimitSubject(req.headers.get(CLIENT_HEADER) ?? "unknown")}`;
 }
 
 /** Günlük için yol sınıfı; yolun kendisi (belirteç) ASLA yazılmaz. */

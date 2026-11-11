@@ -83,6 +83,8 @@ function BasicsStep({
   const [maxGapS, setMaxGap] = useState(campaign?.maxGapS ?? 240);
   const [issues, setIssues] = useState<MutationErrorInfo | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
+  // Kullanıcı posta kutusunu kendisi seçti mi? (Otomatik seçim kullanıcı düzenlemesi sayılmaz.)
+  const [mailboxTouched, setMailboxTouched] = useState(false);
 
   // Varsayılan: tek uygun (demo) posta kutusu.
   useEffect(() => {
@@ -118,7 +120,11 @@ function BasicsStep({
   const readOnly = campaign !== undefined && campaign.status !== "draft";
   const dirty =
     !readOnly &&
-    basicsDirty(campaign ?? null, { name, mailboxId, sendWindow: win, dailyCap, minGapS, maxGapS });
+    basicsDirty(
+      campaign ?? null,
+      { name, mailboxId, sendWindow: win, dailyCap, minGapS, maxGapS },
+      { mailboxTouched },
+    );
   useReportDirty(dirty, onDirtyChange);
 
   return (
@@ -152,7 +158,10 @@ function BasicsStep({
           <Select
             id="cw-mailbox"
             value={mailboxId ?? ""}
-            onChange={(e) => setMailboxId(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => {
+              setMailboxTouched(true);
+              setMailboxId(e.target.value ? Number(e.target.value) : null);
+            }}
             disabled={readOnly}
           >
             <option value="">{t("wizard.mailbox.none")}</option>
@@ -627,7 +636,7 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
     successMessage: t("preflight.backToDraft.done"),
   });
 
-  // Kaydedilmemiş değişiklik koruması: adım değiştirme, bağlantıyla ayrılma ve (tarayıcıda) sekme kapatma.
+  // Kaydedilmemiş değişiklik koruması: adım değiştirme, bağlantıyla ayrılma ve pencere/sekme kapatma veya yenileme.
   const [dirty, setDirty] = useState(false);
   const [leaveTo, setLeaveTo] = useState<{ step: Step } | { href: string } | null>(null);
   // Düzenleme sürerken kampanya yenilenirse (ör. lead eklendi → updatedAt değişti) adım yeniden kurulup yerel
@@ -642,8 +651,9 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
 
   useEffect(() => {
     if (!dirty) return;
-    // Electron'da `beforeunload` iletişim kutusu göstermeden kapatmayı engeller; yalnızca tarayıcıda kullanılır.
-    const desktop = typeof window !== "undefined" && window.universalMail !== undefined;
+    // Tarayıcıda yerel onay iletişim kutusunu açar. Electron'da `beforeunload` kapatmayı/yenilemeyi iletişim kutusu
+    // göstermeden engeller; ana süreç bunu `will-prevent-unload` ile yakalayıp Türkçe yerel bir soru gösterir
+    // (electron/main.ts): "Değişiklikleri at" seçilirse kapanış/yenileme sürer.
     const onUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
@@ -661,10 +671,10 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
       e.stopPropagation();
       setLeaveTo({ href });
     };
-    if (!desktop) window.addEventListener("beforeunload", onUnload);
+    window.addEventListener("beforeunload", onUnload);
     document.addEventListener("click", onClick, true);
     return () => {
-      if (!desktop) window.removeEventListener("beforeunload", onUnload);
+      window.removeEventListener("beforeunload", onUnload);
       document.removeEventListener("click", onClick, true);
     };
   }, [dirty]);

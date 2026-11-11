@@ -38,8 +38,8 @@ import { t, type TrKey } from "@/lib/i18n";
 type Step = "signing" | "channel" | "base" | "verify" | null;
 
 function nextStep(s: UnsubscribeState): Step {
-  if (!s.signing.current) return "signing";
-  if (!s.channel.current) return "channel";
+  if (!s.signing.current || s.signing.secretUnreadable) return "signing";
+  if (!s.channel.current || s.channel.secretUnreadable) return "channel";
   if (!s.baseUrl) return "base";
   if (!s.verification.verified) return "verify";
   return null;
@@ -116,21 +116,30 @@ function KeyStep({
     { invalidate: UNSUBSCRIBE_INVALIDATE, successMessage: t("unsubInfra.key.revokedToast") },
   );
   const live = reg.keys.filter((k) => k.revokedAt === null);
+  // Gizli bilgiler sıfırlandıysa kayıtlı anahtar görünür ama özel anahtarı okunamaz: kullanılamaz, yenisine geçilmeli.
+  const missing = reg.current !== null && reg.secretUnreadable;
   return (
     <StepCard
       n={n}
       title={t(`unsubInfra.${kind}.title`)}
       help={t(`unsubInfra.${kind}.help`)}
-      done={reg.current !== null}
+      done={reg.current !== null && !missing}
     >
+      {missing && <Notice tone="danger">{t("unsubInfra.key.privateMissing")}</Notice>}
       {live.length > 0 && (
         <ul className="space-y-1" aria-label={t(`unsubInfra.${kind}.title`)}>
           {live.map((k) => (
             <li key={k.kid} className="flex flex-wrap items-center gap-2 text-[12px]">
               <KeyRound className="size-3.5 text-muted-foreground" aria-hidden />
               <code className="font-mono">{k.kid}</code>
-              <Badge variant={k.kid === reg.current ? "success" : "outline"}>
-                {k.kid === reg.current ? t("unsubInfra.key.active") : t("unsubInfra.key.retired")}
+              <Badge variant={k.kid === reg.current && !missing ? "success" : "outline"}>
+                {k.kid === reg.current
+                  ? missing
+                    ? t("unsubInfra.key.unreadable")
+                    : t("unsubInfra.key.active")
+                  : kind === "channel"
+                    ? t("unsubInfra.channel.legacy")
+                    : t("unsubInfra.key.retired")}
               </Badge>
               <span className="text-muted-foreground">
                 {t("unsubInfra.key.createdAt", { at: fmtDateTime(k.createdAt) })}
@@ -159,7 +168,11 @@ function KeyStep({
             {t("unsubInfra.key.create")}
           </Button>
         ) : (
-          <Button size="sm" variant="outline" onClick={() => setRotateOpen(true)}>
+          <Button
+            size="sm"
+            variant={missing && primary ? "default" : "outline"}
+            onClick={() => setRotateOpen(true)}
+          >
             {t("unsubInfra.key.rotate")}
           </Button>
         )}
@@ -296,7 +309,9 @@ function BaseUrlStep({ s }: { s: UnsubscribeState }) {
         title={
           confirm === "clear" ? t("unsubInfra.base.clear.title") : t("unsubInfra.base.change.title")
         }
-        description={t("unsubInfra.base.change.body")}
+        description={
+          confirm === "clear" ? t("unsubInfra.base.clear.body") : t("unsubInfra.base.change.body")
+        }
         confirmLabel={
           confirm === "clear" ? t("unsubInfra.base.clear") : t("unsubInfra.base.change.confirm")
         }
@@ -348,8 +363,8 @@ function KeyFileStep({ s }: { s: UnsubscribeState }) {
       </div>
       <p className="text-[12px] text-muted-foreground">{t("unsubInfra.file.scp")}</p>
       <pre className="um-scroll overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-[12px]">
-        {"scp relay-keys.json root@SUNUCU:/etc/um-relay/keys.json\n" +
-          "ssh root@SUNUCU 'chown root:umrelay /etc/um-relay/keys.json && chmod 0640 /etc/um-relay/keys.json'"}
+        {"scp relay-keys.json KULLANICI@SUNUCU:/tmp/relay-keys.json\n" +
+          "ssh KULLANICI@SUNUCU 'sudo install -o root -g umrelay -m 0640 /tmp/relay-keys.json /etc/um-relay/keys.json && rm /tmp/relay-keys.json'"}
       </pre>
       <FieldHint>{t("unsubInfra.file.after")}</FieldHint>
     </StepCard>
@@ -373,7 +388,7 @@ function VerifyStep({ s, primary }: { s: UnsubscribeState; primary: boolean }) {
     },
   });
   const days = v.expiresAt !== null ? daysUntil(v.expiresAt) : null;
-  const ready = s.baseUrl !== null && s.channel.current !== null;
+  const ready = s.baseUrl !== null && s.channel.current !== null && !s.channel.secretUnreadable;
   return (
     <StepCard
       n={5}
@@ -435,7 +450,7 @@ function HealthStep({ s }: { s: UnsubscribeState }) {
       else toast.error(msg);
     },
   });
-  const ready = s.baseUrl !== null && s.channel.current !== null;
+  const ready = s.baseUrl !== null && s.channel.current !== null && !s.channel.secretUnreadable;
   return (
     <StepCard
       n={6}

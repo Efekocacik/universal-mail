@@ -19,6 +19,7 @@ import { FileReplayStore } from "@/relay/replay-store";
 import {
   RelayConfigError,
   loadRelayConfig,
+  rateLimitSubject,
   routeClass,
   startRelayServer,
   type RunningRelay,
@@ -314,6 +315,19 @@ describe("hız sınırı ve güvenilir vekil başlığı (TB-5)", () => {
     // geçersiz başlık değeri → soket adresi
     expect((await postForm(base, mint(), { "X-Real-IP": "not-an-ip" })).status).toBe(200);
     expect((await postForm(base, mint(), { "X-Real-IP": "also-bad" })).status).toBe(429);
+  });
+
+  it("hız sınırı kimliği: IPv4 aynen; IPv6 /64 önekine indirgenir (adres döndürerek sınır atlatılamaz)", () => {
+    expect(rateLimitSubject("198.51.100.7")).toBe("198.51.100.7");
+    expect(rateLimitSubject("2001:db8:1:2:aaaa::1")).toBe("2001:db8:1:2::/64");
+    expect(rateLimitSubject("2001:DB8:1:2:bbbb:cccc:dddd:eeee")).toBe("2001:db8:1:2::/64");
+    expect(rateLimitSubject("2001:db8::5")).toBe("2001:db8:0:0::/64");
+    expect(rateLimitSubject("2001:0db8:0000:0001::")).toBe("2001:db8:0:1::/64");
+    expect(rateLimitSubject("64:ff9b::192.0.2.1")).toBe("64:ff9b:0:0::/64");
+    // IPv4 eşlemeli (onaltılık) ve geri döngü: tek kovada toplanmaz.
+    expect(rateLimitSubject("::ffff:c000:201")).toBe("::ffff:c000:201");
+    expect(rateLimitSubject("::1")).toBe("::1");
+    expect(rateLimitSubject("unknown")).toBe("unknown");
   });
 
   it("güvenilmeyen soketten gelen vekil başlığı YOK SAYILIR; güvenilir ağdan gelen kabul edilir", () => {

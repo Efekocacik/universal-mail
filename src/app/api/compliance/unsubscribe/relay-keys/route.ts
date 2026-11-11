@@ -1,8 +1,8 @@
 import { database, HttpError, json } from "@/lib/api/http";
 import { domainRoute } from "@/lib/api/domain-route";
 import { getSetting } from "@/lib/settings";
-import { exportChannelPublicKeys } from "@/lib/unsubscribe/channel";
-import { exportRelayKeySet } from "@/lib/unsubscribe/keys";
+import { channelPrivateKeyMissing, exportChannelPublicKeys } from "@/lib/unsubscribe/channel";
+import { exportRelayKeySet, signingPrivateKeyMissing } from "@/lib/unsubscribe/keys";
 import { withUnsubscribeLock } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * Aktarıcı anahtar dosyası (`relay-keys.json`): YALNIZCA GENEL anahtarlar (imza + kanal) ve temel adresin kökü.
  * Özel anahtar veya gizli bilgi içermez; yine de yalnızca SSH (scp) ile sunucuya kopyalanmalıdır: kanal anahtarlarını
  * değiştirebilen biri olayları çekip onaylayabilir (silebilir). Etkin imza anahtarı, etkin kanal anahtarı veya temel
- * adres yoksa 409.
+ * adres yoksa 409; etkin anahtarlardan birinin özel anahtarı okunamıyorsa 409 `KEY_UNREADABLE`.
  */
 export const GET = domainRoute(async () => {
   const db = await database();
@@ -26,6 +26,14 @@ export const GET = domainRoute(async () => {
         409,
         "Anahtar dosyası için önce imza anahtarı, kanal anahtarı ve çıkış adresi tanımlanmalıdır.",
         { code: "NOT_CONFIGURED" },
+      );
+    }
+    // Özel anahtarı okunamayan (gizli bilgiler sıfırlanmış) bir anahtarın dosyası işe yaramaz: önce yeni anahtara geçilir.
+    if ((await signingPrivateKeyMissing(db)) || (await channelPrivateKeyMissing(db))) {
+      throw new HttpError(
+        409,
+        "Etkin imza veya kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). İlgili anahtarda “Yeni anahtara geç”i seçin, sonra dosyayı indirin.",
+        { code: "KEY_UNREADABLE" },
       );
     }
     const file = {

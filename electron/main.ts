@@ -38,6 +38,8 @@ const SMOKE = process.env.UM_SMOKE_TEST === "1";
 const DEV_URL = process.env.UM_DEV_URL; // geliştirme: `npm run dev` sunucusuna bağlan
 const children = new Map<string, ChildProcess>();
 let quitting = false;
+/** Kullanıcı kapatmayı onayladı (tarama sorusu geçildi); pencere kapanırken sayfanın kayıt koruması yine sorar. */
+let closeApproved = false;
 let origin = "";
 let mainWindow: BrowserWindow | null = null;
 
@@ -288,11 +290,28 @@ function createWindow(url: string): BrowserWindow {
       if (/^https?:/i.test(target)) void shell.openExternal(target);
     }
   });
+  // Sayfada kaydedilmemiş değişiklik varken (`beforeunload`, ör. kampanya sihirbazı) kapatma veya yenileme: Electron
+  // iletişim kutusu göstermeden engeller; burada Türkçe yerel bir soru sorulur. "Değişiklikleri at" seçilirse
+  // `preventDefault` ile kapanış/yenileme SÜRER; aksi halde pencere açık kalır.
+  win.webContents.on("will-prevent-unload", (e) => {
+    const response = dialog.showMessageBoxSync(win, {
+      type: "question",
+      buttons: ["Değişiklikleri at", "Düzenlemeye dön"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Kaydedilmemiş değişiklikler",
+      message: "Kaydedilmemiş değişiklikler kaybolsun mu?",
+      detail:
+        "Bu sayfada kaydetmediğiniz değişiklikler var. Devam ederseniz bu değişiklikler kaybolur.",
+    });
+    if (response === 0) e.preventDefault();
+    else closeApproved = false;
+  });
   void win.loadURL(url);
 
   // Süren bir tarama varken kapatma: kullanıcıya bilgi ver.
   win.on("close", (e) => {
-    if (quitting || SMOKE) return;
+    if (quitting || SMOKE || closeApproved) return;
     e.preventDefault();
     void confirmQuit(win);
   });
@@ -321,7 +340,11 @@ async function confirmQuit(win: BrowserWindow): Promise<void> {
     });
     if (response !== 0) return;
   }
-  app.quit();
+  // Pencere kapatılır (uygulama doğrudan sonlandırılmaz): böylece sayfanın kayıt koruması (`beforeunload` →
+  // will-prevent-unload) çalışır. Pencere kapanınca window-all-closed → app.quit → güvenli kapanış.
+  closeApproved = true;
+  if (win.isDestroyed()) app.quit();
+  else win.close();
 }
 
 function buildMenu(): void {
@@ -512,6 +535,12 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
   app.on("before-quit", (e) => {
     if (quitting) return;
     e.preventDefault();
+    // Menüden/Cmd+Q ile çıkış: açık pencere varsa önce pencere kapatma akışı (tarama sorusu + kayıt koruması).
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+    if (win && !closeApproved && !SMOKE) {
+      void confirmQuit(win);
+      return;
+    }
     void shutdown().then(() => app.exit(0));
   });
   app.on("activate", () => {

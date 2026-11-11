@@ -1,8 +1,10 @@
 import { LEGAL_APPROVALS } from "@/lib/compliance/legal-status";
 import type { Db } from "@/lib/db/client";
 import { getSetting } from "@/lib/settings";
+import { channelPrivateKeyMissing } from "./channel";
 import { isUnsubscribeDrainEnabled } from "./drain-job";
 import { VERIFICATION_TTL_MS, evaluateDelivery, isOneClickEndpointVerified } from "./endpoint";
+import { signingPrivateKeyMissing } from "./keys";
 
 /**
  * Çıkış altyapısının GENEL durum görünümü (TB-3; Ayarlar ekranı). Yalnızca veritabanını okur, ağ isteği yapmaz.
@@ -19,8 +21,13 @@ export interface UnsubscribeKeyView {
 
 export interface UnsubscribeStateView {
   baseUrl: string | null;
-  signing: { current: string | null; keys: UnsubscribeKeyView[] };
-  channel: { current: string | null; keys: UnsubscribeKeyView[] };
+  /**
+   * `secretUnreadable`: etkin anahtar kayıtlı ama özel anahtarı gizli depoda OKUNAMIYOR (ör. "Gizli bilgileri sıfırla"
+   * sonrası). Bu durumda anahtar kullanılamaz: kullanıcı "Yeni anahtara geç" ile yeni anahtar üretmeli, anahtar dosyasını
+   * yeniden yükleyip uç noktayı yeniden doğrulamalıdır.
+   */
+  signing: { current: string | null; secretUnreadable: boolean; keys: UnsubscribeKeyView[] };
+  channel: { current: string | null; secretUnreadable: boolean; keys: UnsubscribeKeyView[] };
   verification: {
     /** Saklanan uçtan uca kanıttan: uç nokta ŞU AN doğrulanmış mı? */
     verified: boolean;
@@ -44,7 +51,7 @@ export interface UnsubscribeStateView {
   drain: { enabled: boolean; envForced: boolean; active: boolean };
   /** Genel HTTPS çıkış uç noktası için hukuki/işletim onayı (kodda sabit; bu ekrandan değişmez). */
   legalApproved: boolean;
-  /** Anahtar dosyası indirilebilir mi (etkin imza ve kanal anahtarı ile temel adres var mı)? */
+  /** Anahtar dosyası indirilebilir mi (özel anahtarı okunabilen etkin imza ve kanal anahtarı ile temel adres var mı)? */
   keyFileReady: boolean;
 }
 
@@ -61,13 +68,16 @@ export async function buildUnsubscribeState(
     signing.keys.find((k) => k.kid === signing.current && k.revokedAt === null)?.kid ?? null;
   const channelCurrent =
     channel.keys.find((k) => k.kid === channel.current && k.revokedAt === null)?.kid ?? null;
-  const verified = await isOneClickEndpointVerified(db, now);
+  const signingMissing = await signingPrivateKeyMissing(db);
+  const channelMissing = await channelPrivateKeyMissing(db);
+  const verified = (await isOneClickEndpointVerified(db, now)) && !signingMissing;
   const proof = cfg.verified !== null && cfg.verified.baseUrl === cfg.baseUrl ? cfg.verified : null;
   const envForced = isUnsubscribeDrainEnabled(env);
   return {
     baseUrl: cfg.baseUrl,
     signing: {
       current: signingCurrent,
+      secretUnreadable: signingMissing,
       keys: signing.keys.map((k) => ({
         kid: k.kid,
         createdAt: k.createdAt,
@@ -77,6 +87,7 @@ export async function buildUnsubscribeState(
     },
     channel: {
       current: channelCurrent,
+      secretUnreadable: channelMissing,
       keys: channel.keys.map((k) => ({
         kid: k.kid,
         createdAt: k.createdAt,
@@ -99,11 +110,16 @@ export async function buildUnsubscribeState(
         : null,
     },
     delivery: {
-      status: await evaluateDelivery(db, channelCurrent !== null, now),
+      status: await evaluateDelivery(db, channelCurrent !== null && !channelMissing, now),
       last: cfg.delivery,
     },
     drain: { enabled: drain.enabled, envForced, active: drain.enabled || envForced },
     legalApproved: LEGAL_APPROVALS.httpsUnsubscribeEndpoint,
-    keyFileReady: signingCurrent !== null && channelCurrent !== null && cfg.baseUrl !== null,
+    keyFileReady:
+      signingCurrent !== null &&
+      !signingMissing &&
+      channelCurrent !== null &&
+      !channelMissing &&
+      cfg.baseUrl !== null,
   };
 }
