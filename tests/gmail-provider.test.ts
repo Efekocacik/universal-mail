@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { Client } from "@libsql/client";
@@ -536,6 +537,20 @@ describe("sonuç sınıflandırması: kesin ret / belirsiz", () => {
     setTimeout(() => ac.abort(), 150);
     expect(await pending).toEqual({ status: "unknown", code: "network_or_timeout" });
     expect(gmail.requests).toHaveLength(3); // her gönderim tam BİR istek
+  });
+
+  it("bağlantı KURULAMAZSA (ECONNREFUSED) istek gitmemiştir: kesin ret network_unreachable (belirsiz değil)", async () => {
+    const id = await connected();
+    const srv = net.createServer();
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as net.AddressInfo).port;
+    await new Promise<void>((r) => srv.close(() => r()));
+    const p = provider(id, { apiBase: `http://127.0.0.1:${port}` });
+    expect(await p.send(input())).toEqual({
+      status: "rejected",
+      code: "network_unreachable",
+      permanent: false,
+    });
   });
 
   it("sonuç kodları belirteç, adres veya sunucu gövdesi içermez", async () => {

@@ -15,7 +15,7 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
-import { SESSION_CACHE_FILENAME } from "../src/lib/config/paths";
+import { SESSION_CACHE_FILENAME, WORKER_STATUS_FILENAME } from "../src/lib/config/paths";
 import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
 import {
   loadOrRecoverMasterKey,
@@ -215,16 +215,55 @@ async function waitForHealth(url: string, timeoutMs = 45_000): Promise<void> {
 }
 
 let workerRestarts = 0;
+/** Bu kadar süre sorunsuz çalışan işçinin çökme sayacı sıfırlanır (aralıklı çökmeler ömür boyu birikmesin). */
+const WORKER_HEALTHY_RESET_MS = 10 * 60_000;
+const WORKER_FAST_RESTARTS = 5;
+/** Hızlı yeniden başlatma hakkı bitince işçi bırakılmaz; uzun aralıkla denenmeye devam edilir. */
+const WORKER_SLOW_RETRY_MS = 5 * 60_000;
+
+/**
+ * Çökme döngüsü kaydı (`worker-status.json`, veri klasöründe): web sunucusu bunu okuyup arayüzde kırmızı uyarı gösterir
+ * (bkz. src/lib/jobs/worker-status.ts). İşçi yeterince uzun sağlıklı çalışınca silinir. Yazılamazsa uygulama etkilenmez.
+ */
+function writeWorkerStatus(entry: { restarts: number; code: number | null } | null): void {
+  const file = path.join(dataDir(), WORKER_STATUS_FILENAME);
+  try {
+    if (entry === null) fs.rmSync(file, { force: true });
+    else
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ v: 1, state: "crash_loop", at: Date.now(), ...entry }),
+        { mode: 0o600 },
+      );
+  } catch {
+    /* yoksay */
+  }
+}
+
 function startWorker(env: NodeJS.ProcessEnv): void {
   const w = spawnChild("worker", "worker.cjs", env);
+  const startedAt = Date.now();
+  const healthyTimer = setTimeout(() => {
+    if (w.exitCode !== null) return;
+    if (workerRestarts > 0) log("main", "İşçi kararlı çalışıyor; çökme sayacı sıfırlandı.");
+    workerRestarts = 0;
+    writeWorkerStatus(null);
+  }, WORKER_HEALTHY_RESET_MS);
+  healthyTimer.unref();
   w.on("exit", (code) => {
+    clearTimeout(healthyTimer);
     if (quitting) return;
-    if (workerRestarts >= 5) {
-      log("main", "İşçi çok kez çöktü; yeniden başlatılmıyor.");
-      return;
-    }
+    if (Date.now() - startedAt > WORKER_HEALTHY_RESET_MS) workerRestarts = 0;
     workerRestarts++;
-    const delay = 1500 * workerRestarts;
+    let delay: number;
+    if (workerRestarts > WORKER_FAST_RESTARTS) {
+      delay = WORKER_SLOW_RETRY_MS;
+      if (workerRestarts === WORKER_FAST_RESTARTS + 1)
+        log("main", "İşçi çok kez çöktü; uzun aralıklarla yeniden denenecek.");
+      writeWorkerStatus({ restarts: workerRestarts, code });
+    } else {
+      delay = 1500 * workerRestarts;
+    }
     log("main", `İşçi ${delay} ms sonra yeniden başlatılacak (kod=${code}).`);
     setTimeout(() => !quitting && startWorker(env), delay);
   });

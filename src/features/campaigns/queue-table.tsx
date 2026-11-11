@@ -1,7 +1,7 @@
 "use client";
 
 import { Inbox, RefreshCw, X } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,8 @@ export function QueueTable({
   const [status, setStatus] = useState<CampaignLeadStatus | "">("");
   const [target, setTarget] = useState<{ id: number; who: string } | null>(null);
   const q = useCampaignQueue(campaignId, status || undefined, running);
+  const items = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items), [q.data]);
+  const total = q.data?.pages[0]?.total ?? 0;
   const remove = useSafeMutation((clId: number) => campaignApi.removeLead(campaignId, clId), {
     successMessage: t("queue.removed"),
   });
@@ -67,9 +69,7 @@ export function QueueTable({
         <h2 id="queue-title" className="text-sm font-semibold">
           {t("queue.title")}
           {q.data && (
-            <span className="ml-2 font-normal text-muted-foreground">
-              ({fmtNumber(q.data.total)})
-            </span>
+            <span className="ml-2 font-normal text-muted-foreground">({fmtNumber(total)})</span>
           )}
         </h2>
         <Select
@@ -106,7 +106,7 @@ export function QueueTable({
         <Skeleton className="h-40" />
       ) : q.isError ? (
         <LoadError error={q.error} onRetry={() => void q.refetch()} />
-      ) : !q.data || q.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <EmptyState
           className="rounded-lg border border-dashed p-6"
           icon={Inbox}
@@ -134,7 +134,7 @@ export function QueueTable({
               </tr>
             </thead>
             <tbody className="divide-y">
-              {q.data.items.map((r) => {
+              {items.map((r) => {
                 const who = r.recipientMasked ?? String(r.id);
                 return (
                   <tr key={r.id} className="align-top transition-colors hover:bg-accent/40">
@@ -191,6 +191,23 @@ export function QueueTable({
           </table>
         </div>
       )}
+      {items.length > 0 && items.length < total && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[12px] text-muted-foreground" data-testid="queue-partial">
+            {t("queue.partial", { shown: fmtNumber(items.length), total: fmtNumber(total) })}
+          </p>
+          {q.hasNextPage && (
+            <Button
+              variant="outline"
+              size="sm"
+              loading={q.isFetchingNextPage}
+              onClick={() => void q.fetchNextPage()}
+            >
+              {t("queue.more")}
+            </Button>
+          )}
+        </div>
+      )}
       <ConfirmDialog
         open={target !== null}
         onOpenChange={(o) => {
@@ -211,9 +228,10 @@ export function QueueTable({
 /** Gönderim günlüğü (salt okunur): maskeli alıcı ve konu, durum, hata kodu. Gövde gösterilmez. */
 export function MessagesTable({ campaignId, running }: { campaignId: number; running: boolean }) {
   const q = useCampaignMessages(campaignId, running);
+  const rows = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items), [q.data]);
   if (q.isLoading) return <Skeleton className="h-40" />;
   if (q.isError) return <LoadError error={q.error} onRetry={() => void q.refetch()} />;
-  if (!q.data || q.data.length === 0) {
+  if (rows.length === 0) {
     return (
       <EmptyState
         className="rounded-lg border border-dashed p-6"
@@ -223,67 +241,83 @@ export function MessagesTable({ campaignId, running }: { campaignId: number; run
     );
   }
   return (
-    <div className="um-scroll max-h-[28rem] overflow-x-auto rounded-lg border bg-card">
-      <table
-        className="w-full min-w-[34rem] border-collapse text-[13px]"
-        aria-label={t("messages.title")}
-      >
-        <thead>
-          <tr>
-            <th scope="col" className={TH}>
-              {t("messages.col.recipient")}
-            </th>
-            <th scope="col" className={TH}>
-              {t("messages.col.status")}
-            </th>
-            <th scope="col" className={TH}>
-              {t("messages.col.when")}
-            </th>
-            <th scope="col" className={TH}>
-              {t("messages.col.detail")}
-            </th>
-          </tr>
-        </thead>
-        <tbody className="divide-y">
-          {q.data.map((m) => (
-            <tr key={m.id} className="align-top transition-colors hover:bg-accent/40">
-              <td className="max-w-[12rem] truncate px-3 py-2.5 font-medium">
-                {m.recipientMasked ?? m.peerDomain}
-              </td>
-              <td className="px-3 py-2.5">
-                <Badge
-                  variant={
-                    m.status === "sent"
-                      ? "success"
-                      : m.status === "failed"
-                        ? "danger"
-                        : m.status === "unknown"
-                          ? "warning"
-                          : "default"
-                  }
-                >
-                  {t(`messageStatus.${m.status}`)}
-                </Badge>
-              </td>
-              <td className="tabular px-3 py-2.5 text-[12px] text-muted-foreground">
-                <p>{t("queue.step", { n: (m.stepIndex ?? 0) + 1 })}</p>
-                <p>{fmtDateTime(m.sentAt ?? m.createdAt)}</p>
-              </td>
-              <td className="max-w-[16rem] px-3 py-2.5">
-                {m.subject && <p className="truncate text-muted-foreground">{m.subject}</p>}
-                {m.errorCode && (
-                  <p className="text-[12px] text-destructive">{reasonLabel(m.errorCode)}</p>
-                )}
-                {(m.status === "failed" || m.status === "unknown") && (
-                  <p className="mt-0.5 text-[12px] text-muted-foreground">
-                    {m.status === "failed" ? t("messages.next.failed") : t("messages.next.unknown")}
-                  </p>
-                )}
-              </td>
+    <div className="space-y-3">
+      <div className="um-scroll max-h-[28rem] overflow-x-auto rounded-lg border bg-card">
+        <table
+          className="w-full min-w-[34rem] border-collapse text-[13px]"
+          aria-label={t("messages.title")}
+        >
+          <thead>
+            <tr>
+              <th scope="col" className={TH}>
+                {t("messages.col.recipient")}
+              </th>
+              <th scope="col" className={TH}>
+                {t("messages.col.status")}
+              </th>
+              <th scope="col" className={TH}>
+                {t("messages.col.when")}
+              </th>
+              <th scope="col" className={TH}>
+                {t("messages.col.detail")}
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map((m) => (
+              <tr key={m.id} className="align-top transition-colors hover:bg-accent/40">
+                <td className="max-w-[12rem] truncate px-3 py-2.5 font-medium">
+                  {m.recipientMasked ?? m.peerDomain}
+                </td>
+                <td className="px-3 py-2.5">
+                  <Badge
+                    variant={
+                      m.status === "sent"
+                        ? "success"
+                        : m.status === "failed"
+                          ? "danger"
+                          : m.status === "unknown"
+                            ? "warning"
+                            : "default"
+                    }
+                  >
+                    {t(`messageStatus.${m.status}`)}
+                  </Badge>
+                </td>
+                <td className="tabular px-3 py-2.5 text-[12px] text-muted-foreground">
+                  <p>{t("queue.step", { n: (m.stepIndex ?? 0) + 1 })}</p>
+                  <p>{fmtDateTime(m.sentAt ?? m.createdAt)}</p>
+                </td>
+                <td className="max-w-[16rem] px-3 py-2.5">
+                  {m.subject && <p className="truncate text-muted-foreground">{m.subject}</p>}
+                  {m.errorCode && (
+                    <p className="text-[12px] text-destructive">{reasonLabel(m.errorCode)}</p>
+                  )}
+                  {(m.status === "failed" || m.status === "unknown") && (
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      {m.status === "failed"
+                        ? t("messages.next.failed")
+                        : t("messages.next.unknown")}
+                    </p>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {q.hasNextPage && (
+        <div className="flex justify-center">
+          <Button
+            variant="outline"
+            size="sm"
+            loading={q.isFetchingNextPage}
+            onClick={() => void q.fetchNextPage()}
+          >
+            {t("messages.more")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -234,9 +234,9 @@ const TEST_SEND_INLINE_CODES = [
 type TestSendFeedback =
   | { kind: "not_sendable" }
   | { kind: "error"; code: (typeof TEST_SEND_INLINE_CODES)[number] }
-  | { kind: "sent"; listUnsubscribe: boolean }
-  | { kind: "failed"; code: string }
-  | { kind: "unknown" };
+  | { kind: "sent"; listUnsubscribe: boolean; recordError: boolean }
+  | { kind: "failed"; code: string; recordError: boolean }
+  | { kind: "unknown"; recordError: boolean };
 
 /**
  * Kendime test gönder. Demo kutusunda örnek ileti demo sağlayıcısına gider; GERÇEK (Gmail) kutuda gerçek bir e-posta
@@ -283,10 +283,13 @@ function TestSendCard({
       ...(live ? {} : { successMessage: t("health.test.sent") }),
       silentCodes: live ? TEST_SEND_INLINE_CODES : [],
       onSuccess: (r) => {
+        const recordError = r.recordError === true;
         if (!live) return setFeedback(null);
-        if (r.outcome === "sent") setFeedback({ kind: "sent", listUnsubscribe: r.listUnsubscribe });
-        else if (r.outcome === "failed") setFeedback({ kind: "failed", code: r.code ?? "" });
-        else setFeedback({ kind: "unknown" });
+        if (r.outcome === "sent")
+          setFeedback({ kind: "sent", listUnsubscribe: r.listUnsubscribe, recordError });
+        else if (r.outcome === "failed")
+          setFeedback({ kind: "failed", code: r.code ?? "", recordError });
+        else setFeedback({ kind: "unknown", recordError });
       },
       onError: (info) => {
         if (info.code === "NOT_SENDABLE") return setFeedback({ kind: "not_sendable" });
@@ -358,6 +361,9 @@ function TestSendCard({
       )}
       {feedback?.kind === "unknown" && (
         <Notice tone="warning">{t("health.test.liveUnknown")}</Notice>
+      )}
+      {feedback && "recordError" in feedback && feedback.recordError && (
+        <Notice tone="warning">{t("health.test.recordError")}</Notice>
       )}
       <Button
         variant={live ? "success" : "default"}

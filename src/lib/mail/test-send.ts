@@ -10,7 +10,7 @@ import { prepareSelfTestUnsubscribe } from "@/lib/unsubscribe/endpoint";
 import { getSelfTestProvider } from "./gmail/provider";
 import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import { getProvider, ProviderUnavailableError, type MailProvider } from "./provider/provider";
-import { STALE_SENDING_MS } from "./send-service";
+import { RECORD_RETRIES, STALE_SENDING_MS, isBusyError } from "./send-service";
 import { composeEmail, type ComposeIssue } from "./template-service";
 
 /**
@@ -64,6 +64,11 @@ export type TestSendResult =
       scope: "demo" | "live";
       /** Gerçek kutu: iletiye `List-Unsubscribe` (tek tıklamalı) başlıkları eklendi mi? */
       listUnsubscribe: boolean;
+      /**
+       * Sağlayıcı sonucu VERİLDİ ama kaydı yazılamadı (veritabanı meşgul): kayıt `sending` kalır ve uzlaştırmada
+       * `unknown` olur. Sonuç yine sağlayıcınınkidir; yeniden gönderim önerilmez.
+       */
+      recordError?: true;
     }
   | { outcome: "not_sendable"; errors: ComposeIssue[] }
   | {
@@ -72,6 +77,7 @@ export type TestSendResult =
       code: string;
       scope: "demo" | "live";
       listUnsubscribe: boolean;
+      recordError?: true;
     };
 
 function masked(address: string): string {
@@ -249,31 +255,49 @@ export async function sendTestEmail(
 
   const done = clock();
   // Belirsiz sonuç (`unknown`) olduğu gibi kaydedilir: yeniden gönderim YOK; inceleme kuyruğunda görünür.
-  await db
-    .update(messages)
-    .set({
-      status,
-      providerMessageId,
-      sentAt: status === "sent" ? done : null,
-      errorCode: code || null,
-    })
-    .where(eq(messages.id, rowId));
-  await audit(
-    db,
-    "mail.test_sent",
-    "message",
-    rowId,
-    {
-      status,
-      mailboxId: mailbox.id,
-      scope,
-      to: masked(built.to),
-      listUnsubscribe,
-      ...(code ? { code } : {}),
-    },
-    done,
-  );
+  // Durum ve denetim kaydı TEK işlemde yazılır; veritabanı meşgulse yalnızca KAYIT yeniden denenir. Yine yazılamazsa
+  // hata FIRLATILMAZ: sağlayıcının sonucu döndürülür (`recordError`), kayıt `sending` kalır ve uzlaştırmada `unknown`
+  // olur. Yalnızca hâlâ `sending` olan kayıt güncellenir (arada çalışmış bir uzlaştırmanın üzerine yazılmaz).
+  let recordError = false;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await db.transaction(async (tx) => {
+        await tx
+          .update(messages)
+          .set({
+            status,
+            providerMessageId,
+            sentAt: status === "sent" ? done : null,
+            errorCode: code || null,
+          })
+          .where(and(eq(messages.id, rowId), eq(messages.status, "sending")));
+        await audit(
+          tx,
+          "mail.test_sent",
+          "message",
+          rowId,
+          {
+            status,
+            mailboxId: mailbox.id,
+            scope,
+            to: masked(built.to),
+            listUnsubscribe,
+            ...(code ? { code } : {}),
+          },
+          done,
+        );
+      });
+      break;
+    } catch (e) {
+      if (!isBusyError(e) || attempt >= RECORD_RETRIES) {
+        recordError = true;
+        break;
+      }
+      await new Promise((res) => setTimeout(res, 25 * (attempt + 1)));
+    }
+  }
+  const extra = recordError ? ({ recordError: true } as const) : {};
   return status === "sent"
-    ? { outcome: "sent", messageRowId: rowId, scope, listUnsubscribe }
-    : { outcome: status, messageRowId: rowId, code, scope, listUnsubscribe };
+    ? { outcome: "sent", messageRowId: rowId, scope, listUnsubscribe, ...extra }
+    : { outcome: status, messageRowId: rowId, code, scope, listUnsubscribe, ...extra };
 }

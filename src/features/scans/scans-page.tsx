@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Progress, Skeleton } from "@/components/ui/misc";
-import { api } from "@/lib/client/api";
+import { api, ApiError } from "@/lib/client/api";
 import { countryLabel, fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
 import { qk, useScans } from "@/lib/client/queries";
 import type { ScanListItem, ScanStatus } from "@/lib/client/types";
@@ -84,13 +84,23 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  // Bütçe onayı (`NEEDS_ACK`): yeni tarama oluşturucusundaki gibi sunucu iletisiyle açık onay istenir.
+  const [rerunAck, setRerunAck] = useState<string | null>(null);
   const rerun = useMutation({
-    mutationFn: () => api<{ scanId: number }>(`/api/scans/${scan.id}/rerun`, { method: "POST" }),
+    mutationFn: (ack: boolean) =>
+      api<{ scanId: number }>(`/api/scans/${scan.id}/rerun`, {
+        method: "POST",
+        json: ack ? { acknowledgeRisk: true } : {},
+      }),
     onSuccess: (r) => {
       toast.success(t("builder.started", { id: r.scanId }));
+      setRerunAck(null);
       refresh();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => {
+      if (e instanceof ApiError && e.code === "NEEDS_ACK") setRerunAck(e.message);
+      else toast.error(e.message);
+    },
   });
 
   return (
@@ -281,7 +291,23 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
         description={t("scans.rerun.body", { calls: fmtNumber(calls), cost: fmtUsd(scan.costUsd) })}
         confirmLabel={t("scans.rerun.confirm")}
         onConfirm={async () => {
-          await rerun.mutateAsync();
+          try {
+            await rerun.mutateAsync(false);
+          } catch (e) {
+            // Bütçe onayı gerekiyorsa bu pencere kapanır, onay penceresi açılır; diğer hatalarda açık kalır.
+            if (!(e instanceof ApiError && e.code === "NEEDS_ACK")) throw e;
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={rerunAck !== null}
+        onOpenChange={(o) => !o && setRerunAck(null)}
+        tone="warning"
+        title={t("builder.ack.title")}
+        description={rerunAck}
+        confirmLabel={t("builder.ack.confirm")}
+        onConfirm={async () => {
+          await rerun.mutateAsync(true);
         }}
       />
       <ConfirmDialog

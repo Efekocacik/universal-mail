@@ -2,14 +2,14 @@
 
 import { Eye, Megaphone, Plus, ShieldAlert } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { DeliveryAlertBanner } from "@/features/compliance/delivery-alert";
 import { MailboxReauthBanner } from "./mailbox-reauth-banner";
-import { useCampaigns, type CampaignStatus, type CampaignSummary } from "@/lib/client/campaigns";
+import { useCampaignList, type CampaignStatus, type CampaignSummary } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import { CAMPAIGN_STATUSES, pauseReasonText, plainCounts, progressOf, progressTone } from "./model";
@@ -70,8 +70,10 @@ function CampaignCard({ c }: { c: CampaignSummary }) {
 
 export function CampaignsPage() {
   const [status, setStatus] = useState<CampaignStatus | "">("");
-  const q = useCampaigns(status || undefined);
-  const isEmpty = !q.isLoading && !q.isError && (!q.data || q.data.length === 0);
+  const q = useCampaignList(status || undefined);
+  const items = useMemo(() => (q.data?.pages ?? []).flatMap((p) => p.items), [q.data]);
+  const total = q.data?.pages[0]?.total ?? 0;
+  const isEmpty = !q.isLoading && !q.isError && items.length === 0;
   const emptyNoFilter = isEmpty && status === "";
   return (
     <div className="um-scroll min-h-0 flex-1">
@@ -120,8 +122,32 @@ export function CampaignsPage() {
           </div>
         ) : q.isError ? (
           <LoadError error={q.error} onRetry={() => void q.refetch()} />
-        ) : q.data && q.data.length > 0 ? (
-          q.data.map((c) => <CampaignCard key={c.id} c={c} />)
+        ) : items.length > 0 ? (
+          <>
+            {items.map((c) => (
+              <CampaignCard key={c.id} c={c} />
+            ))}
+            {items.length < total && (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[12px] text-muted-foreground">
+                  {t("campaigns.partial", {
+                    shown: fmtNumber(items.length),
+                    total: fmtNumber(total),
+                  })}
+                </p>
+                {q.hasNextPage && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    loading={q.isFetchingNextPage}
+                    onClick={() => void q.fetchNextPage()}
+                  >
+                    {t("campaigns.more")}
+                  </Button>
+                )}
+              </div>
+            )}
+          </>
         ) : status === "" ? (
           <EmptyState
             className="rounded-xl border border-dashed bg-card p-10"

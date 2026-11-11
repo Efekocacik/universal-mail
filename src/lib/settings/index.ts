@@ -94,6 +94,14 @@ export const settingSchemas = {
     z.string(),
     z.object({ send: z.boolean(), read: z.boolean(), at: z.number().int() }),
   ),
+  /**
+   * Kutu düzeyi geçici gönderim beklemesi (Gmail kotası/429, yetki uç noktası veya ağ erişilemez): kutu kimliği →
+   * bitiş anı ve neden kodu. Yalnızca gönderim servisi yazar (bkz. src/lib/mail/mailbox-backoff.ts).
+   */
+  "mail.mailboxSendBackoff": z.record(
+    z.string(),
+    z.object({ until: z.number().int(), code: z.string(), at: z.number().int() }),
+  ),
   "mail.mailboxHalts": z.record(
     z.string(),
     z.object({
@@ -230,6 +238,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
   "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
   "mail.mailboxHalts": {},
+  "mail.mailboxSendBackoff": {},
   "mail.gmailOAuth": { clientId: "" },
   "mail.gmailGrants": {},
   "mail.unsubscribeKeys": { current: null, keys: [] },

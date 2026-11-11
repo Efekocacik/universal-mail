@@ -139,5 +139,7 @@ export const mailOpsApi = {
       scope: "demo" | "live";
       listUnsubscribe: boolean;
       code?: string;
+      /** Sonuç sağlayıcıdan alındı ama kaydı yazılamadı (uzlaştırılacak); yeniden göndermeyin. */
+      recordError?: boolean;
     }>(`/api/mailboxes/${mailboxId}/test-send`, { method: "POST", json: input }),
 };

@@ -14,6 +14,7 @@ import {
   ensureSigningKey,
   exportRelayKeySet,
   loadPublicKeys,
+  mintProbeToken,
   mintUnsubscribeToken,
   recipientTag,
   revokeSigningKey,
@@ -144,6 +145,39 @@ describe("anahtar yönetimi", () => {
     await revokeSigningKey(db, k2.kid, NOW + 30);
     await expect(mint()).rejects.toMatchObject({ code: "no_key" });
     expect(await audits("unsubscribe.key_revoked")).toHaveLength(2);
+  });
+
+  it("iptalden ÖNCE alınmış tıklama iptal edilmiş anahtarla da uygulanır; iptal sonrası ve sınama reddedilir", async () => {
+    const k1 = await ensureSigningKey(db, NOW);
+    const before = await mint();
+    const after = await mint(b);
+    const probe = await mintProbeToken(db, NOW);
+    expect(await revokeSigningKey(db, k1.kid, NOW + 20)).toBe(true);
+    // aktarıcı tıklamayı iptalden önce (NOW+10) aldı, uygulama sonra işliyor
+    const r = await ingest(evt(before.token, NOW + 10));
+    expect(r).toMatchObject({ outcome: "unsubscribed", suppression: "added" });
+    expect(await clStatus(a)).toBe("unsubscribed");
+    const oneClick = await audits("unsubscribe.one_click");
+    expect(oneClick[0]!.detail).toMatchObject({ viaRevokedKey: true, kid: k1.kid });
+    const accepted = await audits("unsubscribe.revoked_key_accepted");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]!.entityId).toBe(k1.kid);
+    expect(JSON.stringify(accepted)).not.toContain(RCPT);
+    // iptal anında/sonrasında alınan olay reddedilir
+    expect(await ingest(evt(after.token, NOW + 20))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
+    expect(await ingest(evt(after.token, NOW + 30))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
+    expect(await clStatus(b)).not.toBe("unsubscribed");
+    // sınama belirteci iptal edilmiş anahtarla ASLA doğrulanmaz
+    expect(await ingest(evt(probe.token, NOW + 10))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
   });
 
   it("alıcı etiketi gizli anahtarlıdır: adres özetinden farklı, kararlı, ana anahtar değişince değişir", async () => {

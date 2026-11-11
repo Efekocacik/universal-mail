@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { IneligibleCode } from "@/lib/compliance/eligibility";
 import type { CampaignStatus, CampaignLeadStatus, SendWindow } from "@/lib/db/schema";
 import type { ReviewItem } from "@/lib/mail/scheduler/review";
@@ -80,14 +80,40 @@ export const ck = {
 const getOpts = { retry: shouldRetryQuery, retryDelay: queryRetryDelay } as const;
 const isActive = (s?: CampaignStatus) => s === "running";
 
-export const useCampaigns = (status?: CampaignStatus) =>
+/** Kampanya listesi sayfası (`updatedAt` azalan; `nextOffset` sonraki sayfa). */
+export interface CampaignListPage {
+  items: CampaignSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+  nextOffset: number | null;
+}
+
+const campaignListUrl = (status: CampaignStatus | undefined, limit: number, offset: number) => {
+  const sp = new URLSearchParams({ limit: String(limit) });
+  if (status) sp.set("status", status);
+  if (offset > 0) sp.set("offset", String(offset));
+  return `/api/campaigns?${sp}`;
+};
+
+/** Sunucu süzgeçli kampanya listesi (tek sayfa, en çok 200); ör. kampanya seçici `draft`/`ready` için ayrı çağırır. */
+export const useCampaigns = (status?: CampaignStatus, limit = 200) =>
   useQuery({
-    queryKey: ck.list(status),
-    queryFn: () =>
-      api<{ items: CampaignSummary[] }>(`/api/campaigns${status ? `?status=${status}` : ""}`).then(
-        (r) => r.items,
-      ),
+    queryKey: [...ck.list(status), limit] as const,
+    queryFn: () => api<CampaignListPage>(campaignListUrl(status, limit, 0)).then((r) => r.items),
     refetchInterval: (q) => (q.state.data?.some((c) => isActive(c.status)) ? 5000 : false),
+    ...getOpts,
+  });
+
+/** Kampanyalar ekranı: sayfalı liste ("Daha fazla yükle"). */
+export const useCampaignList = (status?: CampaignStatus) =>
+  useInfiniteQuery({
+    queryKey: [...ck.list(status), "pages"] as const,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => api<CampaignListPage>(campaignListUrl(status, 50, pageParam)),
+    getNextPageParam: (last) => last.nextOffset ?? undefined,
+    refetchInterval: (q) =>
+      q.state.data?.pages.some((p) => p.items.some((c) => isActive(c.status))) ? 5000 : false,
     ...getOpts,
   });
 
@@ -100,24 +126,46 @@ export const useCampaign = (id: number, enabled = true) =>
     ...getOpts,
   });
 
+/** Kuyruk sayfası (kimliğe göre artan; `nextAfterId` sonraki sayfanın imleci). */
+export interface QueuePage {
+  items: QueueItem[];
+  total: number;
+  nextAfterId: number | null;
+}
+
+export const QUEUE_PAGE_SIZE = 200;
+
 export const useCampaignQueue = (id: number, status?: CampaignLeadStatus, running = false) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: ck.queue(id, status),
-    queryFn: () =>
-      api<{ items: QueueItem[]; total: number }>(
-        `/api/campaigns/${id}/leads?limit=500${status ? `&status=${status}` : ""}`,
-      ),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => {
+      const sp = new URLSearchParams({ limit: String(QUEUE_PAGE_SIZE) });
+      if (status) sp.set("status", status);
+      if (pageParam > 0) sp.set("afterId", String(pageParam));
+      return api<QueuePage>(`/api/campaigns/${id}/leads?${sp}`);
+    },
+    getNextPageParam: (last) => last.nextAfterId ?? undefined,
     refetchInterval: running ? 5000 : false,
     ...getOpts,
   });
 
+/** Gönderim günlüğü sayfası (kimliğe göre azalan; `nextBeforeId` daha eski sayfanın imleci). */
+export interface CampaignMessagesPage {
+  items: CampaignMessageItem[];
+  nextBeforeId: number | null;
+}
+
 export const useCampaignMessages = (id: number, running = false) =>
-  useQuery({
+  useInfiniteQuery({
     queryKey: ck.messages(id),
-    queryFn: () =>
-      api<{ items: CampaignMessageItem[] }>(`/api/campaigns/${id}/messages?limit=200`).then(
-        (r) => r.items,
-      ),
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) => {
+      const sp = new URLSearchParams({ limit: "100" });
+      if (pageParam > 0) sp.set("beforeId", String(pageParam));
+      return api<CampaignMessagesPage>(`/api/campaigns/${id}/messages?${sp}`);
+    },
+    getNextPageParam: (last) => last.nextBeforeId ?? undefined,
     refetchInterval: running ? 5000 : false,
     ...getOpts,
   });
@@ -190,8 +238,6 @@ export const campaignApi = {
       method: "PUT",
       json: { expectedUpdatedAt, steps },
     }),
-  addLeads: (id: number, target: { leadIds: number[] } | { filterQuery: string }) =>
-    api<AddLeadsResult>(`/api/campaigns/${id}/leads`, { method: "POST", json: target }),
   removeLead: (id: number, clId: number) =>
     api<{ removed: true }>(`/api/campaigns/${id}/leads/${clId}`, { method: "DELETE" }),
   control: (id: number, action: CampaignAction, confirmToken?: string) =>

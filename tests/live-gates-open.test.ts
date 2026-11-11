@@ -484,10 +484,11 @@ describe("Gmail yetkisi düştüğünde (invalid_grant) gönderim ERTELENİR, ba
     expect(rows.every((m) => m.status === "failed" && m.errorMessage === "mailbox_auth")).toBe(
       true,
     );
-    // Sonraki gerçek geçici ret yine normal yeniden deneme kuralına girer (ilk deneme sayılır).
+    // Sonraki gerçek (alıcıya özgü) geçici ret yine normal yeniden deneme kuralına girer (ilk deneme sayılır). Kutu
+    // düzeyi retler (rate_limited vb.) ayrıca sınanır: tests/mailbox-backoff.test.ts.
     const transient: MailProvider = {
       id: "gmail",
-      send: async () => ({ status: "rejected", code: "rate_limited", permanent: false }),
+      send: async () => ({ status: "rejected", code: "try_later", permanent: false }),
     };
     const now = T0 + 4 * REAUTH_DEFER_MS;
     await sendCampaignStep(
@@ -496,7 +497,7 @@ describe("Gmail yetkisi düştüğünde (invalid_grant) gönderim ERTELENİR, ba
       { now: () => now, provider: transient },
     );
     const [after] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, cl));
-    expect(after).toMatchObject({ status: "scheduled", attempts: 1, lastError: "rate_limited" });
+    expect(after).toMatchObject({ status: "scheduled", attempts: 1, lastError: "try_later" });
   });
 
   it("kontrol: başka bir kalıcı ret diziyi yine başarısız yapar (önceki davranış)", async () => {

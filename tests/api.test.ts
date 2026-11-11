@@ -20,6 +20,8 @@ import * as scansRoute from "@/app/api/scans/route";
 import * as estimateRoute from "@/app/api/scans/estimate/route";
 import * as controlRoute from "@/app/api/scans/[id]/control/route";
 import * as rerunRoute from "@/app/api/scans/[id]/rerun/route";
+import { requirePaidScanAllowed } from "@/app/api/scans/guard";
+import type { RegionInput } from "@/lib/domain/types";
 import * as leadsRoute from "@/app/api/leads/route";
 import * as leadRoute from "@/app/api/leads/[id]/route";
 import * as enrichRoute from "@/app/api/leads/enrich/route";
@@ -99,6 +101,26 @@ describe("yerel erişim koruması (middleware)", () => {
     expect(middleware(mk("POST", { host, origin: ORIGIN })).status).toBe(200);
     expect(middleware(mk("DELETE", { host })).status).toBe(403);
     expect(middleware(mk("PUT", { host, origin: ORIGIN })).status).toBe(200);
+  });
+
+  it("çapraz site GET istekleri /api altında reddedilir (dışa aktarma, denetim); OAuth geri çağrısı hariç", () => {
+    const host = "127.0.0.1:3000";
+    const get = (p: string, site?: string) =>
+      middleware(
+        new NextRequest(`${ORIGIN}${p}`, {
+          method: "GET",
+          headers: { host, ...(site ? { "sec-fetch-site": site } : {}) },
+        }),
+      ).status;
+    expect(get("/api/audit/export", "cross-site")).toBe(403);
+    expect(get("/api/mail-log/export", "cross-site")).toBe(403);
+    expect(get("/api/export/leads?google=1", "cross-site")).toBe(403);
+    expect(get("/api/audit/export", "same-origin")).toBe(200);
+    expect(get("/api/audit/export", "none")).toBe(200);
+    expect(get("/api/health")).toBe(200);
+    expect(get("/api/oauth/gmail/callback?state=x&code=y", "cross-site")).toBe(200);
+    // Sayfalar (API dışı) gezinmede etkilenmez.
+    expect(get("/campaigns", "cross-site")).toBe(200);
   });
 });
 
@@ -355,6 +377,56 @@ describe("tarama uç noktaları: kapılar", () => {
         )
       ).status,
     ).toBe(201);
+  });
+
+  it("yeniden tara da aynı kapıdan geçer: yüksek tahminde NEEDS_ACK, onayla başlar; Google anahtarı yoksa 400", async () => {
+    await completeSetup();
+    const big = {
+      region: { ...londonRegion, bbox: { south: 51.4, west: -0.3, north: 51.6, east: 0.05 } },
+      categoryIds: await cafeIds(),
+    };
+    const { scanId } = await json(await scansRoute.POST(req("POST", "/api/scans", big), undefined));
+    await setSetting(db, "budget.monthlyUsd", 0.5);
+    await recordUsage(db, "mock", "text_search_pro", 5000);
+    const before = (await db.select().from(scans)).length;
+    const res = await rerunRoute.POST(req("POST", `/api/scans/${scanId}/rerun`), params(scanId));
+    expect(res.status).toBe(409);
+    expect((await json(res)).code).toBe("NEEDS_ACK");
+    expect((await db.select().from(scans)).length).toBe(before);
+    // Bilinmeyen alan reddedilir (katı gövde).
+    expect(
+      (
+        await rerunRoute.POST(
+          req("POST", `/api/scans/${scanId}/rerun`, { acknowledgeRisk: true, x: 1 }),
+          params(scanId),
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await rerunRoute.POST(
+          req("POST", `/api/scans/${scanId}/rerun`, { acknowledgeRisk: true }),
+          params(scanId),
+        )
+      ).status,
+    ).toBe(201);
+    // Sağlayıcı sonradan Google'a çevrildi ama anahtar yok: ücretli tarama kuyruğa ALINMAZ (kurulum kapısı veya
+    // ortak kapının PLACES_KEY_MISSING kontrolü).
+    const count = (await db.select().from(scans)).length;
+    await setSetting(db, "places.provider", "google");
+    const noKey = await rerunRoute.POST(
+      req("POST", `/api/scans/${scanId}/rerun`, { acknowledgeRisk: true }),
+      params(scanId),
+    );
+    expect([400, 403]).toContain(noKey.status);
+    expect((await db.select().from(scans)).length).toBe(count);
+    await expect(
+      requirePaidScanAllowed(
+        db,
+        { region: big.region as RegionInput, categoryIds: big.categoryIds },
+        true,
+      ),
+    ).rejects.toMatchObject({ status: 400, extra: { code: "PLACES_KEY_MISSING" } });
   });
 
   it("bütçe tamamen dolmuşsa yeni tarama başlatılamaz", async () => {

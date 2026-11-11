@@ -299,6 +299,58 @@ describe("kendime test gönder: gerçek Gmail kutusu (kapılardan bağımsız; k
   });
 });
 
+describe("kendine test: sonuç kaydı veritabanı meşgulken", () => {
+  const busy = () => Object.assign(new Error("database is locked"), { code: "SQLITE_BUSY" });
+  /** Gerçek bağdaştırıcıyla gönderir; gönderim bittikten sonra ilk `fails` kayıt işlemini meşgul hatasıyla düşürür. */
+  const busyAfterSend = (id: number, fails: number) => {
+    const real = selfProvider(id);
+    return {
+      id: real.id,
+      send: async (input: Parameters<typeof real.send>[0]) => {
+        const res = await real.send(input);
+        const orig = db.transaction.bind(db);
+        let left = fails;
+        vi.spyOn(db, "transaction").mockImplementation(((fn: never) => {
+          if (left-- > 0) return Promise.reject(busy());
+          return orig(fn);
+        }) as typeof db.transaction);
+        return res;
+      },
+    };
+  };
+  afterEach(() => vi.restoreAllMocks());
+
+  it("geçici meşguliyet: kayıt yeniden denenir; durum ve denetim kaydı birlikte yazılır", async () => {
+    const id = await connected();
+    const r = await sendTestEmail(
+      db,
+      { mailboxId: id, templateId, leadId },
+      { now: () => clock, provider: busyAfterSend(id, 2) },
+    );
+    expect(r).toMatchObject({ outcome: "sent" });
+    expect(r).not.toHaveProperty("recordError");
+    const [row] = await db.select().from(messages).where(eq(messages.purpose, "test"));
+    expect(row!.status).toBe("sent");
+    expect(
+      await db.select().from(auditLog).where(eq(auditLog.action, "mail.test_sent")),
+    ).toHaveLength(1);
+  });
+
+  it("kalıcı meşguliyet: hata FIRLATILMAZ; sağlayıcı sonucu (sent) recordError ile döner, ikinci istek atılmaz", async () => {
+    const id = await connected();
+    const r = await sendTestEmail(
+      db,
+      { mailboxId: id, templateId, leadId },
+      { now: () => clock, provider: busyAfterSend(id, 1000) },
+    );
+    vi.restoreAllMocks();
+    expect(r).toMatchObject({ outcome: "sent", recordError: true });
+    expect(gmail.requests).toHaveLength(1);
+    const [row] = await db.select().from(messages).where(eq(messages.purpose, "test"));
+    expect(row!.status).toBe("sending"); // uzlaştırma `unknown` yapar; yeniden gönderim yok
+  });
+});
+
 describe("kendine test: başka alıcı MÜMKÜN DEĞİL (savunma katmanları)", () => {
   it("bağdaştırıcı: kendi adresi dışındaki alıcı ağ isteği olmadan reddedilir (canlı kilit açık olsa bile)", async () => {
     const id = await connected();

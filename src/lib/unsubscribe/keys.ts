@@ -138,6 +138,19 @@ export async function loadPublicKeys(db: Db): Promise<PublicKeyEntry[]> {
   return reg.keys.filter((k) => k.revokedAt === null).map((k) => ({ kid: k.kid, x: k.x }));
 }
 
+/**
+ * İPTAL edilmiş genel anahtarlar ve iptal anları. Yalnızca olay işlemede, iptalden ÖNCE aktarıcıya ulaşmış tıklamaları
+ * doğrulamak için kullanılır (bkz. `ingestUnsubscribeEvent`); dışa aktarılmaz, sınama belirteçlerini doğrulamaz.
+ */
+export async function loadRevokedPublicKeys(
+  db: Db,
+): Promise<(PublicKeyEntry & { revokedAt: number })[]> {
+  const reg = await getSetting(db, "mail.unsubscribeKeys");
+  return reg.keys.flatMap((k) =>
+    k.revokedAt === null ? [] : [{ kid: k.kid, x: k.x, revokedAt: k.revokedAt }],
+  );
+}
+
 /** Aktarıcıya verilecek GENEL anahtar kümesi (özel anahtar veya gizli bilgi içermez). */
 export async function exportRelayKeySet(
   db: Db,

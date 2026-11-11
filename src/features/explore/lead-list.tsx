@@ -16,6 +16,7 @@ import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { toSearchParams } from "@/lib/client/api";
 import { AddToCampaignButton } from "@/features/campaigns/add-to-campaign-button";
+import { ExportLeadsButton } from "./export-leads-button";
 import { FindEmailsButton } from "./find-emails-button";
 import { GoogleLoadButton } from "./google-load-button";
 import { useExplore } from "./state";
@@ -189,6 +190,9 @@ export function LeadList() {
               filterQuery={toSearchParams(ex.apiFilters).toString()}
               total={total}
             />
+          )}
+          {total > 0 && (
+            <ExportLeadsButton filterQuery={toSearchParams(ex.apiFilters).toString()} />
           )}
           <Select
             aria-label={t("list.sort")}

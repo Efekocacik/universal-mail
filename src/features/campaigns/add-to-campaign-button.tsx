@@ -3,7 +3,7 @@
 import { CheckCircle2, Send } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,8 +46,16 @@ export function AddToCampaignButton({
   const [open, setOpen] = useState(false);
   const [campaignId, setCampaignId] = useState<number | null>(preset);
   const [result, setResult] = useState<AddLeadsByFilterResult | null>(null);
-  const drafts = useCampaigns();
-  const editable = (drafts.data ?? []).filter((c) => c.status === "draft" || c.status === "ready");
+  // Sunucu süzgeçli iki liste (yalnızca en son güncellenen 50 kampanya içinde aranmaz).
+  const drafts = useCampaigns("draft");
+  const ready = useCampaigns("ready");
+  const editable = useMemo(
+    () =>
+      [...(drafts.data ?? []), ...(ready.data ?? [])].sort(
+        (a, b) => b.updatedAt - a.updatedAt || b.id - a.id,
+      ),
+    [drafts.data, ready.data],
+  );
 
   useEffect(() => {
     if (preset) setCampaignId(preset);

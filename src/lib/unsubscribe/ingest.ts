@@ -7,7 +7,7 @@ import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages } from "@/lib/db/schema";
 import { LINKABLE_FROM } from "@/lib/mail/inbound/process";
 import { getSetting, setSetting } from "@/lib/settings";
-import { loadPublicKeys, recipientTag, tagsEqual } from "./keys";
+import { loadPublicKeys, loadRevokedPublicKeys, recipientTag, tagsEqual } from "./keys";
 import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
 
 /**
@@ -111,7 +111,25 @@ export async function ingestUnsubscribeEvent(
   const at = Math.min(event.receivedAt, now);
 
   const keys = await loadPublicKeys(db);
-  const verdict = verifyToken(event.token, keys, at);
+  let verdict = verifyToken(event.token, keys, at);
+  let viaRevokedKey = false;
+  if (!verdict.ok && verdict.reason === "unknown_key") {
+    // İptal edilmiş anahtar: aktarıcı tıklamayı İPTALDEN ÖNCE aldıysa (receivedAt < revokedAt) çıkış yine uygulanır.
+    // Etki yalnızca kısıtlayıcıdır (alıcı çıkarılır); sızmış anahtarla sahte olay üretilse bile gönderim açılamaz.
+    // İptal anında veya sonrasında alınan olaylar ve SINAMA belirteçleri reddedilmeye devam eder.
+    const revoked = (await loadRevokedPublicKeys(db)).filter((k) => k.revokedAt > at);
+    if (revoked.length > 0) {
+      const retry = verifyToken(
+        event.token,
+        revoked.map((k) => ({ kid: k.kid, x: k.x })),
+        at,
+      );
+      if (retry.ok && retry.claims.s !== "p") {
+        verdict = retry;
+        viaRevokedKey = true;
+      }
+    }
+  }
   if (!verdict.ok) {
     const reason: RejectReason =
       verdict.reason === "expired"
@@ -270,9 +288,20 @@ export async function ingestUnsubscribeEvent(
           kid: claims.k,
           ...(reclick ? { reclick: true } : {}),
           ...(tagMismatch ? { recipientTagMismatch: true } : {}),
+          ...(viaRevokedKey ? { viaRevokedKey: true } : {}),
         },
         now,
       );
+      if (viaRevokedKey) {
+        await audit(
+          tx,
+          "unsubscribe.revoked_key_accepted",
+          "unsubscribe_key",
+          claims.k,
+          undefined,
+          now,
+        );
+      }
       if (res.outcome === "existing" && stopped.length === 0) return { outcome: "already" };
       return { outcome: "unsubscribed", stopped: stopped.length, suppression: res.outcome };
     });

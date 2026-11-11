@@ -7,8 +7,10 @@ import { keyActionSchema, withUnsubscribeLock } from "../../shared";
 export const dynamic = "force-dynamic";
 
 /**
- * Aktarıcı kanalı imza anahtarı: `ensure` yoksa üretir, `rotate` yenisini etkin yapar (eskisi iptal edilene kadar
- * aktarıcıda geçerli kalabilir). Aktarıcı yeni anahtarı tanıyana kadar olay çekme 401 ile başarısız olur.
+ * Aktarıcı kanalı imza anahtarı: `ensure` yoksa üretir. `rotate` yenisini etkin yapar ve eski kanal anahtarını HEMEN
+ * iptal edip özel anahtarını siler; güncel relay-keys.json aktarıcıya yüklenene kadar olay çekme ve sağlık denetimi
+ * 401 ile başarısız olur (çekme kapısı kapanır, canlı gönderim ertelenir). Döndürmeden hemen sonra anahtar dosyasını
+ * yükleyin.
  */
 export const POST = domainRoute(async (req: Request) => {
   const db = await database();

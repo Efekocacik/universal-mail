@@ -7,8 +7,9 @@ import {
   inArray,
   isNotNull,
   isNull,
+  gt,
   lt,
-  ne,
+  notInArray,
   or,
   sql,
 } from "drizzle-orm";
@@ -37,6 +38,16 @@ import { evaluateDrainGate } from "@/lib/unsubscribe/delivery-alert";
 import { evaluateDnsReadiness } from "./dns-store";
 import { EndpointError, prepareLiveUnsubscribe } from "@/lib/unsubscribe/endpoint";
 import { getLiveProvider } from "./gmail/provider";
+import {
+  MAILBOX_PERMANENT_DEFER_MS,
+  MAILBOX_PERMANENT_REJECT_CODES,
+  MAILBOX_SCOPED_REJECT_CODES,
+  RECENT_UNKNOWN_COOLDOWN_MS,
+  extendMailboxBackoff,
+  getMailboxBackoff,
+  mailboxBackoffUntil,
+  pauseMailboxCampaigns,
+} from "./mailbox-backoff";
 import { mailboxSendBlock } from "./mailbox-health";
 import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import {
@@ -476,7 +487,8 @@ export async function sendCampaignStep(
   }
 }
 
-const RECORD_RETRIES = 8;
+/** Sonuç kaydı meşgul veritabanında en çok bu kadar yeniden denenir (ileti asla yeniden gönderilmez). */
+export const RECORD_RETRIES = 8;
 
 /**
  * Yazılamamış bir gönderim sonucunu YALNIZCA veritabanına yeniden kaydetmeyi dener; sağlayıcıyı çağırmaz.
@@ -525,6 +537,34 @@ async function checkPacing(
   // Posta kutusu düzeyi sağlık (SRS 5.6.1): durdurulmuş veya oranı eşiği aşan kutudan gönderilmez.
   if ((await mailboxSendBlock(tx, mailbox.id, now)).blocked)
     return ns("mailbox_halted", now + 5 * 60_000);
+
+  // Kutu düzeyi bekleme (Gmail kotası/429, yetki uç noktası veya ağ erişilemez): kalıcıdır, yeniden başlatmada da geçerli.
+  const backoff = await getMailboxBackoff(tx, mailbox.id, now);
+  if (backoff) return ns("mailbox_halted", backoff.until, backoff.code);
+
+  // Devre kesici: kutunun son belirsiz (`unknown`) kampanya iletisinden sonra bir süre başka dizi GÖNDERİLMEZ. Bağlantı
+  // kesintisi veya sağlayıcı arızasında her aralıkta yeni bir dizinin belirsiz sonuca (ve elle incelemeye) düşmesi önlenir.
+  const [recentUnknown] = await tx
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.mailboxId, mailbox.id),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+        eq(messages.status, "unknown"),
+        gt(messages.createdAt, now - RECENT_UNKNOWN_COOLDOWN_MS),
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  if (recentUnknown) {
+    return ns(
+      "mailbox_halted",
+      recentUnknown.createdAt + RECENT_UNKNOWN_COOLDOWN_MS,
+      "recent_unknown",
+    );
+  }
 
   // Planlanan zaman (takip aralığı, yeniden deneme beklemesi).
   if (cl.nextSendAt !== null && cl.nextSendAt > now) return ns("not_due", cl.nextSendAt);
@@ -690,6 +730,39 @@ async function recordResult(
       return;
     }
 
+    if (result.status === "rejected" && MAILBOX_SCOPED_REJECT_CODES.has(result.code)) {
+      // Kutu düzeyi ret (kota/429, yetki uç noktası veya ağ erişilemez, Google 403): alıcıya özgü değildir. Dizinin deneme
+      // hakkı TÜKETİLMEZ; dizi önceki durumuna döner ve kutu beklemesinin sonuna ertelenir. Kalıcı kutu retinde
+      // kutunun çalışan kampanyaları duraklatılır (kullanıcı düzeltip sürdürür).
+      const updated = await tx
+        .update(messages)
+        .set({ status: "failed", errorCode: result.code, errorMessage: "mailbox_scope" })
+        .where(own)
+        .returning({ id: messages.id, mailboxId: messages.mailboxId });
+      if (updated.length === 0) return;
+      const mailboxId = updated[0]!.mailboxId;
+      let until: number;
+      if (MAILBOX_PERMANENT_REJECT_CODES.has(result.code)) {
+        until = now + MAILBOX_PERMANENT_DEFER_MS;
+        if (mailboxId !== null) await pauseMailboxCampaigns(tx, mailboxId, result.code, now);
+      } else {
+        until = mailboxBackoffUntil(result.code, result.retryAfterMs, now);
+        if (mailboxId !== null)
+          until = await extendMailboxBackoff(tx, mailboxId, result.code, until, now);
+      }
+      await tx
+        .update(campaignLeads)
+        .set({
+          status: p.previousStatus,
+          nextSendAt: until,
+          lastError: result.code,
+          updatedAt: now,
+        })
+        .where(inFlight);
+      await settleIfCancelled(tx, p.campaignLeadId, now);
+      return;
+    }
+
     if (result.status === "rejected") {
       const updated = await tx
         .update(messages)
@@ -702,7 +775,7 @@ async function recordResult(
         .returning({ id: messages.id });
       if (updated.length === 0) return;
       // Bu adımın başarısız deneme sayısı (az önceki dahil). Kalıcı ret veya hak bitti: dizi `failed`.
-      // Kutu yetkisi nedeniyle (gönderilmeden) düşen kayıtlar deneme hakkından sayılmaz.
+      // Kutu yetkisi veya kutu düzeyi ret nedeniyle düşen kayıtlar deneme hakkından sayılmaz.
       const [{ n: failedAttempts } = { n: 0 }] = await tx
         .select({ n: count() })
         .from(messages)
@@ -710,7 +783,10 @@ async function recordResult(
           and(
             eq(messages.idempotencyKey, `cl:${p.campaignLeadId}:s:${p.stepIndex}`),
             eq(messages.status, "failed"),
-            or(isNull(messages.errorMessage), ne(messages.errorMessage, "mailbox_auth")),
+            or(
+              isNull(messages.errorMessage),
+              notInArray(messages.errorMessage, ["mailbox_auth", "mailbox_scope"]),
+            ),
           ),
         );
       const delay = retryDelayMs(failedAttempts, result.permanent, result.retryAfterMs);

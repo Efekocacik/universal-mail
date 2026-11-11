@@ -98,6 +98,14 @@ export const tr = {
 
   // Liste
   "list.count": "{n} işletme",
+  "export.leads": "Dışa aktar",
+  "export.leads.title": "Listeyi CSV olarak dışa aktar",
+  "export.leads.body":
+    "Geçerli süzgeçlere uyan işletmeler CSV dosyası olarak indirilir. Dışa aktarma işlem kaydına yazılır.",
+  "export.leads.confirm": "İndir",
+  "export.leads.google": "Google kaynaklı alanları dahil et",
+  "export.leads.google.hint":
+    "Ad, adres, telefon, web sitesi gibi Google Places alanları. Google şartları gereği yalnızca bilinçli olarak ve kendi kullanımınız için dahil edin.",
   "list.sort": "Sıralama",
   "list.sort.novelty": "Yenilik skoru",
   "list.sort.recent": "En yeni tespit",
@@ -755,6 +763,8 @@ export const tr = {
   "campaigns.filter.all": "Tüm durumlar",
   "campaigns.demoNote":
     "Demo posta kutusuyla iletiler hiçbir alıcıya ulaşmaz. Gönderim izni verilmiş Gmail kutusuyla iletiler GERÇEK alıcılara gider; ancak Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi hazır olmadan hiçbir ileti gönderilmez.",
+  "campaigns.partial": "{total} kampanyanın {shown} tanesi gösteriliyor.",
+  "campaigns.more": "Daha fazla yükle",
   "campaigns.empty.title": "Henüz kampanya yok",
   "campaigns.empty.body":
     "Bir kampanya oluşturun, şablonunu seçin ve Keşif ekranından lead ekleyin. Başlatmadan önce özeti ve önizlemeleri görürsünüz.",
@@ -934,6 +944,8 @@ export const tr = {
   "queue.filter": "Dizi durumuna göre süz",
   "queue.filter.all": "Tüm diziler",
   "queue.empty": "Bu kampanyada henüz dizi yok.",
+  "queue.partial": "{total} dizinin ilk {shown} tanesi gösteriliyor.",
+  "queue.more": "Daha fazla yükle",
   "queue.noRecipient": "Alıcı yok",
   "queue.step": "{n}. adım",
   "queue.next": "sıradaki: {at}",
@@ -972,6 +984,7 @@ export const tr = {
     'Ne yapabilirsiniz: sonuç netleşene kadar bu ileti yeniden gönderilmez; "İnceleme bekleyenler" sayfasına bakın.',
   "messages.title": "Gönderim günlüğü",
   "messages.empty": "Henüz gönderim yok.",
+  "messages.more": "Daha fazla yükle",
 
   "preflight.draft":
     "Başlatmadan önce kampanyayı hazır duruma getirin. Posta kutusu, e-posta adımları ve gönderim saatleri kontrol edilir.",
@@ -1144,7 +1157,8 @@ export const tr = {
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
-  "reason.mailbox_halted": "Posta kutusu bounce oranı nedeniyle durduruldu",
+  "reason.mailbox_halted":
+    "Posta kutusundan gönderim geçici olarak durduruldu (bounce oranı, Gmail sınırı veya belirsiz sonuç)",
   "reason.not_due": "Planlanan zaman gelmedi",
   "reason.outside_window": "Alıcının gönderim penceresi dışında",
   "reason.invalid_send_window": "Gönderim penceresi geçersiz",
@@ -1161,6 +1175,18 @@ export const tr = {
   "reason.demo_only": "Demo posta servisi yalnızca demo iletilerini kabul eder",
   "reason.try_later": "Posta servisi daha sonra denenmesini istedi",
   "reason.rate_limited": "Posta servisi çok hızlı gönderildiği için bekletti; otomatik denenecek",
+  "reason.rate_limited_daily":
+    "Gmail günlük gönderim kotası doldu; kutu ertesi güne kadar bekletildi (dizi başarısız sayılmaz)",
+  "reason.auth_unavailable":
+    "Google yetki servisine ulaşılamadı; ileti gönderilmedi, kutu kısa süre bekletildi",
+  "reason.network_unreachable":
+    "İnternet bağlantısı yok veya Gmail'e ulaşılamadı; ileti gönderilmedi, kutu kısa süre bekletildi",
+  "reason.forbidden":
+    "Gmail bu kutudan gönderimi reddetti (yetki/izin); kutunun kampanyaları duraklatıldı",
+  "reason.scope_missing":
+    "Gmail kutusunun gönderim izni yok; kutuyu yeniden bağlayın (kampanyalar duraklatıldı)",
+  "reason.recent_unknown":
+    "Son gönderimin sonucu belirsiz; aynı kutudan 30 dakika başka gönderim yapılmaz",
 
   /* Faz 3 – Aşama 12: şablonlar ve uyum */
   "subnav.label": "Kampanya araçları",
@@ -1589,6 +1615,8 @@ export const tr = {
   "health.test.liveNoUnsubscribe":
     "Çıkış uç noktası henüz doğrulanmadığı için iletide tek tıklamalı çıkış (List-Unsubscribe) başlığı yoktur.",
   "health.test.liveFailed": "Gmail iletiyi kabul etmedi; gönderilmedi (kod: {code}).",
+  "health.test.recordError":
+    "Sonuç kaydı şu an yazılamadı (veritabanı meşgul); kayıt birkaç dakika içinde uzlaştırılacak. Yeniden göndermeyin.",
   "health.test.reauth":
     "Gmail yetkisi geçersiz veya iptal edilmiş; ileti gönderilmedi. Ayarlar → Gönderim hesabı'ndan “Yeniden bağlan”a basın.",
   "health.test.liveUnknown":
@@ -1792,6 +1820,11 @@ export const tr = {
   "mbx.reauthBanner.title": "Gmail bağlantısı yenilenmeli",
   "mbx.reauthBanner.body":
     "{list}: Google yetkisi geçersiz veya iptal edilmiş. Bu kutudan kampanya gönderimleri yeniden bağlanana kadar ertelenir (diziler başarısız sayılmaz).",
+  "worker.banner.title": "Arka plan işçisi çalışmıyor",
+  "worker.banner.overdue":
+    "{count} zamanlanmış iş (gönderim, gelen kutusu veya çıkış olayı çekme) {since} tarihinden beri bekliyor ve çalışan bir işçi yok. Kampanyalar ilerlemez, yanıtlar ve çıkış istekleri işlenmez. Uygulamayı kapatıp yeniden açın; sürerse günlük dosyasına bakın.",
+  "worker.banner.crashLoop":
+    "Arka plan işçisi art arda çöktü ({restarts} kez, son: {at}). Uygulama birkaç dakikada bir yeniden deniyor; bu sürede gönderim, gelen kutusu ve çıkış olayı çekme durur. Uygulamayı yeniden başlatın ve günlük dosyasına bakın.",
   "mbx.limits.consumer":
     "Kişisel Gmail: bugün en çok {today} ileti. Isınma günde {base} ile başlar, bu kutu için üst sınır günde {max}. Kişisel Gmail'in Google gönderim sınırı Workspace'ten çok düşüktür; yüksek hacim hesabın kısıtlanmasına yol açabilir.",
   "mbx.limits.workspace":

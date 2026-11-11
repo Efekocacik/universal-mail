@@ -419,13 +419,14 @@ export async function listCampaignQueue(
   db: DbExecutor,
   campaignId: number,
   opts: { status?: CampaignLeadStatus; afterId?: number; limit?: number } = {},
-): Promise<{ items: QueueItem[]; total: number }> {
+): Promise<{ items: QueueItem[]; total: number; nextAfterId: number | null }> {
   const [c] = await db
     .select({ id: campaigns.id })
     .from(campaigns)
     .where(eq(campaigns.id, campaignId))
     .limit(1);
   if (!c) throw new CampaignError("not_found", "Kampanya bulunamadı.");
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const base = and(
     eq(campaignLeads.campaignId, campaignId),
     opts.status ? eq(campaignLeads.status, opts.status) : undefined,
@@ -435,10 +436,12 @@ export async function listCampaignQueue(
     .from(campaignLeads)
     .where(and(base, opts.afterId ? gt(campaignLeads.id, opts.afterId) : undefined))
     .orderBy(asc(campaignLeads.id))
-    .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500));
+    .limit(limit);
   const [{ n } = { n: 0 }] = await db.select({ n: count() }).from(campaignLeads).where(base);
   return {
     total: Number(n),
+    // Sonraki sayfanın imleci: sayfa doluysa son kimlik (yoksa null).
+    nextAfterId: rows.length === limit ? rows[rows.length - 1]!.id : null,
     items: rows.map((r) => {
       const at = r.recipientEmail?.lastIndexOf("@") ?? -1;
       return {

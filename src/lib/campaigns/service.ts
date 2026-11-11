@@ -374,6 +374,18 @@ export async function listCampaigns(
   return rows.map((r) => summary(r, counts.get(r.id)));
 }
 
+/** `listCampaigns` ile aynı süzgeçte toplam kampanya sayısı (sayfalama için). */
+export async function countCampaigns(
+  db: DbExecutor,
+  opts: { status?: CampaignStatus } = {},
+): Promise<number> {
+  const [r] = await db
+    .select({ n: count() })
+    .from(campaigns)
+    .where(opts.status ? eq(campaigns.status, opts.status) : undefined);
+  return Number(r?.n ?? 0);
+}
+
 export interface CampaignDetail extends CampaignSummary {
   sendWindow: SendWindow;
   minGapS: number;

@@ -95,6 +95,9 @@ export async function GET(req: Request): Promise<Response> {
       // (başarılı bir bağlantı "kurulamadı" diye gösterilmez); kayıt değiştirilmez.
       const prev = lookupOAuthResult(state);
       if (prev) return page({ ok: prev.ok, reason: prev.reason, readDenied: prev.readDenied });
+      // Bekleyen bir istekle eşleşmeyen state KAYDEDİLMEZ: bu uç kimlik doğrulamasız bir GET'tir; başka bir sitenin
+      // rastgele state'lerle tetiklediği istekler sınırlı sonuç tablosunu doldurup gerçek sonucu silemesin.
+      return page({ ok: false, reason: kind, readDenied: false });
     }
     result = { ok: false, reason: kind, readDenied: false, mailboxId: null };
   }

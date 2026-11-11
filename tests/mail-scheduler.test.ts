@@ -163,6 +163,24 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     expect(sends).toHaveLength(2);
   });
 
+  it("tavanına takılan kampanyanın çok sayıda dizisi aynı kutudaki başka kampanyayı aç bırakmaz (aday sayfalama)", async () => {
+    const capped = await createCampaign(db, { steps: 1, dailyCap: 1 });
+    for (let i = 0; i < 12; i++) await addSequence(db, capped);
+    const other = await createCampaign(db, { steps: 1 });
+    const { cl } = await addSequence(db, other);
+    const p = fake();
+    const d = new MailDispatcher(db);
+    expect((await d.dispatchOnce({ now: () => T0, provider: p, batchSize: 5 })).send?.outcome).toBe(
+      "sent",
+    );
+    // Kapalı kampanyanın en eski dizileri ilk sayfayı doldurur; yine de diğer kampanyanın dizisine ulaşılır.
+    const later = T0 + 10 * MIN;
+    const r = await d.dispatchOnce({ now: () => later, provider: p, batchSize: 5 });
+    expect(r.send?.outcome).toBe("sent");
+    expect((await seq(cl)).status).toBe("completed");
+    expect(p.calls).toBe(2);
+  });
+
   it("pencere dışında gönderim yok; dizi alıcının yerel açılışına ertelenir", async () => {
     const c = await createCampaign(db, { steps: 1 });
     const { cl } = await addSequence(db, c);

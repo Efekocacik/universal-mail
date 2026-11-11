@@ -187,6 +187,21 @@ describe("uygulama penceresi için sonuç ucu", () => {
     expect(await again.text()).toContain(tr["mbx.oauth.reason.account_mismatch"]);
   });
 
+  it("bekleyen istekle eşleşmeyen state'ler kaydedilmez: toplu sahte geri çağrılar gerçek sonucu silemez", async () => {
+    const b = await begin("takma-ad@firma-ornek.com");
+    await callback(`code=${b.code}&state=${b.state}`);
+    for (let i = 0; i < 40; i++) {
+      const res = await callback(`code=abcdef&state=sahte-${i}`);
+      expect(res.status).toBe(400);
+    }
+    expect((await result({ state: "sahte-1" })).body).toEqual({ status: "pending" });
+    expect((await result({ state: b.state })).body).toMatchObject({
+      status: "done",
+      ok: false,
+      reason: "account_mismatch",
+    });
+  });
+
   it("hata nedeni (account_mismatch) pencereye iletilir; başka state'in sonucu görünmez", async () => {
     const b = await begin("baska@firma-ornek.com");
     await callback(`code=${b.code}&state=${b.state}`);

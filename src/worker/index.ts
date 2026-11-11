@@ -123,6 +123,17 @@ async function main(): Promise<void> {
   process.exit(0);
 }
 
+// Yakalanmamış hata/ret: nedeni günlüğe yazılır ve süreç hata koduyla kapanır; Electron ana süreci işçiyi yeniden başlatır
+// (sessizce yarım durumda çalışmaya devam etmez). Ayrıntı güvenli tutulur: yalnızca hata iletisi/yığını.
+process.on("uncaughtException", (e) => {
+  console.error("[worker] yakalanmamış hata; işçi yeniden başlatılacak:", e);
+  process.exit(1);
+});
+process.on("unhandledRejection", (e) => {
+  console.error("[worker] yakalanmamış ret; işçi yeniden başlatılacak:", e);
+  process.exit(1);
+});
+
 main().catch((e) => {
   console.error("[worker] başlatılamadı:", e);
   process.exit(1);
