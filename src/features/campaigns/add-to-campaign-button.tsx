@@ -15,7 +15,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
-import { campaignApi, useCampaigns, type AddLeadsResult } from "@/lib/client/campaigns";
+import { campaignLeadsApi, type AddLeadsByFilterResult } from "@/lib/client/campaign-leads";
+import { useCampaigns } from "@/lib/client/campaigns";
 import { fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import { reasonLabel } from "./model";
@@ -26,7 +27,12 @@ import { useSafeMutation } from "./use-safe-mutation";
  * Keşif ekranından "Kampanyaya ekle": o anki süzgece uyan lead'leri (en fazla 500, eklendiği andaki görüntü) taslak
  * veya hazır bir kampanyaya ekler. Her lead sunucuda uygunluk denetiminden geçer; uygun olmayanlar gerekçesiyle
  * hariç tutulur. Belirsiz sonuçta istek tekrar gönderilmez (tekrar ekleme zaten sunucuda engellenir).
+ * Sayfalama: sunucu kampanyada zaten bulunanları atlar ve kalan sayıyı döndürür; "Sıradaki N işletmeyi ekle" ile
+ * aynı süzgeçten devam edilir. Daha önce hariç tutulanlar yeniden denetlenir.
  */
+/** Sunucudaki `MAX_ADD_BATCH` ile aynı (istemci paketine sunucu modülü alınmaz). */
+const MAX_BATCH = 500;
+
 export function AddToCampaignButton({
   filterQuery,
   total,
@@ -39,7 +45,7 @@ export function AddToCampaignButton({
   const preset = Number(sp.get("campaign")) || null;
   const [open, setOpen] = useState(false);
   const [campaignId, setCampaignId] = useState<number | null>(preset);
-  const [result, setResult] = useState<AddLeadsResult | null>(null);
+  const [result, setResult] = useState<AddLeadsByFilterResult | null>(null);
   const drafts = useCampaigns();
   const editable = (drafts.data ?? []).filter((c) => c.status === "draft" || c.status === "ready");
 
@@ -47,7 +53,7 @@ export function AddToCampaignButton({
     if (preset) setCampaignId(preset);
   }, [preset]);
 
-  const add = useSafeMutation(() => campaignApi.addLeads(campaignId!, { filterQuery }), {
+  const add = useSafeMutation(() => campaignLeadsApi.addByFilter(campaignId!, filterQuery), {
     onSuccess: (r) => {
       setResult(r);
       const target = campaignId;
@@ -81,8 +87,8 @@ export function AddToCampaignButton({
           <DialogHeader>
             <DialogTitle>{t("addToCampaign.title")}</DialogTitle>
             <DialogDescription>
-              {t("addToCampaign.body", {
-                n: fmtNumber(Math.min(total, 500)),
+              {t("addToCampaign.bodyPaged", {
+                n: fmtNumber(Math.min(total, MAX_BATCH)),
                 total: fmtNumber(total),
               })}
             </DialogDescription>
@@ -98,6 +104,16 @@ export function AddToCampaignButton({
                     duplicates: fmtNumber(result.duplicates.length),
                   })}
                 </span>
+              </p>
+              {result.reevaluated > 0 && (
+                <p className="text-muted-foreground">
+                  {t("addToCampaign.reevaluated", { n: fmtNumber(result.reevaluated) })}
+                </p>
+              )}
+              <p className="text-muted-foreground" role="status">
+                {result.remaining > 0
+                  ? t("addToCampaign.remaining", { n: fmtNumber(result.remaining) })
+                  : t("addToCampaign.allDone")}
               </p>
               {reasons.size > 0 && (
                 <ul className="space-y-0.5">
@@ -138,11 +154,18 @@ export function AddToCampaignButton({
                 <Button variant="outline" onClick={() => setOpen(false)}>
                   {t("common.close")}
                 </Button>
-                <Button asChild>
+                <Button asChild variant={result.remaining > 0 ? "outline" : "default"}>
                   <Link href={`/campaigns/${campaignId}/edit?step=leads`}>
                     {t("addToCampaign.open")}
                   </Link>
                 </Button>
+                {result.remaining > 0 && (
+                  <Button onClick={() => add.mutate(undefined)} loading={add.isPending}>
+                    {t("addToCampaign.next", {
+                      n: fmtNumber(Math.min(result.remaining, MAX_BATCH)),
+                    })}
+                  </Button>
+                )}
               </>
             ) : (
               <>

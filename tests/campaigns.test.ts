@@ -374,8 +374,10 @@ describe("lead ekleme ve çıkarma", () => {
       rows.filter((x) => x.status === "excluded").every((x) => x.recipientEmail === null),
     ).toBe(true);
 
+    // C9: hariç tutulan (de) tekrar sayılmaz, yeniden değerlendirilir ve gerekçesiyle hariç kalır.
     const again = await addLeadsToCampaign(db, c.id, [ok, de], { now: T0 });
-    expect(again).toMatchObject({ added: 0, duplicates: [ok, de] });
+    expect(again).toMatchObject({ added: 0, duplicates: [ok], reevaluated: 1 });
+    expect(again.excluded.find((e) => e.leadId === de)?.reasons).toContain("country_blocked");
 
     // Çıkarılan lead aynı kampanyaya tekrar eklenemez.
     await removeCampaignLead(db, c.id, good.id, { now: T0 });

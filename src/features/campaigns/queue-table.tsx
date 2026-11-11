@@ -1,15 +1,18 @@
 "use client";
 
-import { Inbox, X } from "lucide-react";
+import { Inbox, RefreshCw, X } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { campaignLeadsApi, useExcludedCount } from "@/lib/client/campaign-leads";
 import {
   campaignApi,
+  useCampaign,
   useCampaignMessages,
   useCampaignQueue,
   type CampaignLeadStatus,
@@ -23,7 +26,10 @@ import { useSafeMutation } from "./use-safe-mutation";
 const TH =
   "sticky top-0 z-10 bg-muted px-3 py-2 text-left text-[11px] font-medium uppercase tracking-wide text-muted-foreground";
 
-/** Kuyruk (FR-CMP-05): alıcı adresleri sunucudan maskeli gelir; gönderimde olmayan dizi kaldırılabilir. */
+/**
+ * Kuyruk (FR-CMP-05): alıcı adresleri sunucudan maskeli gelir; gönderimde olmayan dizi kaldırılabilir. Taslak/hazır
+ * kampanyada hariç tutulan diziler yeniden denetlenebilir (uygun olanlar `pending` olur).
+ */
 export function QueueTable({
   campaignId,
   canRemove,
@@ -38,6 +44,21 @@ export function QueueTable({
   const q = useCampaignQueue(campaignId, status || undefined, running);
   const remove = useSafeMutation((clId: number) => campaignApi.removeLead(campaignId, clId), {
     successMessage: t("queue.removed"),
+  });
+  const campaignStatus = useCampaign(campaignId).data?.status;
+  const editable = campaignStatus === "draft" || campaignStatus === "ready";
+  const excludedCount = useExcludedCount(campaignId, editable).data ?? 0;
+  const reevaluate = useSafeMutation(() => campaignLeadsApi.reevaluate(campaignId), {
+    onSuccess: (r) => {
+      if (r.reevaluated === 0) toast.info(t("queue.reevaluate.none"));
+      else
+        toast.success(
+          t("queue.reevaluate.done", {
+            pending: fmtNumber(r.nowPending),
+            excluded: fmtNumber(r.stillExcluded),
+          }),
+        );
+    },
   });
 
   return (
@@ -65,6 +86,22 @@ export function QueueTable({
           ))}
         </Select>
       </div>
+      {editable && excludedCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
+          <p className="text-[12px] text-muted-foreground">
+            {t("queue.reevaluate.help", { n: fmtNumber(excludedCount) })}
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => reevaluate.mutate(undefined)}
+            loading={reevaluate.isPending}
+          >
+            {!reevaluate.isPending && <RefreshCw aria-hidden />}
+            {t("queue.reevaluate")}
+          </Button>
+        </div>
+      )}
       {q.isLoading ? (
         <Skeleton className="h-40" />
       ) : q.isError ? (
