@@ -598,6 +598,12 @@ export type CampaignLeadStatus =
   | "cancelled"
   | "failed";
 
+/**
+ * Dizinin neden durduğu: `status = 'unsubscribed'` iken çıkış talebi ile şikâyet (ARF) ayrımı (Aşama 15.10).
+ * Yalnızca `status = 'unsubscribed'` iken anlamlıdır; başka durumlarda yok sayılır (eski sürümler temizlemez).
+ */
+export type SequenceStopReason = "unsubscribe" | "complaint";
+
 /** Bir lead'in bir kampanyadaki iletişim dizisi (lead başına tek satır). Gönderim kuyruğu `next_send_at`'tir. */
 export const campaignLeads = sqliteTable(
   "campaign_leads",
@@ -630,6 +636,8 @@ export const campaignLeads = sqliteTable(
     redactedAt: integer("redacted_at"),
     addedAt: integer("added_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    /** Aşama 15.10: durma nedeni (çıkış / şikâyet). Eski satırlarda migrasyonla doldurulur; yeni yazımlar 15.10-2'de. */
+    stopReason: text("stop_reason").$type<SequenceStopReason>(),
   },
   (t) => [
     uniqueIndex("campaign_leads_uq").on(t.campaignId, t.leadId),
@@ -642,6 +650,10 @@ export const campaignLeads = sqliteTable(
       sql`status IN ('pending', 'excluded', 'scheduled', 'in_flight', 'waiting_next', 'completed', 'replied', 'bounced', 'unsubscribed', 'removed', 'cancelled', 'failed')`,
     ),
     check("campaign_leads_step_ck", sql`next_step BETWEEN 0 AND 3`),
+    check(
+      "campaign_leads_stop_reason_ck",
+      sql`stop_reason IS NULL OR stop_reason IN ('unsubscribe', 'complaint')`,
+    ),
     check(
       "campaign_leads_recipient_ck",
       sql`recipient_email IS NOT NULL OR redacted_at IS NOT NULL OR status IN ('pending', 'excluded')`,
@@ -664,7 +676,7 @@ export type OutboundStatus = "queued" | "sending" | "sent" | "failed" | "unknown
 export type InboundStatus = "received" | "matched" | "unmatched" | "ignored";
 export type DeliveryStatus = "bounced_soft" | "bounced_hard";
 export type MessageClassification =
-  "reply" | "bounce" | "auto_reply" | "unsubscribe" | "negative" | "other";
+  "reply" | "bounce" | "auto_reply" | "unsubscribe" | "negative" | "complaint" | "other";
 
 /** Gönderim geçmişi (giden ve gelen). İleti gövdesi saklanmaz; yalnızca özeti (`body_sha256`). */
 export const messages = sqliteTable(
@@ -745,7 +757,7 @@ export const messages = sqliteTable(
     ),
     check(
       "messages_classification_ck",
-      sql`classification IS NULL OR classification IN ('reply', 'bounce', 'auto_reply', 'unsubscribe', 'negative', 'other')`,
+      sql`classification IS NULL OR classification IN ('reply', 'bounce', 'auto_reply', 'unsubscribe', 'negative', 'complaint', 'other')`,
     ),
     check(
       "messages_campaign_ck",

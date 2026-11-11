@@ -7,6 +7,9 @@ import { withFileLock } from "@/lib/util/file-lock";
 import { getClient, getDb } from "./client";
 import { runMigrations, type MigrationResult } from "./migrate";
 
+/** Uzun süren bir şema geçişini bekleyen süreç zaman aşımına uğramasın (büyük veritabanında geçiş dakikalar sürebilir). */
+const MIGRATION_LOCK_WAIT_MS = 600_000;
+
 export interface InitResult {
   migrated: MigrationResult;
   seededCategories: number;
@@ -20,15 +23,19 @@ export interface InitResult {
  * İşlem dosya kilidi altında olduğundan aynı anda birden çok süreç çağırsa bile güvenlidir.
  */
 export async function initDatabase(): Promise<InitResult> {
-  return withFileLock(path.join(dataDir(), "migrate.lock"), async () => {
-    const [db, client] = await Promise.all([getDb(), getClient()]);
-    const migrated = await runMigrations(db, client);
-    const seededCategories = await seedCategories(db);
-    const seededFaz3 = {
-      countryPolicies: await seedCountryPolicies(db),
-      templates: await seedBuiltinTemplates(db),
-      demoMailbox: await seedDemoMailbox(db),
-    };
-    return { migrated, seededCategories, seededFaz3 };
-  });
+  return withFileLock(
+    path.join(dataDir(), "migrate.lock"),
+    async () => {
+      const [db, client] = await Promise.all([getDb(), getClient()]);
+      const migrated = await runMigrations(db, client);
+      const seededCategories = await seedCategories(db);
+      const seededFaz3 = {
+        countryPolicies: await seedCountryPolicies(db),
+        templates: await seedBuiltinTemplates(db),
+        demoMailbox: await seedDemoMailbox(db),
+      };
+      return { migrated, seededCategories, seededFaz3 };
+    },
+    MIGRATION_LOCK_WAIT_MS,
+  );
 }

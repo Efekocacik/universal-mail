@@ -153,7 +153,11 @@ describe("0002_faz3: mevcut veri korunur", () => {
 
     expect(await rows("PRAGMA foreign_key_check")).toEqual([]);
     expect(await rows("PRAGMA integrity_check")).toEqual([{ integrity_check: "ok" }]);
-    expect((await rows("SELECT * FROM __drizzle_migrations")).length).toBe(3);
+    // Tam klasör uygulandığında günlükteki her geçiş kayıtlıdır (0003 ve sonrası eklendikçe bu test güncellenmez).
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf8"),
+    ) as { entries: unknown[] };
+    expect((await rows("SELECT * FROM __drizzle_migrations")).length).toBe(journal.entries.length);
   });
 
   it("8 yeni tablo ve leads.last_contacted_at oluşur; başka tablo değişmez", async () => {

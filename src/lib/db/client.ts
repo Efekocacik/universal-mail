@@ -9,6 +9,7 @@ import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import type { BaseSQLiteDatabase } from "drizzle-orm/sqlite-core";
 import { cacheDbPathFor, dbPath, toLibsqlUrl } from "@/lib/config/paths";
 import { CACHE_DDL } from "./cache-schema";
+import { waitForMaintenance } from "./maintenance";
 import * as cacheSchema from "./cache-schema";
 import * as schema from "./schema";
 
@@ -131,6 +132,8 @@ export function trackTransactions(client: Client, path?: string): Client {
 
   const waitGate = async () => {
     while (st.inflight) await st.inflight.catch(() => undefined);
+    // Şema geçişi (bakım kilidi) başka bir süreçte sürüyorsa bekle; bkz. maintenance.ts (K3).
+    if (st.path) await waitForMaintenance(st.path);
   };
   const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
     await waitGate();
