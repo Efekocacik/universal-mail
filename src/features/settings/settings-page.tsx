@@ -32,6 +32,7 @@ import { qk, useBudget, useCategories, useCountries, useSettings } from "@/lib/c
 import type { Category, CompanyProfile, GoogleDataSummary, SecretInfo } from "@/lib/client/types";
 import { skuLabel, PRICING_VERIFIED_AT } from "@/lib/places/pricing";
 import { MailboxSettingsSection } from "./mailbox-section";
+import { UnsubscribeSettingsSection } from "./unsubscribe-section";
 import { t } from "@/lib/i18n";
 
 function useInvalidateAll() {
@@ -1237,6 +1238,7 @@ const SECTIONS = [
   { id: "categories", key: "settings.nav.categories" },
   { id: "email", key: "settings.nav.email" },
   { id: "mailbox", key: "settings.nav.mailbox" },
+  { id: "unsubscribe", key: "settings.nav.unsubscribe" },
   { id: "data", key: "settings.nav.data" },
   { id: "novelty", key: "settings.nav.novelty" },
 ] as const;
@@ -1372,6 +1374,9 @@ export function SettingsPage() {
                 </div>
                 <div id="mailbox" className="scroll-mt-16 lg:scroll-mt-6">
                   <MailboxSettingsSection />
+                </div>
+                <div id="unsubscribe" className="scroll-mt-16 lg:scroll-mt-6">
+                  <UnsubscribeSettingsSection />
                 </div>
                 <div id="data" className="scroll-mt-16 lg:scroll-mt-6">
                   <DataSection />

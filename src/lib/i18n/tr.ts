@@ -1709,4 +1709,136 @@ export const tr = {
   "mbx.oauth.reason.no_refresh_token": "Google kalıcı yetki vermedi; yeniden deneyin.",
   "mbx.oauth.reason.transient": "Google'a ulaşılamadı; daha sonra yeniden deneyin.",
   "mbx.oauth.reason.other": "Google yetkilendirmeyi tamamlayamadı.",
+
+  // Paket C3+C4 (TB-3): abonelikten çıkış altyapısı ayar kartı (anahtarlar, aktarıcı, doğrulama, çekme, ARF).
+  "settings.nav.unsubscribe": "Çıkış altyapısı",
+  "unsubInfra.title": "Abonelikten çıkış altyapısı (HTTPS)",
+  "unsubInfra.desc":
+    "Gerçek iletilerdeki tek tıklamalı çıkış bağlantısı için gereken anahtarlar, çıkış sunucusunun adresi ve doğrulaması. Adımları sırayla izleyin.",
+  "unsubInfra.note":
+    "Gerçek gönderim bu ekrandan açılmaz. Çıkış sunucusuna yalnızca “Doğrula” veya “Kuyruğu denetle” düğmesine bastığınızda ya da düzenli çekmeyi açtığınızda bağlanılır.",
+  "unsubInfra.legal.pending":
+    "Genel HTTPS çıkış uç noktası onayı bu sürümde kapalıdır; doğrulama başarılı olsa da canlı gönderime hazırlıkta bu madde açılmaz.",
+  "unsubInfra.step": "Adım {n}",
+  "unsubInfra.done": "Tamam",
+  "unsubInfra.todo": "Bekliyor",
+  "unsubInfra.signing.title": "İmza anahtarı",
+  "unsubInfra.signing.help":
+    "Her iletideki çıkış bağlantısı bu anahtarla imzalanır. Özel anahtar yalnızca bu bilgisayardaki şifreli depoda durur.",
+  "unsubInfra.signing.rotate.title": "İmza anahtarı yenilensin mi?",
+  "unsubInfra.signing.rotate.body":
+    "Yeni anahtar etkin olur; eski anahtar emekli kalır ve daha önce gönderilmiş bağlantılar çalışmaya devam eder. Çıkış sunucusu yeni anahtar dosyasını alıp uç nokta yeniden doğrulanana kadar uç nokta DOĞRULANMAMIŞ sayılır.",
+  "unsubInfra.signing.revoke.title": "İmza anahtarı iptal edilsin mi?",
+  "unsubInfra.signing.revoke.body":
+    "Bu işlem GERİ ALINAMAZ. Anahtar silinir ve bu anahtarla imzalanmış, daha önce gönderilmiş iletilerdeki çıkış bağlantıları ÇALIŞMAZ olur. Yalnızca anahtar sızdıysa kullanın; olağan yenileme için “Yeni anahtara geç”i seçin.",
+  "unsubInfra.channel.title": "Kanal anahtarı",
+  "unsubInfra.channel.help":
+    "Uygulama, çıkış sunucusunda bekleyen talepleri bu anahtarla imzalanmış isteklerle çeker. Sunucu yalnızca genel anahtarı bilir.",
+  "unsubInfra.channel.rotate.title": "Kanal anahtarı yenilensin mi?",
+  "unsubInfra.channel.rotate.body":
+    "Yeni anahtar etkin olur. Çıkış sunucusu yeni anahtar dosyasını alana kadar talepler çekilemez (talepler sunucuda bekler, kaybolmaz).",
+  "unsubInfra.channel.revoke.title": "Kanal anahtarı iptal edilsin mi?",
+  "unsubInfra.channel.revoke.body":
+    "Bu işlem GERİ ALINAMAZ. Anahtar silinir; etkin anahtarı iptal ederseniz yeni anahtar oluşturup sunucuya yükleyene kadar çıkış talepleri uygulamaya ulaşmaz.",
+  "unsubInfra.key.create": "Anahtar oluştur",
+  "unsubInfra.key.created": "Anahtar oluşturuldu.",
+  "unsubInfra.key.rotate": "Yeni anahtara geç",
+  "unsubInfra.key.rotated":
+    "Yeni anahtar etkin. Anahtar dosyasını yeniden indirip sunucuya yükleyin ve uç noktayı yeniden doğrulayın.",
+  "unsubInfra.key.active": "Etkin",
+  "unsubInfra.key.retired": "Emekli (eski bağlantılar için)",
+  "unsubInfra.key.createdAt": "Oluşturma: {at}",
+  "unsubInfra.key.revoke": "Anahtarı iptal et",
+  "unsubInfra.key.revoke.aria": "{kid} anahtarını iptal et",
+  "unsubInfra.key.revokedToast": "Anahtar iptal edildi.",
+  "unsubInfra.base.title": "Çıkış sunucusu adresi",
+  "unsubInfra.base.help":
+    "Yalnızca kök HTTPS adresi; port, yol veya sorgu olmadan (örn. https://cikis.firmaniz.com). Bağlantılar bu adresin /u/ yolunu kullanır.",
+  "unsubInfra.base.label": "Çıkış sunucusu adresi",
+  "unsubInfra.base.save": "Adresi kaydet",
+  "unsubInfra.base.saved": "Adres kaydedildi. Uç noktayı yeniden doğrulayın.",
+  "unsubInfra.base.cleared": "Adres kaldırıldı.",
+  "unsubInfra.base.invalid": "Geçerli bir HTTPS kök adresi girin (port, yol veya sorgu olmadan).",
+  "unsubInfra.base.clear": "Adresi kaldır",
+  "unsubInfra.base.clear.title": "Çıkış adresi kaldırılsın mı?",
+  "unsubInfra.base.change.title": "Çıkış adresi değiştirilsin mi?",
+  "unsubInfra.base.change.body":
+    "Mevcut doğrulama kanıtı silinir. Yeni adres doğrulanana kadar çıkış uç noktası doğrulanmamış sayılır.",
+  "unsubInfra.base.change.confirm": "Adresi değiştir",
+  "unsubInfra.file.title": "Anahtar dosyasını sunucuya yükleyin",
+  "unsubInfra.file.help":
+    "Dosya yalnızca GENEL anahtarları içerir. Yine de yalnızca SSH ile kopyalayın ve başkasıyla paylaşmayın.",
+  "unsubInfra.file.download": "Anahtar dosyasını indir",
+  "unsubInfra.file.downloaded": "relay-keys.json indirildi.",
+  "unsubInfra.file.needs": "Önce 1-3. adımları tamamlayın.",
+  "unsubInfra.file.scp":
+    "Dosyayı sunucuya kopyalayın (SUNUCU yerine kendi sunucunuzu yazın). Sunucu dosyayı birkaç saniye içinde kendisi yükler; yeniden başlatma gerekmez.",
+  "unsubInfra.file.after":
+    "Anahtar yenilediğinizde, iptal ettiğinizde veya adresi değiştirdiğinizde dosyayı yeniden indirip yükleyin.",
+  "unsubInfra.verify.title": "Uçtan uca doğrula",
+  "unsubInfra.verify.help":
+    "İmzalı bir SINAMA bağlantısı sunucuya gerçek bir tek tıklamalı çıkış isteğiyle gönderilir ve uygulamaya geri çekilir. Hiçbir alıcıya dokunmaz.",
+  "unsubInfra.verify.run": "Doğrula",
+  "unsubInfra.verify.running": "Doğrulanıyor; birkaç saniye sürebilir…",
+  "unsubInfra.verify.ok": "Doğrulandı ({at}). Kanıt {days} gün içinde sona erer.",
+  "unsubInfra.verify.expiring":
+    "Doğrulama kanıtı {days} gün içinde sona erecek; düzenli çekme kapalıysa elle yeniden doğrulayın.",
+  "unsubInfra.verify.none": "Henüz doğrulanmadı.",
+  "unsubInfra.verify.stale":
+    "Kanıt eski imza anahtarına ait. Güncel anahtar dosyasını sunucuya yükleyip yeniden doğrulayın.",
+  "unsubInfra.verify.expired": "Doğrulama kanıtının süresi doldu; yeniden doğrulayın.",
+  "unsubInfra.verify.last": "Son deneme ({at}): {msg}",
+  "unsubInfra.verify.autoNote":
+    "Düzenli çekme açıkken kanıt 25 günden eskiyince uygulama uç noktayı kendiliğinden yeniden doğrular (kanıt 30 gün geçerlidir).",
+  "unsubInfra.verify.code.verified": "Uç nokta doğrulandı.",
+  "unsubInfra.verify.code.not_configured": "Çıkış sunucusu adresi tanımlı değil.",
+  "unsubInfra.verify.code.no_key": "Etkin imza anahtarı yok; 1. adımı tamamlayın.",
+  "unsubInfra.verify.code.post_failed":
+    "Sunucuya ulaşılamadı (adres, DNS veya sertifika sorunu olabilir).",
+  "unsubInfra.verify.code.bad_status":
+    "Sunucu isteği kabul etmedi: sunucu çalışmıyor veya güncel anahtar dosyası yüklenmemiş.",
+  "unsubInfra.verify.code.not_delivered":
+    "Sunucu isteği aldı ama talep uygulamaya ulaşmadı; sunucunun kuyruk ayarını denetleyin.",
+  "unsubInfra.verify.code.channel_failed_401":
+    "Sunucu kanal anahtarını tanımıyor: güncel anahtar dosyasını yükleyin.",
+  "unsubInfra.verify.code.channel_failed_network":
+    "Sunucunun talep kuyruğuna ulaşılamadı; bağlantıyı denetleyip yeniden deneyin.",
+  "unsubInfra.verify.code.channel_failed": "Sunucunun talep kuyruğu okunamadı.",
+  "unsubInfra.verify.code.other": "Doğrulama tamamlanamadı.",
+  "unsubInfra.health.title": "Talep kuyruğu sağlığı",
+  "unsubInfra.health.help":
+    "Sunucuda bekleyen çıkış taleplerinin sayısı ve yaşı. Talepler uzun süre beklerse kişiler listeden geç çıkar.",
+  "unsubInfra.health.run": "Kuyruğu denetle",
+  "unsubInfra.health.never": "Henüz denetlenmedi.",
+  "unsubInfra.health.detail":
+    "Son denetim {at}: {depth} bekleyen talep, en eskisi {age}, {corrupt} bozuk kayıt.",
+  "unsubInfra.health.age.none": "yok",
+  "unsubInfra.health.age.min": "{n} dk",
+  "unsubInfra.health.code.ok": "Kuyruk sağlıklı.",
+  "unsubInfra.health.code.corrupt_events":
+    "Kuyrukta bozuk kayıt var; sunucunun diskini ve günlüklerini denetleyin.",
+  "unsubInfra.health.code.queue_deep":
+    "Kuyrukta 1000'den fazla bekleyen talep var; düzenli çekmenin açık olduğundan emin olun.",
+  "unsubInfra.health.code.events_stale":
+    "Bir saatten eski bekleyen talep var; düzenli çekme çalışmıyor olabilir.",
+  "unsubInfra.health.code.unreachable":
+    "Sunucuya ulaşılamadı veya sunucu kanal anahtarını tanımadı.",
+  "unsubInfra.health.code.other": "Kuyruk durumu bilinmiyor.",
+  "unsubInfra.drain.title": "Çıkış taleplerini düzenli çek",
+  "unsubInfra.drain.help":
+    "Açıkken uygulama dakikada bir sunucudaki çıkış taleplerini çeker ve kişileri iletişim listesinden çıkarır. Uygulama açık olmalıdır; gönderimi açmaz.",
+  "unsubInfra.drain.label": "Talepleri düzenli çek",
+  "unsubInfra.drain.on": "Düzenli çekme açıldı.",
+  "unsubInfra.drain.off": "Düzenli çekme kapatıldı.",
+  "unsubInfra.drain.env":
+    "Ortam değişkeni (UM_UNSUBSCRIBE_DRAIN_ENABLED) ile açık; bu anahtar kapalı olsa da çekme çalışır.",
+  "unsubInfra.drain.needsBase": "Çıkış sunucusu adresi tanımlanınca çalışmaya başlar.",
+  "unsubInfra.arf.title": "Şikâyet raporu sağlayıcıları (ARF)",
+  "unsubInfra.arf.help":
+    "Şikâyet (spam) raporu göndermesine güvendiğiniz sağlayıcıların alan adları; her satıra bir tane, en çok 50. Boş bırakırsanız gelen raporlar yalnızca inceleme kuyruğuna düşer.",
+  "unsubInfra.arf.label": "Güvenilen sağlayıcı alan adları",
+  "unsubInfra.arf.save": "Listeyi kaydet",
+  "unsubInfra.arf.saved": "Liste kaydedildi.",
+  "unsubInfra.arf.count": "{n} alan adı kayıtlı",
+  "unsubInfra.arf.tooMany": "En çok 50 alan adı girilebilir.",
 } as const;
