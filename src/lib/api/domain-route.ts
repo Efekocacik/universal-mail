@@ -8,6 +8,9 @@ import { SuppressionError } from "@/lib/compliance/suppression";
 import { ReviewError } from "@/lib/mail/inbound/process";
 import { TestSendError } from "@/lib/mail/test-send";
 import { TemplateServiceError } from "@/lib/mail/template-service";
+import { ArfConfigError } from "@/lib/mail/inbound/arf";
+import { ChannelError } from "@/lib/unsubscribe/channel";
+import { EndpointError } from "@/lib/unsubscribe/endpoint";
 import { json, route } from "./http";
 
 /**
@@ -129,8 +132,44 @@ export function mapDomainError(e: unknown): Mapped | null {
       body: { error: e.message, code: e.kind.toUpperCase() },
     };
   }
+  if (e instanceof EndpointError) {
+    return {
+      status: ENDPOINT_STATUS[e.code],
+      body: { error: e.message, code: e.code.toUpperCase() },
+    };
+  }
+  if (e instanceof ArfConfigError) {
+    return { status: 400, body: { error: e.message, code: e.code.toUpperCase() } };
+  }
+  if (e instanceof ChannelError) {
+    // Aktarıcı kanalı: yalnızca güvenli kod ve (varsa) aktarıcının HTTP durumu döner; adres/gövde sızdırılmaz.
+    return {
+      status: e.code === "insecure_url" ? 400 : 502,
+      body: {
+        error: CHANNEL_MESSAGE[e.code],
+        code: `CHANNEL_${e.code.toUpperCase()}`,
+        ...(e.status !== undefined ? { upstreamStatus: e.status } : {}),
+      },
+    };
+  }
   return null;
 }
+
+const ENDPOINT_STATUS: Record<EndpointError["code"], number> = {
+  invalid_url: 400,
+  no_endpoint: 409,
+  not_verified: 409,
+  no_key: 409,
+  lead_unavailable: 409,
+};
+
+const CHANNEL_MESSAGE: Record<ChannelError["code"], string> = {
+  insecure_url: "Çıkış adresi güvenli bir HTTPS adresi olmalıdır.",
+  http_error: "Çıkış sunucusu isteği reddetti.",
+  bad_response: "Çıkış sunucusundan beklenmeyen bir yanıt geldi.",
+  network: "Çıkış sunucusuna ulaşılamadı.",
+  timeout: "Çıkış sunucusu zamanında yanıt vermedi.",
+};
 
 const AUTO_STOP_STATUS: Record<AutoStopError["kind"], number> = {
   invalid_input: 400,

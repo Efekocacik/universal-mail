@@ -8,6 +8,7 @@ import type { Db } from "@/lib/db/client";
 import { auditLog, campaignLeads, messages, settings, suppressions } from "@/lib/db/schema";
 import { getSetting, setSetting } from "@/lib/settings";
 import {
+  ChannelError,
   HttpEventSource,
   createSpoolPullHandler,
   ensureChannelKey,
@@ -279,10 +280,37 @@ describe("uçtan uca doğrulama (kanıt yalnızca başarıdan sonra yazılır)",
     expect(await verify()).toEqual({ ok: false, code: "bad_status" });
   });
 
-  it("kanal anahtarı aktarıcıda tanınmıyorsa çekme başarısız → doğrulama tamamlanmaz (ChannelError yukarı çıkar)", async () => {
+  it("kanal anahtarı aktarıcıda tanınmıyorsa çekme başarısız → channel_failed; kanıt yok, son deneme KAYDEDİLİR", async () => {
     pull = createSpoolPullHandler({ spool, keys: () => [], now: () => clock });
-    await expect(verify()).rejects.toMatchObject({ code: "http_error", status: 401 });
-    expect((await cfg()).verified).toBeNull();
+    expect(await verify()).toEqual({
+      ok: false,
+      code: "channel_failed",
+      detail: "http_error_401",
+    });
+    const c = await cfg();
+    expect(c.verified).toBeNull();
+    expect(c.lastAttempt).toEqual({
+      at: clock,
+      ok: false,
+      code: "channel_failed",
+      detail: "http_error_401",
+    });
+  });
+
+  it("kanal ağ hatası (zaman aşımı/ağ) da channel_failed olarak kaydedilir; başka hatalar yukarı çıkar", async () => {
+    const failing = (err: unknown) => ({
+      pull: async () => {
+        throw err;
+      },
+      ack: async () => undefined,
+    });
+    expect(await verify({ source: failing(new ChannelError("timeout")) })).toEqual({
+      ok: false,
+      code: "channel_failed",
+      detail: "timeout",
+    });
+    expect((await cfg()).lastAttempt).toMatchObject({ code: "channel_failed", detail: "timeout" });
+    await expect(verify({ source: failing(new Error("db")) })).rejects.toThrow("db");
   });
 });
 

@@ -2,6 +2,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { isSafeLiveUnsubscribeUrl } from "@/lib/mail/footer";
 import { getSetting, setSetting } from "@/lib/settings";
+import { ChannelError } from "./channel";
 import { drainUnsubscribeEvents, type UnsubscribeEventSource } from "./ingest";
 import { buildUnsubscribeUrl, getSigner, mintProbeToken, mintUnsubscribeToken } from "./keys";
 
@@ -102,7 +103,18 @@ export type VerifyOutcome =
   | {
       ok: false;
       code: "not_configured" | "no_key" | "post_failed" | "bad_status" | "not_delivered";
+    }
+  | {
+      ok: false;
+      /** Aktarıcı kanalından olay çekilemedi (ör. aktarıcı kanal anahtarını tanımıyor → 401). */
+      code: "channel_failed";
+      detail: string;
     };
+
+/** Kanal hatasının güvenli, kısa ayrıntısı (ör. `http_error_401`); kişisel veri veya adres içermez. */
+function channelDetail(e: ChannelError): string {
+  return e.code === "http_error" && e.status !== undefined ? `http_error_${e.status}` : e.code;
+}
 
 /**
  * UÇTAN UCA doğrulama: sınama belirteci → gerçek RFC 8058 POST (yönlendirme izlenmez) → 200 → olay kuyruktan çekilir
@@ -117,7 +129,12 @@ export async function verifyOneClickEndpoint(db: Db, o: VerifyOptions): Promise<
     await setSetting(db, "mail.unsubscribeEndpoint", {
       ...cur,
       pending: out.ok ? null : cur.pending,
-      lastAttempt: { at: clock(), ok: out.ok, code: out.code },
+      lastAttempt: {
+        at: clock(),
+        ok: out.ok,
+        code: out.code,
+        ...("detail" in out ? { detail: out.detail } : {}),
+      },
     });
     return out;
   };
@@ -156,7 +173,15 @@ export async function verifyOneClickEndpoint(db: Db, o: VerifyOptions): Promise<
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const attempts = Math.max(1, o.attempts ?? 5);
   for (let i = 0; i < attempts; i++) {
-    await drainUnsubscribeEvents(db, o.source, { now: clock });
+    try {
+      await drainUnsubscribeEvents(db, o.source, { now: clock });
+    } catch (e) {
+      // Kanal hatası (ör. aktarıcı kanal anahtarını tanımıyor): kanıt YAZILMAZ, neden kayda geçer (sessiz kalmaz).
+      if (e instanceof ChannelError) {
+        return finish({ ok: false, code: "channel_failed", detail: channelDetail(e) });
+      }
+      throw e;
+    }
     const cur = await getSetting(db, "mail.unsubscribeEndpoint");
     if (cur.verified?.jti === probe.jti) return finish({ ok: true, code: "verified" });
     if (i < attempts - 1) await sleep(o.delayMs ?? 500);

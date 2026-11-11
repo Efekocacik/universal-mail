@@ -1,31 +1,56 @@
 import { and, eq, inArray, lt } from "drizzle-orm";
+import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobHandler } from "@/lib/jobs/registry";
-import { getSetting } from "@/lib/settings";
+import { getSetting, setSetting } from "@/lib/settings";
 import { HttpEventSource, getChannelSigner } from "./channel";
-import { checkDeliveryHealth } from "./endpoint";
+import { checkDeliveryHealth, verifyOneClickEndpoint, type VerifyOutcome } from "./endpoint";
 import { drainUnsubscribeEvents, type UnsubscribeEventSource } from "./ingest";
 
 /**
  * `unsubscribe.drain` iş türü (Aşama 15.7; docs/09 K7/K11): aktarıcının dayanıklı kuyruğundaki çıkış olaylarını
  * imzalı kanaldan ÇEKER, uygulamada işler ve ancak işlendikten sonra onaylar; ardından kuyruk sağlığını kaydeder.
  *
- * GÜVENLİK: Varsayılan KAPALI. İki koşul birlikte gerekir: `UM_UNSUBSCRIBE_DRAIN_ENABLED=1` VE yapılandırılmış çıkış
- * uç noktası (`mail.unsubscribeEndpoint.baseUrl`) ile etkin kanal anahtarı. Kapalıyken veya yapılandırma yokken hiçbir
- * ağ isteği yapılmaz, veritabanına hiçbir şey yazılmaz. Bu sürümde bayrak hiçbir yerde açılmaz (gerçek alan adı yok).
+ * GÜVENLİK: Varsayılan KAPALI. İki koşul birlikte gerekir: açma anahtarı (`UM_UNSUBSCRIBE_DRAIN_ENABLED=1` ortam
+ * bayrağı VEYA kullanıcının Ayarlar'dan açtığı `mail.unsubscribeDrain.enabled`) VE yapılandırılmış çıkış uç noktası
+ * (`mail.unsubscribeEndpoint.baseUrl`) ile etkin kanal anahtarı. Anahtar her turda yeniden okunur (worker yeniden
+ * başlatılmadan açılıp kapatılabilir). Kapalıyken veya yapılandırma yokken hiçbir ağ isteği yapılmaz. Bu iş gönderimi
+ * AÇMAZ; yalnızca çıkış taleplerinin uygulamaya ulaşmasını sağlar.
+ *
+ * Kendiliğinden yeniden doğrulama (C4): uçtan uca kanıt 30 gün geçerlidir. İş açıkken kanıt 25 günden eskiyse tur
+ * sonunda sınama yeniden yapılır (kanıt sessizce dolup canlı gönderim her ay kendiliğinden durmasın diye). Kanıt yoksa
+ * yalnızca daha önceki yeniden denenebilir bir başarısızlıktan en az 1 saat sonra denenir; hiç denenmemiş bir uç nokta
+ * için İLK doğrulama her zaman kullanıcı eylemidir.
  */
 
 export const UNSUBSCRIBE_DRAIN_JOB = "unsubscribe.drain";
 export const UNSUBSCRIBE_DRAIN_FLAG = "UM_UNSUBSCRIBE_DRAIN_ENABLED";
 export const UNSUBSCRIBE_DRAIN_INTERVAL_MS = 60_000;
+/** Kanıt bu yaştan büyükse tur sonunda yeniden doğrulanır (geçerlilik 30 gün). */
+export const AUTO_REVERIFY_AFTER_MS = 25 * 86_400_000;
+/** Başarısız (yeniden denenebilir) bir doğrulamadan sonra kendiliğinden yeniden deneme aralığı. */
+export const AUTO_REVERIFY_RETRY_MS = 3_600_000;
+/** Kendiliğinden yeniden denenebilen sonuçlar (yapılandırma eksikliği değil; geçici/aktarıcı sorunları). */
+const RETRYABLE_VERIFY_CODES: ReadonlySet<string> = new Set([
+  "post_failed",
+  "bad_status",
+  "not_delivered",
+  "channel_failed",
+]);
 const STALE_LOCK_MS = 5 * 60_000;
 
-export function isUnsubscribeDrainEnabled(
-  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
-): boolean {
+type Env = NodeJS.ProcessEnv | Record<string, string | undefined>;
+
+export function isUnsubscribeDrainEnabled(env: Env): boolean {
   const v = env[UNSUBSCRIBE_DRAIN_FLAG];
   return v === "1" || v === "true";
+}
+
+/** Çekme işi açık mı: ortam bayrağı VEYA kullanıcı ayarı (her çağrıda okunur). */
+export async function isUnsubscribeDrainActive(db: Db, env: Env): Promise<boolean> {
+  if (isUnsubscribeDrainEnabled(env)) return true;
+  return (await getSetting(db, "mail.unsubscribeDrain")).enabled;
 }
 
 export async function scheduleUnsubscribeDrain(
@@ -58,6 +83,67 @@ export async function scheduleUnsubscribeDrain(
   });
 }
 
+/**
+ * Yapılandırma değiştikten sonra (temel adres, anahtar açıldı): iş açıksa VE temel adres varsa hemen bir tur planlar
+ * (idempotent; kuyrukta tur varsa yenisi eklenmez). Aksi halde veritabanına yazmaz.
+ */
+export async function scheduleUnsubscribeDrainIfActive(
+  db: Db,
+  opts: { env: Env; now?: number },
+): Promise<boolean> {
+  if (!(await isUnsubscribeDrainActive(db, opts.env))) return false;
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  if (!cfg.baseUrl) return false;
+  const now = opts.now ?? Date.now();
+  return (await scheduleUnsubscribeDrain(db, { runAt: now, now })) !== null;
+}
+
+/**
+ * Kullanıcı anahtarını yazar ve denetime geçirir. Açılırsa (ve temel adres varsa) hemen bir tur planlanır; kapatılırsa
+ * kuyrukta BEKLEYEN turlar iptal edilir (ortam bayrağı açıksa iş yine çalışır, o durumda iptal edilmez).
+ */
+export async function setUnsubscribeDrainEnabled(
+  db: Db,
+  enabled: boolean,
+  opts: { env: Env; now?: number },
+): Promise<{ enabled: boolean; active: boolean; scheduled: boolean }> {
+  const now = opts.now ?? Date.now();
+  await setSetting(db, "mail.unsubscribeDrain", { enabled });
+  await audit(
+    db,
+    "unsubscribe.drain_toggled",
+    "setting",
+    "mail.unsubscribeDrain",
+    { enabled },
+    now,
+  );
+  const active = enabled || isUnsubscribeDrainEnabled(opts.env);
+  let scheduled = false;
+  if (active) {
+    scheduled = await scheduleUnsubscribeDrainIfActive(db, { env: opts.env, now });
+  } else {
+    await db
+      .update(jobs)
+      .set({ status: "cancelled", finishedAt: now, updatedAt: now, lockedBy: null })
+      .where(and(eq(jobs.type, UNSUBSCRIBE_DRAIN_JOB), eq(jobs.status, "queued")));
+  }
+  return { enabled, active, scheduled };
+}
+
+/** Kanıt kendiliğinden yeniden doğrulanmalı mı (bkz. modül açıklaması)? Yalnızca okur. */
+export async function needsAutoReverify(db: Db, now: number): Promise<boolean> {
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  if (!cfg.baseUrl) return false;
+  if (cfg.verified) return now - cfg.verified.verifiedAt > AUTO_REVERIFY_AFTER_MS;
+  const last = cfg.lastAttempt;
+  return (
+    last !== null &&
+    !last.ok &&
+    RETRYABLE_VERIFY_CODES.has(last.code) &&
+    now - last.at >= AUTO_REVERIFY_RETRY_MS
+  );
+}
+
 export interface DrainSourceBundle {
   source: UnsubscribeEventSource;
   stats: { getStats(): Promise<{ depth: number; oldestAgeMs: number | null; corrupt: number }> };
@@ -77,15 +163,20 @@ export async function buildHttpSource(db: Db): Promise<DrainSourceBundle | null>
 }
 
 export function createUnsubscribeDrainHandler(opts: {
-  enabled: boolean;
+  /** Sabit değer veya HER TURDA okunan karar (worker: ortam bayrağı VEYA kullanıcı ayarı). */
+  enabled: boolean | ((db: Db) => Promise<boolean>);
   /** Testler için; verilmezse yapılandırmadan kurulur. */
   sourceFactory?: (db: Db) => Promise<DrainSourceBundle | null>;
   now?: () => number;
+  /** Kendiliğinden yeniden doğrulama (testler için değiştirilebilir); verilmezse gerçek uçtan uca sınama. */
+  reverify?: (db: Db, source: UnsubscribeEventSource) => Promise<VerifyOutcome>;
 }): JobHandler {
+  const isOn = (db: Db): Promise<boolean> =>
+    typeof opts.enabled === "function" ? opts.enabled(db) : Promise.resolve(opts.enabled);
   return async (ctx) => {
-    if (!opts.enabled) {
+    if (!(await isOn(ctx.db))) {
       throw new NonRetryableJobError(
-        `${UNSUBSCRIBE_DRAIN_FLAG} kapalı: çıkış olayları çekilmedi, hiçbir ağ isteği yapılmadı.`,
+        `Çıkış olayı çekme kapalı (${UNSUBSCRIBE_DRAIN_FLAG} / Ayarlar): çıkış olayları çekilmedi, hiçbir ağ isteği yapılmadı.`,
       );
     }
     const clock = opts.now ?? Date.now;
@@ -115,8 +206,27 @@ export function createUnsubscribeDrainHandler(opts: {
       } catch (e) {
         ctx.log(`kuyruk sağlığı kaydedilemedi: ${e instanceof Error ? e.name : "unknown"}`);
       }
+      // Kanıt eskiyorsa (25 gün) sessizce dolmasın: tur sonunda uçtan uca yeniden doğrula.
+      if (!ctx.shouldStop()) {
+        try {
+          if (await needsAutoReverify(ctx.db, clock())) {
+            const reverify =
+              opts.reverify ??
+              ((db: Db, source: UnsubscribeEventSource) =>
+                verifyOneClickEndpoint(db, { source, now: clock }));
+            const out = await reverify(ctx.db, bundle.source);
+            ctx.log(`çıkış uç noktası kendiliğinden yeniden doğrulandı: ${out.code}`);
+          }
+        } catch (e) {
+          ctx.log(
+            `kendiliğinden yeniden doğrulama yapılamadı: ${e instanceof Error ? e.name : "unknown"}`,
+          );
+        }
+      }
     }
     if (ctx.shouldStop()) return;
+    // Tur sürerken kullanıcı kapattıysa sonraki tur planlanmaz.
+    if (!(await isOn(ctx.db))) return;
     try {
       await scheduleUnsubscribeDrain(ctx.db, {
         runAt: clock() + UNSUBSCRIBE_DRAIN_INTERVAL_MS,
@@ -129,12 +239,12 @@ export function createUnsubscribeDrainHandler(opts: {
   };
 }
 
-/** Worker başlangıcı: bayrak VE yapılandırma varsa turu planlar; aksi halde veritabanına HİÇ yazmaz. */
+/** Worker başlangıcı: anahtar (bayrak veya ayar) VE yapılandırma varsa turu planlar; aksi halde veritabanına HİÇ yazmaz. */
 export async function startUnsubscribeDrain(
   db: Db,
-  opts: { env: NodeJS.ProcessEnv | Record<string, string | undefined>; now?: () => number },
+  opts: { env: Env; now?: () => number },
 ): Promise<{ enabled: boolean }> {
-  if (!isUnsubscribeDrainEnabled(opts.env)) return { enabled: false };
+  if (!(await isUnsubscribeDrainActive(db, opts.env))) return { enabled: false };
   const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
   if (!cfg.baseUrl) return { enabled: false };
   const clock = opts.now ?? Date.now;
