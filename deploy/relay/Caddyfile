@@ -1,0 +1,27 @@
+# Universal Mail abonelikten çıkış aktarıcısı: Caddy ters vekil (TLS + Let's Encrypt).
+#
+# "cikis.firma.com" yerine kendi alt alan adınızı yazın. Bu ad, uygulamadaki "Abonelikten çıkış adresi" ile
+# (ve aktarıcının RELAY_PUBLIC_ORIGIN değeriyle) BİREBİR aynı olmalıdır. Port YAZMAYIN: uygulama yalnızca :443 kabul eder.
+#
+# KURALLAR:
+#  - Yol yeniden yazma (rewrite), www yönlendirmesi, önbellek EKLEMEYİN: /spool/* imzası yolun ve sorgunun TAMAMINI kapsar.
+#  - Erişim günlüğü ("log" yönergesi) AÇMAYIN: istek yolu abonelikten çıkış belirtecini içerir.
+#  - 80 ve 443 portları açık olmalı (80 yalnızca sertifika doğrulaması ve HTTPS'e yönlendirme içindir).
+
+cikis.firma.com {
+	request_body {
+		max_size 64KB
+	}
+
+	@relay path /u/* /spool/* /healthz
+	handle @relay {
+		reverse_proxy 127.0.0.1:8787 {
+			# İstemci adresini aktarıcıya güvenilir biçimde iletir (gelen X-Real-IP üzerine yazılır).
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
