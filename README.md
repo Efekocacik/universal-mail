@@ -38,6 +38,7 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 ```bash
 npm run setup      # .env.local + veritabanı (ilk kez)
 npm run dev        # http://127.0.0.1:3000 (web + arka plan işçisi)
+npm run dev:demo   # aynısı, ayrı veri klasörü (.data-demo) + demo kampanya gönderimi ve demo gelen kutusu açık
 npm test           # birim ve entegrasyon testleri
 npm run build && npx playwright test   # uçtan uca testler
 npm run dist       # macOS/Windows kurulum paketi (bulutta: GitHub Actions)
