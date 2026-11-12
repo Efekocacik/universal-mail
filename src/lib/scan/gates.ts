@@ -87,15 +87,8 @@ export interface PaidScanOptions {
   ackMaxUsd?: number | null;
 }
 
-/**
- * Ücretli tarama kapısı (yeni tarama, "Yeniden tara", zamanlanmış ve "Şimdi çalıştır" için ORTAK). Sağlayıcı ve fiyatlar
- * GÜNCEL ayarlardan okunur (eski taramanın sağlayıcısından değil).
- */
-export async function checkPaidScan(
-  db: Db,
-  request: ScanRequest,
-  opts: PaidScanOptions = {},
-): Promise<GateResult<{ estimate: ScanEstimate; budget: BudgetStatus }>> {
+/** Google sağlayıcısı seçiliyse anahtar tanımlı olmalı (demo sağlayıcıda her zaman geçer). */
+export async function checkProviderKey(db: Db): Promise<GateResult> {
   if (
     (await getSetting(db, "places.provider")) === "google" &&
     !(await getSecret("google.placesKey"))
@@ -105,6 +98,20 @@ export async function checkPaidScan(
       "Google Places API anahtarı tanımlı değil. Ayarlar'dan ekleyin.",
     );
   }
+  return { ok: true };
+}
+
+/**
+ * Ücretli tarama kapısı (yeni tarama, "Yeniden tara", zamanlanmış ve "Şimdi çalıştır" için ORTAK). Sağlayıcı ve fiyatlar
+ * GÜNCEL ayarlardan okunur (eski taramanın sağlayıcısından değil).
+ */
+export async function checkPaidScan(
+  db: Db,
+  request: ScanRequest,
+  opts: PaidScanOptions = {},
+): Promise<GateResult<{ estimate: ScanEstimate; budget: BudgetStatus }>> {
+  const key = await checkProviderKey(db);
+  if (!key.ok) return key;
   const { estimate } = await estimateForRequest(db, request);
   const budget = await budgetSummary(db);
   if (budget.level === "blocked")

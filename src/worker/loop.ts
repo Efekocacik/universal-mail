@@ -60,7 +60,10 @@ export class Worker {
    * - Faz 4: ZAMANLANMIŞ taramalardan kesilen (INTERRUPTED) veya kapanışta güvenle duraklatılan (APP_STOPPED) olanlar
    *   bütçe engelli değilse kendiliğinden yeniden kuyruğa alınır (kullanıcı zamanlamayı kurarken onayladı; çalıştırıcının
    *   çağrı ve bütçe sınırları geçerlidir). ELLE başlatılan taramalar duraklatılmış kalır (ücretli çağrılar kullanıcı
-   *   onayı olmadan sürmez) ve M9: kesilen elle taramalar için tek bir `scan.paused` bildirimi yazılır;
+   *   onayı olmadan sürmez) ve M9: kesilen elle taramalar için tek bir `scan.paused` bildirimi yazılır. BİLİNÇLİ
+   *   SAPMA: M9 yalnızca işçinin kendiliğinden yeniden başlatılmasını istiyordu; işçi ilk açılışla yeniden başlatmayı
+   *   ayırt edemez ve kullanıcı sert kapatmadan sonraki açılışta da yarım kalan taramasından haberdar olmalıdır;
+   *   bildirim gün başına tekildir. Zamanlanmış taramalar ayrıca tick'te de sürdürülür (schedule.ts `handleOwnRun`);
    * - `mail.send` işi yalnızca kalp atışı kesilmişse geri alınır (başka aktif bir worker'ın işi sahiplenilmez);
    * - diğer işler yeniden kuyruğa alınır;
    * - kuyruğa alınmış ama işi kaybolmuş taramalara iş eklenir.

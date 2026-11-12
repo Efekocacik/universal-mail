@@ -139,6 +139,23 @@ describe("POST /api/notifications/read", () => {
 });
 
 describe("POST /api/notifications/os-claim", () => {
+  it("sözleşme (Paket D): Electron ana süreci Origin göndermek ZORUNDA; Origin yoksa 403", () => {
+    const mk = (headers: Record<string, string>) =>
+      new NextRequest(`${ORIGIN}/api/notifications/os-claim`, { method: "POST", headers });
+    // Node/Electron-main fetch'i Origin eklemez: middleware reddeder.
+    expect(middleware(mk({ host: "127.0.0.1:3000" })).status).toBe(403);
+    // Doğru kullanım: Origin: http://127.0.0.1:<port> (Host ile aynı) + Content-Type.
+    expect(
+      middleware(
+        mk({
+          host: "127.0.0.1:3000",
+          origin: "http://127.0.0.1:3000",
+          "content-type": "application/json",
+        }),
+      ).status,
+    ).toBe(200);
+  });
+
   it("en çok 5, bir kez; ayar kapalıysa boş", async () => {
     await seed(7);
     const a = await json(

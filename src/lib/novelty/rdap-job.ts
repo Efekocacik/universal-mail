@@ -22,10 +22,15 @@ import { demoRdap } from "./rdap-demo";
  *    `pending` olarak eklenir (INSERT OR IGNORE; idempotent).
  * 2. `runRdapBatch`: zamanı gelen satırlar sırayla sorgulanır (en çok `limit`; istekler arası bekleme). Sonuç tek UPDATE ile
  *    yazılır; deneme sayısına göre geri çekilir. Ayar kapalıysa hiçbir ağ isteği yapılmaz.
+ * 3. Birikmiş kuyruk (ör. ilk açılışta ~1.900 alan adı) tek tura sığmaz: tur bittiğinde hâlâ zamanı gelmiş satır varsa ve
+ *    tur durdurulmadıysa iş kendini `RDAP_CONTINUE_DELAY_MS` sonra yeniden kuyruğa alır (`continueAfterJobId`). Böylece
+ *    kuyruk saatler içinde erir; işçi tek iş yürüttüğünden turlar arasında taramalar ve gönderimler önce çalışır.
  * Demo sağlayıcıda ağ isteği YOKTUR (`demoRdap`).
  */
 export const RDAP_JOB = "novelty.rdap";
 export const RDAP_MAX_PER_RUN = 50;
+/** Kuyruk erirken iki tur arası bekleme (başka işlerin araya girmesi için). */
+export const RDAP_CONTINUE_DELAY_MS = 5_000;
 
 export async function syncDomainQueue(db: Db, now: number, leadIds?: number[]): Promise<number> {
   const scope = leadIds?.length
@@ -51,6 +56,8 @@ export interface RdapDeps {
   minIntervalMs?: number;
   shouldStop?: () => boolean;
   log?: (m: string) => void;
+  /** Çalışan iş kimliği: verilirse ve kuyrukta zamanı gelmiş satır kaldıysa devam turu kuyruğa alınır. */
+  continueAfterJobId?: number;
 }
 
 export interface RdapRunResult {
@@ -60,6 +67,10 @@ export interface RdapRunResult {
   /** Kayıt tarihi bulunan alan adları (çağıran, bağlı lead'lerin yenilik skorunu yeniden hesaplar). */
   domains: string[];
   skippedReason?: "disabled" | "bootstrap_unavailable" | "stopped";
+  /** Tur sonunda hâlâ zamanı gelmiş alan adı var mı (birikmiş kuyruk). */
+  moreDue?: boolean;
+  /** Devam turu kuyruğa alındıysa iş kimliği. */
+  continuedJobId?: number | null;
 }
 
 async function loadBootstrap(deps: RdapDeps, now: number): Promise<RdapBootstrap | null> {
@@ -145,8 +156,24 @@ export async function runRdapBatch(
       { checked: res.checked, ok: res.ok, failed: res.failed },
       clock(),
     );
+  if (!res.skippedReason) {
+    const left = await db
+      .select({ domain: domainRegistrations.domain })
+      .from(domainRegistrations)
+      .where(lte(domainRegistrations.nextCheckAt, clock()))
+      .limit(1);
+    res.moreDue = left.length > 0;
+    if (res.moreDue && deps.continueAfterJobId !== undefined) {
+      const t = clock();
+      res.continuedJobId = await enqueueRdap(db, {
+        runAt: t + RDAP_CONTINUE_DELAY_MS,
+        now: t,
+        exceptJobId: deps.continueAfterJobId,
+      });
+    }
+  }
   deps.log?.(
-    `RDAP: ${res.checked} alan adı denetlendi, ${res.ok} tarih bulundu, ${res.failed} hata`,
+    `RDAP: ${res.checked} alan adı denetlendi, ${res.ok} tarih bulundu, ${res.failed} hata${res.moreDue ? "; kalanlar için devam turu" : ""}`,
   );
   return res;
 }

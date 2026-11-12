@@ -7,7 +7,14 @@ import * as rdapRoute from "@/app/api/leads/rdap/route";
 import * as rdapStatusRoute from "@/app/api/settings/novelty/rdap-status/route";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { categorySets, domainRegistrations, leadEnrichment, leads, scans } from "@/lib/db/schema";
+import {
+  categorySets,
+  domainRegistrations,
+  jobs,
+  leadEnrichment,
+  leads,
+  scans,
+} from "@/lib/db/schema";
 import { FetchError, safeFetch, type FetchFn, type FetchResult } from "@/lib/email/safe-fetch";
 import { computeNovelty } from "@/lib/novelty/score";
 import {
@@ -23,6 +30,9 @@ import { demoRdap } from "@/lib/novelty/rdap-demo";
 import {
   enqueueRdap,
   placeIdsForDomains,
+  RDAP_CONTINUE_DELAY_MS,
+  RDAP_JOB,
+  RDAP_MAX_PER_RUN,
   rdapStatus,
   runRdapBatch,
   syncDomainQueue,
@@ -415,6 +425,30 @@ describe("HTTP: RDAP uç noktaları ve lead ayrıntısı", () => {
     expect(st).toMatchObject({ enabled: false, demo: true });
   });
 
+  it("birikmiş kuyruk: tur sınırından fazlası varsa devam turu kuyruğa alınır, kuyruk bitince durur", async () => {
+    await setup();
+    const n = RDAP_MAX_PER_RUN + 10;
+    await db.insert(domainRegistrations).values(
+      Array.from({ length: n }, (_, i) => ({
+        domain: `firma${i}.de`,
+        status: "pending" as const,
+        nextCheckAt: T0,
+        createdAt: T0,
+        updatedAt: T0,
+      })),
+    );
+    const first = await runRdapBatch({ db, now: () => T0, continueAfterJobId: 9999 });
+    expect(first).toMatchObject({ checked: RDAP_MAX_PER_RUN, moreDue: true });
+    expect(first.continuedJobId).toEqual(expect.any(Number));
+    const queued = (await db.select().from(jobs)).filter((j) => j.type === RDAP_JOB);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]).toMatchObject({ status: "queued", runAt: T0 + RDAP_CONTINUE_DELAY_MS });
+    // Devam turu zaten kuyrukta: yeniden çağrı ikinci iş eklemez; kuyruk bitince devam yok.
+    const second = await runRdapBatch({ db, now: () => T0, continueAfterJobId: 9999 });
+    expect(second).toMatchObject({ checked: 10, moreDue: false });
+    expect((await db.select().from(jobs)).filter((j) => j.type === RDAP_JOB)).toHaveLength(1);
+  });
+
   it("lead ayrıntısı: alan adı yaşı ve kaybolma", async () => {
     await setup();
     const byPlace = await seedLeads();
@@ -427,6 +461,20 @@ describe("HTTP: RDAP uç noktaları ve lead ayrıntısı", () => {
     );
     expect(d.domainAge).toMatchObject({ domain: "firma.de", status: "ok" });
     expect(d.place.goneAt).toBeNull();
+    // Denetim kapalıyken "henüz denetlenmedi" denmez; kapalı olduğu söylenir (tarih de gösterilmez).
+    await setSetting(db, "novelty.rdap", { enabled: false });
+    const off = await json(
+      await leadRoute.GET(req("GET", `/api/leads/${id}`), {
+        params: Promise.resolve({ id: String(id) }),
+      }),
+    );
+    expect(off.domainAge).toEqual({
+      domain: "firma.de",
+      status: "disabled",
+      registeredAt: null,
+      checkedAt: null,
+    });
+    await setSetting(db, "novelty.rdap", { enabled: true });
     const id3 = byPlace.get("p3")!;
     const d3 = await json(
       await leadRoute.GET(req("GET", `/api/leads/${id3}`), {

@@ -5,6 +5,7 @@ import {
   jobs,
   regions,
   scanSchedules,
+  scans,
   type ScheduleIntervalDays,
   type ScheduleOutcome,
 } from "@/lib/db/schema";
@@ -13,11 +14,24 @@ import { getSetting, setSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/util";
 import { uniqueViolationOn } from "./db-errors";
 import { ScanGateError, type GateCode } from "./gate-error";
-import { checkCollectionReady, checkPaidScan, checkTargetCountry } from "./gates";
+import {
+  budgetSummary,
+  checkCollectionReady,
+  checkPaidScan,
+  checkProviderKey,
+  checkTargetCountry,
+} from "./gates";
+import { isAutoResumable, type OwnRunCode } from "./pause-codes";
 import { PlanError } from "./planner";
 import { safeNotify } from "./scan-notifications";
 import { checkScheduleCategorySets, CATEGORY_SET_MISSING } from "./schedule-categories";
-import { insertPreparedScan, prepareScan, type PreparedScan, type ScanRequest } from "./service";
+import {
+  ACTIVE_SCAN_STATUSES,
+  insertPreparedScan,
+  prepareScan,
+  type PreparedScan,
+  type ScanRequest,
+} from "./service";
 
 /**
  * Zamanlanmış (tekrarlanan) taramalar (Faz 4, madde 1; SRS FR-DIS-07). Tasarım:
@@ -32,6 +46,11 @@ import { insertPreparedScan, prepareScan, type PreparedScan, type ScanRequest } 
  *   oluştururken/düzenlerken bir üst sınırı (`ack_max_usd`) önceden onaylar; tahmin bunu aşarsa NEEDS_ACK ile atlanır.
  * - Atlamada tarama oluşmaz; `last_outcome='skipped'`, `last_skip_code` yazılır, `next_run_at` yeniden deneme anına
  *   kayar ve gün başına tekil bir `schedule.skipped` bildirimi üretilir.
+ * - Zamanlamanın KENDİ son taraması henüz bitmediyse yeni tarama açılmaz (aynı anahtar ACTIVE_SCAN olurdu):
+ *   kuyrukta/çalışıyorsa sessizce bir saat sonra (PREVIOUS_RUN_ACTIVE); geçici hata, kapanış veya bütçe nedeniyle
+ *   durduysa ve kapılar izin veriyorsa KALDIĞI YERDEN sürdürülür (`resumed`); kullanıcı duraklattıysa ya da güvenlik
+ *   sınırına takıldıysa SCAN_PAUSED ile atlanır (kullanıcıya "sürdürün ya da iptal edin" denir). Böylece kendi kendine
+ *   duran bir tarama zamanlamayı kalıcı olarak kilitlemez (inceleme P1).
  * - M2 (yalnızca demo sağlayıcı): her zamanlanmış çalışma demo zamanını (`mock.epoch`) bir ilerletir; böylece demo
  *   modunda da yeni/açılan işletmeler birikir. Google sağlayıcısında asla dokunulmaz.
  * Bütün fonksiyonlar `now` alır (M1 kabul testi saat enjeksiyonu).
@@ -46,11 +65,18 @@ export const TICK_INTERVAL_MS = 5 * 60_000;
 export const FIRST_TICK_DELAY_MS = 60_000;
 export const MAX_DEMO_EPOCH = 50;
 
-export type ScheduleSkipCode = GateCode | typeof CATEGORY_SET_MISSING | "PLAN_INVALID";
+export type ScheduleSkipCode = GateCode | typeof CATEGORY_SET_MISSING | "PLAN_INVALID" | OwnRunCode;
 
-/** Atlama kodu → yeniden deneme gecikmesi. ACTIVE_SCAN kısa (aynı tarama bitince), diğerleri bir gün. */
+export const HOUR_MS = 3_600_000;
+
+/**
+ * Atlama kodu → yeniden deneme gecikmesi. Kısa (bir saat): başka/önceki tarama sürüyor veya geçici Google hatası.
+ * Diğerleri (bütçe, onay, kurulum, kullanıcının duraklattığı tarama) bir gün.
+ */
 export function retryDelayMs(code: ScheduleSkipCode): number {
-  return code === "ACTIVE_SCAN" ? 3_600_000 : DAY_MS;
+  return code === "ACTIVE_SCAN" || code === "PREVIOUS_RUN_ACTIVE" || code === "SCAN_RETRYING"
+    ? HOUR_MS
+    : DAY_MS;
 }
 
 export type ScheduleRow = typeof scanSchedules.$inferSelect;
@@ -112,6 +138,7 @@ export async function scheduleRequest(
 
 export type ScheduleRunResult =
   | { scheduleId: number; outcome: "started"; scanId: number; missedRuns: number }
+  | { scheduleId: number; outcome: "resumed"; scanId: number; missedRuns: number }
   | { scheduleId: number; outcome: "skipped"; code: ScheduleSkipCode; retryAt: number }
   | { scheduleId: number; outcome: "lost" };
 
@@ -195,6 +222,120 @@ async function recordSkip(
   return { scheduleId: s.id, outcome: "skipped", code, retryAt };
 }
 
+/** Zamanlamanın son taraması hâlâ bitmemişse (kuyrukta/çalışıyor/duraklı/bütçe durdurdu) onu döndürür. */
+async function ownUnfinishedRun(
+  db: Db,
+  s: ScheduleRow,
+): Promise<{ id: number; status: string; pauseCode: string | null } | null> {
+  if (s.lastScanId === null) return null;
+  const row = (
+    await db
+      .select({ id: scans.id, status: scans.status, pauseCode: scans.pauseCode })
+      .from(scans)
+      .where(
+        and(
+          eq(scans.id, s.lastScanId),
+          eq(scans.scheduleId, s.id),
+          inArray(scans.status, [...ACTIVE_SCAN_STATUSES]),
+        ),
+      )
+      .limit(1)
+  )[0];
+  return row ?? null;
+}
+
+class ResumeRaceLost extends Error {}
+
+/**
+ * Zamanlamanın kendi duraklamış taramasını sürdürür: zamanlama CAS'ı, tarama durumu CAS'ı (paused|budget_stopped →
+ * queued) ve iş kaydı TEK işlemde. Aynı an için iki tick'ten yalnızca biri kazanır; taramanın zaten bir işi varsa yenisi
+ * eklenmez. Sonraki çalışma `şimdi + aralık` (tarama yeniden durursa çalıştırıcı bunu öne çeker).
+ */
+async function resumeOwnRun(
+  db: Db,
+  s: ScheduleRow,
+  scanId: number,
+  now: number,
+  log?: (m: string) => void,
+): Promise<ScheduleRunResult> {
+  const { missedRuns } = computeDue(s, now);
+  try {
+    const ok = await db.transaction(async (tx) => {
+      const cas = await tx
+        .update(scanSchedules)
+        .set({
+          nextRunAt: nextRunAfter(now, s.intervalDays),
+          lastRunAt: now,
+          missedRuns,
+          lastOutcome: "started" satisfies ScheduleOutcome,
+          lastSkipCode: null,
+          updatedAt: now,
+        })
+        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+        .returning({ id: scanSchedules.id });
+      if (cas.length === 0) return false;
+      const moved = await tx
+        .update(scans)
+        .set({ status: "queued", pauseReason: null, pauseCode: null })
+        .where(and(eq(scans.id, scanId), inArray(scans.status, ["paused", "budget_stopped"])))
+        .returning({ id: scans.id });
+      if (moved.length === 0) throw new ResumeRaceLost();
+      const active = await tx
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.type, "scan.run"),
+            inArray(jobs.status, ["queued", "running"]),
+            sql`json_extract(${jobs.payload}, '$.scanId') = ${scanId}`,
+          ),
+        )
+        .limit(1);
+      if (active.length === 0)
+        await tx.insert(jobs).values({
+          type: "scan.run",
+          payload: { scanId },
+          status: "queued",
+          priority: 5,
+          maxAttempts: 1,
+          runAt: now,
+          createdAt: now,
+          updatedAt: now,
+        });
+      await audit(tx, "schedule.resumed", "schedule", s.id, { scanId, missedRuns }, now);
+      return true;
+    });
+    if (!ok) return { scheduleId: s.id, outcome: "lost" };
+  } catch (e) {
+    if (e instanceof ResumeRaceLost) return { scheduleId: s.id, outcome: "lost" };
+    throw e;
+  }
+  log?.(`zamanlama #${s.id}: duraklamış tarama #${scanId} kaldığı yerden sürüyor`);
+  return { scheduleId: s.id, outcome: "resumed", scanId, missedRuns };
+}
+
+/** Arka plan tick'i: zamanlamanın kendi bitmemiş taraması varsa yeni tarama yerine onu ele alır. */
+async function handleOwnRun(
+  db: Db,
+  s: ScheduleRow,
+  own: { id: number; status: string; pauseCode: string | null },
+  now: number,
+  log?: (m: string) => void,
+): Promise<ScheduleRunResult> {
+  // Hâlâ kuyrukta/çalışıyor: kullanıcıya söylenecek bir şey yok; bir saat sonra yeniden bakılır.
+  if (own.status === "queued" || own.status === "running")
+    return recordSkip(db, s, "PREVIOUS_RUN_ACTIVE", now, { notifyUser: false, log });
+  if (!isAutoResumable(own.status, own.pauseCode))
+    return recordSkip(db, s, "SCAN_PAUSED", now, { notifyUser: true, log });
+  const ready = await checkCollectionReady(db);
+  if (!ready.ok) return recordSkip(db, s, ready.code, now, { notifyUser: true, log });
+  const key = await checkProviderKey(db);
+  if (!key.ok) return recordSkip(db, s, key.code, now, { notifyUser: true, log });
+  if ((await budgetSummary(db)).level === "blocked")
+    return recordSkip(db, s, "SCAN_BUDGET_STOPPED", now, { notifyUser: true, log });
+  return resumeOwnRun(db, s, own.id, now, log);
+}
+
 /**
  * Tek zamanlamayı bu an için çalıştırır (CAS + tarama oluşturma tek işlemde). `expectedNextRunAt` CAS değeridir.
  * Etkileşimli ("Şimdi çalıştır") çağrıda `slot = now` kullanılır ve `acknowledgeRisk` geçerlidir.
@@ -212,6 +353,10 @@ export async function runSchedule(
 > {
   const log = mode.log;
   const due = computeDue(s, now);
+  if (!mode.interactive) {
+    const own = await ownUnfinishedRun(db, s);
+    if (own) return handleOwnRun(db, s, own, now, log);
+  }
   const ev = await evaluate(db, s, mode);
   if (!ev.ok) {
     if (mode.interactive)
@@ -304,7 +449,7 @@ export async function runDueSchedules(
       opts.log?.(`zamanlama #${s.id} çalıştırılamadı: ${errorMessage(e).slice(0, 160)}`);
       await db
         .update(scanSchedules)
-        .set({ nextRunAt: opts.now + 3_600_000, updatedAt: opts.now })
+        .set({ nextRunAt: opts.now + HOUR_MS, updatedAt: opts.now })
         .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)));
     }
   }

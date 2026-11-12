@@ -22,7 +22,13 @@ import { FIELD_TIERS } from "./fields";
  *  - `session`: yalnızca geçici oturum önbelleğinde (gcache); açılış/kapanışta ve `google.cacheDays` sonra silinir.
  *  - `derived`: bizim türettiğimiz kalıcı bayraklar. Google içeriği mi sayılır hukuki görüşü BEKLİYOR (`legalReview:
  *    "pending"`); o zamana dek bugünkü davranış (süresiz) korunur, `google.derivedFlagsDays` ayarlanırsa o kadar gün sonra
- *    temizlenir.
+ *    temizlenir — YALNIZCA `settingKey` taşıyan alanlar (`purgeDerivedFlags` tam olarak bunları siler; test eşleştirir).
+ *    Ayarın silmediği türetilmiş alanlar `settingKey` taşımaz, `maxDays` null'dır ve `keptBecause` gerçek davranışı
+ *    söyler (politika tablosu yapılmayan bir silmeyi vaat etmez):
+ *      `prevents_reappearing`  goneAt: Google'da kaybolan yer yeniden "etkin" görünmesin diye kalır (yalnızca bizim
+ *                              zaman damgamız; Google içeriği yok)
+ *      `recomputed_each_scan`  reviewsSignal: her taramada güncel (oturumluk) değerlendirme sayısından yeniden hesaplanır
+ *      `own_dataset`           countryCity: KENDİ GeoNames veri setimizden türetilir, Google içeriği değildir
  */
 export const TERMS_REVIEWED_AT = "2026-11-12";
 export const TERMS_URL = "https://cloud.google.com/maps-platform/terms";
@@ -47,7 +53,11 @@ export interface RetentionRule {
   refreshAfterDays?: number;
   termsRef: string;
   legalReview?: "pending";
+  /** Türetilmiş ama `google.derivedFlagsDays` ile SİLİNMEYEN alanın gerçek davranışı. */
+  keptBecause?: KeptBecause;
 }
+
+export type KeptBecause = "prevents_reappearing" | "recomputed_each_scan" | "own_dataset";
 
 /** Bizim türettiğimiz kalıcı alanlar (Google alanı değil ama Google verisinden hesaplanan). */
 export const DERIVED_FIELDS = [
@@ -76,6 +86,14 @@ const derived = (storage: Storage[]): RetentionRule => ({
   settingKey: "google.derivedFlagsDays",
   termsRef: TERMS_URL,
   legalReview: "pending",
+});
+/** Türetilmiş, ayar tarafından silinmeyen alan (gerekçesiyle). */
+const derivedKept = (storage: Storage[], keptBecause: KeptBecause): RetentionRule => ({
+  class: "derived",
+  storage,
+  termsRef: TERMS_URL,
+  legalReview: "pending",
+  keptBecause,
 });
 
 export const GOOGLE_RETENTION_POLICY: Readonly<
@@ -112,11 +130,11 @@ export const GOOGLE_RETENTION_POLICY: Readonly<
   newDetectedAt: derived(["places"]),
   notFoundInScanId: derived(["places"]),
   statusCheckedAt: derived(["places"]),
-  goneAt: derived(["places"]),
+  goneAt: derivedKept(["places"], "prevents_reappearing"),
   /** Değerlendirme sayısından türetilen yenilik sinyali kovası (leads.novelty_signals). */
-  reviewsSignal: derived(["leads"]),
+  reviewsSignal: derivedKept(["leads"], "recomputed_each_scan"),
   /** Ülke/şehir: Google koordinatından KENDİ GeoNames veri setimizle türetilir. */
-  countryCity: derived(["leads"]),
+  countryCity: derivedKept(["leads"], "own_dataset"),
 };
 
 export interface PolicyRow {
@@ -127,6 +145,7 @@ export interface PolicyRow {
   refreshAfterDays: number | null;
   termsRef: string;
   legalReview: "pending" | null;
+  keptBecause: KeptBecause | null;
 }
 
 /** Ayarlar kartı ve GET /api/google-data için politika tablosu (güncel ayar değerleriyle). */
@@ -139,7 +158,7 @@ export function policyRows(settings: {
     class: r.class,
     storage: r.storage,
     maxDays:
-      r.class === "derived"
+      r.settingKey === "google.derivedFlagsDays"
         ? settings.derivedFlagsDays
         : r.maxDays !== undefined
           ? effectiveCacheDays(settings.cacheDays)
@@ -147,6 +166,7 @@ export function policyRows(settings: {
     refreshAfterDays: r.refreshAfterDays ?? null,
     termsRef: r.termsRef,
     legalReview: r.legalReview ?? null,
+    keptBecause: r.keptBecause ?? null,
   }));
 }
 
@@ -158,8 +178,9 @@ export function effectiveCacheDays(setting: number): number {
 
 /**
  * `google.derivedFlagsDays` ayarlıysa (null = süresiz) türetilmiş bayrakları temizler: son gözlemi (`status_checked_at`,
- * yoksa `updated_at`) kesimden eski yerlerde was_future/is_closed/*_detected_at/not_found sıfırlanır ve kesimden önce
- * biten taramaların snapshot `was_future` bayrağı kaldırılır. place_id ve lead (kullanıcı verisi) kalır.
+ * yoksa `updated_at`) kesimden eski yerlerde was_future/is_closed/*_detected_at/not_found/status_checked_at sıfırlanır
+ * ve kesimden önce biten taramaların snapshot `was_future` bayrağı kaldırılır. place_id ve lead (kullanıcı verisi) kalır.
+ * Silinen alanlar politika tablosunda `settingKey: "google.derivedFlagsDays"` taşıyanlarla birebir aynıdır.
  */
 export async function purgeDerivedFlags(
   db: Db,
@@ -177,6 +198,7 @@ export async function purgeDerivedFlags(
       openedDetectedAt: null,
       newDetectedAt: null,
       notFoundInScanId: null,
+      statusCheckedAt: null,
     })
     .where(
       and(
@@ -187,6 +209,7 @@ export async function purgeDerivedFlags(
           isNotNull(places.openedDetectedAt),
           isNotNull(places.newDetectedAt),
           isNotNull(places.notFoundInScanId),
+          isNotNull(places.statusCheckedAt),
         ),
       ),
     )

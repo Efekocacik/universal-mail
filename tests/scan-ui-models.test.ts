@@ -71,7 +71,14 @@ describe("zamanlama kartı görünüm modeli", () => {
         NOW,
         fmt,
       );
-      expect(vm.outcomeTone).toBe("warning");
+      expect(vm.outcomeTone).toBe(code === "PREVIOUS_RUN_ACTIVE" ? "ok" : "warning");
+      expect(vm.outcomeLabel).toBe(
+        code === "PREVIOUS_RUN_ACTIVE"
+          ? "Çalışıyor"
+          : code.startsWith("SCAN_")
+            ? "Duraklatıldı"
+            : "Atlandı",
+      );
       expect(vm.skipReason).toBe(t(`schedules.skip.${code}` as TrKey));
       expect(hasTranslation(`schedules.skip.${code}` as TrKey, "en")).toBe(true);
     }

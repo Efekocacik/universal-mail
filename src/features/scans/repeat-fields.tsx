@@ -58,12 +58,13 @@ export function RepeatFields({
           placeholder={t("schedules.field.cap.placeholder")}
           value={value.capText}
           aria-invalid={!cap.ok}
+          aria-describedby={cap.ok ? `${id}-cap-hint` : `${id}-cap-error`}
           onChange={(e) => onChange({ ...value, capText: e.target.value })}
         />
         {cap.ok ? (
-          <FieldHint>{t("schedules.field.cap.hint")}</FieldHint>
+          <FieldHint id={`${id}-cap-hint`}>{t("schedules.field.cap.hint")}</FieldHint>
         ) : (
-          <FieldError>{t("schedules.field.cap.invalid")}</FieldError>
+          <FieldError id={`${id}-cap-error`}>{t("schedules.field.cap.invalid")}</FieldError>
         )}
       </div>
       <FieldHint className="sm:col-span-2">{t("schedules.whileOpen")}</FieldHint>

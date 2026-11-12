@@ -19,6 +19,7 @@ export const scan = {
   "schedules.outcome.started": "Çalışıyor",
   "schedules.outcome.failed": "Tamamlanamadı",
   "schedules.outcome.skipped": "Atlandı",
+  "schedules.outcome.paused": "Duraklatıldı",
   "schedules.skip.BUDGET_BLOCKED":
     "Aylık Google bütçesi dolduğu için atlandı. Bütçeyi Ayarlar'dan artırabilir ya da gelecek ayı bekleyebilirsiniz; yarın yeniden denenecek.",
   "schedules.skip.NEEDS_ACK":
@@ -33,6 +34,14 @@ export const scan = {
     "Aynı bölge ve kategoriler için başka bir tarama sürdüğü için atlandı; bir saat sonra yeniden denenecek.",
   "schedules.skip.CATEGORY_SET_MISSING":
     "Zamanlamanın kullandığı bir kategori artık yok. Bu zamanlamayı silip taramayı yeniden kurun.",
+  "schedules.skip.PREVIOUS_RUN_ACTIVE":
+    "Önceki düzenli tarama hâlâ sürüyor; bittikten sonra yeni çalışma başlar.",
+  "schedules.skip.SCAN_RETRYING":
+    "Son tarama Google'a ulaşılamadığı için duraklatıldı; bir saat içinde kaldığı yerden kendiliğinden sürecek.",
+  "schedules.skip.SCAN_BUDGET_STOPPED":
+    "Son tarama aylık Google bütçesi dolduğu için durdu. Bütçe yenilenince ya da Ayarlar'dan artırınca kaldığı yerden kendiliğinden sürecek.",
+  "schedules.skip.SCAN_PAUSED":
+    "Son tarama duraklatılmış durumda (siz duraklattınız ya da güvenlik sınırına ulaştı). Aşağıdaki Taramalar listesinden sürdürün ya da iptal edin; o zamana kadar yeni çalışma başlamaz.",
   "schedules.skip.other": "Bu kez çalıştırılamadı; yarın yeniden denenecek.",
   "schedules.interval.7": "Her hafta",
   "schedules.interval.14": "İki haftada bir",
@@ -133,6 +142,7 @@ export const scan = {
   "detail.domainAge.unsupported_tld": "Bu uzantı için kayıt sorgusu yok",
   "detail.domainAge.rate_limited": "Kayıt sunucusu meşgul; yeniden denenecek",
   "detail.domainAge.error": "Sorgulanamadı; yeniden denenecek",
+  "detail.domainAge.disabled": "Denetim kapalı (Ayarlar > Alan adı yaşı bölümünden açabilirsiniz)",
 
   // Yenilik sinyali gerekçeleri (parametreli)
   "novelty.signal.future_opening":

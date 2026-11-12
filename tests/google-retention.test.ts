@@ -143,6 +143,45 @@ describe("alan düzeyinde saklama politikası", () => {
       refreshAfterDays: 365,
     });
     expect(rows.find((r) => r.field === "wasFuture")!.maxDays).toBe(365);
+    // Ayarın silmediği türetilmiş alanlar süre vaat etmez; gerçek davranışları yazılıdır.
+    expect(rows.find((r) => r.field === "goneAt")).toMatchObject({
+      maxDays: null,
+      keptBecause: "prevents_reappearing",
+    });
+    expect(rows.find((r) => r.field === "reviewsSignal")!.keptBecause).toBe("recomputed_each_scan");
+    expect(rows.find((r) => r.field === "countryCity")!.keptBecause).toBe("own_dataset");
+  });
+
+  it("politikada süreli görünen her türetilmiş alan purgeDerivedFlags tarafından gerçekten silinir", async () => {
+    await seed(["d1"], T0, "FUTURE_OPENING");
+    const scanId = (await db.select().from(scans))[0]!.id;
+    await db
+      .update(places)
+      .set({
+        wasFuture: true,
+        isClosed: true,
+        openedDetectedAt: T0,
+        newDetectedAt: T0,
+        notFoundInScanId: scanId,
+        statusCheckedAt: T0,
+      })
+      .where(eq(places.placeId, "d1"));
+    /** Politika alanı → places sütunu ve "temizlenmiş" değeri. */
+    const cleared: Record<string, (p: typeof places.$inferSelect) => boolean> = {
+      wasFuture: (p) => p.wasFuture === false,
+      isClosed: (p) => p.isClosed === false,
+      openedDetectedAt: (p) => p.openedDetectedAt === null,
+      newDetectedAt: (p) => p.newDetectedAt === null,
+      notFoundInScanId: (p) => p.notFoundInScanId === null,
+      statusCheckedAt: (p) => p.statusCheckedAt === null,
+    };
+    const promised = policyRows({ cacheDays: 30, derivedFlagsDays: 90 })
+      .filter((r) => r.class === "derived" && r.maxDays !== null)
+      .map((r) => r.field);
+    expect(promised.sort()).toEqual(Object.keys(cleared).sort());
+    await purgeDerivedFlags(db, 90, T0 + 91 * DAY);
+    const [row] = await db.select().from(places).where(eq(places.placeId, "d1"));
+    for (const f of promised) expect(cleared[f]!(row!), f).toBe(true);
   });
 
   it("koordinat temizliği politika üst sınırını kullanır", async () => {

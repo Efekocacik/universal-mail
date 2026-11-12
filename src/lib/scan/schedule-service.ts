@@ -207,27 +207,31 @@ export async function createScheduleFromScan(
   const { id: _omit, ...values } = draft;
   void _omit;
   try {
-    const [row] = await db
-      .insert(scanSchedules)
-      .values({ ...values, ackMaxUsd, ackAt: now })
-      .returning({ id: scanSchedules.id });
-    await audit(
-      db,
-      "schedule.created",
-      "schedule",
-      row!.id,
-      { fromScanId: scan.id, intervalDays: input.intervalDays, nextRunAt },
-      now,
-    );
-    await audit(
-      db,
-      "schedule.authorized",
-      "schedule",
-      row!.id,
-      { ackMaxUsd, maxCostUsd: draft.maxCostUsd },
-      now,
-    );
-    return { id: row!.id, nextRunAt, ackMaxUsd };
+    // Kayıt ve iki denetim satırı birlikte yazılır ya da hiçbiri (denetimsiz zamanlama/ön onay kalmaz).
+    const id = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(scanSchedules)
+        .values({ ...values, ackMaxUsd, ackAt: now })
+        .returning({ id: scanSchedules.id });
+      await audit(
+        tx,
+        "schedule.created",
+        "schedule",
+        row!.id,
+        { fromScanId: scan.id, intervalDays: input.intervalDays, nextRunAt },
+        now,
+      );
+      await audit(
+        tx,
+        "schedule.authorized",
+        "schedule",
+        row!.id,
+        { ackMaxUsd, maxCostUsd: draft.maxCostUsd },
+        now,
+      );
+      return row!.id;
+    });
+    return { id, nextRunAt, ackMaxUsd };
   } catch (e) {
     if (uniqueViolationOn(e, /scan_schedules\.scan_key/i)) {
       const again = (
@@ -276,18 +280,26 @@ export async function updateSchedule(
     set.ackMaxUsd = authorized;
     set.ackAt = now;
   }
-  const [row] = await db.update(scanSchedules).set(set).where(eq(scanSchedules.id, id)).returning();
-  await audit(db, "schedule.updated", "schedule", id, { ...patch, nextRunAt }, now);
-  if (authorized !== undefined)
-    await audit(
-      db,
-      "schedule.authorized",
-      "schedule",
-      id,
-      { ackMaxUsd: authorized, maxCostUsd: patch.maxCostUsd },
-      now,
-    );
-  return row!;
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .update(scanSchedules)
+      .set(set)
+      .where(eq(scanSchedules.id, id))
+      .returning();
+    // Bu arada silindiyse denetim yazılmaz; 404 döner.
+    if (!row) throw new ScheduleError("SCHEDULE_NOT_FOUND");
+    await audit(tx, "schedule.updated", "schedule", id, { ...patch, nextRunAt }, now);
+    if (authorized !== undefined)
+      await audit(
+        tx,
+        "schedule.authorized",
+        "schedule",
+        id,
+        { ackMaxUsd: authorized, maxCostUsd: patch.maxCostUsd },
+        now,
+      );
+    return row;
+  });
 }
 
 /** Siler; geçmiş taramalar kalır (schedule_id NULL olur). Zamanlamaya bağlı bildirimler de silinir. */

@@ -85,7 +85,13 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
             </div>
           )}
           {vm.skipReason && (
-            <p className="rounded-md bg-nov-likely/15 px-2.5 py-1.5 text-[12px] text-[#6b5200]">
+            <p
+              className={
+                vm.outcomeTone === "ok"
+                  ? "rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-muted-foreground"
+                  : "rounded-md bg-nov-likely/15 px-2.5 py-1.5 text-[12px] text-[#6b5200] dark:text-nov-likely"
+              }
+            >
               {vm.skipReason}
             </p>
           )}

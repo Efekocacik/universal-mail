@@ -85,6 +85,7 @@ export function registerScanBackgroundHandlers(opts: { now?: () => number } = {}
       now: clock,
       shouldStop: ctx.shouldStop,
       log: ctx.log,
+      continueAfterJobId: ctx.job.id,
     });
     const ids = await placeIdsForDomains(ctx.db, res.domains);
     if (ids.length > 0)

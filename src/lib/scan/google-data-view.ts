@@ -16,8 +16,11 @@ export interface GoogleRetentionSummary {
   policy: {
     field: string;
     class: "indefinite" | "ttl" | "session" | "derived";
+    /** null = ayarla silinmez (süresiz) veya sınırsız. */
     maxDays: number | null;
     termsRef: string;
+    /** Türetilmiş ama silinmeyen alanın gerekçesi (`prevents_reappearing` | `recomputed_each_scan` | `own_dataset`). */
+    keptBecause?: string | null;
   }[];
 }
 

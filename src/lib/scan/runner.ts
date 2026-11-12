@@ -13,7 +13,8 @@ import type { PlacesProvider, SearchResult } from "@/lib/places/provider";
 import { typeToQuery } from "@/lib/places/provider";
 import { chunk, errorMessage, sleep as defaultSleep } from "@/lib/util";
 import { recomputeNovelty } from "./novelty-sync";
-import { onScanCompleted, onScanFailed } from "./scan-notifications";
+import { APP_STOPPED, BUDGET_STOP_CODE, CALL_LIMIT, providerPauseCode } from "./pause-codes";
+import { onScanCompleted, onScanFailed, onScanPaused } from "./scan-notifications";
 import { canSubdivide } from "./planner";
 import {
   countSnapshot,
@@ -60,10 +61,8 @@ interface RunState {
 }
 
 const MAX_CONSECUTIVE_UNIT_FAILURES = 5;
-/** Faz 4: uygulama kapanırken güvenle duraklatıldı (zamanlanmış tarama açılışta kendiliğinden sürer). */
-export const APP_STOPPED = "APP_STOPPED";
-/** Faz 4: çalışan beklenmedik şekilde durduğu için kurtarmada duraklatıldı. */
-export const INTERRUPTED = "INTERRUPTED";
+/** Faz 4 duraklatma kodları (`pause-codes.ts`); işçi kurtarması buradan içe aktarır. */
+export { APP_STOPPED, INTERRUPTED } from "./pause-codes";
 
 function readMaxCalls(scan: ScanRow): number {
   const est = scan.estimate as { maxCalls?: number } | null;
@@ -187,7 +186,9 @@ async function runUnit(
       await requeue();
       await setScanStatus(db, scan.id, "paused", {
         pauseReason: `Güvenlik sınırı: bu tarama ${state.maxCalls} çağrıyı aştı. Devam etmek için taramayı sürdürün.`,
+        pauseCode: CALL_LIMIT,
       });
+      await onScanPaused(db, scan.id, now(), log);
       return "paused";
     }
 
@@ -210,8 +211,9 @@ async function runUnit(
       await requeue();
       await setScanStatus(db, scan.id, "budget_stopped", {
         pauseReason: spend.reason,
-        pauseCode: "BUDGET_BLOCKED",
+        pauseCode: BUDGET_STOP_CODE,
       });
+      await onScanPaused(db, scan.id, now(), log);
       return "budget_stopped";
     }
 
@@ -311,8 +313,13 @@ async function handleCallError(
 
   if (e.isPausable) {
     // Kota, hız sınırı, ağ veya geçici sunucu hatası: tarama duraklatılır, kullanıcı sonra devam ettirir (NFR-04).
+    // Kod (PROVIDER_*) zamanlanmış taramanın bir saat sonra kendiliğinden sürdürülmesini sağlar (schedule.ts).
     await requeue();
-    await setScanStatus(db, scan.id, "paused", { pauseReason: e.message });
+    await setScanStatus(db, scan.id, "paused", {
+      pauseReason: e.message,
+      pauseCode: providerPauseCode(e.kind),
+    });
+    await onScanPaused(db, scan.id, now(), log);
     return "paused";
   }
 

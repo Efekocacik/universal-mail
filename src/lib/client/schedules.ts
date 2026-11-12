@@ -46,7 +46,15 @@ export const SKIP_CODES = [
   "COUNTRY_NOT_TARGETED",
   "ACTIVE_SCAN",
   "CATEGORY_SET_MISSING",
+  // Zamanlamanın kendi son taraması bitmedi (src/lib/scan/pause-codes.ts OWN_RUN_CODES).
+  "PREVIOUS_RUN_ACTIVE",
+  "SCAN_RETRYING",
+  "SCAN_BUDGET_STOPPED",
+  "SCAN_PAUSED",
 ] as const;
+
+/** Bu kodlarla "skipped" aslında "son tarama duraklatıldı" demektir; kart "Atlandı" yerine "Duraklatıldı" der. */
+const PAUSED_CODES = new Set(["SCAN_RETRYING", "SCAN_BUDGET_STOPPED", "SCAN_PAUSED"]);
 
 export type ScheduleTone = "ok" | "warning" | "danger" | "muted";
 
@@ -98,11 +106,19 @@ export function scheduleViewModel(
       outcomeTone = "danger";
       break;
     case "skipped": {
-      outcomeLabel = t("schedules.outcome.skipped");
-      outcomeTone = "warning";
       const code = (SKIP_CODES as readonly string[]).includes(s.lastSkipCode ?? "")
         ? s.lastSkipCode!
         : "other";
+      if (code === "PREVIOUS_RUN_ACTIVE") {
+        // Önceki çalışma hâlâ sürüyor: bir sorun yok, yalnızca bilgi.
+        outcomeLabel = t("schedules.outcome.started");
+        outcomeTone = "ok";
+      } else {
+        outcomeLabel = t(
+          PAUSED_CODES.has(code) ? "schedules.outcome.paused" : "schedules.outcome.skipped",
+        );
+        outcomeTone = "warning";
+      }
       skipReason = t(`schedules.skip.${code}` as TrKey);
       break;
     }

@@ -1,8 +1,9 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { regions, scanSchedules, scans } from "@/lib/db/schema";
 import { notify, type NotifyInput } from "@/lib/notifications";
 import { errorMessage } from "@/lib/util";
+import { ownRunCodeFor } from "./pause-codes";
 
 /**
  * Tarama motorunun bildirim üreticileri (Faz 4). Bildirimler en iyi çaba ile yazılır: tarama sonucu zaten kaydedildikten
@@ -41,7 +42,13 @@ export async function safeNotify(
 
 async function scanContext(db: Db, scanId: number) {
   const rows = await db
-    .select({ region: regions.name, origin: scans.origin, scheduleId: scans.scheduleId })
+    .select({
+      region: regions.name,
+      origin: scans.origin,
+      scheduleId: scans.scheduleId,
+      status: scans.status,
+      pauseCode: scans.pauseCode,
+    })
     .from(scans)
     .innerJoin(regions, eq(regions.id, scans.regionId))
     .where(eq(scans.id, scanId))
@@ -124,6 +131,56 @@ export async function onScanFailed(
     );
   } catch (e) {
     log?.(`başarısız tarama bildirimi yazılamadı: ${errorMessage(e).slice(0, 160)}`);
+  }
+}
+
+const HOUR = 3_600_000;
+const DAY = 86_400_000;
+
+/**
+ * Kendi kendine duran tarama (geçici Google hatası, güvenlik sınırı, bütçe): yalnızca ZAMANLANMIŞ taramalar için.
+ * - Zamanlamanın son durumu "skipped" + kod olur (SCAN_RETRYING | SCAN_BUDGET_STOPPED | SCAN_PAUSED); kart "Çalışıyor"
+ *   demeye devam etmez. Yalnızca bu tarama hâlâ zamanlamanın son taramasıysa.
+ * - Sonraki deneme öne çekilir (geçici: bir saat, diğerleri: bir gün; daha erkense dokunulmaz); tick o an taramayı
+ *   kaldığı yerden sürdürür veya kullanıcıya ne yapacağını söyler (schedule.ts `handleOwnRun`).
+ * - Tek `scan.paused` bildirimi (tarama + gün başına; saatlik yeniden denemeler bildirim yağdırmaz).
+ * Elle başlatılan taramada kullanıcı zaten ekrandadır; bildirim yok. Hata fırlatmaz.
+ */
+export async function onScanPaused(
+  db: Db,
+  scanId: number,
+  now: number,
+  log?: (m: string) => void,
+): Promise<void> {
+  try {
+    const ctx = await scanContext(db, scanId);
+    if (!ctx || ctx.origin !== "schedule" || ctx.scheduleId === null) return;
+    const code = ownRunCodeFor(ctx.status, ctx.pauseCode);
+    const retryAt = now + (code === "SCAN_RETRYING" ? HOUR : DAY);
+    await db
+      .update(scanSchedules)
+      .set({
+        lastOutcome: "skipped",
+        lastSkipCode: code,
+        nextRunAt: sql`min(${scanSchedules.nextRunAt}, ${retryAt})`,
+        updatedAt: now,
+      })
+      .where(and(eq(scanSchedules.id, ctx.scheduleId), eq(scanSchedules.lastScanId, scanId)));
+    await safeNotify(
+      db,
+      {
+        kind: "scan.paused",
+        dedupeKey: `scan.paused:${scanId}:${new Date(now).toISOString().slice(0, 10)}`,
+        params: { n: 1, code, region: ctx.region.slice(0, 200), scanId },
+        url: "/scans",
+        entity: "scan",
+        entityId: scanId,
+      },
+      now,
+      log,
+    );
+  } catch (e) {
+    log?.(`duraklayan tarama bildirimi yazılamadı: ${errorMessage(e).slice(0, 160)}`);
   }
 }
 

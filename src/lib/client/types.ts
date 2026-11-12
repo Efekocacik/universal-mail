@@ -156,7 +156,14 @@ export interface LeadDetailResponse {
   domainAge?: {
     domain: string;
     status:
-      "pending" | "ok" | "no_date" | "not_found" | "unsupported_tld" | "rate_limited" | "error";
+      | "pending"
+      | "ok"
+      | "no_date"
+      | "not_found"
+      | "unsupported_tld"
+      | "rate_limited"
+      | "error"
+      | "disabled";
     registeredAt: number | null;
     checkedAt: number | null;
   } | null;

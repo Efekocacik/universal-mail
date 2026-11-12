@@ -8,8 +8,11 @@ import { recordUsage } from "@/lib/budget";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, categorySets, jobs, notifications, scanSchedules, scans } from "@/lib/db/schema";
+import { PlacesApiError } from "@/lib/places/errors";
+import { renderNotification } from "@/lib/notifications/render";
 import { MockPlacesProvider } from "@/lib/places/mock";
-import { runScan } from "@/lib/scan/runner";
+import type { PlacesProvider } from "@/lib/places/provider";
+import { runScan, type RunnerDeps } from "@/lib/scan/runner";
 import {
   computeDue,
   DAY_MS,
@@ -22,7 +25,7 @@ import {
   SCHEDULE_TICK_JOB,
 } from "@/lib/scan/schedule";
 import { createScheduleFromScan, getSchedule } from "@/lib/scan/schedule-service";
-import { createAndStartScan } from "@/lib/scan/service";
+import { createAndStartScan, pauseScan } from "@/lib/scan/service";
 import { setSecret } from "@/lib/secrets/store";
 import { getSetting, setSetting } from "@/lib/settings";
 import { createTestDb, type TestDb } from "./helpers/db";
@@ -206,17 +209,32 @@ describe("runDueSchedules: atlama kodları ve bildirim tekilleştirme", () => {
     return ns.filter((n) => n.kind === "schedule.skipped" && n.dedupeKey.includes(`:${code}:`));
   }
 
-  it("ACTIVE_SCAN: önceki tarama sürerken atlanır, bir saat sonra yeniden denenir", async () => {
+  it("PREVIOUS_RUN_ACTIVE: zamanlamanın kendi taraması sürerken sessizce bir saat sonra yeniden denenir", async () => {
     const { id, nextRunAt } = await makeSchedule(7);
     await runDueSchedules(db, { now: nextRunAt });
     const s = await getSchedule(db, id);
     const now = s.nextRunAt + 10;
     const [r] = await runDueSchedules(db, { now });
-    expect(r).toMatchObject({ outcome: "skipped", code: "ACTIVE_SCAN", retryAt: now + 3_600_000 });
+    expect(r).toMatchObject({
+      outcome: "skipped",
+      code: "PREVIOUS_RUN_ACTIVE",
+      retryAt: now + 3_600_000,
+    });
     expect(await getSchedule(db, id)).toMatchObject({
       lastOutcome: "skipped",
-      lastSkipCode: "ACTIVE_SCAN",
+      lastSkipCode: "PREVIOUS_RUN_ACTIVE",
     });
+    expect(await db.select().from(notifications)).toHaveLength(0);
+  });
+
+  it("ACTIVE_SCAN: aynı anahtarla BAŞKA (elle) bir tarama sürerken atlanır ve bildirilir", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    await finishedScan(); // aynı bölge + kategori
+    await db.update(scans).set({ status: "running" }).where(eq(scans.origin, "manual"));
+    const now = nextRunAt + 10;
+    const [r] = await runDueSchedules(db, { now });
+    expect(r).toMatchObject({ outcome: "skipped", code: "ACTIVE_SCAN", retryAt: now + 3_600_000 });
+    expect(await getSchedule(db, id)).toMatchObject({ lastSkipCode: "ACTIVE_SCAN" });
     expect(await skipped("ACTIVE_SCAN")).toHaveLength(1);
   });
 
@@ -486,5 +504,168 @@ describe("HTTP: /api/schedules", () => {
     expect((await scheduleSummary(db, nextRunAt)).due).toBe(1);
     const st = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
     expect(st.schedules).toMatchObject({ total: 1 });
+  });
+});
+
+describe("kendi kendine duran zamanlanmış tarama zamanlamayı kilitlemez (inceleme P1)", () => {
+  /** İlk `failCalls` çağrıda ağ hatası veren demo sağlayıcı. */
+  function flaky(failCalls: number): PlacesProvider {
+    const inner = new MockPlacesProvider({ getEpoch: () => 1 });
+    let n = 0;
+    return Object.assign(Object.create(inner) as PlacesProvider, {
+      searchText: async (r: Parameters<PlacesProvider["searchText"]>[0]) => {
+        if (n++ < failCalls) throw new PlacesApiError("network", "Ağ hatası (test)");
+        return inner.searchText(r);
+      },
+    });
+  }
+  const runnerDeps = (provider: PlacesProvider, now: number): RunnerDeps => ({
+    db,
+    provider,
+    getBudgetUsd: () => getSetting(db, "budget.monthlyUsd"),
+    getNoveltyConfig: () => getSetting(db, "novelty.thresholds"),
+    sleep: async () => undefined,
+    minIntervalMs: 0,
+    now: () => now,
+  });
+  const notifs = async (kind: string) =>
+    (await db.select().from(notifications)).filter((n) => n.kind === kind);
+
+  it("ağ hatasıyla duran tarama: durum yansır, tek bildirim, bir saat sonra kaldığı yerden sürer (ACTIVE_SCAN döngüsü yok)", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const t1 = nextRunAt + 5;
+    const [first] = await runDueSchedules(db, { now: t1 });
+    expect(first?.outcome).toBe("started");
+    const scanId = (first as { scanId: number }).scanId;
+    expect(await runScan(runnerDeps(flaky(1), t1), scanId)).toBe("paused");
+    const [paused] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(paused).toMatchObject({ status: "paused", pauseCode: "PROVIDER_NETWORK" });
+    expect(await getSchedule(db, id)).toMatchObject({
+      lastOutcome: "skipped",
+      lastSkipCode: "SCAN_RETRYING",
+      nextRunAt: t1 + 3_600_000,
+    });
+    const p = await notifs("scan.paused");
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ url: "/scans", entity: "scan", entityId: String(scanId) });
+    expect(p[0]!.params).toMatchObject({ code: "SCAN_RETRYING", region: "London" });
+
+    // Bir saat sonra: yeni tarama açılmaz, aynı tarama sürdürülür.
+    const t2 = t1 + 3_600_000;
+    const [r] = await runDueSchedules(db, { now: t2 });
+    expect(r).toMatchObject({ outcome: "resumed", scanId });
+    const [resumed] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(resumed).toMatchObject({ status: "queued", pauseCode: null });
+    const runJobs = (await db.select().from(jobs)).filter(
+      (j) => j.type === "scan.run" && j.status === "queued",
+    );
+    expect(runJobs.map((j) => (j.payload as { scanId: number }).scanId)).toContain(scanId);
+    expect(await getSchedule(db, id)).toMatchObject({
+      lastOutcome: "started",
+      lastSkipCode: null,
+      nextRunAt: t2 + 7 * DAY_MS,
+    });
+    // Aynı an için ikinci tick hiçbir şey yapmaz (CAS); iş çoğalmaz.
+    expect(await runDueSchedules(db, { now: t2 + 1 })).toEqual([]);
+    expect(await notifs("schedule.skipped")).toHaveLength(0);
+
+    expect(await runScan(runnerDeps(flaky(0), t2), scanId)).toBe("completed");
+    expect(await getSchedule(db, id)).toMatchObject({ lastOutcome: "completed" });
+    expect(await db.select().from(scans).where(eq(scans.origin, "schedule"))).toHaveLength(1);
+    expect((await db.select().from(auditLog)).map((a) => a.action)).toContain("schedule.resumed");
+  });
+
+  it("bütçe durdurdu: bütçe engelliyken SCAN_BUDGET_STOPPED ile atlanır; bütçe artınca kaldığı yerden sürer", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const t1 = nextRunAt + 5;
+    const [first] = await runDueSchedules(db, { now: t1 });
+    const scanId = (first as { scanId: number }).scanId;
+    await setSetting(db, "budget.monthlyUsd", 0.5);
+    await recordUsage(db, "mock", "text_search_pro", 5100);
+    expect(await runScan(runnerDeps(flaky(0), t1), scanId)).toBe("budget_stopped");
+    expect(await getSchedule(db, id)).toMatchObject({
+      lastOutcome: "skipped",
+      lastSkipCode: "SCAN_BUDGET_STOPPED",
+      nextRunAt: t1 + DAY_MS,
+    });
+    expect((await notifs("scan.paused"))[0]!.params).toMatchObject({
+      code: "SCAN_BUDGET_STOPPED",
+    });
+
+    const t2 = t1 + DAY_MS;
+    const [blocked] = await runDueSchedules(db, { now: t2 });
+    expect(blocked).toMatchObject({
+      outcome: "skipped",
+      code: "SCAN_BUDGET_STOPPED",
+      retryAt: t2 + DAY_MS,
+    });
+    expect(await notifs("schedule.skipped")).toHaveLength(1);
+
+    await setSetting(db, "budget.monthlyUsd", 1000);
+    const [r] = await runDueSchedules(db, { now: t2 + DAY_MS });
+    expect(r).toMatchObject({ outcome: "resumed", scanId });
+  });
+
+  it("kullanıcı duraklattıysa kendiliğinden sürmez: SCAN_PAUSED, günde bir hatırlatma", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const [first] = await runDueSchedules(db, { now: nextRunAt });
+    const scanId = (first as { scanId: number }).scanId;
+    expect(await pauseScan(db, scanId)).toEqual({ ok: true });
+    const s = await getSchedule(db, id);
+    const now = s.nextRunAt + 1;
+    const [r] = await runDueSchedules(db, { now });
+    expect(r).toMatchObject({ outcome: "skipped", code: "SCAN_PAUSED", retryAt: now + DAY_MS });
+    const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(scan?.status).toBe("paused");
+    const n = await notifs("schedule.skipped");
+    expect(n).toHaveLength(1);
+    expect(n[0]!.params).toMatchObject({ code: "SCAN_PAUSED" });
+  });
+
+  it("geçici hatayla duran ama kurulum eksikse sürdürülmez, kapı koduyla atlanır", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const [first] = await runDueSchedules(db, { now: nextRunAt });
+    const scanId = (first as { scanId: number }).scanId;
+    await db
+      .update(scans)
+      .set({ status: "paused", pauseCode: "PROVIDER_RATE" })
+      .where(eq(scans.id, scanId));
+    await setSetting(db, "consent", null);
+    const s = await getSchedule(db, id);
+    const [r] = await runDueSchedules(db, { now: s.nextRunAt + 1 });
+    expect(r).toMatchObject({ outcome: "skipped", code: "SETUP_REQUIRED" });
+    const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(scan?.status).toBe("paused");
+  });
+
+  it("elle başlatılan taramanın durması zamanlamaya ve bildirimlere dokunmaz", async () => {
+    const scanId = await finishedScan();
+    await db.update(scans).set({ status: "queued" }).where(eq(scans.id, scanId));
+    expect(await runScan(runnerDeps(flaky(1), T0), scanId)).toBe("paused");
+    expect(await db.select().from(notifications)).toHaveLength(0);
+  });
+});
+
+describe("duraklayan zamanlanmış tarama bildirim metinleri", () => {
+  const r = (
+    kind: "scan.paused" | "schedule.skipped",
+    params: Record<string, string | number>,
+  ) => ({
+    tr: renderNotification({ kind, params }, "tr"),
+    en: renderNotification({ kind, params }, "en"),
+  });
+  it("neden koduna göre sade metin; bölge başlıkta; kodsuz eski metin korunur", () => {
+    const retry = r("scan.paused", { n: 1, code: "SCAN_RETRYING", region: "London" });
+    expect(retry.tr.title).toBe("London taraması duraklatıldı");
+    expect(retry.tr.body).toContain("bir saat");
+    expect(retry.en.body).toContain("within an hour");
+    expect(r("scan.paused", { code: "SCAN_BUDGET_STOPPED" }).tr).toMatchObject({
+      title: "Tarama duraklatıldı",
+      body: expect.stringContaining("bütçe"),
+    });
+    expect(r("scan.paused", { code: "SCAN_PAUSED" }).en.body).toContain("safety limit");
+    expect(r("scan.paused", { n: 2 }).tr.body).toContain("2 tarama");
+    expect(r("schedule.skipped", { code: "SCAN_PAUSED" }).tr.body).toContain("sürdürün");
+    expect(r("schedule.skipped", { code: "SCAN_BUDGET_STOPPED" }).en.body).toContain("budget");
   });
 });

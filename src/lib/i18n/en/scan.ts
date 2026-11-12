@@ -18,6 +18,7 @@ export const scan = {
   "schedules.outcome.started": "Running",
   "schedules.outcome.failed": "Could not finish",
   "schedules.outcome.skipped": "Skipped",
+  "schedules.outcome.paused": "Paused",
   "schedules.skip.BUDGET_BLOCKED":
     "Skipped because the monthly Google budget is used up. Raise the budget in Settings or wait for next month; it will be retried tomorrow.",
   "schedules.skip.NEEDS_ACK":
@@ -32,6 +33,14 @@ export const scan = {
     "Skipped because another scan of the same area and categories is running; it will be retried in an hour.",
   "schedules.skip.CATEGORY_SET_MISSING":
     "A category used by this schedule no longer exists. Delete this schedule and set the scan up again.",
+  "schedules.skip.PREVIOUS_RUN_ACTIVE":
+    "The previous scheduled scan is still running; the next run starts after it finishes.",
+  "schedules.skip.SCAN_RETRYING":
+    "The last scan was paused because Google could not be reached; it will resume automatically within an hour.",
+  "schedules.skip.SCAN_BUDGET_STOPPED":
+    "The last scan stopped because the monthly Google budget is used up. It will resume automatically when the budget renews or when you raise it in Settings.",
+  "schedules.skip.SCAN_PAUSED":
+    "The last scan is paused (you paused it or it reached its safety limit). Resume or cancel it in the scan list below; no new run starts until then.",
   "schedules.skip.other": "It could not run this time; it will be retried tomorrow.",
   "schedules.interval.7": "Every week",
   "schedules.interval.14": "Every two weeks",
@@ -132,6 +141,7 @@ export const scan = {
   "detail.domainAge.unsupported_tld": "No registration lookup for this extension",
   "detail.domainAge.rate_limited": "Registration server busy; will retry",
   "detail.domainAge.error": "Could not be checked; will retry",
+  "detail.domainAge.disabled": "Check turned off (you can turn it on under Settings > Domain age)",
 
   "novelty.signal.future_opening":
     'Google lists this business as "opening soon". That does not mean it is looking for suppliers.',
