@@ -1,8 +1,9 @@
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { DbExecutor } from "@/lib/db/client";
 import { settings } from "@/lib/db/schema";
 import { DEFAULT_EXCLUDED_COUNTRIES } from "@/lib/geo/countries";
+import { mapIdSchema } from "./map-id";
 
 /** Uygulama sürümü ile birlikte onaylanan kullanım koşulları metninin sürümü. */
 export const CONSENT_VERSION = "2026-10-1";
@@ -44,6 +45,22 @@ const noveltySchema = z.object({
   newWindowDays: z.number().min(1).max(365),
 });
 
+/** Faz 4: "yakında açılacak" yerlerin düzenli durum kontrolü (Places Details Pro; bütçe korumasıyla). */
+const futureWatchSchema = z.object({
+  enabled: z.boolean(),
+  everyDays: z.number().int().min(1).max(90),
+  maxPerRun: z.number().int().min(1).max(1000),
+});
+
+/** Faz 4: IANA RDAP önyükleme önbelleği (TLD → https RDAP tabanı). Yalnızca RDAP modülü yazar. */
+const rdapBootstrapSchema = z
+  .object({
+    fetchedAt: z.number().int(),
+    publication: z.string().max(64),
+    map: z.record(z.string().max(63), z.string().max(300)),
+  })
+  .nullable();
+
 const externalEmailSchema = z.object({
   enabled: z.boolean(),
   provider: z.literal("hunter"),
@@ -56,7 +73,8 @@ export const settingSchemas = {
   "targets.countries": z.array(z.string().length(2)),
   "budget.monthlyUsd": z.number().min(0).max(100_000),
   "places.provider": z.enum(["google", "mock"]),
-  "maps.mapId": z.string(),
+  /** Google Maps Map ID; biçimi `map-id.ts` doğrular (e-posta/boşluk reddedilir, boş = demo kimliği). */
+  "maps.mapId": mapIdSchema,
   "novelty.thresholds": noveltySchema,
   "google.cacheDays": z.number().min(1).max(30),
   "mock.epoch": z.number().int().min(0).max(50),
@@ -215,6 +233,28 @@ export const settingSchemas = {
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
   }),
+
+  /* ---------------------------------------------------------------- Faz 4 (P0) ---------------------------------------------------------------- */
+  /** Görünüm teması; `system` işletim sistemini izler. */
+  "ui.theme": z.enum(["system", "light", "dark"]),
+  /** SRS satır 158: bilgisayar açılışında uygulamayı başlat (varsayılan KAPALI). Electron ana süreci uygular. */
+  "app.openAtLogin": z.boolean(),
+  /** Uygulama açıkken yeni işletme/açılış bildirimlerini işletim sistemi bildirimi olarak göster. */
+  "notifications.os": z.boolean(),
+  /** RDAP alan adı yaşı sinyali (yalnızca alan adı herkese açık kayıt sunucusuna gönderilir). */
+  "novelty.rdap": z.object({ enabled: z.boolean() }),
+  /** İÇ: RDAP önyükleme önbelleği. Ayarlar API'si değiştiremez. */
+  "novelty.rdapBootstrap": rdapBootstrapSchema,
+  /** "Genç alan adı" penceresi (gün). Varsayılan 183 ≈ 6 ay (SRS 4.2). */
+  "novelty.domainYoungDays": z.number().int().min(30).max(730),
+  "novelty.futureWatch": futureWatchSchema,
+  /**
+   * Google'dan türetilmiş kalıcı bayrakların (was_future/is_closed/*_detected_at) saklama süresi (gün). `null` = süresiz
+   * (hukuki değerlendirme tamamlanana kadar bugünkü davranış). Koordinatların 30 günlük üst sınırı bundan bağımsızdır.
+   */
+  "google.derivedFlagsDays": z.number().int().min(30).max(3650).nullable(),
+  /** İÇ: gönderim iş parçacığına "hemen uyan" isteği (çalışan iş varken). Yalnızca gönderim zamanlayıcısı yazar. */
+  "mail.dispatch.wakeRequestedAt": z.number().int().nullable(),
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -254,7 +294,41 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
     lastAttempt: null,
     delivery: null,
   },
+  "ui.theme": "system",
+  "app.openAtLogin": false,
+  "notifications.os": true,
+  "novelty.rdap": { enabled: true },
+  "novelty.rdapBootstrap": null,
+  "novelty.domainYoungDays": 183,
+  "novelty.futureWatch": { enabled: true, everyDays: 7, maxPerRun: 100 },
+  "google.derivedFlagsDays": null,
+  "mail.dispatch.wakeRequestedAt": null,
 };
+
+/**
+ * Kullanıcının Ayarlar ekranından / ayarlar API'sinden DEĞİŞTİREBİLDİĞİ anahtarlar. Listede olmayanlar (onay, kurulum
+ * durumu, seed sürümleri, posta güvenlik kayıtları, iç önbellekler) yalnızca kendi servisleri tarafından yazılır.
+ */
+export const USER_SETTING_KEYS = [
+  "company.profile",
+  "targets.countries",
+  "budget.monthlyUsd",
+  "places.provider",
+  "maps.mapId",
+  "novelty.thresholds",
+  "google.cacheDays",
+  "ui.language",
+  "enrichment.external",
+  "enrichment.concurrency",
+  "ui.theme",
+  "app.openAtLogin",
+  "notifications.os",
+  "novelty.rdap",
+  "novelty.domainYoungDays",
+  "novelty.futureWatch",
+  "google.derivedFlagsDays",
+] as const satisfies readonly SettingKey[];
+export type UserSettingKey = (typeof USER_SETTING_KEYS)[number];
 
 export async function getSetting<K extends SettingKey>(
   db: DbExecutor,
@@ -292,10 +366,13 @@ export async function setSetting<K extends SettingKey>(
 ): Promise<void> {
   const parsed = settingSchemas[key].parse(value);
   const now = Date.now();
+  // JSON `null` (ör. "süresiz" anlamındaki boş değer) SQL NULL değil, `'null'` metni olarak saklanır: sütun NOT NULL'dır
+  // ve satırın varlığı "kullanıcı bilerek boşalttı" anlamını taşır (yoksa varsayılan okunur).
+  const stored = parsed === null ? sql`'null'` : parsed;
   await db
     .insert(settings)
-    .values({ key, value: parsed, updatedAt: now })
-    .onConflictDoUpdate({ target: settings.key, set: { value: parsed, updatedAt: now } });
+    .values({ key, value: stored, updatedAt: now })
+    .onConflictDoUpdate({ target: settings.key, set: { value: stored, updatedAt: now } });
 }
 
 /** Hedef ülke listesi boşsa tüm desteklenen ülkeler (Türkiye hariç) varsayılan kabul edilir. */

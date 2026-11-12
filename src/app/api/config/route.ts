@@ -2,6 +2,7 @@ import { json, route, database } from "@/lib/api/http";
 import { getSetupState } from "@/lib/app/state";
 import { getSecret } from "@/lib/secrets/store";
 import { getSettings } from "@/lib/settings";
+import { effectiveMapId } from "@/lib/settings/map-id";
 
 export const dynamic = "force-dynamic";
 
@@ -14,15 +15,18 @@ export const GET = route(async () => {
     "places.provider",
     "novelty.thresholds",
     "ui.language",
+    "ui.theme",
   ] as const);
   const setup = await getSetupState(db);
   return json({
     setup,
     provider: s["places.provider"],
     mapsKey: (await getSecret("google.mapsKey")) ?? null,
-    mapId: s["maps.mapId"] || "DEMO_MAP_ID",
+    // Geçersiz kayıtlı değer (ör. eskiden kaydedilmiş e-posta) asla Google'a gönderilmez: demo kimliğine düşülür.
+    mapId: effectiveMapId(s["maps.mapId"]),
     targetCountries: s["targets.countries"],
     novelty: s["novelty.thresholds"],
     language: s["ui.language"],
+    theme: s["ui.theme"],
   });
 });

@@ -37,6 +37,8 @@ export interface AppConfig {
   targetCountries: string[];
   novelty: { highAt: number; likelyAt: number; newWindowDays: number };
   language: "tr" | "en";
+  /** Faz 4: görünüm teması (`system` işletim sistemini izler). */
+  theme: "system" | "light" | "dark";
 }
 
 export interface StatusScan {
