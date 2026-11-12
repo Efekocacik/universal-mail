@@ -69,14 +69,17 @@ async function sharedDeps(db: Db) {
 export function registerCoreHandlers(): void {
   registerJobHandler("scan.run", async (ctx: JobContext) => {
     const { scanId } = scanPayload.parse(ctx.payload);
-    const deps = await sharedDeps(ctx.db);
     try {
+      // Onay/sağlayıcı hazırlığı da try içinde: burada fırlayan hata (onay geri alındı, anahtar okunamadı)
+      // taramayı işsiz "kuyrukta" bırakırsa zamanlama her tick PREVIOUS_RUN_ACTIVE ile sessizce atlar.
+      const deps = await sharedDeps(ctx.db);
       const outcome = await runScan({ ...deps, shouldStop: ctx.shouldStop, log: ctx.log }, scanId);
       ctx.log(`Tarama ${scanId}: ${outcome}`);
     } catch (e) {
-      // Beklenmeyen hata: tarama "çalışıyor" görünmeye devam etmesin.
+      // Beklenmeyen hata: tarama "çalışıyor"/"kuyrukta" görünmeye devam etmesin (iş tek denemelik).
       const message = errorMessage(e);
-      if ((await scanStatusOf(ctx.db, scanId)) === "running") {
+      const status = await scanStatusOf(ctx.db, scanId);
+      if (status === "running" || status === "queued") {
         await setScanStatus(ctx.db, scanId, "failed", { error: message, finishedAt: Date.now() });
         await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
       }

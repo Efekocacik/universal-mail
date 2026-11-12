@@ -22,6 +22,9 @@ import {
   lookupDomain,
   nextCheckAt,
   parseBootstrap,
+  parseRetryAfter,
+  RDAP_RATE_LIMIT_DEFAULT_MS,
+  rateLimitDelayMs,
   registrableDomain,
   registrationDate,
   type RdapBootstrap,
@@ -333,10 +336,11 @@ describe("RDAP işi", () => {
     expect(res).toMatchObject({ checked: 2, ok: 1, failed: 1, domains: ["firma.de"] });
     const rows = new Map((await db.select().from(domainRegistrations)).map((r) => [r.domain, r]));
     expect(rows.get("firma.de")).toMatchObject({ status: "ok", nextCheckAt: T0 + 365 * DAY });
+    // Hız sınırı alan adının hatası değildir: deneme sayısı artmaz; Retry-After yoksa varsayılan bekleme.
     expect(rows.get("old.com")).toMatchObject({
       status: "rate_limited",
-      attempts: 1,
-      nextCheckAt: T0 + DAY,
+      attempts: 0,
+      nextCheckAt: T0 + RDAP_RATE_LIMIT_DEFAULT_MS,
     });
     // Önyükleme önbellekte: ikinci tur IANA'ya gitmez.
     const before = f.urls.filter((u) => u.includes("iana.org")).length;
@@ -373,6 +377,69 @@ describe("RDAP işi", () => {
     const r = await runRdapBatch({ db, fetch: never, now: () => T0 });
     expect(r.checked).toBe(2);
     expect(never.urls).toHaveLength(0);
+  });
+
+  it("son denetim: 429 veren sunucu bu turda yeniden sorgulanmaz; Retry-After'a uyulur, deneme sayısı artmaz", async () => {
+    await setSetting(db, "novelty.rdapBootstrap", BOOT);
+    const domains = ["a.com", "b.com", "c.com", "x.de", "d.com"];
+    await db.insert(domainRegistrations).values(
+      domains.map((domain, i) => ({
+        domain,
+        status: "pending" as const,
+        attempts: 2,
+        nextCheckAt: T0 - 100 + i, // sıra: a, b, c, x, d
+        createdAt: T0,
+        updatedAt: T0,
+      })),
+    );
+    const f = fakeFetch((url) =>
+      url.includes("verisign")
+        ? { status: 429, headers: { "retry-after": "120" } }
+        : {
+            body: JSON.stringify({
+              events: [{ eventAction: "registration", eventDate: "2026-06-01T00:00:00Z" }],
+            }),
+          },
+    );
+    const res = await runRdapBatch({
+      db,
+      fetch: f,
+      now: () => T0,
+      sleep: async () => undefined,
+      log: () => undefined,
+      continueAfterJobId: 9999,
+    });
+    // .com sunucusuna tek istek; .de etkilenmez.
+    expect(f.urls.filter((u) => u.includes("verisign"))).toHaveLength(1);
+    expect(f.urls.filter((u) => u.includes("denic"))).toHaveLength(1);
+    expect(res).toMatchObject({ checked: 2, ok: 1, failed: 1, deferred: 3, moreDue: true });
+    expect(res.rateLimited).toEqual({ "rdap.verisign.com": T0 + 120_000 });
+    const rows = new Map((await db.select().from(domainRegistrations)).map((r) => [r.domain, r]));
+    expect(rows.get("a.com")).toMatchObject({
+      status: "rate_limited",
+      attempts: 2,
+      nextCheckAt: T0 + 120_000,
+    });
+    for (const d of ["b.com", "c.com", "d.com"])
+      expect(rows.get(d)).toMatchObject({
+        status: "pending",
+        attempts: 2,
+        nextCheckAt: T0 + 120_000,
+      });
+    // Devam turu 5 sn sonra değil, sınır kalkınca.
+    const queued = (await db.select().from(jobs)).filter((j) => j.type === RDAP_JOB);
+    expect(queued).toHaveLength(1);
+    expect(queued[0]!.runAt).toBe(T0 + 120_000);
+  });
+
+  it("Retry-After: saniye, HTTP tarihi, geçersiz; bekleme sınırları", () => {
+    expect(parseRetryAfter("30", T0)).toBe(30_000);
+    expect(parseRetryAfter(new Date(T0 + 90_000).toUTCString(), T0)).toBe(90_000);
+    expect(parseRetryAfter("yarın", T0)).toBeNull();
+    expect(parseRetryAfter(undefined, T0)).toBeNull();
+    expect(rateLimitDelayMs(null)).toBe(RDAP_RATE_LIMIT_DEFAULT_MS);
+    expect(rateLimitDelayMs(1_000)).toBe(60_000);
+    expect(rateLimitDelayMs(30 * DAY)).toBe(6 * 3_600_000);
   });
 
   it("tekil iş; durum özeti", async () => {

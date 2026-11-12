@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { campaignLeadsApi, useExcludedCount } from "@/lib/client/campaign-leads";
 import {
   campaignApi,
@@ -127,8 +128,12 @@ export function QueueTable({
                 <th scope="col" className={TH}>
                   {t("queue.col.recipient")}
                 </th>
-                <th scope="col" className={TH}>
-                  {t("queue.col.status")}
+                {/* Başlığın adı yalnızca "Durum" kalır (balon düğmesi her hücrede okunmasın). */}
+                <th scope="col" className={TH} aria-label={t("queue.col.status")}>
+                  <span className="inline-flex items-center gap-1.5">
+                    {t("queue.col.status")}
+                    <HelpTip>{t("help.sequenceStatus")}</HelpTip>
+                  </span>
                 </th>
                 <th scope="col" className={TH}>
                   {t("queue.col.when")}

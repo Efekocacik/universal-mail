@@ -114,7 +114,7 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Kabul:** SRS Bölüm 13 maddeleri 5–8 geçer. İlk hafta günde ≤ 20 e-posta ile pilot başlar.
 
-**Durum (11 Kasım 2026):** Demo geliştirmeleri tamamlandı ve canlı entegrasyonun yazılım hazırlığı (Aşama 15.1–15.8: Gmail OAuth/gönderim/gelen kutusu, HTTPS çıkış altyapısı, DNS saklama, ARF şikâyet) `feat/faz-3` dalında kodlandı; her aşamanın CI sonucu yeşil. **Faz 3 KAPANMADI:** bütün canlı bileşenler yalnızca yerel sahte sunucularla sınandı; gerçek Gmail hesabı, gerçek gelen kutusu, genel HTTPS çıkış uç noktası ve alan adı, gerçek DNS doğrulaması, hukuki onaylar, canlı ülke politikaları ve pilot yoktur. Gerçek gönderim, gerçek gelen kutusu okuma ve Gmail başlık güveni kodda **kapalıdır**. Yukarıda yalnızca kod ve testlerle tam doğrulanan maddeler işaretlidir; kısmi veya gerçek hesap/alan adı/onay isteyenler işaretsiz bırakıldı. Açık teknik borç (Aşama 15.10: ARF sınıflandırması ve şikâyet/çıkış sayaçlarının ayrılması, migrasyon gerektirir) ve kapanış koşulları: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 6 ve 9; gerçek ortam doğrulama listesi: [`09-FAZ3-CANLI-DOGRULAMA.md`](09-FAZ3-CANLI-DOGRULAMA.md).
+**Durum (12 Kasım 2026):** Faz 3 yazılımı teslim edildi: demo geliştirmeleri, canlı entegrasyonun yazılım hazırlığı (Aşama 15.1–15.10: Gmail OAuth/gönderim/gelen kutusu, HTTPS çıkış altyapısı ve dağıtılabilir aktarıcı, DNS saklama, ARF şikâyet) ve canlıya geçiş hazırlık paketleri `feat/golive-prep` dalında birleşik; CI yeşil. Gerçek gönderim ve gerçek gelen kutusu okuma kod kapıları sahip kararıyla açıldı (`release/live-gates`; Gmail başlık güveni kapalı kalır, canlı ülke politikalarının hepsi kilitli). **Canlı kısımlar müşteri hesaplarını bekliyor:** gerçek Gmail bağlantısı, aktarıcının bir sunucuya dağıtılması ve HTTPS çıkış alt alan adı, gerçek DNS doğrulaması, ülke kilidinin açılması ve pilot henüz yapılmadı; bütün canlı bileşenler şimdiye kadar yalnızca yerel sahte sunucularla sınandı. Yukarıda yalnızca kod ve testlerle tam doğrulanan maddeler işaretlidir; kısmi veya gerçek hesap/alan adı/onay isteyenler işaretsiz bırakıldı. Aşama 15.10'un açık teknik borcu (TB-1, TB-2, TB-10, TB-11d: ARF sınıflandırması, şikâyet/çıkış durma nedenlerinin ve sayaçlarının ayrılması) **Faz 4 paket F'de çözüldü**. Kapanış koşulları: [`08-FAZ3-NOTLARI.md`](08-FAZ3-NOTLARI.md) Bölüm 6 ve 9; şirket girdileri ve canlı test sırası: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md); gerçek ortam doğrulama listesi: [`09-FAZ3-CANLI-DOGRULAMA.md`](09-FAZ3-CANLI-DOGRULAMA.md).
 
 ---
 
@@ -122,18 +122,20 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Hedef:** Uygulama kendi kendine yeni açılanları bulmaya devam eder; arayüz "satış aracı" hissi verir.
 
-- [ ] Bölge başına tekrarlayan tarama (7/14/30 gün), kaçan çalışmaların telafisi.
-- [ ] Google Maps Platform'un güncel saklama/önbellekleme kurallarına göre veri tazeleme, yeniden sorgulama ve gerektiğinde silme; tüm alanlar için sabit bir 30 günlük kural varsayma.
-- [ ] `FUTURE_OPENING → OPERATIONAL` geçiş tespiti ("açıldı!" bildirimi).
-- [ ] RDAP alan adı yaşı sinyali.
-- [ ] Dashboard: sayaçlar, bugünkü kuyruk, aylık harcama, "bu hafta yeni açılanlar" listesi.
-- [ ] Harita görünümünde kullanım kolaylığı iyileştirmeleri; isteğe bağlı olarak "görünümdekileri seç" özelliğini değerlendir. Bölge çizerek tarama Faz 1'de tamamlanmış olmalı.
-- [ ] Kaydedilmiş filtreler, toplu işlemler, klavye kısayolları.
-- [ ] Koyu tema, boş durumlar, "Bu nedir?" balonları, TR/EN arayüz.
-- [ ] Takip (follow-up) adımları (en fazla 2 takip, toplam 3 e-posta).
-- [ ] Yerel bildirimler (macOS/Windows) — "12 yeni işletme bulundu".
+- [x] Bölge başına tekrarlayan tarama (7/14/30 gün), kaçan çalışmaların telafisi. *(Uygulama açıkken çalışır; arka plan maliyeti ön onaya ve birikimli tavana bağlı.)*
+- [x] Google Maps Platform'un güncel saklama/önbellekleme kurallarına göre veri tazeleme, yeniden sorgulama ve gerektiğinde silme; tüm alanlar için sabit bir 30 günlük kural varsayma. *(Alan düzeyinde politika ve 12 aylık yer kimliği yenilemesi; gerçek Google çağrısı denenmedi, türetilmiş bayrak süresi hukuki görüş bekliyor.)*
+- [x] `FUTURE_OPENING → OPERATIONAL` geçiş tespiti ("açıldı!" bildirimi). *(Ayrıca günlük açılış izleme işi; demo sağlayıcıyla sınandı.)*
+- [x] RDAP alan adı yaşı sinyali. *(Sahte sunucu ve demo modunda sınandı; gerçek ağda denenmedi.)*
+- [x] Dashboard: sayaçlar, bugünkü kuyruk, aylık harcama, "bu hafta yeni açılanlar" listesi.
+- [x] Harita görünümünde kullanım kolaylığı iyileştirmeleri; isteğe bağlı olarak "görünümdekileri seç" özelliğini değerlendir. Bölge çizerek tarama Faz 1'de tamamlanmış olmalı.
+- [x] Kaydedilmiş filtreler, toplu işlemler, klavye kısayolları.
+- [x] Koyu tema, boş durumlar, "Bu nedir?" balonları, TR/EN arayüz. *(Son inceleme bulguları — eksik balonlar, İngilizcede tekil biçim — düzeltildi; `11-FAZ4-NOTLARI.md` Bölüm 6.1 ve 9.)*
+- [x] Takip (follow-up) adımları (en fazla 2 takip, toplam 3 e-posta). *(Aynı konuşmada gönderim yalnızca sahte Gmail sunucusuyla sınandı.)*
+- [x] Yerel bildirimler (macOS/Windows) — "12 yeni işletme bulundu". *(Uygulama içi zil ve işletim sistemi bildirimi; paketlenmiş, imzalı uygulamada denenmedi.)*
 
 **Kabul:** Uygulama bir hafta açık kaldığında zamanlanmış taramalar çalışır; yeni açılanlar dashboard'da birikir.
+
+**Durum (12 Kasım 2026):** Faz 4 `feat/faz-4` dalında tamamlandı; bütün kalite kapıları ve üretim derlemesine karşı uçtan uca testler yeşil. Ek olarak posta kutusu günlük sınırı/ısınma arayüzü ve Faz 3'ten devralınan TB-1, TB-2, TB-10, TB-11(d) yapıldı. Kabul ölçütü saat enjeksiyonlu 8 günlük benzetimle (`tests/faz4-acceptance.test.ts`) kanıtlandı; gerçek Google anahtarıyla bir hafta süren çalışma yapılmadı. Ayrıntılar, API uçları, migrasyon `0004` ve geri alma, bilinen sınırlar ve entegrasyon bekleyenler: [`11-FAZ4-NOTLARI.md`](11-FAZ4-NOTLARI.md).
 
 ---
 

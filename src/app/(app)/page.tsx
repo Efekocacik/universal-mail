@@ -19,7 +19,8 @@ async function newWindowDays(): Promise<number> {
 
 /**
  * Keşif. Bağlantı parametreleri (gösterge paneli ve bildirimler kullanır): `scan`, `lifecycle=opened|future|new`
- * (virgülle birden çok), `detectedSince=<epoch ms>`, `archived=1`. Geçersiz değerler yok sayılır. `opened`/`new`
+ * (virgülle birden çok), `detectedSince=<epoch ms>`, `archived=1`, `emailStatus=<durum,…>` ve ayrıntısı açılacak
+ * işletme için `lead=<id>`. Geçersiz değerler yok sayılır. `opened`/`new`
  * bağlantısı `detectedSince` taşımıyorsa ayarlardaki "yeni" penceresi (son N gün) uygulanır; bkz. `parseExploreLink`.
  */
 export default async function Page({

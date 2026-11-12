@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   parseCostCap,
+  scheduleControlName,
+  scheduleWarningText,
   scheduleViewModel,
   SKIP_CODES,
   type ScheduleItem,
@@ -62,6 +66,50 @@ describe("zamanlama kartı görünüm modeli", () => {
     expect(vm.missedNote).toMatch(/3 çalışma/);
     expect(vm.capLabel).toBe("Tarama başına onaylanan üst sınır: $2.00");
     expect(scheduleViewModel({ ...base, ackMaxUsd: null }, NOW, fmt).capLabel).toBeNull();
+  });
+
+  it("inceleme: zamanlama uyarısı koda göre yerelleşir; İngilizce arayüzde sunucunun Türkçe metni görünmez", () => {
+    const w = {
+      code: "COUNTRY_NOT_TARGETED",
+      message: "Birleşik Krallık hedef pazarlarınız arasında değil.",
+    };
+    expect(scheduleWarningText(w, "en")).toMatch(/schedule is saved.*target markets/);
+    expect(scheduleWarningText(w, "tr")).toMatch(/^Zamanlama kaydedildi/);
+    // Bilinmeyen kod: Türkçede sunucu metni, İngilizcede genel metin (asla ham Türkçe değil).
+    const other = { code: "SOMETHING_NEW", message: "Türkçe sunucu iletisi" };
+    expect(scheduleWarningText(other, "tr")).toBe("Türkçe sunucu iletisi");
+    expect(scheduleWarningText(other, "en")).not.toMatch(/Türkçe/);
+  });
+
+  it("inceleme a11y: satır denetimlerinin adları görünür etiketle başlar ve bölgeyi taşır", () => {
+    const title = scheduleViewModel(base, NOW, fmt).title;
+    const name = scheduleControlName(t("schedules.delete"), title);
+    expect(name.startsWith(t("schedules.delete"))).toBe(true); // WCAG 2.5.3: görünür ad içinde
+    expect(name).toContain("London");
+    // Bileşen: tek tip (bölgesiz) aria-label kalmamalı; her satır denetimi adı scheduleControlName ile kurar.
+    const src = fs.readFileSync(
+      path.resolve(__dirname, "../src/features/scans/schedules-section.tsx"),
+      "utf8",
+    );
+    expect(src).not.toMatch(/aria-label=\{t\("schedules\./);
+    for (const key of ["toggle", "runNow", "delete"])
+      expect(src).toContain(`aria-label={named(t("schedules.${key}"))}`);
+    expect(src).toContain("aria-labelledby={titleId}");
+  });
+
+  it("inceleme: geri alınmış ön onay '$0.00 onaylı' demez, ne yapılacağını söyler ve uyarı tonundadır", () => {
+    // Google'a geçişte ön onay 0'a çekilir; kullanıcının eski üst sınırı (2) kayıtta kalır.
+    const revoked = scheduleViewModel({ ...base, maxCostUsd: 2, ackMaxUsd: 0 }, NOW, fmt);
+    expect(revoked.capRevoked).toBe(true);
+    expect(revoked.capLabel).toMatch(/onaylanmış bir tutar yok/);
+    expect(revoked.capLabel).not.toMatch(/\$0\.00/);
+    const autoRevoked = scheduleViewModel({ ...base, maxCostUsd: null, ackMaxUsd: 0 }, NOW, fmt);
+    expect(autoRevoked.capRevoked).toBe(true);
+    // Kullanıcı bilerek 0 yazdıysa (yalnızca ücretsiz kota) bu onun sınırıdır, geri alma değil.
+    const userZero = scheduleViewModel({ ...base, maxCostUsd: 0, ackMaxUsd: 0 }, NOW, fmt);
+    expect(userZero.capRevoked).toBe(false);
+    expect(userZero.capLabel).toBe("Tarama başına onaylanan üst sınır: $0.00");
+    expect(scheduleViewModel(base, NOW, fmt).capRevoked).toBe(false);
   });
 
   it("her atlama kodu sade Türkçe nedenle gösterilir; bilinmeyen kod genel metne düşer", () => {

@@ -355,7 +355,10 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="lead-status">{t("detail.status")}</Label>
+            <div className="flex items-center gap-1.5">
+              <Label htmlFor="lead-status">{t("detail.status")}</Label>
+              <HelpTip>{t("help.leadStatus")}</HelpTip>
+            </div>
             <Select
               id="lead-status"
               value={lead.status}

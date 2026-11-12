@@ -17,6 +17,7 @@ import {
 } from "@/lib/db/schema";
 import type { ScanStatus } from "@/lib/domain/types";
 import type { Locale } from "@/lib/i18n";
+import { EMAIL_FOUND_STATES } from "@/lib/leads/email-states";
 import { EMAIL_STATE, LEAD_NOT_ARCHIVED } from "@/lib/leads/query";
 import { effectiveMailboxCap, nextUtcDayStart } from "@/lib/mail/scheduler/limits";
 import { CONTACTED } from "@/lib/mail/send-service";
@@ -68,8 +69,8 @@ export type DashboardSection = (typeof DASHBOARD_SECTIONS)[number];
 export const NEW_LIST_LIMIT = 8;
 export const UPCOMING_SCANS_LIMIT = 5;
 export const RECENT_NOTIFICATIONS_LIMIT = 5;
-/** E-postası bulunmuş sayılan durumlar (SRS email_status). */
-export const EMAIL_FOUND_STATES = ["found_verified", "found_unverified", "generic"] as const;
+/** E-postası bulunmuş sayılan durumlar: Keşif bağlantısıyla ortak liste (`@/lib/leads/email-states`). */
+export { EMAIL_FOUND_STATES };
 const ACTIVE_SCAN_STATUSES: ScanStatus[] = ["queued", "running"];
 const SEQUENCE_OPEN = ["scheduled", "waiting_next"] as const;
 

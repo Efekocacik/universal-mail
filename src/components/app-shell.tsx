@@ -3,6 +3,7 @@
 import { Compass, LayoutDashboard, Layers, Mail, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { Toaster } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/misc";
@@ -10,8 +11,10 @@ import { Tip, TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { fmtUsd } from "@/lib/client/format";
 import { useStatus } from "@/lib/client/queries";
+import { GLOBAL_SHORTCUTS, useShortcuts } from "@/lib/client/shortcuts";
 import { t } from "@/lib/i18n";
 import { NotificationBell } from "./notification-bell";
+import { ShortcutsDialog } from "./shortcuts-dialog";
 import { useResolvedTheme } from "./providers";
 import { WorkerStatusBanner } from "./worker-status-banner";
 
@@ -124,6 +127,17 @@ function ProviderStrip() {
  *  - Logo yazısı ve bütçe hapının uzun metni `xl` (1280 px) ve üstünde.
  * e2e/ui-polish.spec.ts 320–1440 px aralığında, Türkçe ve İngilizce, çakışma olmadığını sınar.
  */
+/**
+ * Yardımda "Her yerde" diye listelenen `?` kısayolu Keşif dışındaki sayfalarda da çalışır. Keşif ("/") kendi
+ * dinleyicisini ve tüm kısayolları gösteren yardımını kurar; iki dinleyici aynı anda etkin olmasın diye burada kapatılır.
+ */
+function GlobalShortcuts({ enabled }: { enabled: boolean }) {
+  const [open, setOpen] = useState(false);
+  useShortcuts({ help: () => setOpen(true) }, enabled);
+  if (!enabled) return null;
+  return <ShortcutsDialog open={open} onOpenChange={setOpen} shortcuts={GLOBAL_SHORTCUTS} />;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const theme = useResolvedTheme();
@@ -189,6 +203,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
           {children}
         </main>
+        <GlobalShortcuts enabled={pathname !== "/"} />
         <Toaster position="bottom-right" richColors closeButton duration={8000} theme={theme} />
       </div>
     </TooltipProvider>

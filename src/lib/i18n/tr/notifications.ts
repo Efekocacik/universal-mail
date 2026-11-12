@@ -43,7 +43,7 @@ export const notifications = {
   "notif.scheduleSkipped.body.ACTIVE_SCAN":
     "Aynı bölge ve kategoriler için başka bir tarama sürüyor; bir saat sonra yeniden denenecek.",
   "notif.scheduleSkipped.body.CATEGORY_SET_MISSING":
-    "Zamanlamanın kullandığı bir kategori artık yok. Zamanlamayı Taramalar sayfasından düzenleyin.",
+    "Zamanlamanın kullandığı bir kategori artık yok. Taramalar sayfasından bu zamanlamayı silip taramayı yeniden kurun.",
   "notif.scheduleSkipped.body.SCAN_PAUSED":
     "Bu zamanlamanın önceki taraması duraklatılmış durumda. Taramalar sayfasından sürdürün ya da iptal edin.",
   "notif.scheduleSkipped.body.SCAN_BUDGET_STOPPED":

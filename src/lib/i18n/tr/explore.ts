@@ -76,7 +76,7 @@ export const explore = {
     "Arşivdeki işletmeleri görüyorsunuz. Geri almak için seçip “Arşivden çıkar”a basın.",
 
   // Yaşam döngüsü (yeni açılanlar vb.)
-  "filters.lifecycle": "Yenilikler",
+  "filters.lifecycle": "Açılışlar",
   "lifecycle.opened": "Yeni açılanlar",
   "lifecycle.future": "Açılışı beklenenler",
   "lifecycle.new": "Yeni tespit edilenler",
@@ -142,6 +142,8 @@ export const explore = {
   "shortcuts.escape": "Çizimi iptal et, seçimi temizle, ayrıntıyı kapat",
   "shortcuts.help": "Bu yardımı aç",
   "shortcuts.or": "veya",
+  "shortcuts.moreOnExplore":
+    "Listede gezinme, seçme ve e-posta bulma kısayolları Keşif ekranında çalışır.",
 
   // E-posta bulma ve kampanyaya ekleme (seçimle)
   "findEmails.capped":

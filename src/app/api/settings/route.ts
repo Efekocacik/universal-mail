@@ -6,7 +6,9 @@ import { getSetupState } from "@/lib/app/state";
 import { audit } from "@/lib/db/audit";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { secretStatus } from "@/lib/secrets/store";
+import { revokeScheduleAcks } from "@/lib/scan/schedule-service";
 import {
+  getSetting,
   getSettings,
   setSetting,
   settingSchemas,
@@ -83,6 +85,12 @@ export const PUT = route(async (req: Request) => {
   if (entries.length === 0) return json({ ok: true, setup: await getSetupState(db) });
   // Hepsi ya da hiçbiri: birden çok anahtar tek işlemde yazılır (yarım kalan güncelleme olmaz).
   await db.transaction(async (tx) => {
+    // Sağlayıcı Google'a geçiyorsa demo/önceki sağlayıcıyla verilmiş zamanlama ön onayları geri alınır (aynı işlem).
+    const nextProvider = patch["places.provider"];
+    if (nextProvider === "google") {
+      const prev = await getSetting(tx, "places.provider");
+      if (prev !== nextProvider) await revokeScheduleAcks(tx, { from: prev, to: nextProvider });
+    }
     for (const [key, value] of entries) {
       const normalized =
         key === "targets.countries"

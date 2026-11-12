@@ -1,6 +1,6 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
-import { scans } from "@/lib/db/schema";
+import { scanSchedules, scans } from "@/lib/db/schema";
 import {
   cancelJob,
   claimNextJob,
@@ -12,7 +12,7 @@ import {
 } from "@/lib/jobs/queue";
 import { getJobHandler, NonRetryableJobError } from "@/lib/jobs/registry";
 import { MAIL_SEND_JOB, requeueStaleMailJobs } from "@/lib/mail/scheduler/job";
-import { budgetSummary } from "@/lib/scan/gates";
+import { budgetSummary, checkCollectionReady, checkProviderKey } from "@/lib/scan/gates";
 import { APP_STOPPED, INTERRUPTED } from "@/lib/scan/runner";
 import { safeNotify } from "@/lib/scan/scan-notifications";
 import { enqueueScanJob } from "@/lib/scan/service";
@@ -22,6 +22,8 @@ export interface RecoverResult {
   interrupted: number;
   resumedScheduled: number;
   pausedManual: number;
+  /** Zamanlaması kapalı veya silinmiş olduğu için kendiliğinden sürdürülmeyen zamanlanmış taramalar. */
+  heldScheduled: number;
 }
 
 export interface WorkerOptions {
@@ -30,6 +32,19 @@ export interface WorkerOptions {
   pollMs?: number;
   heartbeatMs?: number;
   log?: (message: string) => void;
+}
+
+/**
+ * Zamanlanmış taramanın kendiliğinden sürdürülme kapıları (schedule.ts `handleOwnRun` ile aynı): kurulum/onay, sağlayıcı
+ * anahtarı ve bütçe. Geçerse null, aksi halde kapı kodu.
+ */
+async function autoResumeGate(db: Db): Promise<string | null> {
+  const ready = await checkCollectionReady(db);
+  if (!ready.ok) return ready.code;
+  const key = await checkProviderKey(db);
+  if (!key.ok) return key.code;
+  if ((await budgetSummary(db)).level === "blocked") return "SCAN_BUDGET_STOPPED";
+  return null;
 }
 
 /**
@@ -58,8 +73,10 @@ export class Worker {
    * Önceki oturumdan kalanları toparlar:
    * - "çalışıyor" görünen tarama işleri iptal edilir, tarama DURAKLATILIR (`pause_code = INTERRUPTED`);
    * - Faz 4: ZAMANLANMIŞ taramalardan kesilen (INTERRUPTED) veya kapanışta güvenle duraklatılan (APP_STOPPED) olanlar
-   *   bütçe engelli değilse kendiliğinden yeniden kuyruğa alınır (kullanıcı zamanlamayı kurarken onayladı; çalıştırıcının
-   *   çağrı ve bütçe sınırları geçerlidir). ELLE başlatılan taramalar duraklatılmış kalır (ücretli çağrılar kullanıcı
+   *   zamanlamaları hâlâ var ve ETKİNSE ve tick'in sürdürme kapıları (kurulum/onay, sağlayıcı anahtarı, bütçe) geçiyorsa
+   *   kendiliğinden yeniden kuyruğa alınır (kullanıcı zamanlamayı kurarken onayladı; çalıştırıcının çağrı ve maliyet
+   *   sınırları geçerlidir). Zamanlaması kapatılmış/silinmiş olanlar duraklı kalır ve elle taramalarla aynı bildirime
+   *   katılır (kullanıcı tam da o harcamayı durdurmak istemişti). ELLE başlatılan taramalar duraklatılmış kalır (ücretli çağrılar kullanıcı
    *   onayı olmadan sürmez) ve M9: kesilen elle taramalar için tek bir `scan.paused` bildirimi yazılır. BİLİNÇLİ
    *   SAPMA: M9 yalnızca işçinin kendiliğinden yeniden başlatılmasını istiyordu; işçi ilk açılışla yeniden başlatmayı
    *   ayırt edemez ve kullanıcı sert kapatmadan sonraki açılışta da yarım kalan taramasından haberdar olmalıdır;
@@ -88,8 +105,9 @@ export class Worker {
 
     let resumed = 0;
     const resumable = await db
-      .select({ id: scans.id })
+      .select({ id: scans.id, scheduleEnabled: scanSchedules.enabled })
       .from(scans)
+      .leftJoin(scanSchedules, eq(scanSchedules.id, scans.scheduleId))
       .where(
         and(
           eq(scans.status, "paused"),
@@ -97,23 +115,38 @@ export class Worker {
           inArray(scans.pauseCode, [INTERRUPTED, APP_STOPPED]),
         ),
       );
-    if (resumable.length > 0) {
-      const budget = await budgetSummary(db);
-      if (budget.level !== "blocked") {
-        for (const s of resumable) {
-          await db
+    // Yalnızca zamanlaması hâlâ VAR ve ETKİN olanlar sürer: kullanıcı maliyet yüzünden zamanlamayı kapattıysa veya
+    // sildiyse yarım kalan çalışması da kendiliğinden ücretli çağrı yapmamalıdır (inceleme P2). Kapılar tick'in
+    // `handleOwnRun` sürdürmesiyle aynıdır (kurulum/onay, sağlayıcı anahtarı, bütçe).
+    const eligible = resumable.filter((s) => s.scheduleEnabled === true);
+    const held = resumable.filter((s) => s.scheduleEnabled !== true).map((s) => s.id);
+    if (eligible.length > 0) {
+      const gate = await autoResumeGate(db);
+      if (gate === null) {
+        for (const s of eligible) {
+          const moved = await db
             .update(scans)
             .set({ status: "queued", pauseReason: null, pauseCode: null })
-            .where(and(eq(scans.id, s.id), eq(scans.status, "paused")));
-          resumed++;
+            .where(and(eq(scans.id, s.id), eq(scans.status, "paused")))
+            .returning({ id: scans.id });
+          resumed += moved.length;
         }
         this.log(`${resumed} zamanlanmış tarama kaldığı yerden sürecek.`);
+      } else {
+        // Duraklı kalır; zamanlamanın tick'i kapı kodunu kullanıcıya bildirir ve kapı açılınca sürdürür.
+        this.log(`${eligible.length} zamanlanmış tarama sürdürülmedi (${gate}).`);
       }
     }
+    if (held.length > 0)
+      this.log(
+        `${held.length} zamanlanmış tarama duraklatılmış kaldı (zamanlaması kapalı/silinmiş).`,
+      );
 
-    const manual = interrupted.filter((s) => s.origin === "manual");
+    // Kullanıcının elle sürdürmesi gerekenler: kesilen elle taramalar + zamanlaması kapalı/silinmiş olanlar.
+    const manualIds = interrupted.filter((s) => s.origin === "manual").map((s) => s.id);
+    const manual = [...new Set([...manualIds, ...held])];
     if (manual.length > 0) {
-      const first = manual[0]!.id;
+      const first = manual[0]!;
       await safeNotify(
         db,
         {
@@ -137,7 +170,8 @@ export class Worker {
     return {
       interrupted: interrupted.length,
       resumedScheduled: resumed,
-      pausedManual: manual.length,
+      pausedManual: manualIds.length,
+      heldScheduled: held.length,
     };
   }
 
@@ -186,8 +220,9 @@ export class Worker {
     return true;
   }
 
-  async run(): Promise<void> {
-    await this.recover();
+  /** `recover: false`: çağıran `recover()`'ı zaten çalıştırdı (işçi açılışı, bakım turundan önce). */
+  async run(opts: { recover?: boolean } = {}): Promise<void> {
+    if (opts.recover !== false) await this.recover();
     this.log("işçi başladı");
     while (!this.stopping) {
       let worked = false;

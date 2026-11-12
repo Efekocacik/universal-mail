@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { t, type TrKey } from "@/lib/i18n";
-import { api } from "./api";
+import { getLocale, hasTranslation, t, type Locale, type TrKey } from "@/lib/i18n";
+import { api, localizeApiError } from "./api";
 
 /**
  * Zamanlanmış taramalar istemcisi (Paket B).
@@ -70,6 +70,8 @@ export interface ScheduleVM {
   skipReason: string | null;
   missedNote: string | null;
   capLabel: string | null;
+  /** Ön onay geri alınmış (0, kullanıcı 0 yazmadı): kart uyarı tonunda gösterir. */
+  capRevoked: boolean;
 }
 
 const DAY = 86_400_000;
@@ -135,11 +137,15 @@ export function scheduleViewModel(
     skipReason,
     missedNote: s.missedRuns > 0 ? t("schedules.missed", { n: s.missedRuns }) : null,
     capLabel:
-      s.ackMaxUsd !== null
-        ? t(s.maxCostUsd !== null ? "schedules.cap.user" : "schedules.cap.auto", {
-            usd: fmt.usd(s.ackMaxUsd),
-          })
-        : null,
+      s.ackMaxUsd === null
+        ? null
+        : s.ackMaxUsd === 0 && s.maxCostUsd !== 0
+          ? // Onay geri alındı (sağlayıcı Google'a geçti): "0 USD onaylı" demek yerine ne yapılacağını söyler.
+            t("schedules.cap.none")
+          : t(s.maxCostUsd !== null ? "schedules.cap.user" : "schedules.cap.auto", {
+              usd: fmt.usd(s.ackMaxUsd),
+            }),
+    capRevoked: s.ackMaxUsd === 0 && s.maxCostUsd !== 0,
   };
 }
 
@@ -166,6 +172,20 @@ export interface CreateScheduleInput {
   fromScanId: number;
   intervalDays: IntervalDays;
   maxCostUsd?: number | null;
+}
+
+/**
+ * Zamanlama oluşturulduğunda dönen uyarının (ör. ülke hedef pazarlarda değil) kullanıcı dilindeki metni. Sunucunun
+ * `message` alanı Türkçedir; koda göre yerelleştirilir (`schedules.warning.<KOD>`; yoksa `apiError.<KOD>`, o da yoksa
+ * Türkçede sunucu metni, İngilizcede genel metin). Böylece İngilizce arayüzde Türkçe uyarı görünmez.
+ */
+export function scheduleWarningText(
+  w: { code: string; message?: string },
+  locale: Locale = getLocale(),
+): string {
+  const key = `schedules.warning.${w.code}` as TrKey;
+  if (hasTranslation(key, "tr")) return t(key, {}, locale);
+  return localizeApiError(200, { code: w.code, error: w.message }, locale).message;
 }
 
 export function useCreateSchedule() {
@@ -222,6 +242,15 @@ export function useRunScheduleNow() {
 }
 
 /** Maliyet üst sınırı girişini doğrular: boş → null (otomatik), aksi halde 0..10000 sayı. */
+/**
+ * Zamanlama satırındaki bir denetimin erişilebilir adı: görünür etiketle BAŞLAR (WCAG 2.5.3, sesli komutla "Şimdi
+ * çalıştır" denebilsin) ve satırın başlığını (bölge · kategoriler) taşır; birden çok zamanlamada ekran okuyucu her
+ * "Zamanlamayı sil" düğmesinin hangi bölgeyi sildiğini söyler (WCAG 2.4.6).
+ */
+export function scheduleControlName(label: string, title: string): string {
+  return `${label}: ${title}`;
+}
+
 export function parseCostCap(raw: string): { ok: true; value: number | null } | { ok: false } {
   const v = raw.trim().replace(",", ".");
   if (!v) return { ok: true, value: null };

@@ -988,7 +988,7 @@ export const scanSchedules = sqliteTable(
     check("scan_schedules_cost_ck", sql`max_cost_usd IS NULL OR max_cost_usd >= 0`),
     check(
       "scan_schedules_ack_ck",
-      sql`(ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd >= 0 AND ack_at IS NOT NULL)`,
+      sql`(ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd IS NOT NULL AND ack_max_usd >= 0 AND ack_at IS NOT NULL)`,
     ),
     check(
       "scan_schedules_outcome_ck",

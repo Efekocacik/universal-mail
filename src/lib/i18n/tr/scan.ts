@@ -31,6 +31,8 @@ export const scan = {
     "Google Places API anahtarı olmadığı için atlandı. Anahtarı Ayarlar'dan ekleyin.",
   "schedules.skip.SETUP_REQUIRED":
     "Kurulum veya kullanım onayı eksik olduğu için atlandı. Kurulum sihirbazını tamamlayın.",
+  "schedules.warning.COUNTRY_NOT_TARGETED":
+    "Zamanlama kaydedildi ama bu bölgenin ülkesi hedef pazarlarınız arasında değil; ekleyene kadar çalışmaz. Ayarlar > Hedef pazarlar bölümünden ekleyin.",
   "schedules.skip.COUNTRY_NOT_TARGETED":
     "Bölgenin ülkesi artık hedef ülkeleriniz arasında olmadığı için atlandı. Ayarlar > Hedef pazarlar'dan ekleyin.",
   "schedules.skip.ACTIVE_SCAN":
@@ -52,6 +54,11 @@ export const scan = {
   "schedules.missed": "Uygulama kapalıyken {n} çalışma kaçırıldı; tek taramada birleştirildi.",
   "schedules.cap.user": "Tarama başına onaylanan üst sınır: {usd}",
   "schedules.cap.auto": "Tarama başına onaylanan tutar (otomatik): en çok {usd}",
+  "schedules.cap.none":
+    "Bu zamanlama için onaylanmış bir tutar yok (ör. Google'a geçildi). Arka planda çalışması için aşağıdan bir üst sınır onaylayın.",
+  "schedules.cap.edit": "Tarama başına üst sınır (USD)",
+  "schedules.cap.save": "Onayla",
+  "schedules.cap.saved": "Üst sınır onaylandı.",
   "schedules.toggle": "Düzenli taramayı aç/kapat",
   "schedules.on": "Açık",
   "schedules.off": "Kapalı",

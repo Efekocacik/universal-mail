@@ -1,6 +1,6 @@
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, gt, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import {
   categorySets,
@@ -310,4 +310,33 @@ export async function deleteSchedule(db: Db, id: number, now: number = Date.now(
     await deleteNotificationsFor(tx, { scheduleIds: [id] });
     await audit(tx, "schedule.deleted", "schedule", id, undefined, now);
   });
+}
+
+/**
+ * Sağlayıcı Google'a geçince zamanlamaların ön onayları (`ack_max_usd`) geri alınır (0 = onaylı tutar yok). Ön onay
+ * oluşturma/düzenleme anındaki sağlayıcıyla verilir; demo modunda verilen "en çok ~3 USD" onayı gerçek, ücretli Google
+ * taramasına rıza sayılmamalıdır (inceleme P2). 0 tutarla arka plan kapısı her ücretli tahminde NEEDS_ACK ile atlar ve
+ * kullanıcıya bildirir; kullanıcı kartta üst sınırı yeniden onaylar ya da "Şimdi çalıştır" ile tek seferlik onay verir.
+ * Ayarların yazıldığı işlemin içinde çağrılır (ayar ve geri alma birlikte yazılır ya da hiçbiri). Etkilenen sayı döner.
+ */
+export async function revokeScheduleAcks(
+  tx: DbExecutor,
+  reason: { from: string; to: string },
+  now: number = Date.now(),
+): Promise<number> {
+  const revoked = await tx
+    .update(scanSchedules)
+    .set({ ackMaxUsd: 0, ackAt: now, updatedAt: now })
+    .where(gt(scanSchedules.ackMaxUsd, 0))
+    .returning({ id: scanSchedules.id });
+  for (const r of revoked)
+    await audit(
+      tx,
+      "schedule.authorized",
+      "schedule",
+      r.id,
+      { ackMaxUsd: 0, revoked: true, providerFrom: reason.from, providerTo: reason.to },
+      now,
+    );
+  return revoked.length;
 }

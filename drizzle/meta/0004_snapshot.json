@@ -3039,7 +3039,7 @@
         },
         "scan_schedules_ack_ck": {
           "name": "scan_schedules_ack_ck",
-          "value": "(ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd >= 0 AND ack_at IS NOT NULL)"
+          "value": "(ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd IS NOT NULL AND ack_max_usd >= 0 AND ack_at IS NOT NULL)"
         },
         "scan_schedules_outcome_ck": {
           "name": "scan_schedules_outcome_ck",

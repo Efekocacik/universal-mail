@@ -210,6 +210,21 @@ describe("keşif bağlantısı (gösterge paneli ve bildirimlerle ortak sözleş
     });
   });
 
+  it("inceleme: e-posta durumu ve lead=<id> bağlantısı çözülür, gidiş-dönüş korunur; geçersizler atılır", () => {
+    const link = parseExploreLink({
+      emailStatus: "found_verified,generic,bogus,generic",
+      lead: "42",
+    });
+    expect(link).toEqual({ emailStatus: ["found_verified", "generic"], leadId: 42 });
+    expect(initialExploreFilters(link).emailStatus).toEqual(["found_verified", "generic"]);
+    expect(
+      parseExploreLink(Object.fromEntries(new URLSearchParams(exploreHref(link).slice(2)))),
+    ).toEqual(link);
+    expect(parseExploreLink({ emailStatus: "x", lead: "0" })).toEqual({});
+    expect(parseExploreLink({ lead: "1.5" })).toEqual({});
+    expect(parseExploreLink({ lead: "abc" })).toEqual({});
+  });
+
   it("opened/new bağlantısı detectedSince taşımıyorsa 'yeni' penceresi (son N gün) uygulanır", () => {
     const now = Date.UTC(2026, 10, 12);
     const day = 86_400_000;

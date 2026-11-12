@@ -43,7 +43,7 @@ export const notifications = {
   "notif.scheduleSkipped.body.ACTIVE_SCAN":
     "Another scan for the same region and categories is running; it will be retried in an hour.",
   "notif.scheduleSkipped.body.CATEGORY_SET_MISSING":
-    "A category this schedule uses no longer exists. Edit the schedule on the Scans page.",
+    "A category this schedule uses no longer exists. On the Scans page, delete this schedule and set the scan up again.",
   "notif.scheduleSkipped.body.SCAN_PAUSED":
     "The previous scan of this schedule is paused. Resume or cancel it on the Scans page.",
   "notif.scheduleSkipped.body.SCAN_BUDGET_STOPPED":

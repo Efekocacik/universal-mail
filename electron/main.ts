@@ -348,7 +348,10 @@ function startWorker(env: NodeJS.ProcessEnv): void {
     } else {
       delay = 1500 * workerRestarts;
     }
-    log("main", `İşçi ${delay} ms sonra yeniden başlatılacak (kod=${code}).`);
+    log(
+      "main",
+      `İşçi ${delay} ms sonra yeniden başlatılacak (kod=${code}, art arda ${workerRestarts}. çökme).`,
+    );
     setTimeout(() => !quitting && startWorker(env), delay);
   });
 }
@@ -506,8 +509,13 @@ let poller: NotificationPoller | null = null;
 const alertsFile = () => path.join(app.getPath("userData"), "notified-alerts.json");
 
 function showToast(toast: OsToast): void {
-  if (!Notification.isSupported()) return;
+  // Desteklenmeyen platform sessizce yutulmaz: yoklayıcı `toast.failed` satırı yazar (zil yine tek doğru kaynaktır).
+  if (!Notification.isSupported()) throw new Error("Notification desteklenmiyor");
   const n = new Notification({ title: toast.title, body: toast.body, silent: false });
+  // İşletim sistemi gösterimi reddederse (izin kapalı vb.) ana süreç günlüğüne düşer.
+  n.on("failed", (_e, error) =>
+    log("notify", `toast.failed url=${toast.url} error=${String(error).slice(0, 160)}`),
+  );
   n.on("click", () => {
     const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
     if (!win) return;

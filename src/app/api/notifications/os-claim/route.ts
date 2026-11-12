@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic";
  */
 export const POST = route(async () => {
   const db = await database();
-  const [rows, locale] = await Promise.all([claimForOs(db, { limit: 5 }), notificationLocale(db)]);
+  // Dil önce okunur: sahiplenme (kalıcı UPDATE) sonrasında fırlayan bir okuma 500 döndürüp bildirimleri
+  // gösterilmeden "sahiplenilmiş" bırakmasın.
+  const locale = await notificationLocale(db);
+  const rows = await claimForOs(db, { limit: 5 });
   return json({ items: rows.map((r) => toNotificationItem(r, locale)) });
 });

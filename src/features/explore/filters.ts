@@ -27,6 +27,7 @@ export function initialExploreFilters(initial?: ExploreLink): UiFilters {
           ? { since: initial.detectedSince, days: initial.detectedDays }
           : { since: initial.detectedSince },
     archived: initial?.archived === true,
+    emailStatus: initial?.emailStatus ?? [],
   };
 }
 

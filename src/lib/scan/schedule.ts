@@ -187,6 +187,20 @@ async function bumpDemoEpoch(tx: DbExecutor, scheduleId: number, now: number): P
 }
 
 /**
+ * Zamanlama CAS koşulu: bu an (eski `next_run_at`) hâlâ geçerli VE (arka planda) zamanlama hâlâ etkin. Kullanıcı
+ * `dueSchedules()` ile CAS arasında zamanlamayı kapatırsa (web süreci, ayrı SQLite bağlantısı) `next_run_at` değişmez;
+ * `enabled` denetlenmezse tick kapatılmış zamanlamanın ücretli taramasını yine başlatırdı (inceleme P2).
+ * Etkileşimli "Şimdi çalıştır" kapalı zamanlamada da kullanıcının açık isteğidir; orada `enabled` aranmaz.
+ */
+function scheduleCas(s: ScheduleRow, opts: { requireEnabled?: boolean } = {}) {
+  return and(
+    eq(scanSchedules.id, s.id),
+    eq(scanSchedules.nextRunAt, s.nextRunAt),
+    opts.requireEnabled === false ? undefined : eq(scanSchedules.enabled, true),
+  );
+}
+
+/**
  * Atlamayı kaydeder (CAS: başka tick bu anı ilerlettiyse dokunmaz) ve gün başına tekil bildirim üretir.
  * `notifyUser` false ise (etkileşimli "Şimdi çalıştır") bildirim üretilmez; kullanıcı hatayı ekranda görür.
  */
@@ -201,7 +215,7 @@ async function recordSkip(
   const updated = await db
     .update(scanSchedules)
     .set({ nextRunAt: retryAt, lastOutcome: "skipped", lastSkipCode: code, updatedAt: now })
-    .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+    .where(scheduleCas(s))
     .returning({ id: scanSchedules.id });
   if (updated.length === 0) return { scheduleId: s.id, outcome: "lost" };
   await audit(db, "schedule.skipped", "schedule", s.id, { code, retryAt }, now);
@@ -271,7 +285,7 @@ async function resumeOwnRun(
           lastSkipCode: null,
           updatedAt: now,
         })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+        .where(scheduleCas(s))
         .returning({ id: scanSchedules.id });
       if (cas.length === 0) return false;
       const moved = await tx
@@ -388,7 +402,7 @@ export async function runSchedule(
           lastSkipCode: null,
           updatedAt: now,
         })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+        .where(scheduleCas(s, { requireEnabled: !mode.interactive }))
         .returning({ id: scanSchedules.id });
       if (cas.length === 0) return null;
       await bumpDemoEpoch(tx, s.id, now);
@@ -462,7 +476,7 @@ export async function runDueSchedules(
       await db
         .update(scanSchedules)
         .set({ nextRunAt: opts.now + HOUR_MS, updatedAt: opts.now })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)));
+        .where(scheduleCas(s));
     }
   }
   return out;
@@ -515,11 +529,24 @@ export async function scheduleTick(
   });
 }
 
-/** Durum özeti (GET /api/status): zamanı gelmiş etkin zamanlama sayısı ve en yakın çalışma. */
+/** Zamanı gelmiş zamanlama, kuyrukta/çalışan tick olmadan bu kadar beklerse zincir kopmuş sayılır. */
+export const TICK_STALL_MS = 10 * 60_000;
+
+/**
+ * Durum özeti (GET /api/status): zamanı gelmiş etkin zamanlama sayısı ve en yakın çalışma. `tickArmed`: kuyrukta ya da
+ * çalışan tick işi var mı; `stalled`: zamanı gelmiş zamanlama `TICK_STALL_MS`'den uzun süredir bekliyor ve tick zinciri
+ * kopuk (bakım turu yeniden kurana kadar zamanlamalar çalışmaz; işçi yeniden başlatılınca zincir kurulur).
+ */
 export async function scheduleSummary(
   db: Db,
   now: number,
-): Promise<{ total: number; due: number; nextRunAt: number | null }> {
+): Promise<{
+  total: number;
+  due: number;
+  nextRunAt: number | null;
+  tickArmed: boolean;
+  stalled: boolean;
+}> {
   const r = await db
     .select({
       total: sql<number>`count(*)`,
@@ -528,9 +555,19 @@ export async function scheduleSummary(
     })
     .from(scanSchedules)
     .where(eq(scanSchedules.enabled, true));
+  const tick = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.type, SCHEDULE_TICK_JOB), inArray(jobs.status, ["queued", "running"])))
+    .limit(1);
+  const due = Number(r[0]?.due ?? 0);
+  const nextRunAt = r[0]?.next === null || r[0]?.next === undefined ? null : Number(r[0].next);
+  const tickArmed = tick.length > 0;
   return {
     total: Number(r[0]?.total ?? 0),
-    due: Number(r[0]?.due ?? 0),
-    nextRunAt: r[0]?.next === null || r[0]?.next === undefined ? null : Number(r[0].next),
+    due,
+    nextRunAt,
+    tickArmed,
+    stalled: due > 0 && !tickArmed && nextRunAt !== null && nextRunAt <= now - TICK_STALL_MS,
   };
 }

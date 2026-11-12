@@ -72,6 +72,9 @@ export function ShortcutsDialog({
             </section>
           );
         })}
+        {!shortcuts.some((s) => s.scope === "explore") && (
+          <p className="text-[12px] text-muted-foreground">{t("shortcuts.moreOnExplore")}</p>
+        )}
       </DialogContent>
     </Dialog>
   );

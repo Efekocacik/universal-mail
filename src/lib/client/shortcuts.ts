@@ -32,7 +32,8 @@ export interface ShortcutDef {
 
 export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "help", keys: ["?"], scope: "global", labelKey: "shortcuts.help" },
-  { id: "escape", keys: ["Escape"], scope: "global", labelKey: "shortcuts.escape" },
+  // Esc'nin işi (çizimi iptal, seçimi temizle, ayrıntıyı kapat) Keşif'e özgüdür; diyaloglar Esc'yi kendileri işler.
+  { id: "escape", keys: ["Escape"], scope: "explore", labelKey: "shortcuts.escape" },
   { id: "next", keys: ["j"], scope: "explore", labelKey: "shortcuts.next", repeat: true },
   { id: "prev", keys: ["k"], scope: "explore", labelKey: "shortcuts.prev", repeat: true },
   { id: "search", keys: ["/"], scope: "explore", labelKey: "shortcuts.search" },
@@ -46,6 +47,11 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
 /** Kısayolların yok sayıldığı odak alanları: metin girişi, açılır listeler, menüler ve diyaloglar. */
 export const SHORTCUT_IGNORE_SELECTOR =
   "input, textarea, select, [contenteditable=''], [contenteditable=true], [role=dialog], [role=alertdialog], [role=listbox], [role=combobox], [role=menu]";
+
+/** Uygulamanın her sayfasında (Keşif dışında da) çalışan kısayollar: app-shell bunları dinler ve yardımda gösterir. */
+export const GLOBAL_SHORTCUTS: readonly ShortcutDef[] = SHORTCUTS.filter(
+  (s) => s.scope === "global",
+);
 
 /** Sınama için en küçük olay biçimi (tarayıcıdaki `KeyboardEvent` bunu sağlar). */
 export interface ShortcutEventLike {
