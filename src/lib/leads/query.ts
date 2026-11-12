@@ -503,6 +503,12 @@ export interface LeadIdQueryOptions {
   notInCampaignId?: number;
   /** `false`: `excluded` satırı olan lead'ler de atlanır (yalnızca kampanyaya hiç eklenmemiş olanlar). */
   includeExcluded?: boolean;
+  /**
+   * Ek koşul (süzgeçle VE'lenir; `LIMIT`'ten ÖNCE uygulanır). Sınırlı (2000) toplu işlemler bununla yalnızca HÂLÂ
+   * işlenmesi gereken lead'leri seçer; böylece aynı süzgeçle yeniden çalıştırma hep sıradakilere ilerler.
+   * `leads`, `places`, `place_cache` ve `lead_enrichment` (LEFT JOIN) sütunlarına başvurabilir.
+   */
+  where?: SQL;
 }
 
 function campaignMembership(opts: LeadIdQueryOptions): SQL | undefined {
@@ -518,7 +524,7 @@ export async function queryLeadIds(
   limit = 2000,
   opts: LeadIdQueryOptions = {},
 ): Promise<number[]> {
-  const where = and(await buildWhere(db, filters), campaignMembership(opts));
+  const where = and(await buildWhere(db, filters), campaignMembership(opts), opts.where);
   const base = db
     .select({ id: leads.id })
     .from(leads)
@@ -544,7 +550,7 @@ export async function countLeadIds(
   filters: LeadFilters,
   opts: LeadIdQueryOptions = {},
 ): Promise<number> {
-  const where = and(await buildWhere(db, filters), campaignMembership(opts));
+  const where = and(await buildWhere(db, filters), campaignMembership(opts), opts.where);
   const base = db
     .select({ n: sql<number>`count(DISTINCT ${leads.id})` })
     .from(leads)

@@ -27,7 +27,12 @@ import {
 } from "@/features/explore/selection";
 import { countActiveFilters, EMPTY_FILTERS, toApiFilters } from "@/features/explore/filters";
 import { MAX_SELECTION as SERVER_MAX } from "@/lib/api/filters";
-import { bulkResultMessage, chunkIds, mergeAddResults } from "@/lib/client/leads-bulk";
+import {
+  addIdsToCampaign,
+  bulkResultMessage,
+  chunkIds,
+  mergeAddResults,
+} from "@/lib/client/leads-bulk";
 import {
   matchShortcut,
   shortcutHint,
@@ -200,6 +205,32 @@ describe("keşif bağlantısı (gösterge paneli ve bildirimlerle ortak sözleş
     });
   });
 
+  it("opened/new bağlantısı detectedSince taşımıyorsa 'yeni' penceresi (son N gün) uygulanır", () => {
+    const now = Date.UTC(2026, 10, 12);
+    const day = 86_400_000;
+    const opts = { defaultWindowDays: 60, now };
+    expect(parseExploreLink({ lifecycle: "opened", scan: "4" }, opts)).toEqual({
+      scanId: 4,
+      lifecycle: ["opened"],
+      detectedSince: now - 60 * day,
+      detectedDays: 60,
+    });
+    expect(parseExploreLink({ lifecycle: "new" }, opts).detectedDays).toBe(60);
+    // `future` bir tespit değil, durumdur: pencere uygulanmaz.
+    expect(parseExploreLink({ lifecycle: "future" }, opts)).toEqual({ lifecycle: ["future"] });
+    // Açık `detectedSince` (0 = tüm zamanlar dahil) varsayılanı ezer.
+    expect(parseExploreLink({ lifecycle: "opened", detectedSince: "0" }, opts)).toEqual({
+      lifecycle: ["opened"],
+      detectedSince: 0,
+    });
+    // Seçenek verilmezse (saf çağrı) varsayılan yoktur.
+    expect(parseExploreLink({ lifecycle: "opened" })).toEqual({ lifecycle: ["opened"] });
+    // Göreli pencere bağlantıya mutlak tarih olarak yazılmaz.
+    expect(
+      exploreHref({ lifecycle: ["opened"], detectedSince: now - 60 * day, detectedDays: 60 }),
+    ).toBe("/?lifecycle=opened");
+  });
+
   it("üretilen bağlantı geri çözülünce aynıdır", () => {
     const link = { scanId: 3, lifecycle: ["future" as const], detectedSince: 5, archived: true };
     const href = exploreHref(link);
@@ -255,6 +286,45 @@ describe("toplu işlem yardımcıları", () => {
       updatedAt: 9,
     });
     expect(mergeAddResults([]).updatedAt).toBe(0);
+  });
+
+  it("kampanyaya ekleme: bir parça başarısız olursa o ana kadarki sonuç ve hata döner; ilk parça başarısızsa fırlatır", async () => {
+    const ids = Array.from({ length: 1200 }, (_, i) => i + 1);
+    const ok = (part: number[]) => ({
+      added: part.length,
+      excluded: [],
+      duplicates: [],
+      reevaluated: 0,
+      updatedAt: 7,
+    });
+    let calls = 0;
+    const progress: number[] = [];
+    const r = await addIdsToCampaign(
+      1,
+      ids,
+      (done) => progress.push(done),
+      async (part) => {
+        if (++calls === 2) throw new Error("Bağlantı kesildi.");
+        return ok(part);
+      },
+    );
+    expect(r).toMatchObject({
+      added: 500,
+      matched: 1200,
+      taken: 500,
+      remaining: 700,
+      error: "Bağlantı kesildi.",
+    });
+    expect(progress).toEqual([0, 500]);
+
+    const all = await addIdsToCampaign(1, ids, undefined, async (part) => ok(part));
+    expect(all).toMatchObject({ added: 1200, remaining: 0, error: null });
+
+    await expect(
+      addIdsToCampaign(1, ids, undefined, async () => {
+        throw new Error("Kampanya artık düzenlenemez.");
+      }),
+    ).rejects.toThrow("Kampanya artık düzenlenemez.");
   });
 
   it("sonuç bildirimi değişen ve atlanan sayıyı söyler", () => {

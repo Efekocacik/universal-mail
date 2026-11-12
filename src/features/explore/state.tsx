@@ -78,6 +78,8 @@ export interface InitialExploreState {
   scanId?: number;
   lifecycle?: LeadLifecycle[];
   detectedSince?: number;
+  /** Varsayılan pencereden gelen gün sayısı (çip "Son N gün" der). */
+  detectedDays?: number;
   archived?: boolean;
 }
 
@@ -146,7 +148,12 @@ export function ExploreProvider({
     ...EMPTY_FILTERS,
     scanId: initial?.scanId,
     lifecycle: initial?.lifecycle ?? [],
-    detected: initial?.detectedSince !== undefined ? { since: initial.detectedSince } : null,
+    detected:
+      initial?.detectedSince === undefined || initial.detectedSince <= 0
+        ? null // `detectedSince=0`: açıkça tüm zamanlar
+        : initial.detectedDays !== undefined
+          ? { since: initial.detectedSince, days: initial.detectedDays }
+          : { since: initial.detectedSince },
     archived: initial?.archived === true,
   });
   const [sort, setSort] = useState<LeadSort>("novelty");

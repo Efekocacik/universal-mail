@@ -17,13 +17,14 @@ const schema = z
 /**
  * Seçili lead'ler üzerinde toplu işlem: arşivle, arşivden çıkar, "İletişime geçme" olarak işaretle (bkz.
  * src/lib/leads/bulk.ts). Yanıt: `{action, matched, changed, skipped:{unchanged, activeCampaign, notFound}, capped,
- * matchedTotal, dryRun}`. Seçimde hiç lead yoksa 409 `NOTHING_MATCHED`.
+ * matchedTotal, dryRun, changedIds}`. Seçime/süzgece hiç lead uymuyorsa 409 `NOTHING_MATCHED` (hepsi zaten istenen durumdaysa
+ * 200 ve `changed: 0`).
  */
 export const POST = route(async (req: Request) => {
   const db = await database();
   const input = await body(req, schema);
   const result = await runBulk(db, input);
-  if (result.matched === 0)
+  if (result.matchedTotal === 0)
     throw new HttpError(
       409,
       "Seçimde işlenecek işletme kalmadı. Liste değişmiş olabilir; sayfayı yenileyip yeniden seçin.",

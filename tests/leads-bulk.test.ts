@@ -12,7 +12,7 @@ import { addLeadsSchema } from "@/app/api/campaigns/schema";
 import { FILTER_QUERY_MAX, parseLeadFilters, selectionSchema } from "@/lib/api/filters";
 import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { auditLog, campaignLeads, leads, places } from "@/lib/db/schema";
+import { auditLog, campaignLeads, leadEnrichment, leads, places } from "@/lib/db/schema";
 import { resolveSelection, runBulk } from "@/lib/leads/bulk";
 import { patchLead } from "@/lib/leads/mutations";
 import { auditFilterSummary, countLeadIds, queryLeadIds, queryLeads } from "@/lib/leads/query";
@@ -296,7 +296,7 @@ describe("toplu işlemler (runBulk)", () => {
   it("süzgeçle seçim: 2000'den fazlası eşleşirse capped ve matchedTotal döner", async () => {
     await seedMany(4, { country: "NL" });
     await seedMany(2, { country: "GB" });
-    const sel = await resolveSelection(db, { filterQuery: "countries=NL" }, 3);
+    const sel = await resolveSelection(db, { filterQuery: "countries=NL" }, { max: 3 });
     expect(sel).toMatchObject({ matchedTotal: 4, capped: true });
     expect(sel.ids).toHaveLength(3);
     const r = await runBulk(
@@ -316,6 +316,103 @@ describe("toplu işlemler (runBulk)", () => {
       { now: T },
     );
     expect(undo.changed).toBe(4);
+  });
+});
+
+describe("sınırlı süzgeç seçimi yeniden çalıştırınca ilerler", () => {
+  it("İletişime geçme: zaten işaretli olanlar sınırdan önce elenir; her çalıştırma sıradakilere geçer", async () => {
+    await seedMany(2, { country: "NL", status: "do_not_contact" });
+    await seedMany(3, { country: "NL" });
+    await seedMany(2, { country: "GB" });
+    const sel = { filterQuery: "countries=NL" };
+    const dry = await runBulk(
+      db,
+      { action: "do_not_contact", selection: sel, dryRun: true },
+      {
+        now: T,
+        max: 2,
+      },
+    );
+    expect(dry).toMatchObject({
+      matched: 2,
+      changed: 2,
+      capped: true,
+      matchedTotal: 5,
+      skipped: { unchanged: 2, activeCampaign: 0 },
+    });
+    const first = await runBulk(
+      db,
+      { action: "do_not_contact", selection: sel },
+      { now: T, max: 2 },
+    );
+    expect(first).toMatchObject({ changed: 2, capped: true, skipped: { unchanged: 2 } });
+    const second = await runBulk(
+      db,
+      { action: "do_not_contact", selection: sel },
+      { now: T, max: 2 },
+    );
+    expect(second).toMatchObject({ changed: 1, capped: false, skipped: { unchanged: 4 } });
+    const third = await runBulk(
+      db,
+      { action: "do_not_contact", selection: sel },
+      { now: T, max: 2 },
+    );
+    expect(third).toMatchObject({
+      matched: 0,
+      changed: 0,
+      capped: false,
+      skipped: { unchanged: 5 },
+    });
+  });
+
+  it("Arşivle: etkin kampanyadakiler sınırdan önce elenir ve ayrıca sayılır; kalanlar sonraki çalıştırmada işlenir", async () => {
+    const [busy, ...rest] = await seedMany(4, { country: "NL" });
+    const campaignId = await createCampaign(db);
+    await db.insert(campaignLeads).values({
+      campaignId,
+      leadId: busy!,
+      status: "waiting_next",
+      recipientEmail: "info@busy.example",
+      addedAt: T,
+      updatedAt: T,
+    });
+    const sel = { filterQuery: "countries=NL" };
+    const first = await runBulk(db, { action: "archive", selection: sel }, { now: T, max: 2 });
+    expect(first).toMatchObject({
+      matched: 2,
+      changed: 2,
+      capped: true,
+      skipped: { activeCampaign: 1, unchanged: 0 },
+    });
+    // Arşivlenenler varsayılan görünümden düşer; kalan tek uygun lead ikinci çalıştırmada işlenir.
+    const second = await runBulk(db, { action: "archive", selection: sel }, { now: T, max: 2 });
+    expect(second).toMatchObject({ changed: 1, capped: false, skipped: { activeCampaign: 1 } });
+    expect(await archivedOf(busy!)).toBeNull();
+    for (const id of rest) expect(await archivedOf(id)).toBe(T);
+  });
+
+  it("arşiv koşulu UPDATE'in içindedir: seçim çözüldükten sonra kampanyaya alınan lead arşivlenmez", async () => {
+    const [a, b] = await seedMany(2);
+    const campaignId = await createCampaign(db);
+    // Kimlikle seçim kampanya durumuna bakmadan çözülür; kampanya satırı yazmadan hemen önce eklenmiş gibi.
+    const sel = await resolveSelection(db, { leadIds: [a!, b!] }, { action: "archive" });
+    expect(sel.ids).toHaveLength(2);
+    await db.insert(campaignLeads).values({
+      campaignId,
+      leadId: a!,
+      status: "pending",
+      recipientEmail: "info@a.example",
+      addedAt: T,
+      updatedAt: T,
+    });
+    const r = await runBulk(
+      db,
+      { action: "archive", selection: { leadIds: [a!, b!] } },
+      { now: T },
+    );
+    expect(r).toMatchObject({ changed: 1, skipped: { activeCampaign: 1, unchanged: 0 } });
+    expect(r.changedIds).toEqual([b]);
+    expect(await archivedOf(a!)).toBeNull();
   });
 });
 
@@ -422,6 +519,60 @@ describe("İletişime geçme kilidi (tekil düzenleme)", () => {
   });
 });
 
+describe("İletişime geçme kilidi: okuma ile yazma arasındaki yarış", () => {
+  it("okumadan sonra kilitlenen lead'e onaysız durum yazılamaz: 409, hiçbir alan yazılmaz, denetim kaydı yok", async () => {
+    const id = await seedLead();
+    // patchLead'in okuması ile yazması arasında başka bir istek kilidi koyar.
+    const racing = new Proxy(db, {
+      get(target, prop, recv) {
+        if (prop === "update")
+          return (table: typeof leads) => {
+            const run = async () =>
+              target.update(leads).set({ status: "do_not_contact" }).where(eq(leads.id, id));
+            const builder = target.update(table);
+            return {
+              set: (v: Parameters<typeof builder.set>[0]) => {
+                const next = builder.set(v);
+                return {
+                  where: (w: Parameters<typeof next.where>[0]) => {
+                    const q = next.where(w);
+                    return {
+                      returning: async (cols: Parameters<typeof q.returning>[0]) => {
+                        await run();
+                        return q.returning(cols);
+                      },
+                    };
+                  },
+                };
+              },
+            };
+          };
+        return Reflect.get(target, prop, recv);
+      },
+    }) as Db;
+    await expect(
+      patchLead(racing, id, { status: "customer", notes: "aradı" }),
+    ).rejects.toMatchObject({
+      status: 409,
+      extra: { code: "LEAD_UNBLOCK_CONFIRM" },
+    });
+    const row = (await db.select().from(leads).where(eq(leads.id, id)))[0]!;
+    expect(row.status).toBe("do_not_contact");
+    expect(row.notes).toBeNull();
+    expect(await db.select().from(auditLog).where(eq(auditLog.action, "lead.status"))).toHaveLength(
+      0,
+    );
+  });
+
+  it("PATCH gövdesi katıdır: bilinmeyen alan 400", async () => {
+    const id = await seedLead();
+    const res = await leadRoute.PATCH(req("PATCH", `/api/leads/${id}`, { status: "new", x: 1 }), {
+      params: Promise.resolve({ id: String(id) }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("POST /api/leads/find-emails: eşleşen sayı ve sınır bilgisi", () => {
   async function ready() {
     await setSetting(db, "places.provider", "mock");
@@ -469,6 +620,56 @@ describe("POST /api/leads/find-emails: eşleşen sayı ve sınır bilgisi", () =
     expect(res.status).toBe(200);
     const { preview } = await json(res);
     expect(preview).toMatchObject({ leads: 2000, matched: 2003, capped: true, max: 2000 });
+
+    // İlk 2000'i (yenilik puanı eşit → kimlik sırası) taranmış say, kalanlardan biri temas istemiyor: yeniden
+    // çalıştırma aynı 2000'i değil, kalan 2 lead'i hedefler.
+    const all = (await db.select({ id: leads.id }).from(leads))
+      .map((r) => r.id)
+      .sort((a, b) => a - b);
+    const settled = all.slice(0, 2000);
+    for (let i = 0; i < settled.length; i += 400)
+      await db
+        .insert(leadEnrichment)
+        .values(
+          settled
+            .slice(i, i + 400)
+            .map((leadId) => ({ leadId, status: "done" as const, updatedAt: T })),
+        );
+    await db.update(leads).set({ status: "do_not_contact" }).where(eq(leads.id, all[2000]!));
+    const again = await json(
+      await findRoute.POST(
+        req("POST", "/api/leads/find-emails", { filtersQuery: "countries=GB", dryRun: true }),
+        undefined,
+      ),
+    );
+    expect(again.preview).toMatchObject({
+      leads: 2003,
+      matched: 2003,
+      capped: false,
+      alreadyDone: 2000,
+      optedOut: 1,
+    });
+    const p = again.preview as Record<string, number>;
+    expect(p.ready! + p.noWebsite! + p.needsGoogle!).toBe(2);
+    // `force`: taranmışlar yeniden hedeflenir (yine 2000 sınırıyla).
+    const forced = await json(
+      await findRoute.POST(
+        req("POST", "/api/leads/find-emails", {
+          filtersQuery: "countries=GB",
+          dryRun: true,
+          force: true,
+        }),
+        undefined,
+      ),
+    );
+    expect(forced.preview).toMatchObject({ capped: true, alreadyDone: 0, optedOut: 1 });
+
+    // Kimlikler pozitif tam sayı olmalı.
+    const bad = await findRoute.POST(
+      req("POST", "/api/leads/find-emails", { leadIds: [0, -1], dryRun: true }),
+      undefined,
+    );
+    expect(bad.status).toBe(400);
 
     const ids = await json(
       await findRoute.POST(

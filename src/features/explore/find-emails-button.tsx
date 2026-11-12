@@ -127,7 +127,7 @@ export function FindEmailsButton({
                 >
                   {t("findEmails.capped", {
                     matched: fmtNumber(p.matched),
-                    max: fmtNumber(p.max ?? p.leads),
+                    max: fmtNumber(p.max ?? 2000),
                   })}
                 </p>
               )}

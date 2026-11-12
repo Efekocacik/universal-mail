@@ -248,10 +248,16 @@ test.describe("Keşif kullanılabilirliği (Faz 4 paket C)", () => {
     await page.getByRole("button", { name: "Aramayı temizle" }).click();
   });
 
-  test("bağlantıdan süzgeç: ?lifecycle=opened etkin süzgeç olarak görünür", async () => {
-    await page.goto("/?lifecycle=opened&detectedSince=0");
+  test("bağlantıdan süzgeç: ?lifecycle=opened son 60 günle açılır; detectedSince=0 tüm zamanlardır", async () => {
+    await page.goto("/?lifecycle=opened");
     const chips = page.getByRole("group", { name: "Etkin süzgeçler" });
     await expect(chips.getByText("Yeni açılanlar")).toBeVisible();
+    await expect(chips.getByText("Son 60 gün")).toBeVisible();
     await expect(chips.getByRole("button", { name: "Temizle: 2 süzgeç etkin" })).toBeVisible();
+
+    await page.goto("/?lifecycle=opened&detectedSince=0");
+    await expect(chips.getByText("Yeni açılanlar")).toBeVisible();
+    await expect(chips.getByText("Son 60 gün")).toHaveCount(0);
+    await expect(chips.getByRole("button", { name: "Temizle: 1 süzgeç etkin" })).toBeVisible();
   });
 });

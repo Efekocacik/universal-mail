@@ -9,7 +9,7 @@ export const explore = {
   "map.onlyThisArea": "Listede yalnızca bu alan",
   "map.legend.show": "Göstergeyi göster",
   "map.legend.hide": "Göstergeyi gizle",
-  "map.legend.sent": "E-posta gönderildi",
+  "map.legend.sent": "Kampanyada / gönderildi",
   "map.legend.replied": "Yanıt verdi / müşteri",
   "map.legend.stopped": "İlgilenmiyor / iletişime geçme",
   "map.legend.selected": "Seçili",
@@ -28,8 +28,6 @@ export const explore = {
   "selection.cap":
     "Tek tek en fazla {n} işletme seçilebilir. Daha fazlası için “Süzgece uyan tümünü seç”i kullanın.",
   "selection.selectAll": "Süzgece uyan tümünü seç ({n})",
-  "selection.capped":
-    "Bir seferde en fazla {max} işletme işlenir; kalanlar için işlemi yeniden çalıştırın.",
   "list.row.select": "Seç: {name}",
 
   // Toplu işlemler
@@ -38,10 +36,9 @@ export const explore = {
   "bulk.archive": "Arşivle",
   "bulk.unarchive": "Arşivden çıkar",
   "bulk.dnc": "“İletişime geçme” olarak işaretle",
-  "bulk.export": "Seçilenleri dışa aktar",
   "bulk.archive.title": "{n} işletme arşivlensin mi?",
   "bulk.archive.body":
-    "Arşivlenen işletmeler listede, haritada ve dışa aktarımda görünmez; yeni taramalar da onları geri getirmez. Gönderim geçmişi korunur. İstediğiniz zaman “Arşivdekileri göster”den geri alabilirsiniz.",
+    "Arşivlenen işletmeler listede ve haritada görünmez, süzgeçle yapılan dışa aktarımda da yer almaz; yeni taramalar onları geri getirmez. Gönderim geçmişi korunur. İstediğiniz zaman “Arşivdekileri göster”den geri alabilirsiniz.",
   "bulk.archive.confirm": "Arşivle",
   "bulk.unarchive.title": "{n} işletme arşivden çıkarılsın mı?",
   "bulk.unarchive.body": "İşletmeler yeniden listede ve haritada görünür.",
@@ -55,12 +52,15 @@ export const explore = {
   "bulk.preview.unchanged": "Zaten bu durumda",
   "bulk.preview.activeCampaign": "Kampanyası sürdüğü için atlanacak",
   "bulk.preview.notFound": "Artık bulunmayan",
-  "bulk.preview.capped": "Süzgece {total} işletme uyuyor; bu seferde ilk {max} tanesi işlenecek.",
-  "bulk.preview.nothing": "Değişecek işletme yok; seçilenlerin hepsi zaten bu durumda.",
+  "bulk.preview.capped":
+    "Süzgece {total} işletme uyuyor; bir seferde en fazla {max} işletme değiştirilir. İşlem bitince yeniden çalıştırın: değişmiş olanlar atlanır, sıradakiler işlenir.",
+  "bulk.preview.nothing":
+    "Değişecek işletme yok; seçilenler zaten bu durumda veya kampanyaları sürüyor.",
   "bulk.done.archive": "{n} işletme arşivlendi.",
   "bulk.done.unarchive": "{n} işletme arşivden çıkarıldı.",
   "bulk.done.do_not_contact": "{n} işletme “İletişime geçme” olarak işaretlendi.",
-  "bulk.done.skipped": "{n} işletme atlandı (zaten bu durumdaydı veya kampanyası sürüyor).",
+  "bulk.done.skipped":
+    "{n} işletme atlandı (zaten bu durumdaydı, kampanyası sürüyor veya artık yok).",
   "bulk.undo": "Geri al",
   "bulk.undone": "Geri alındı.",
   "bulk.export.title": "Seçilen {n} işletmeyi CSV olarak dışa aktar",
@@ -74,7 +74,7 @@ export const explore = {
     "Arşivdeki işletmeleri görüyorsunuz. Geri almak için seçip “Arşivden çıkar”a basın.",
 
   // Yaşam döngüsü (yeni açılanlar vb.)
-  "filters.lifecycle": "Gelişme",
+  "filters.lifecycle": "Yenilikler",
   "lifecycle.opened": "Yeni açılanlar",
   "lifecycle.future": "Açılışı beklenenler",
   "lifecycle.new": "Yeni tespit edilenler",
@@ -140,10 +140,13 @@ export const explore = {
 
   // E-posta bulma ve kampanyaya ekleme (seçimle)
   "findEmails.capped":
-    "Süzgece {matched} işletme uyuyor; bu seferde ilk {max} tanesi işlenir. Arama bitince yeniden başlatın; taranmış olanlar atlanır.",
+    "Süzgece {matched} işletme uyuyor; bir seferde en fazla {max} işletmede arama yapılır. Bu arama bitince yeniden başlatın: taranmış olanlar atlanır, sıradakiler işlenir.",
   "addToCampaign.bodySelected":
     "Seçilen {n} işletme kampanyaya eklenir. Her biri uygunluk denetiminden geçer; uygun olmayanlar gerekçesiyle hariç tutulur.",
   "addToCampaign.progress": "Ekleniyor: {done} / {total}",
+  "addToCampaign.partial":
+    "Ekleme yarıda kaldı: {n} işletme eklenemedi ({error}). Yeniden deneyin; eklenmiş olanlar ikinci kez eklenmez.",
+  "addToCampaign.retry": "Yeniden dene",
 
   // Tekil ayrıntı: uyum kilidini kaldırma onayı
   "detail.unblock.title": "“İletişime geçme” işareti kaldırılsın mı?",

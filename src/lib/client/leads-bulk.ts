@@ -97,30 +97,49 @@ export function mergeAddResults(parts: readonly AddLeadsResult[]): AddLeadsResul
   };
 }
 
+/** Kimlikle kampanyaya ekleme sonucu: bir parça başarısız olduysa o ana kadarki sonuç ve hata. */
+export type AddIdsResult = AddLeadsByFilterResult & {
+  /** Başarısız parçanın hata iletisi; tüm parçalar eklendiyse null. */
+  error: string | null;
+};
+
 /**
- * Seçili kimlikleri kampanyaya 500'lük parçalarla ekler. Bir parça başarısız olursa duran ve o ana kadarki sonucu
- * hatayla birlikte bildiren davranış: ekleme sunucuda idempotenttir (tekrar eklenenler `duplicates` olur), kullanıcı
- * aynı seçimle yeniden deneyebilir.
+ * Seçili kimlikleri kampanyaya 500'lük parçalarla ekler. Bir parça başarısız olursa DURUR ve o ana kadar eklenenleri
+ * hatayla birlikte döndürür (`error`, `remaining`: denenmeyen kimlik sayısı). Hiçbir parça eklenemediyse hata fırlatılır.
+ * Ekleme sunucuda idempotenttir (tekrar eklenenler `duplicates` olur); kullanıcı aynı seçimle güvenle yeniden dener.
  */
 export async function addIdsToCampaign(
   campaignId: number,
   ids: readonly number[],
   onProgress?: (done: number, total: number) => void,
-): Promise<AddLeadsByFilterResult> {
+  post: (part: number[]) => Promise<AddLeadsResult> = (part) =>
+    api<AddLeadsResult>(`/api/campaigns/${campaignId}/leads`, {
+      method: "POST",
+      json: { leadIds: part },
+    }),
+): Promise<AddIdsResult> {
   const parts: AddLeadsResult[] = [];
   let done = 0;
+  let error: string | null = null;
   onProgress?.(0, ids.length);
   for (const part of chunkIds(ids)) {
-    parts.push(
-      await api<AddLeadsResult>(`/api/campaigns/${campaignId}/leads`, {
-        method: "POST",
-        json: { leadIds: part },
-      }),
-    );
+    try {
+      parts.push(await post(part));
+    } catch (e) {
+      if (parts.length === 0) throw e;
+      error = (e as Error).message || t("common.error");
+      break;
+    }
     done += part.length;
     onProgress?.(done, ids.length);
   }
-  return { ...mergeAddResults(parts), matched: ids.length, taken: ids.length, remaining: 0 };
+  return {
+    ...mergeAddResults(parts),
+    matched: ids.length,
+    taken: done,
+    remaining: ids.length - done,
+    error,
+  };
 }
 
 /** Toplu işlem sonucu bildirimi (saf; sınanır): kaç işletme değişti, kaçı atlandı. */

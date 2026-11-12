@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
 import { campaignLeadsApi, type AddLeadsByFilterResult } from "@/lib/client/campaign-leads";
-import { addIdsToCampaign } from "@/lib/client/leads-bulk";
+import { addIdsToCampaign, type AddIdsResult } from "@/lib/client/leads-bulk";
 import { useCampaigns } from "@/lib/client/campaigns";
 import { fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
@@ -67,7 +67,7 @@ export function AddToCampaignButton({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const byIds = leadIds !== undefined;
   const [campaignId, setCampaignId] = useState<number | null>(preset);
-  const [result, setResult] = useState<AddLeadsByFilterResult | null>(null);
+  const [result, setResult] = useState<AddLeadsByFilterResult | AddIdsResult | null>(null);
   // Sunucu süzgeçli iki liste (yalnızca en son güncellenen 50 kampanya içinde aranmaz).
   const drafts = useCampaigns("draft");
   const ready = useCampaigns("ready");
@@ -102,12 +102,16 @@ export function AddToCampaignButton({
       onSuccess: (r) => {
         setResult(r);
         const target = campaignId;
-        toast.success(t("addToCampaign.toast", { added: fmtNumber(r.added) }), {
-          action: {
-            label: t("addToCampaign.open"),
-            onClick: () => router.push(`/campaigns/${target}/edit?step=leads`),
+        const partial = "error" in r && r.error;
+        (partial ? toast.warning : toast.success)(
+          t("addToCampaign.toast", { added: fmtNumber(r.added) }),
+          {
+            action: {
+              label: t("addToCampaign.open"),
+              onClick: () => router.push(`/campaigns/${target}/edit?step=leads`),
+            },
           },
-        });
+        );
       },
     },
   );
@@ -153,6 +157,17 @@ export function AddToCampaignButton({
                   })}
                 </span>
               </p>
+              {"error" in result && result.error && (
+                <p
+                  className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px]"
+                  role="alert"
+                >
+                  {t("addToCampaign.partial", {
+                    n: fmtNumber(result.remaining),
+                    error: result.error,
+                  })}
+                </p>
+              )}
               {result.reevaluated > 0 && (
                 <p className="text-muted-foreground">
                   {t("addToCampaign.reevaluated", { n: fmtNumber(result.reevaluated) })}
@@ -217,6 +232,11 @@ export function AddToCampaignButton({
                     {t("addToCampaign.open")}
                   </Link>
                 </Button>
+                {byIds && "error" in result && result.error && (
+                  <Button onClick={() => add.mutate(undefined)} loading={add.isPending}>
+                    {t("addToCampaign.retry")}
+                  </Button>
+                )}
                 {!byIds && result.remaining > 0 && (
                   <Button onClick={() => add.mutate(undefined)} loading={add.isPending}>
                     {t("addToCampaign.next", {

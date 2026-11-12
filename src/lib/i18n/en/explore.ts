@@ -8,7 +8,7 @@ export const explore = {
   "map.onlyThisArea": "List only this area",
   "map.legend.show": "Show legend",
   "map.legend.hide": "Hide legend",
-  "map.legend.sent": "E-mail sent",
+  "map.legend.sent": "In a campaign / sent",
   "map.legend.replied": "Replied / customer",
   "map.legend.stopped": "Not interested / do not contact",
   "map.legend.selected": "Selected",
@@ -26,8 +26,6 @@ export const explore = {
   "selection.cap":
     "You can pick at most {n} businesses one by one. To select more, use “Select all matching”.",
   "selection.selectAll": "Select all matching ({n})",
-  "selection.capped":
-    "At most {max} businesses are processed at a time; run the action again for the rest.",
   "list.row.select": "Select: {name}",
 
   "bulk.toolbar": "Actions for the selected businesses",
@@ -35,10 +33,9 @@ export const explore = {
   "bulk.archive": "Archive",
   "bulk.unarchive": "Restore from archive",
   "bulk.dnc": "Mark as “Do not contact”",
-  "bulk.export": "Export selected",
   "bulk.archive.title": "Archive {n} businesses?",
   "bulk.archive.body":
-    "Archived businesses are hidden from the list, the map and exports, and new scans do not bring them back. Sending history is kept. You can restore them any time from “Show archived”.",
+    "Archived businesses are hidden from the list and the map and are left out of filter-based exports; new scans do not bring them back. Sending history is kept. You can restore them any time from “Show archived”.",
   "bulk.archive.confirm": "Archive",
   "bulk.unarchive.title": "Restore {n} businesses from the archive?",
   "bulk.unarchive.body": "The businesses appear in the list and on the map again.",
@@ -53,12 +50,14 @@ export const explore = {
   "bulk.preview.activeCampaign": "Skipped, campaign still running",
   "bulk.preview.notFound": "No longer found",
   "bulk.preview.capped":
-    "{total} businesses match the filters; this run processes the first {max}.",
-  "bulk.preview.nothing": "Nothing will change; all selected businesses are already in this state.",
+    "{total} businesses match the filters; at most {max} are changed per run. When it finishes, run it again: businesses already changed are skipped and the next ones are processed.",
+  "bulk.preview.nothing":
+    "Nothing will change; the selected businesses are already in this state or their campaigns are still running.",
   "bulk.done.archive": "{n} businesses archived.",
   "bulk.done.unarchive": "{n} businesses restored from the archive.",
   "bulk.done.do_not_contact": "{n} businesses marked as “Do not contact”.",
-  "bulk.done.skipped": "{n} businesses skipped (already in this state or campaign still running).",
+  "bulk.done.skipped":
+    "{n} businesses skipped (already in this state, campaign still running, or no longer exist).",
   "bulk.undo": "Undo",
   "bulk.undone": "Undone.",
   "bulk.export.title": "Export the {n} selected businesses as CSV",
@@ -70,7 +69,7 @@ export const explore = {
   "list.archived.banner":
     "You are viewing archived businesses. To restore, select them and press “Restore from archive”.",
 
-  "filters.lifecycle": "Change",
+  "filters.lifecycle": "What's new",
   "lifecycle.opened": "Just opened",
   "lifecycle.future": "Opening soon",
   "lifecycle.new": "Newly found",
@@ -134,10 +133,13 @@ export const explore = {
   "shortcuts.or": "or",
 
   "findEmails.capped":
-    "{matched} businesses match the filters; this run processes the first {max}. Start again when it finishes; businesses already searched are skipped.",
+    "{matched} businesses match the filters; one run searches at most {max}. When it finishes, start again: businesses already searched are skipped and the next ones are processed.",
   "addToCampaign.bodySelected":
     "The {n} selected businesses are added to the campaign. Each one is checked for eligibility; those that are not eligible are excluded with a reason.",
   "addToCampaign.progress": "Adding: {done} / {total}",
+  "addToCampaign.partial":
+    "Adding stopped partway: {n} businesses were not added ({error}). Try again; businesses already added are not added twice.",
+  "addToCampaign.retry": "Try again",
 
   "detail.unblock.title": "Remove the “Do not contact” mark?",
   "detail.unblock.body":

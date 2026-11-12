@@ -138,7 +138,7 @@ const BLOCKED_LEAD_STATUSES: ReadonlySet<LeadStatus> = new Set([
 ]);
 
 /** Sürmekte olan (henüz bitmemiş) dizi durumları. */
-const ACTIVE_SEQUENCE: readonly CampaignLeadStatus[] = [
+export const ACTIVE_SEQUENCE: readonly CampaignLeadStatus[] = [
   "pending",
   "scheduled",
   "in_flight",
