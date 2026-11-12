@@ -168,13 +168,25 @@ describe("uyandırma", () => {
     const mailId = (await enqueueJob(db, MAIL_SEND_JOB, {}, { runAt: now + 600_000 }))!;
     expect(await handleWake(db, { now, mailEnabled: false })).toEqual({
       tickInserted: false,
-      mailPulled: 0,
+      mail: "disabled",
     });
     const [tick] = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
     expect(tick!.runAt).toBe(now);
     expect((await db.select().from(jobs).where(eq(jobs.id, mailId)))[0]!.runAt).toBe(now + 600_000);
-    expect((await handleWake(db, { now, mailEnabled: true })).mailPulled).toBe(1);
+    expect((await handleWake(db, { now, mailEnabled: true })).mail).toBe("pulled");
     expect((await db.select().from(jobs).where(eq(jobs.id, mailId)))[0]!.runAt).toBe(now);
+    // İkinci uyandırma ikinci iş eklemez (idempotent).
+    expect((await handleWake(db, { now, mailEnabled: true })).mail).toBe("noop");
+    expect(await db.select().from(jobs).where(eq(jobs.type, MAIL_SEND_JOB))).toHaveLength(1);
+  });
+
+  it("kuyrukta gönderim işi yoksa uyandırma tek iş ekler (E: wakeDispatch)", async () => {
+    const now = Date.now();
+    expect((await handleWake(db, { now, mailEnabled: true })).mail).toBe("inserted");
+    expect((await handleWake(db, { now, mailEnabled: true })).mail).toBe("noop");
+    const mail = await db.select().from(jobs).where(eq(jobs.type, MAIL_SEND_JOB));
+    expect(mail).toHaveLength(1);
+    expect(mail[0]!.runAt).toBe(now);
   });
 
   it("tick yoksa eklenir; ileti doğrulama ve sıçrama kapısı", async () => {

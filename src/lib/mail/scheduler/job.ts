@@ -158,11 +158,13 @@ export async function wakeDispatchSafely(
   opts: {
     now?: number;
     env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+    /** Zamanlayıcının açık olup olmadığı çağırandan biliniyorsa (ör. worker'daki `mailScheduler.enabled`). */
+    enabled?: boolean;
     source: string;
   },
 ): Promise<WakeOutcome | "failed"> {
   try {
-    return await wakeDispatch(db, { now: opts.now, env: opts.env });
+    return await wakeDispatch(db, { now: opts.now, env: opts.env, enabled: opts.enabled });
   } catch (e) {
     console.warn(
       `[mail] dispatch.wake_failed source=${opts.source} error=${e instanceof Error ? e.name : "unknown"}`,
