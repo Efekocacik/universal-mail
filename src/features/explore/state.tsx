@@ -82,6 +82,9 @@ export interface InitialExploreState {
   /** Varsayılan pencereden gelen gün sayısı (çip "Son N gün" der). */
   detectedDays?: number;
   archived?: boolean;
+  emailStatus?: string[];
+  /** Açılışta ayrıntısı açılacak işletme (`lead=<id>`). */
+  leadId?: number;
 }
 
 interface ExploreContextValue {
@@ -147,7 +150,7 @@ export function ExploreProvider({
 }) {
   const [filters, setFiltersState] = useState<UiFilters>(() => initialExploreFilters(initial));
   const [sort, setSort] = useState<LeadSort>("novelty");
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<number | null>(initial?.leadId ?? null);
   const [tab, setTab] = useState<"list" | "scan">("list");
   const [draft, setDraft] = useState<DraftRegion | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>(null);

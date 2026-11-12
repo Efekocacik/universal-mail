@@ -12,6 +12,7 @@ import {
   scheduleState,
   usagePct,
   utcDayStart,
+  withEmailLink,
 } from "@/features/dashboard/model";
 import { parseExploreLink } from "@/features/explore/deep-link";
 import { initialExploreFilters, toApiFilters } from "@/features/explore/filters";
@@ -84,7 +85,7 @@ async function addPlaceLead(o: {
   openedAt?: number | null;
   name?: string;
   archived?: boolean;
-  email?: "found_verified" | "not_found" | null;
+  email?: "found_verified" | "found_unverified" | "generic" | "not_found" | null;
 }) {
   const placeId = `pl_${++seq}`;
   await db.insert(places).values({
@@ -560,6 +561,28 @@ describe("entegrasyon: gösterge paneli → Keşif bağlantıları (E → C)", (
 
     // Dikiş kanıtı: hafta başı verilmeseydi Keşif 60 günlük pencereye düşer ve sayı tutmazdı.
     expect((await follow("/?lifecycle=new")).total).toBe(3);
+  });
+
+  it("inceleme: satır bağlantısı o işletmenin ayrıntısını açar; 'E-postası bulunan' kutucuğu sayıyla aynı listeyi açar", async () => {
+    const a = await addPlaceLead({ newAt: NOW - DAY, email: "found_verified" });
+    const b = await addPlaceLead({ openedAt: NOW - HOUR, email: "generic" });
+    const c = await addPlaceLead({ email: "found_unverified" });
+    await addPlaceLead({ email: "not_found" });
+    await addPlaceLead({});
+
+    const d = await getDashboard(db, { now: NOW, timeZone: "Europe/Istanbul" });
+    expect(d.counters!.withEmail).toBe(3);
+    const toEmail = await follow(withEmailLink());
+    expect(toEmail.total).toBe(d.counters!.withEmail);
+    expect(toEmail.ids).toEqual([a, b, c]);
+
+    for (const it of d.newThisWeek!.items) {
+      const href = exploreLink(it.kind, d.weekStart, { leadId: it.leadId });
+      const r = await follow(href);
+      expect(r.link.leadId).toBe(it.leadId); // Keşif bu işletmeyi seçili açar (LeadDetail)
+      expect(r.ids).toContain(it.leadId); // ve süzgeçli liste onu içerir
+    }
+    expect(d.newThisWeek!.items.map((i) => i.leadId).sort((x, y) => x - y)).toEqual([a, b]);
   });
 });
 

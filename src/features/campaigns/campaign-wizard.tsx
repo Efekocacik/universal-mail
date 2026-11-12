@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
+import { HelpTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import {
   campaignApi,
@@ -263,7 +264,10 @@ function BasicsStep({
       </div>
 
       <fieldset className="space-y-2">
-        <legend className="text-[13px] font-medium">{t("wizard.window")}</legend>
+        <legend className="flex items-center gap-1.5 text-[13px] font-medium">
+          {t("wizard.window")}
+          <HelpTip>{t("help.sendWindow")}</HelpTip>
+        </legend>
         <div className="flex flex-wrap gap-3">
           {WINDOW_DAYS.map((d) => (
             <label key={d} className="flex items-center gap-1.5 text-[13px]">
@@ -319,7 +323,10 @@ function BasicsStep({
 
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-1.5">
-          <Label htmlFor="cw-cap">{t("wizard.dailyCap")}</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="cw-cap">{t("wizard.dailyCap")}</Label>
+            <HelpTip>{t("help.dailyCap")}</HelpTip>
+          </div>
           <Input
             id="cw-cap"
             type="number"
@@ -340,7 +347,10 @@ function BasicsStep({
           )}
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="cw-min">{t("wizard.gap.min")}</Label>
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="cw-min">{t("wizard.gap.min")}</Label>
+            <HelpTip>{t("help.sendGap")}</HelpTip>
+          </div>
           <Input
             id="cw-min"
             type="number"

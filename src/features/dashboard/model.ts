@@ -1,5 +1,6 @@
 import type { DashboardMailboxQueue, DashboardScheduleItem } from "@/lib/client/dashboard";
 import { intlLocale, type Locale } from "@/lib/i18n";
+import { EMAIL_FOUND_STATES } from "@/lib/leads/email-states";
 
 /**
  * Gösterge panelinin saf görünüm mantığı (DOM'suz test edilir): Keşif bağlantıları, posta kutusu satırının durumu,
@@ -14,12 +15,28 @@ export type ExploreLifecycle = "new" | "opened" | "future";
  * API varsayılan pencere uygulamaz, Keşif de yokluğunda "son N gün"e düşer; ikisi de gösterge panelindeki sayıyla
  * aynı kümeyi göstermez. Geçersiz (≤ 0) değer bağlantıya yazılmaz.
  */
-export function exploreLink(lifecycle: ExploreLifecycle, detectedSince: number): string {
+export function exploreLink(
+  lifecycle: ExploreLifecycle,
+  detectedSince: number,
+  opts: { leadId?: number } = {},
+): string {
   const q = new URLSearchParams({ lifecycle });
   if (Number.isSafeInteger(detectedSince) && detectedSince > 0) {
     q.set("detectedSince", String(detectedSince));
   }
+  // Satır bağlantısı: aynı süzgeçli liste açılır VE o işletmenin ayrıntısı gösterilir (listede yeniden aramak gerekmez).
+  if (opts.leadId !== undefined && Number.isSafeInteger(opts.leadId) && opts.leadId > 0) {
+    q.set("lead", String(opts.leadId));
+  }
   return `/?${q.toString()}`;
+}
+
+/**
+ * "E-postası bulunan" kutucuğunun bağlantısı: sayacın saydığı durumlarla (`EMAIL_FOUND_STATES`, sunucuyla ortak)
+ * süzülmüş Keşif listesi; kutucuktaki sayı ile açılan liste aynı kümedir.
+ */
+export function withEmailLink(): string {
+  return `/?${new URLSearchParams({ emailStatus: EMAIL_FOUND_STATES.join(",") }).toString()}`;
 }
 
 export type QueueState =

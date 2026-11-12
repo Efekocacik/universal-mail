@@ -32,6 +32,7 @@ import {
   budgetTone,
   clockTime,
   exploreLink,
+  withEmailLink,
   formatCount,
   formatUsd,
   queueState,
@@ -302,7 +303,7 @@ function CounterGrid({
         id="withEmail"
         label={t("dash.stat.withEmail")}
         value={n(c.withEmail)}
-        href="/"
+        href={withEmailLink()}
         help={t("dash.stat.withEmail.help")}
       />
       <StatTile
@@ -574,7 +575,7 @@ function NewList({
               {it.kind === "opened" ? t("dash.new.kind.opened") : t("dash.new.kind.new")}
             </Badge>
             <Link
-              href={exploreLink(it.kind, weekStart)}
+              href={exploreLink(it.kind, weekStart, { leadId: it.leadId })}
               className="min-w-0 flex-1 truncate text-[13px] hover:underline"
             >
               {it.name ?? <span className="text-muted-foreground">{t("dash.new.unnamed")}</span>}

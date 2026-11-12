@@ -16,6 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/misc";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { HelpTip } from "@/components/ui/tooltip";
 import {
   campaignApi,
   useMailboxes,
@@ -134,9 +135,12 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
   return (
     <div className="um-enter space-y-4">
       <section aria-labelledby="pf-check-title" className="space-y-2">
-        <h3 id="pf-check-title" className="text-sm font-semibold">
-          {t("preflight.check.title")}
-        </h3>
+        <div className="flex items-center gap-1.5">
+          <h3 id="pf-check-title" className="text-sm font-semibold">
+            {t("preflight.check.title")}
+          </h3>
+          <HelpTip>{t("help.preflight")}</HelpTip>
+        </div>
         <ul className="divide-y rounded-lg border bg-card">
           {r.blockers.map((c) => (
             <CheckRow key={c} tone="block" text={blockerLabel(c)} hint={blockerHint(c)} />

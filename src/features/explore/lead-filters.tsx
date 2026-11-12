@@ -3,14 +3,17 @@
 import { ChevronDown, Search, X } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { NoveltyHelp } from "@/components/novelty-badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input, Label } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { HelpTip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { countryLabel, fmtDate, fmtNumber, NOVELTY_ORDER } from "@/lib/client/format";
 import { useCategories, useFacets } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
+import { EMAIL_STATES } from "@/lib/leads/email-states";
 import { LIFECYCLE_OPTIONS } from "@/lib/leads/saved-filter-payload";
 import { SavedFiltersMenu } from "./saved-filters-menu";
 import { SEARCH_INPUT_ID, useExplore, type UiFilters } from "./state";
@@ -35,11 +38,14 @@ function FilterButton({
   label,
   active,
   summary,
+  help,
   children,
 }: {
   label: string;
   active: boolean;
   summary?: string;
+  /** "Bu nedir?" balonu: tetikleyici düğmenin içine düğme konamaz; açılan panelin başlığında gösterilir. */
+  help?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -63,7 +69,15 @@ function FilterButton({
           <ChevronDown className="size-3.5 opacity-60" />
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-60 p-2">{children}</PopoverContent>
+      <PopoverContent className="w-60 p-2">
+        {help && (
+          <div className="flex items-center gap-1.5 px-2 pb-1.5 text-[12px] font-medium text-muted-foreground">
+            {label}
+            {help}
+          </div>
+        )}
+        {children}
+      </PopoverContent>
     </Popover>
   );
 }
@@ -119,21 +133,6 @@ function MultiList({
 
 // Kalıcı bayraklardan türetilen durumlar; geçici kapalı gibi ayrıntılar yalnızca önbellekteki Google verisinde bulunur.
 const BUSINESS_STATUSES = ["OPERATIONAL", "FUTURE_OPENING", "CLOSED_PERMANENTLY"] as const;
-// Faz 2: e-posta durumu (SRS email_status) ve işlem durumları.
-const EMAIL_STATES = [
-  "found_verified",
-  "generic",
-  "found_unverified",
-  "invalid",
-  "not_found",
-  "unchecked",
-  "queued",
-  "running",
-  "no_website",
-  "needs_google",
-  "blocked",
-  "failed",
-] as const;
 const LEAD_STATUSES = [
   "new",
   "enriched",
@@ -292,6 +291,7 @@ export function LeadFilters() {
           label={t("filters.novelty")}
           active={filters.novelty.length > 0}
           summary={summaryOf(filters.novelty.length)}
+          help={<NoveltyHelp />}
         >
           <MultiList
             options={NOVELTY_ORDER.map((n) => ({
@@ -420,6 +420,7 @@ export function LeadFilters() {
           label={t("filters.leadStatus")}
           active={filters.leadStatus.length > 0}
           summary={summaryOf(filters.leadStatus.length)}
+          help={<HelpTip>{t("help.leadStatus")}</HelpTip>}
         >
           <MultiList
             options={LEAD_STATUSES.map((s) => ({

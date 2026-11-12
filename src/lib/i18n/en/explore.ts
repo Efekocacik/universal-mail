@@ -71,7 +71,7 @@ export const explore = {
   "list.archived.banner":
     "You are viewing archived businesses. To restore, select them and press “Restore from archive”.",
 
-  "filters.lifecycle": "What's new",
+  "filters.lifecycle": "Openings",
   "lifecycle.opened": "Just opened",
   "lifecycle.future": "Opening soon",
   "lifecycle.new": "Newly found",
@@ -136,6 +136,8 @@ export const explore = {
   "shortcuts.escape": "Cancel drawing, clear selection, close details",
   "shortcuts.help": "Open this help",
   "shortcuts.or": "or",
+  "shortcuts.moreOnExplore":
+    "Shortcuts for moving through the list, selecting and finding e-mails work on the Explore screen.",
 
   "findEmails.capped":
     "{matched} businesses match the filters; one run searches at most {max}. When it finishes, start again: businesses already searched are skipped and the next ones are processed.",
