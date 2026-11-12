@@ -188,7 +188,14 @@ export async function onScanPaused(
   }
 }
 
-/** Zamanlamanın son sonucunu günceller; yalnızca bu tarama hâlâ zamanlamanın SON taramasıysa (eski sonuç ezilmez). */
+/**
+ * Zamanlamanın son sonucunu günceller; yalnızca bu tarama hâlâ zamanlamanın SON taramasıysa (eski sonuç ezilmez).
+ *
+ * Aynı ifadede zamanlama takvimine geri döner: duraklayan tarama `onScanPaused` ile sonraki denemeyi öne çekmiş
+ * olabilir (bir saat / bir gün). Kullanıcı taramayı elle sürdürüp bitirdiyse o erken an artık "yarım taramayı sürdür"
+ * anlamına gelmez; dokunulmazsa tick bitmiş taramayı görmez ve AYNI bölgeyi yeniden ücretli tarar (inceleme P1).
+ * `next_run_at = max(next_run_at, (son çalışma ?? oluşturma) + aralık)`: zaten daha geçse (ör. tick sürdürdü) dokunmaz.
+ */
 async function markScheduleOutcome(
   db: Db,
   scheduleId: number,
@@ -198,6 +205,11 @@ async function markScheduleOutcome(
 ): Promise<void> {
   await db
     .update(scanSchedules)
-    .set({ lastOutcome: outcome, lastSkipCode: null, updatedAt: now })
+    .set({
+      lastOutcome: outcome,
+      lastSkipCode: null,
+      nextRunAt: sql`max(${scanSchedules.nextRunAt}, coalesce(${scanSchedules.lastRunAt}, ${scanSchedules.createdAt}) + ${scanSchedules.intervalDays} * ${DAY})`,
+      updatedAt: now,
+    })
     .where(and(eq(scanSchedules.id, scheduleId), eq(scanSchedules.lastScanId, scanId)));
 }

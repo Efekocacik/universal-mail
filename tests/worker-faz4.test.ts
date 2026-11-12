@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordUsage } from "@/lib/budget";
 import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { categorySets, jobs, notifications, places, scans } from "@/lib/db/schema";
+import { categorySets, jobs, notifications, places, scanSchedules, scans } from "@/lib/db/schema";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { clearJobHandlers, getJobHandler, type JobContext } from "@/lib/jobs/registry";
 import { MAIL_SEND_JOB } from "@/lib/mail/scheduler/job";
@@ -317,19 +317,39 @@ describe("bakım turu (M3)", () => {
   });
 });
 
+/** Taramayı bir zamanlamanın duraklamış çalışması yapar (zamanlama gerçek kayıttır). */
+async function pausedScheduledRun(
+  name: string,
+  pauseCode: string,
+  opts: { enabled?: boolean } = {},
+): Promise<{ scanId: number; scheduleId: number }> {
+  const scanId = await newScan(name);
+  await db
+    .update(scans)
+    .set({ status: "completed", finishedAt: Date.now() })
+    .where(eq(scans.id, scanId));
+  const { id: scheduleId } = await createScheduleFromScan(db, {
+    fromScanId: scanId,
+    intervalDays: 7,
+  });
+  if (opts.enabled === false)
+    await db.update(scanSchedules).set({ enabled: false }).where(eq(scanSchedules.id, scheduleId));
+  await db
+    .update(scans)
+    .set({ status: "paused", pauseCode, origin: "schedule", scheduleId, scheduleSlot: 1 })
+    .where(eq(scans.id, scanId));
+  return { scanId, scheduleId };
+}
+
 describe("recover (M9 ve zamanlanmış taramalar)", () => {
   it("kesilen elle tarama duraklar ve tek scan.paused bildirimi; zamanlanmış tarama sürer", async () => {
     await setup();
     const manual1 = await newScan("London");
     await db.update(scans).set({ status: "running" }).where(eq(scans.id, manual1));
-    const sched = await newScan("Manchester");
-    await db
-      .update(scans)
-      .set({ status: "paused", pauseCode: APP_STOPPED, origin: "schedule", scheduleSlot: 1 })
-      .where(eq(scans.id, sched));
+    const { scanId: sched } = await pausedScheduledRun("Manchester", APP_STOPPED);
     const w = new Worker({ db, workerId: "w", log: () => undefined });
     const r = await w.recover();
-    expect(r).toEqual({ interrupted: 1, resumedScheduled: 1, pausedManual: 1 });
+    expect(r).toEqual({ interrupted: 1, resumedScheduled: 1, pausedManual: 1, heldScheduled: 0 });
     const by = new Map((await db.select().from(scans)).map((s) => [s.id, s]));
     expect(by.get(manual1)).toMatchObject({ status: "paused", pauseCode: INTERRUPTED });
     expect(by.get(sched)).toMatchObject({ status: "queued", pauseCode: null });
@@ -343,16 +363,40 @@ describe("recover (M9 ve zamanlanmış taramalar)", () => {
 
   it("bütçe dolmuşsa zamanlanmış tarama kendiliğinden sürmez", async () => {
     await setup();
-    const sched = await newScan("Manchester");
-    await db
-      .update(scans)
-      .set({ status: "paused", pauseCode: INTERRUPTED, origin: "schedule", scheduleSlot: 1 })
-      .where(eq(scans.id, sched));
+    const { scanId: sched } = await pausedScheduledRun("Manchester", INTERRUPTED);
     await setSetting(db, "budget.monthlyUsd", 0.01);
     await recordUsage(db, "mock", "text_search_pro", 6000);
     const r = await new Worker({ db, workerId: "w", log: () => undefined }).recover();
     expect(r.resumedScheduled).toBe(0);
     expect((await db.select().from(scans).where(eq(scans.id, sched)))[0]!.status).toBe("paused");
+  });
+
+  it("inceleme P2: zamanlaması kapatılmış veya silinmiş tarama kendiliğinden sürmez; kullanıcıya bildirilir", async () => {
+    await setup();
+    const off = await pausedScheduledRun("London", APP_STOPPED, { enabled: false });
+    const gone = await pausedScheduledRun("Manchester", INTERRUPTED);
+    await db.delete(scanSchedules).where(eq(scanSchedules.id, gone.scheduleId));
+    await db.delete(jobs); // oluşturma anının işleri; yalnızca recover'ın ekledikleri sayılır
+    const r = await new Worker({ db, workerId: "w", log: () => undefined }).recover();
+    expect(r).toMatchObject({ resumedScheduled: 0, heldScheduled: 2, pausedManual: 0 });
+    const rows = await db.select().from(scans);
+    for (const id of [off.scanId, gone.scanId])
+      expect(rows.find((s) => s.id === id)).toMatchObject({ status: "paused" });
+    const runJobs = (await db.select().from(jobs)).filter((j) => j.type === "scan.run");
+    expect(runJobs).toHaveLength(0);
+    const ns = await db.select().from(notifications);
+    expect(ns).toHaveLength(1);
+    expect(ns[0]).toMatchObject({ kind: "scan.paused" });
+    expect(ns[0]!.params).toMatchObject({ n: 2 });
+  });
+
+  it("inceleme P2: Google anahtarı yoksa etkin zamanlamanın taraması da sürmez (tick'in kapıları)", async () => {
+    await setup();
+    const { scanId } = await pausedScheduledRun("London", APP_STOPPED);
+    await setSetting(db, "places.provider", "google");
+    const r = await new Worker({ db, workerId: "w", log: () => undefined }).recover();
+    expect(r).toMatchObject({ resumedScheduled: 0, heldScheduled: 0 });
+    expect((await db.select().from(scans).where(eq(scans.id, scanId)))[0]!.status).toBe("paused");
   });
 });
 

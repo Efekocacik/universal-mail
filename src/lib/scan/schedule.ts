@@ -187,6 +187,20 @@ async function bumpDemoEpoch(tx: DbExecutor, scheduleId: number, now: number): P
 }
 
 /**
+ * Zamanlama CAS koşulu: bu an (eski `next_run_at`) hâlâ geçerli VE (arka planda) zamanlama hâlâ etkin. Kullanıcı
+ * `dueSchedules()` ile CAS arasında zamanlamayı kapatırsa (web süreci, ayrı SQLite bağlantısı) `next_run_at` değişmez;
+ * `enabled` denetlenmezse tick kapatılmış zamanlamanın ücretli taramasını yine başlatırdı (inceleme P2).
+ * Etkileşimli "Şimdi çalıştır" kapalı zamanlamada da kullanıcının açık isteğidir; orada `enabled` aranmaz.
+ */
+function scheduleCas(s: ScheduleRow, opts: { requireEnabled?: boolean } = {}) {
+  return and(
+    eq(scanSchedules.id, s.id),
+    eq(scanSchedules.nextRunAt, s.nextRunAt),
+    opts.requireEnabled === false ? undefined : eq(scanSchedules.enabled, true),
+  );
+}
+
+/**
  * Atlamayı kaydeder (CAS: başka tick bu anı ilerlettiyse dokunmaz) ve gün başına tekil bildirim üretir.
  * `notifyUser` false ise (etkileşimli "Şimdi çalıştır") bildirim üretilmez; kullanıcı hatayı ekranda görür.
  */
@@ -201,7 +215,7 @@ async function recordSkip(
   const updated = await db
     .update(scanSchedules)
     .set({ nextRunAt: retryAt, lastOutcome: "skipped", lastSkipCode: code, updatedAt: now })
-    .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+    .where(scheduleCas(s))
     .returning({ id: scanSchedules.id });
   if (updated.length === 0) return { scheduleId: s.id, outcome: "lost" };
   await audit(db, "schedule.skipped", "schedule", s.id, { code, retryAt }, now);
@@ -271,7 +285,7 @@ async function resumeOwnRun(
           lastSkipCode: null,
           updatedAt: now,
         })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+        .where(scheduleCas(s))
         .returning({ id: scanSchedules.id });
       if (cas.length === 0) return false;
       const moved = await tx
@@ -388,7 +402,7 @@ export async function runSchedule(
           lastSkipCode: null,
           updatedAt: now,
         })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)))
+        .where(scheduleCas(s, { requireEnabled: !mode.interactive }))
         .returning({ id: scanSchedules.id });
       if (cas.length === 0) return null;
       await bumpDemoEpoch(tx, s.id, now);
@@ -462,7 +476,7 @@ export async function runDueSchedules(
       await db
         .update(scanSchedules)
         .set({ nextRunAt: opts.now + HOUR_MS, updatedAt: opts.now })
-        .where(and(eq(scanSchedules.id, s.id), eq(scanSchedules.nextRunAt, s.nextRunAt)));
+        .where(scheduleCas(s));
     }
   }
   return out;

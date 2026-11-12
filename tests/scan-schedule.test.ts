@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as schedulesRoute from "@/app/api/schedules/route";
 import * as scheduleRoute from "@/app/api/schedules/[id]/route";
 import * as runNowRoute from "@/app/api/schedules/[id]/run-now/route";
+import * as settingsRoute from "@/app/api/settings/route";
 import * as statusRoute from "@/app/api/status/route";
 import { recordUsage } from "@/lib/budget";
 import { getDb, type Db } from "@/lib/db/client";
@@ -10,6 +11,7 @@ import { initDatabase } from "@/lib/db/init";
 import { auditLog, categorySets, jobs, notifications, scanSchedules, scans } from "@/lib/db/schema";
 import { PlacesApiError } from "@/lib/places/errors";
 import { renderNotification } from "@/lib/notifications/render";
+import { onScanFailed } from "@/lib/scan/scan-notifications";
 import { MockPlacesProvider } from "@/lib/places/mock";
 import type { SkuId } from "@/lib/domain/types";
 import { marginalCostUsd, SKU_PRICING } from "@/lib/places/pricing";
@@ -27,7 +29,7 @@ import {
   scheduleTick,
   SCHEDULE_TICK_JOB,
 } from "@/lib/scan/schedule";
-import { createScheduleFromScan, getSchedule } from "@/lib/scan/schedule-service";
+import { createScheduleFromScan, getSchedule, updateSchedule } from "@/lib/scan/schedule-service";
 import { createAndStartScan, pauseScan, resumeScan } from "@/lib/scan/service";
 import { setSecret } from "@/lib/secrets/store";
 import { getSetting, setSetting } from "@/lib/settings";
@@ -195,6 +197,25 @@ describe("runDueSchedules: çalıştırma, birleştirme, yarış", () => {
     expect((await runSchedule(db, stale, nextRunAt + 2)).outcome).toBe("lost");
   });
 
+  it("inceleme P2: değerlendirme sırasında kapatılan zamanlama tarama başlatmaz (CAS enabled'ı da denetler)", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const stale = await getSchedule(db, id); // tick'in dueSchedules() ile okuduğu satır
+    await updateSchedule(db, id, { enabled: false }, nextRunAt); // web süreci: kullanıcı "Kapat"a bastı
+    const r = await runSchedule(db, stale, nextRunAt + 5);
+    expect(r).toMatchObject({ outcome: "lost" });
+    expect(await db.select().from(scans).where(eq(scans.origin, "schedule"))).toHaveLength(0);
+    expect(await getSchedule(db, id)).toMatchObject({ enabled: false, nextRunAt });
+    // Atlama yolu da kapalı zamanlamaya yazmaz.
+    await setSetting(db, "places.provider", "google");
+    expect(await runSchedule(db, stale, nextRunAt + 5)).toMatchObject({ outcome: "lost" });
+    expect(await getSchedule(db, id)).toMatchObject({ lastSkipCode: null, nextRunAt });
+    // Etkileşimli "Şimdi çalıştır" kullanıcının açık isteğidir; kapalı zamanlamada da çalışır.
+    await setSetting(db, "places.provider", "mock");
+    const now = nextRunAt + 10;
+    const manual = await runSchedule(db, await getSchedule(db, id), now, { interactive: true });
+    expect(manual).toMatchObject({ outcome: "started" });
+  });
+
   it("demo zamanı yalnızca demo sağlayıcıda ilerler (Google'da asla)", async () => {
     const { id, nextRunAt } = await makeSchedule(7);
     await setSetting(db, "places.provider", "google");
@@ -270,6 +291,44 @@ describe("runDueSchedules: atlama kodları ve bildirim tekilleştirme", () => {
     const s = await getSchedule(db, id);
     const ok = await runSchedule(db, s, nextRunAt + 3, { interactive: true });
     expect(ok.outcome).toBe("started");
+  });
+
+  it("inceleme P2: demo modunda verilen ön onay Google'a geçince geri alınır; yeniden onaylanınca çalışır", async () => {
+    const { id, nextRunAt, ackMaxUsd } = await makeSchedule(7);
+    expect(ackMaxUsd).toBeGreaterThan(0);
+    await setSecret("google.placesKey", "AIza-test-key-not-real-000000000000");
+    // Demo → Google (Ayarlar). Aynı sağlayıcıyı yeniden kaydetmek bir şey değiştirmez.
+    const put = (body: unknown) => settingsRoute.PUT(req("PUT", "/api/settings", body), undefined);
+    expect((await put({ "places.provider": "google" })).status).toBe(200);
+    expect(await getSchedule(db, id)).toMatchObject({ ackMaxUsd: 0 });
+    const revoked = (await db.select().from(auditLog)).filter(
+      (a) => a.action === "schedule.authorized" && (a.detail as { revoked?: boolean }).revoked,
+    );
+    expect(revoked).toHaveLength(1);
+    expect(revoked[0]!.detail).toMatchObject({ providerFrom: "mock", providerTo: "google" });
+    expect((await put({ "places.provider": "google" })).status).toBe(200);
+    expect(
+      (await db.select().from(auditLog)).filter(
+        (a) => a.action === "schedule.authorized" && (a.detail as { revoked?: boolean }).revoked,
+      ),
+    ).toHaveLength(1);
+
+    // Ücretli Google çalışması kullanıcı onayı olmadan başlamaz.
+    await recordUsage(db, "google", "text_search_pro", 5000); // ücretsiz kota bitti
+    const [r] = await runDueSchedules(db, { now: nextRunAt + 1 });
+    expect(r).toMatchObject({ outcome: "skipped", code: "NEEDS_ACK" });
+    expect(await skipped("NEEDS_ACK")).toHaveLength(1);
+    expect(await db.select().from(scans).where(eq(scans.origin, "schedule"))).toHaveLength(0);
+
+    // Kartta üst sınır yeniden onaylanır: sonraki çalışma başlar (gerçek çağrı yapılmaz; yalnızca tarama oluşur).
+    const patched = await scheduleRoute.PATCH(
+      req("PATCH", `/api/schedules/${id}`, { maxCostUsd: 50 }),
+      params(id),
+    );
+    expect(patched.status).toBe(200);
+    expect(await getSchedule(db, id)).toMatchObject({ ackMaxUsd: 50 });
+    const [again] = await runDueSchedules(db, { now: nextRunAt + DAY_MS + 2 });
+    expect(again).toMatchObject({ outcome: "started" });
   });
 
   it.each([
@@ -671,6 +730,48 @@ describe("kendi kendine duran zamanlanmış tarama zamanlamayı kilitlemez (ince
       "scan.cost_cap_lifted",
     );
     expect(await runScan(runnerDeps(flaky(0), now + DAY_MS), scanId)).toBe("completed");
+    // İnceleme P1: elle sürdürülüp biten tarama zamanlamayı takvimine döndürür; öne çekilmiş tick yeni ücretli tarama
+    // açmaz.
+    const back = await getSchedule(db, id);
+    expect(back.nextRunAt).toBe(back.lastRunAt! + 7 * DAY_MS);
+    expect(await runDueSchedules(db, { now: now + 2 * DAY_MS })).toEqual([]);
+    expect(await db.select().from(scans).where(eq(scans.origin, "schedule"))).toHaveLength(1);
+  });
+
+  it("inceleme P1: geçici hatayla duran tarama elle sürdürülüp bitince öne çekilen tick ikinci tarama açmaz", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const t1 = nextRunAt + 5;
+    const [first] = await runDueSchedules(db, { now: t1 });
+    const scanId = (first as { scanId: number }).scanId;
+    expect(await runScan(runnerDeps(flaky(1), t1 + 600_000), scanId)).toBe("paused");
+    expect((await getSchedule(db, id)).nextRunAt).toBe(t1 + 600_000 + 3_600_000);
+
+    // Kullanıcı bildirimden "Devam et"e basar; tarama erken tick'ten önce biter.
+    expect(await resumeScan(db, scanId)).toEqual({ ok: true });
+    expect(await runScan(runnerDeps(flaky(0), t1 + 1_800_000), scanId)).toBe("completed");
+    expect(await getSchedule(db, id)).toMatchObject({
+      lastOutcome: "completed",
+      lastSkipCode: null,
+      nextRunAt: t1 + 7 * DAY_MS,
+    });
+    expect(await runDueSchedules(db, { now: t1 + 600_000 + 3_600_000 })).toEqual([]);
+    expect(await db.select().from(scans).where(eq(scans.origin, "schedule"))).toHaveLength(1);
+    // Takvim bozulmaz: bir aralık sonra yeni çalışma yine başlar.
+    const [next] = await runDueSchedules(db, { now: t1 + 7 * DAY_MS });
+    expect(next).toMatchObject({ outcome: "started" });
+  });
+
+  it("inceleme P1: başarısız biten tarama da öne çekilmiş anı takvime döndürür", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const t1 = nextRunAt + 5;
+    const [first] = await runDueSchedules(db, { now: t1 });
+    const scanId = (first as { scanId: number }).scanId;
+    expect(await runScan(runnerDeps(flaky(1), t1), scanId)).toBe("paused");
+    await onScanFailed(db, scanId, t1 + 60_000);
+    expect(await getSchedule(db, id)).toMatchObject({
+      lastOutcome: "failed",
+      nextRunAt: t1 + 7 * DAY_MS,
+    });
   });
 
   it("H: tavan yalnızca zamanlanmış taramada geçerlidir; elle başlatılan taramada yoktur", async () => {
