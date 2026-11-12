@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { tr } from "@/lib/i18n/tr";
 
 /**
  * Canlıya geçiş entegrasyonu: DOM'suz/Electron'suz bağlantı denetimleri (kaynak taraması). Davranışın kendisi ilgili
@@ -45,7 +46,12 @@ describe("worker ve masaüstü kablolaması", () => {
   it("Electron: kapatma/çıkış sayfanın kayıt korumasından geçer (will-prevent-unload, doğrudan app.quit yok)", () => {
     const src = read("electron/main.ts");
     expect(src).toContain('win.webContents.on("will-prevent-unload"');
-    expect(src).toContain('buttons: ["Değişiklikleri at", "Düzenlemeye dön"]');
+    // Faz 4: düğme metinleri kullanıcının arayüz dilinde (paylaşılan sözlük); Türkçe metin değişmedi.
+    expect(src).toContain('buttons: [tl("electron.unsaved.discard"), tl("electron.unsaved.keep")]');
+    expect([tr["electron.unsaved.discard"], tr["electron.unsaved.keep"]]).toEqual([
+      "Değişiklikleri at",
+      "Düzenlemeye dön",
+    ]);
     expect(src).toMatch(
       /closeApproved = true;\s*if \(win\.isDestroyed\(\)\) app\.quit\(\);\s*else win\.close\(\);/,
     );

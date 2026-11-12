@@ -11,6 +11,8 @@ import { cn } from "@/lib/cn";
 import { fmtUsd } from "@/lib/client/format";
 import { useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
+import { NotificationBell } from "./notification-bell";
+import { useResolvedTheme } from "./providers";
 import { WorkerStatusBanner } from "./worker-status-banner";
 
 /**
@@ -57,7 +59,7 @@ function BudgetPill() {
       <Link
         href="/settings#budget"
         className={cn(
-          "flex h-8 items-center gap-2.5 rounded-full border bg-card px-3 text-[12px] transition-colors duration-150 hover:bg-accent",
+          "flex h-8 min-w-0 shrink items-center gap-2.5 rounded-full border bg-card px-2.5 text-[12px] transition-colors duration-150 hover:bg-accent sm:px-3",
           tone === "warning" && "border-nov-likely/60 bg-nov-likely/10",
           tone === "danger" && "border-destructive/50 bg-destructive/10",
         )}
@@ -67,7 +69,10 @@ function BudgetPill() {
           <span className="hidden sm:inline">{text}</span>
           <span className="sm:hidden">
             {fmtUsd(b.spentUsd)}
-            <span className="font-normal text-muted-foreground"> / {fmtUsd(b.monthlyUsd)}</span>
+            <span className="font-normal text-muted-foreground max-[399px]:hidden">
+              {" "}
+              / {fmtUsd(b.monthlyUsd)}
+            </span>
           </span>
         </span>
         <Progress value={b.pct} tone={tone} label={text} className="hidden w-12 sm:block" />
@@ -81,7 +86,7 @@ function ProviderBadge() {
   if (data?.provider !== "mock") return null;
   return (
     <Tip content={t("provider.demo.tip")}>
-      <Badge variant="future" className="cursor-help" tabIndex={0}>
+      <Badge variant="future" className="hidden cursor-help sm:inline-flex" tabIndex={0}>
         {t("provider.demo")}
       </Badge>
     </Tip>
@@ -90,6 +95,7 @@ function ProviderBadge() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const theme = useResolvedTheme();
   return (
     <TooltipProvider>
       <div className="flex h-dvh flex-col">
@@ -99,10 +105,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           {t("a11y.skip")}
         </a>
-        <header className="relative z-30 flex h-12 shrink-0 items-center gap-3 border-b bg-card/90 px-4 shadow-[0_1px_8px_rgb(0_0_0/0.04)] backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-4">
+        <header className="relative z-30 flex h-12 min-w-0 shrink-0 items-center gap-1.5 border-b bg-card/90 px-3 min-[400px]:gap-3 sm:px-4 shadow-[0_1px_8px_rgb(0_0_0/0.04)] backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-4">
           <Link
             href="/"
-            className="flex items-center gap-2 rounded-md font-semibold tracking-tight"
+            className="flex shrink-0 items-center gap-2 rounded-md font-semibold tracking-tight max-[359px]:hidden"
             aria-label="Universal Mail"
           >
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-[13px] font-bold text-primary-foreground shadow-sm">
@@ -110,7 +116,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </span>
             <span className="hidden lg:inline">Universal Mail</span>
           </Link>
-          <nav className="flex items-center gap-1" aria-label={t("nav.label")}>
+          <nav className="flex min-w-0 items-center gap-0.5 sm:gap-1" aria-label={t("nav.label")}>
             {NAV_ITEMS.map((item) => {
               const { href, key, icon: Icon } = item;
               const also: readonly string[] = "also" in item ? item.also : [];
@@ -125,7 +131,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     aria-current={active ? "page" : undefined}
                     aria-label={t(key)}
                     className={cn(
-                      "relative flex h-8 items-center gap-1.5 rounded-md px-2.5 text-[13px] font-medium transition-colors duration-150",
+                      "relative flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13px] font-medium transition-colors duration-150 sm:px-2.5",
                       active
                         ? "bg-accent text-accent-foreground after:absolute after:inset-x-2.5 after:-bottom-[9px] after:h-0.5 after:rounded-full after:bg-primary"
                         : "text-muted-foreground hover:bg-accent/60 hover:text-foreground",
@@ -138,8 +144,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               );
             })}
           </nav>
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex min-w-0 items-center gap-1.5 min-[400px]:gap-3">
             <ProviderBadge />
+            <NotificationBell />
             <BudgetPill />
           </div>
         </header>
@@ -147,7 +154,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
           {children}
         </main>
-        <Toaster position="bottom-right" richColors closeButton duration={8000} />
+        <Toaster position="bottom-right" richColors closeButton duration={8000} theme={theme} />
       </div>
     </TooltipProvider>
   );

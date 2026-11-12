@@ -45,6 +45,8 @@ if (process.argv.includes("--relay")) {
     external: ["libsql", "@libsql/*"],
   });
 
+  // Faz 4: ana süreç menü/pencere metinleri için src/lib/i18n sözlüğünü ve bildirim bağlantısı doğrulaması için
+  // src/lib/client/app-path.ts'i de içerir (veritabanı katmanı İÇERMEZ; ~350 KB).
   await build({
     ...common,
     entryPoints: { main: "electron/main.ts", preload: "electron/preload.ts" },
