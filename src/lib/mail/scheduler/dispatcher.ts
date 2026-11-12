@@ -1,6 +1,21 @@
-import { and, asc, eq, exists, gt, inArray, isNull, lte, min, not, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNull,
+  lte,
+  min,
+  not,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { IneligibleCode, IneligibleReason } from "@/lib/compliance/eligibility";
 import { DAY_MS, type FrequencyLimits } from "@/lib/compliance/frequency";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { bumpUpdatedAt } from "@/lib/campaigns/errors";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes, type CampaignLeadStatus } from "@/lib/db/schema";
@@ -10,6 +25,7 @@ import type { MailProvider } from "../provider/provider";
 import { MIN_GAP_S } from "./throttle";
 import {
   isBusyError,
+  REAUTH_DEFER_MS,
   retryPendingRecord,
   sendCampaignStep,
   STALE_SENDING_MS,
@@ -21,7 +37,9 @@ import {
  * Kampanya gönderim dağıtıcısı (Aşama 9). Her çağrıda EN FAZLA BİR ileti gönderir; zamanlamanın doğru kaynağı
  * `campaign_leads` / `messages` tablolarıdır, iş kuyruğu yalnızca dağıtıcıyı uyandırır.
  *
- * - Yalnızca `running` durumundaki ve DEMO posta kutulu kampanyalar seçilir (gerçek gönderim kapalıdır).
+ * - Yalnızca `running` durumundaki kampanyalar seçilir: DEMO posta kutulu olanlar her zaman, GMAIL posta kutulu olanlar
+ *   YALNIZCA canlı gönderim kapısı (`isLiveSendingPermitted`) açıkken. Kapı kapalıyken gerçek posta kutulu kampanyalar
+ *   aday bile olmaz (önceki davranış); açıkken de her ileti `sendCampaignStep` içinde aynı kapıdan yeniden geçer.
  * - Her aday için bütün kurallar (uygunluk, suppression, ülke politikası, pencere, tavanlar, ısınma, bekleme)
  *   gönderimden hemen önce `sendCampaignStep` içinde, ayırma işleminde yeniden denetlenir.
  * - `unknown`/`sending`/`sent` olan adımlar seçilmez ve yeniden gönderilmez (dizi `in_flight` kalır).
@@ -62,6 +80,8 @@ const EXCLUDE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
   "recipient_mismatch",
   "reply_received",
   "sequence_limit",
+  // Aynı kampanyada işletmeye başka bir dizi yazdı veya öncelikli: bu kampanyada işletme başına tek dizi (C8).
+  "business_already_in_campaign",
   "lead_status_blocked",
   "lead_not_demo",
 ]);
@@ -69,6 +89,9 @@ const EXCLUDE_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>([
 const UNCERTAIN_CODES: ReadonlySet<IneligibleCode> = new Set<IneligibleCode>(["evaluation_error"]);
 
 const SHORT_DEFER_MS = 15 * 60_000;
+/** Uygunsuzluk yalnızca kutunun yeniden yetkilendirilmesini mi bekliyor? */
+const isReauthReason = (r: IneligibleReason) =>
+  r.code === "mailbox_not_ready" && r.detail === "reauthorization_required";
 
 /**
  * Eksik değişkenlerin hepsi lead'den mi geliyor? Gönderen (firma profili) değişkeni eksikse bütün diziler aynı
@@ -95,7 +118,14 @@ export function classifyReasons(
   now: number,
 ): { action: ReasonAction; retryAt?: number } {
   const codes = reasons.map((r) => r.code);
-  if (codes.some((c) => PAUSE_CODES.has(c))) return { action: "pause" };
+  const pauseReasons = reasons.filter((r) => PAUSE_CODES.has(r.code));
+  if (pauseReasons.length > 0) {
+    // Yalnızca kutunun yeniden bağlanması bekleniyorsa: ertele (kampanya durmaz, dizi bozulmaz).
+    if (pauseReasons.every(isReauthReason)) {
+      return { action: "defer", retryAt: now + REAUTH_DEFER_MS };
+    }
+    return { action: "pause" };
+  }
   if (codes.some((c) => SKIP_CODES.has(c))) return { action: "skip" };
   if (codes.length === 0 || codes.some((c) => UNCERTAIN_CODES.has(c))) {
     return { action: "defer", retryAt: now + SHORT_DEFER_MS };
@@ -114,7 +144,7 @@ export function classifyReasons(
 
 export interface DispatchOptions {
   now?: () => number;
-  /** Testler için; verilmezse posta kutusuna göre (yalnızca demo). */
+  /** Testler için; verilmezse posta kutusuna göre (demo sağlayıcısı veya canlı kapı açıksa `getLiveProvider`). */
   provider?: MailProvider;
   timeoutMs?: number;
   limits?: FrequencyLimits;
@@ -140,6 +170,8 @@ const MIN_WAKE_MS = 5_000;
 const MAX_WAKE_MS = 5 * 60_000;
 const BUSY_WAKE_MS = 10_000;
 const MAX_PENDING_TRIES = 50;
+/** Bir turda incelenecek en fazla aday sayfası (sayfa başına `batchSize`). */
+const MAX_CANDIDATE_PAGES = 5;
 
 /** Yalnızca güvenli, kişisel veri içermeyen kısa metin (kod listesi). */
 function codesText(codes: readonly string[]): string {
@@ -190,140 +222,180 @@ export class MailDispatcher {
 
     await this.flushPending(now, opts.limits, log);
 
-    const candidates = await this.db
-      .select({
-        id: campaignLeads.id,
-        campaignId: campaignLeads.campaignId,
-        nextStep: campaignLeads.nextStep,
-        mailboxId: campaigns.mailboxId,
-      })
-      .from(campaignLeads)
-      .innerJoin(campaigns, eq(campaigns.id, campaignLeads.campaignId))
-      .innerJoin(mailboxes, eq(mailboxes.id, campaigns.mailboxId))
-      .where(
-        and(
-          eq(campaigns.status, "running"),
-          eq(mailboxes.provider, "demo"),
-          inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
-          or(isNull(campaignLeads.nextSendAt), lte(campaignLeads.nextSendAt, now)),
-        ),
-      )
-      .orderBy(asc(sql`coalesce(${campaignLeads.nextSendAt}, 0)`), asc(campaignLeads.id))
-      .limit(opts.batchSize ?? 50);
-
+    // Aday sayfaları: kampanya/kutu tavanına takılan veya ertelenen adaylar sonraki sayfada sorgudan düşer; böylece en
+    // eski 50 dizi aynı kutunun BAŞKA bir kampanyasını (ya da başka kutuları) aç bırakmaz.
     const blockedMailboxes = new Set<number>();
     const blockedCampaigns = new Set<number>();
+    const seen = new Set<number>();
+    const batchSize = opts.batchSize ?? 50;
+    let stop = false;
+    let page = 0;
+    for (; page < MAX_CANDIDATE_PAGES && !stop; page++) {
+      const candidates = await this.db
+        .select({
+          id: campaignLeads.id,
+          campaignId: campaignLeads.campaignId,
+          nextStep: campaignLeads.nextStep,
+          mailboxId: campaigns.mailboxId,
+        })
+        .from(campaignLeads)
+        .innerJoin(campaigns, eq(campaigns.id, campaignLeads.campaignId))
+        .innerJoin(mailboxes, eq(mailboxes.id, campaigns.mailboxId))
+        .where(
+          and(
+            eq(campaigns.status, "running"),
+            isLiveSendingPermitted()
+              ? inArray(mailboxes.provider, ["demo", "gmail"])
+              : eq(mailboxes.provider, "demo"),
+            inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
+            or(isNull(campaignLeads.nextSendAt), lte(campaignLeads.nextSendAt, now)),
+            blockedCampaigns.size > 0
+              ? notInArray(campaignLeads.campaignId, [...blockedCampaigns])
+              : undefined,
+            blockedMailboxes.size > 0
+              ? notInArray(campaigns.mailboxId, [...blockedMailboxes])
+              : undefined,
+            seen.size > 0 ? notInArray(campaignLeads.id, [...seen]) : undefined,
+          ),
+        )
+        .orderBy(asc(sql`coalesce(${campaignLeads.nextSendAt}, 0)`), asc(campaignLeads.id))
+        .limit(batchSize);
 
-    for (const c of candidates) {
-      if (c.mailboxId === null || blockedMailboxes.has(c.mailboxId)) continue;
-      if (blockedCampaigns.has(c.campaignId)) continue;
+      if (candidates.length === 0) break;
 
-      const out = await sendCampaignStep(
-        this.db,
-        { campaignLeadId: c.id, stepIndex: c.nextStep },
-        { now: clock, provider: opts.provider, timeoutMs: opts.timeoutMs, limits: opts.limits },
-      );
+      for (const c of candidates) {
+        seen.add(c.id);
+        if (c.mailboxId === null || blockedMailboxes.has(c.mailboxId)) continue;
+        if (blockedCampaigns.has(c.campaignId)) continue;
 
-      if (out.outcome === "sent" || out.outcome === "failed" || out.outcome === "unknown") {
-        res.send = out;
-        log(`dizi #${c.id} adım ${c.nextStep}: ${out.outcome}${out.code ? ` (${out.code})` : ""}`);
-        if (out.recordError && out.pendingRecord) {
-          this.pending.push({ record: out.pendingRecord, tries: 0, since: clock() });
+        const out = await sendCampaignStep(
+          this.db,
+          { campaignLeadId: c.id, stepIndex: c.nextStep },
+          { now: clock, provider: opts.provider, timeoutMs: opts.timeoutMs, limits: opts.limits },
+        );
+
+        if (out.outcome === "sent" || out.outcome === "failed" || out.outcome === "unknown") {
+          res.send = out;
           log(
-            `ileti #${out.messageRowId}: sonuç kaydı yazılamadı; yalnızca kayıt yeniden denenecek`,
+            `dizi #${c.id} adım ${c.nextStep}: ${out.outcome}${out.code ? ` (${out.code})` : ""}`,
           );
-        }
-        wakeCandidates.push(clock() + MIN_GAP_S * 1000);
-        break; // çağrı başına en fazla bir gönderim
-      }
-      if (out.outcome === "busy") {
-        res.busy = true;
-        wakeCandidates.push(now + BUSY_WAKE_MS);
-        break;
-      }
-      if (out.outcome === "already_reserved") {
-        // Başka bir çağrı/süreç bu adımı ayırdı; ona bırakılır.
-        wakeCandidates.push(now + MIN_WAKE_MS);
-        continue;
-      }
-      if (out.outcome === "ineligible") {
-        const verdict = classifyReasons(out.reasons, now);
-        const codes = out.reasons.map((r) => r.code);
-        if (verdict.action === "pause") {
-          if (await this.pauseCampaign(c.campaignId, codes, now)) {
-            res.pausedCampaigns.push(c.campaignId);
-            log(`kampanya #${c.campaignId} duraklatıldı: ${codesText(codes)}`);
+          if (out.recordError && out.pendingRecord) {
+            this.pending.push({ record: out.pendingRecord, tries: 0, since: clock() });
+            log(
+              `ileti #${out.messageRowId}: sonuç kaydı yazılamadı; yalnızca kayıt yeniden denenecek`,
+            );
           }
-          blockedCampaigns.add(c.campaignId);
-        } else if (verdict.action === "exclude") {
-          if (await this.excludeSequence(c.id, codes, now)) res.excluded++;
-          log(`dizi #${c.id} sonlandırıldı: ${codesText(codes)}`);
-        } else if (verdict.action === "defer") {
-          if (await this.defer(c.id, verdict.retryAt!, codesText(codes), now)) res.deferred++;
-          wakeCandidates.push(verdict.retryAt!);
+          wakeCandidates.push(clock() + MIN_GAP_S * 1000);
+          stop = true;
+          break; // çağrı başına en fazla bir gönderim
         }
-        continue;
-      }
-
-      if (out.outcome !== "not_sendable") continue;
-      switch (out.code) {
-        case "mailbox_gap":
-        case "mailbox_halted":
-        case "mailbox_daily_cap":
-          blockedMailboxes.add(c.mailboxId);
-          wakeCandidates.push(out.retryAt ?? now + MAX_WAKE_MS);
-          break;
-        case "campaign_daily_cap":
-          blockedCampaigns.add(c.campaignId);
-          wakeCandidates.push(out.retryAt ?? now + MAX_WAKE_MS);
-          break;
-        case "not_due":
-        case "outside_window": {
-          const at = out.retryAt ?? now + DAY_MS;
-          if (await this.defer(c.id, at, out.code, now)) res.deferred++;
-          wakeCandidates.push(at);
+        if (out.outcome === "busy") {
+          res.busy = true;
+          wakeCandidates.push(now + BUSY_WAKE_MS);
+          stop = true;
           break;
         }
-        case "compose_failed": {
-          // Şablon/profil kaynaklı hata bütün dizileri etkiler: kampanya duraklar, kullanıcı düzeltip sürdürür.
-          // Yalnızca bu lead'e özgü hata (eksik değişken, içerik) diziyi sonlandırır. Ertelemek kampanyayı hiç
-          // bitirmezdi: aynı içerik ertesi gün de aynı hatayı verir.
-          const errs = (out.errors ?? []).map((e) => e.code);
-          if (
-            errs.length === 0 ||
-            errs.some((e) => !LEAD_COMPOSE_ERRORS.has(e)) ||
-            !onlyLeadVariablesMissing(out.errors ?? [])
-          ) {
-            if (await this.pauseCampaign(c.campaignId, [out.code, ...errs], now)) {
+        if (out.outcome === "already_reserved") {
+          // Başka bir çağrı/süreç bu adımı ayırdı; ona bırakılır.
+          wakeCandidates.push(now + MIN_WAKE_MS);
+          continue;
+        }
+        if (out.outcome === "ineligible") {
+          const verdict = classifyReasons(out.reasons, now);
+          const codes = out.reasons.map((r) => r.code);
+          if (verdict.action === "pause") {
+            if (await this.pauseCampaign(c.campaignId, codes, now)) {
               res.pausedCampaigns.push(c.campaignId);
-              log(`kampanya #${c.campaignId} duraklatıldı: ${out.code} (${errs.join(",")})`);
+              log(`kampanya #${c.campaignId} duraklatıldı: ${codesText(codes)}`);
             }
             blockedCampaigns.add(c.campaignId);
-          } else if (await this.excludeSequence(c.id, [out.code, ...errs], now)) {
-            res.excluded++;
-            log(`dizi #${c.id} sonlandırıldı: ${out.code} (${errs.join(",")})`);
+          } else if (verdict.action === "exclude") {
+            if (await this.excludeSequence(c.id, codes, now)) res.excluded++;
+            log(`dizi #${c.id} sonlandırıldı: ${codesText(codes)}`);
+          } else if (verdict.action === "defer") {
+            const reauth = out.reasons.some(isReauthReason);
+            const why = reauth ? "reauthorization_required" : codesText(codes);
+            if (await this.defer(c.id, verdict.retryAt!, why, now)) res.deferred++;
+            if (reauth) log(`dizi #${c.id} ertelendi: posta kutusu yeniden bağlanmalı`);
+            wakeCandidates.push(verdict.retryAt!);
           }
-          break;
+          continue;
         }
-        case "timezone_unknown":
-          // Saat dilimi tablosu sürümle değişir; bu sürümde bu alıcıya hiçbir zaman gönderilemez.
-          if (await this.excludeSequence(c.id, [out.code], now)) {
-            res.excluded++;
-            log(`dizi #${c.id} sonlandırıldı: ${out.code}`);
+
+        if (out.outcome !== "not_sendable") continue;
+        switch (out.code) {
+          case "mailbox_gap":
+          case "mailbox_halted":
+          case "mailbox_daily_cap":
+            blockedMailboxes.add(c.mailboxId);
+            wakeCandidates.push(out.retryAt ?? now + MAX_WAKE_MS);
+            break;
+          case "campaign_daily_cap":
+            blockedCampaigns.add(c.campaignId);
+            wakeCandidates.push(out.retryAt ?? now + MAX_WAKE_MS);
+            break;
+          case "not_due":
+          case "outside_window": {
+            const at = out.retryAt ?? now + DAY_MS;
+            if (await this.defer(c.id, at, out.code, now)) res.deferred++;
+            wakeCandidates.push(at);
+            break;
           }
-          break;
-        case "step_template_missing":
-        case "invalid_send_window":
-        case "provider_unavailable":
-        case "unsubscribe_unavailable":
-        case "build_failed":
-          if (await this.pauseCampaign(c.campaignId, [out.code], now)) {
-            res.pausedCampaigns.push(c.campaignId);
-            log(`kampanya #${c.campaignId} duraklatıldı: ${out.code}`);
+          case "compose_failed": {
+            // Şablon/profil kaynaklı hata bütün dizileri etkiler: kampanya duraklar, kullanıcı düzeltip sürdürür.
+            // Yalnızca bu lead'e özgü hata (eksik değişken, içerik) diziyi sonlandırır. Ertelemek kampanyayı hiç
+            // bitirmezdi: aynı içerik ertesi gün de aynı hatayı verir.
+            const errs = (out.errors ?? []).map((e) => e.code);
+            if (
+              errs.length === 0 ||
+              errs.some((e) => !LEAD_COMPOSE_ERRORS.has(e)) ||
+              !onlyLeadVariablesMissing(out.errors ?? [])
+            ) {
+              if (await this.pauseCampaign(c.campaignId, [out.code, ...errs], now)) {
+                res.pausedCampaigns.push(c.campaignId);
+                log(`kampanya #${c.campaignId} duraklatıldı: ${out.code} (${errs.join(",")})`);
+              }
+              blockedCampaigns.add(c.campaignId);
+            } else if (await this.excludeSequence(c.id, [out.code, ...errs], now)) {
+              res.excluded++;
+              log(`dizi #${c.id} sonlandırıldı: ${out.code} (${errs.join(",")})`);
+            }
+            break;
           }
-          blockedCampaigns.add(c.campaignId);
-          break;
+          case "timezone_unknown":
+            // Saat dilimi tablosu sürümle değişir; bu sürümde bu alıcıya hiçbir zaman gönderilemez.
+            if (await this.excludeSequence(c.id, [out.code], now)) {
+              res.excluded++;
+              log(`dizi #${c.id} sonlandırıldı: ${out.code}`);
+            }
+            break;
+          case "unsubscribe_drain_unhealthy":
+          case "dns_not_verified": {
+            // Çıkış talepleri çekilmiyor veya kutunun DNS denetimi taze/geçerli değil: kampanya ve dizi bozulmaz, yalnızca
+            // ERTELENİR (dışlama/başarısızlık yok). Koşul diziden bağımsızdır: bu turda aynı kutunun başka dizisi denenmez.
+            const at = out.retryAt ?? now + SHORT_DEFER_MS;
+            if (await this.defer(c.id, at, out.code, now)) res.deferred++;
+            log(`dizi #${c.id} ertelendi: ${out.code}${out.detail ? ` (${out.detail})` : ""}`);
+            blockedMailboxes.add(c.mailboxId);
+            wakeCandidates.push(at);
+            break;
+          }
+          case "step_template_missing":
+          case "invalid_send_window":
+          case "provider_unavailable":
+          case "unsubscribe_unavailable":
+          case "build_failed":
+            if (await this.pauseCampaign(c.campaignId, [out.code], now)) {
+              res.pausedCampaigns.push(c.campaignId);
+              log(`kampanya #${c.campaignId} duraklatıldı: ${out.code}`);
+            }
+            blockedCampaigns.add(c.campaignId);
+            break;
+        }
       }
+    }
+    if (!stop && page >= MAX_CANDIDATE_PAGES && seen.size >= MAX_CANDIDATE_PAGES * batchSize) {
+      log(`${seen.size} aday incelendi; bu turda gönderilebilecek dizi bulunamadı`);
     }
 
     res.completedCampaigns = await this.completeFinishedCampaigns(now);

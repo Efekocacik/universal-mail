@@ -6,7 +6,9 @@ import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db/client";
 import { auditLog, messages } from "@/lib/db/schema";
-import { sendCampaignStep } from "@/lib/mail/send-service";
+import { DRAIN_GATE_RETRY_MS, sendCampaignStep } from "@/lib/mail/send-service";
+import { getSetting, setSetting } from "@/lib/settings";
+import { computeDrainGate } from "@/lib/unsubscribe/delivery-alert";
 import type { MailProvider, ProviderSendInput } from "@/lib/mail/provider/provider";
 import {
   HttpEventSource,
@@ -15,7 +17,12 @@ import {
   exportChannelPublicKeys,
   getChannelSigner,
 } from "@/lib/unsubscribe/channel";
-import { setUnsubscribeBaseUrl, verifyOneClickEndpoint } from "@/lib/unsubscribe/endpoint";
+import {
+  checkDeliveryHealth,
+  DELIVERY_FRESH_MS,
+  setUnsubscribeBaseUrl,
+  verifyOneClickEndpoint,
+} from "@/lib/unsubscribe/endpoint";
 import { ensureSigningKey, loadPublicKeys, rotateSigningKey } from "@/lib/unsubscribe/keys";
 import { createRelayHandler } from "@/lib/unsubscribe/relay";
 import { FileSpool } from "@/lib/unsubscribe/spool";
@@ -28,6 +35,8 @@ import {
   T0,
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
+import { recordPassingDns } from "./helpers/dns-fixture";
+import { enableHealthyDrain } from "./helpers/drain-fixture";
 
 // Bu dosyada YALNIZCA test içinde: canlı kilit "açık" ve uygunluk denetimi "uygun" varsayılır, böylece canlı yolun
 // iç kapıları (doğrulanmış çıkış uç noktası, iletiye özgü bağlantı, sağlayıcı) sınanabilir. Gerçek kod değişmez.
@@ -127,6 +136,8 @@ async function verifiedEndpoint() {
     attempts: 2,
   });
   expect(r.ok).toBe(true);
+  await enableHealthyDrain(db, T0);
+  await recordPassingDns(db, gid, T0);
 }
 
 async function liveSequence() {
@@ -248,5 +259,91 @@ describe("canlı yol: doğrulanmış uç noktayla iletiye özgü imzalı bağlan
       env.NODE_ENV = prev;
     }
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("canlı yol: çıkış talepleri çekilmiyorsa kampanya gönderimi ERTELENİR (çekme kapısı)", () => {
+  const drainBlocked = (detail: string) => ({
+    outcome: "not_sendable",
+    code: "unsubscribe_drain_unhealthy",
+    detail,
+    retryAt: T0 + DRAIN_GATE_RETRY_MS,
+  });
+
+  it("çekme işi kapalı → drain_disabled; sağlayıcı çağrılmaz, ileti kaydı açılmaz", async () => {
+    await verifiedEndpoint();
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    const s = await liveSequence();
+    expect(await send(s.cl)).toMatchObject(drainBlocked("drain_disabled"));
+    expect(sent).toHaveLength(0);
+    expect(await msgRows()).toHaveLength(0);
+  });
+
+  it("son sağlık kaydı yok veya 24 saatten eski → drain_stale", async () => {
+    await verifiedEndpoint();
+    const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+    await setSetting(db, "mail.unsubscribeEndpoint", { ...cfg, delivery: null });
+    const s = await liveSequence();
+    expect(await send(s.cl)).toMatchObject(drainBlocked("drain_stale"));
+    await setSetting(db, "mail.unsubscribeEndpoint", {
+      ...cfg,
+      delivery: { ...cfg.delivery!, checkedAt: T0 - DELIVERY_FRESH_MS - 1 },
+    });
+    expect(await send(s.cl)).toMatchObject(drainBlocked("drain_stale"));
+    expect(sent).toHaveLength(0);
+    expect(await msgRows()).toHaveLength(0);
+  });
+
+  it("son sağlık kaydı kötü (ör. kuyruk birikmiş) → drain_unhealthy", async () => {
+    await verifiedEndpoint();
+    await checkDeliveryHealth(
+      db,
+      { getStats: async () => ({ depth: 5000, oldestAgeMs: 1000, corrupt: 0 }) },
+      T0,
+    );
+    const s = await liveSequence();
+    expect(await send(s.cl)).toMatchObject(drainBlocked("drain_unhealthy"));
+    expect(sent).toHaveLength(0);
+  });
+
+  it("ortam bayrağı da çekmeyi açar; sağlıklı ve taze kayıtla gönderilir", async () => {
+    await verifiedEndpoint();
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    const prev = process.env.UM_UNSUBSCRIBE_DRAIN_ENABLED;
+    process.env.UM_UNSUBSCRIBE_DRAIN_ENABLED = "1";
+    try {
+      const s = await liveSequence();
+      expect(await send(s.cl)).toMatchObject({ outcome: "sent" });
+      expect(sent).toHaveLength(1);
+    } finally {
+      if (prev === undefined) delete process.env.UM_UNSUBSCRIBE_DRAIN_ENABLED;
+      else process.env.UM_UNSUBSCRIBE_DRAIN_ENABLED = prev;
+    }
+  });
+});
+
+describe("çekme kapısı kararı (saf)", () => {
+  const ok = { ok: true, checkedAt: T0 };
+  it("kapalı / kayıt yok / bayat / gelecekte / kötü / sağlıklı", () => {
+    expect(computeDrainGate({ active: false, delivery: ok }, T0)).toEqual({
+      ok: false,
+      code: "drain_disabled",
+    });
+    expect(computeDrainGate({ active: true, delivery: null }, T0)).toEqual({
+      ok: false,
+      code: "drain_stale",
+    });
+    expect(
+      computeDrainGate({ active: true, delivery: ok }, T0 + DELIVERY_FRESH_MS + 1),
+    ).toMatchObject({ code: "drain_stale" });
+    expect(
+      computeDrainGate({ active: true, delivery: { ok: true, checkedAt: T0 + 3_600_000 } }, T0),
+    ).toMatchObject({ code: "drain_stale" });
+    expect(
+      computeDrainGate({ active: true, delivery: { ok: false, checkedAt: T0 } }, T0),
+    ).toMatchObject({ code: "drain_unhealthy" });
+    expect(computeDrainGate({ active: true, delivery: ok }, T0 + DELIVERY_FRESH_MS)).toEqual({
+      ok: true,
+    });
   });
 });

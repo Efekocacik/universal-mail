@@ -3,9 +3,13 @@ import path from "node:path";
 import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
-import { isDemoSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
+import { isMailSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
-import { startUnsubscribeDrain } from "@/lib/unsubscribe/drain-job";
+import {
+  scheduleUnsubscribeDrainIfActive,
+  startUnsubscribeDrain,
+} from "@/lib/unsubscribe/drain-job";
 import { getSetting } from "@/lib/settings";
 import { recomputeNovelty } from "@/lib/scan/novelty-sync";
 import {
@@ -38,12 +42,18 @@ async function main(): Promise<void> {
   registerEmailHandlers();
   bindEmailEvents();
   const db = await getDb();
-  // Faz 3 demo zamanlayıcısı: varsayılan KAPALI (FAZ3_DEMO_SCHEDULER_ENABLED). Kapalıyken veritabanına yazmaz.
-  const schedulerEnabled = isDemoSchedulerEnabled(process.env);
+  // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim
+  // kapısı (isLiveSendingPermitted; kodda sabit, bu sürümde açık) ile açılır. Kapalıyken veritabanına yazmaz.
+  const schedulerEnabled = isMailSchedulerEnabled(process.env);
   const inboxEnabled = isDemoInboxEnabled(process.env);
   registerMailHandlers({ enabled: schedulerEnabled, inboxEnabled, db });
   const inbox = await startInboxScheduler(db, { env: process.env });
-  if (inbox.enabled) console.log("[worker] demo gelen kutusu açık (yalnızca demo).");
+  if (inbox.enabled)
+    console.log(
+      inbox.live
+        ? "[worker] gelen kutusu eşitleme açık (gerçek Gmail okuma dahil)."
+        : "[worker] demo gelen kutusu açık (yalnızca demo).",
+    );
   const drain = await startUnsubscribeDrain(db, { env: process.env });
   if (drain.enabled) console.log("[worker] çıkış olayı çekme işi açık.");
   const mailScheduler = await startMailScheduler(db, {
@@ -51,7 +61,11 @@ async function main(): Promise<void> {
     log: (m) => console.log(`[worker] ${m}`),
   });
   if (mailScheduler.enabled)
-    console.log("[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).");
+    console.log(
+      isLiveSendingPermitted()
+        ? "[worker] gönderim zamanlayıcısı açık (canlı gönderim kapısı açık)."
+        : "[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).",
+    );
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 
   // Zamanla sona eren yenilik sinyallerini (ör. "son 60 gün") düzenli yenile.
@@ -81,12 +95,21 @@ async function main(): Promise<void> {
   };
   void housekeeping();
   const interval = setInterval(housekeeping, 6 * 3_600_000);
+  // Çıkış olayı çekme zinciri kendini yeniden planlar; beklenmedik bir kopmaya karşı (ör. iş başarısız işaretlendi)
+  // düzenli olarak yeniden kurulur. İdempotent: kuyrukta/çalışan tur varsa yenisi eklenmez; iş kapalıysa veya adres
+  // yoksa veritabanına yazmaz.
+  const rearmDrain = setInterval(() => {
+    scheduleUnsubscribeDrainIfActive(db, { env: process.env }).catch((e) =>
+      console.error("[worker] çıkış çekme işi yeniden kurulamadı:", e),
+    );
+  }, 10 * 60_000);
 
   const shutdown = () => {
     console.log("[worker] kapanış isteği alındı; iş güvenle durduruluyor...");
     worker.stop();
     mailScheduler.stop();
     clearInterval(interval);
+    clearInterval(rearmDrain);
     setTimeout(() => process.exit(0), 20_000).unref();
   };
   process.on("SIGINT", shutdown);
@@ -99,6 +122,20 @@ async function main(): Promise<void> {
   await worker.run();
   process.exit(0);
 }
+
+// Yakalanmamış hata/ret: nedeni günlüğe yazılır ve süreç hata koduyla kapanır; Electron ana süreci işçiyi yeniden başlatır
+// (sessizce yarım durumda çalışmaya devam etmez). Ayrıntı güvenli tutulur: yalnızca hata iletisi/yığını.
+// Hata nesnesinin tamamı (ek alanları, `cause` zinciri) yazılmaz; yalnızca yığın veya ileti.
+const crashText = (e: unknown): string =>
+  e instanceof Error ? (e.stack ?? `${e.name}: ${e.message}`) : `[${typeof e}]`;
+process.on("uncaughtException", (e) => {
+  console.error("[worker] yakalanmamış hata; işçi yeniden başlatılacak:", crashText(e));
+  process.exit(1);
+});
+process.on("unhandledRejection", (e) => {
+  console.error("[worker] yakalanmamış ret; işçi yeniden başlatılacak:", crashText(e));
+  process.exit(1);
+});
 
 main().catch((e) => {
   console.error("[worker] başlatılamadı:", e);

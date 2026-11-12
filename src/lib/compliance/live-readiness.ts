@@ -1,10 +1,13 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db/client";
 import { countryPolicies, mailboxes } from "@/lib/db/schema";
-import { evaluateDnsReadiness } from "@/lib/mail/dns-store";
+import { evaluateDnsReadiness, isDnsProviderManaged } from "@/lib/mail/dns-store";
 import { evaluateInboxSync } from "@/lib/mail/inbound/sync-status";
 import { getSetting, settingSchemas } from "@/lib/settings";
+import { channelPrivateKeyMissing } from "@/lib/unsubscribe/channel";
+import { isUnsubscribeDrainActive, type Env } from "@/lib/unsubscribe/drain-job";
 import { evaluateDelivery, isOneClickEndpointVerified } from "@/lib/unsubscribe/endpoint";
+import { signingPrivateKeyMissing } from "@/lib/unsubscribe/keys";
 import { LEGAL_APPROVALS, type LegalApprovalKey } from "./legal-status";
 import {
   GMAIL_HEADER_TRUST_VERIFIED,
@@ -14,8 +17,8 @@ import {
 } from "./policies";
 
 /**
- * "Canlı gönderime hazırlık" (Aşama 14). SALT OKUNUR: gerçek gönderimin neden hâlâ kapalı olduğunu gösterir ve
- * kapıyı ASLA açmaz. Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
+ * "Canlı gönderime hazırlık" (Aşama 14). SALT OKUNUR: gerçek gönderimin önünde hâlâ ne kaldığını gösterir ve
+ * hiçbir kapıyı AÇMAZ (kod kapıları bu sürümde açıktır; çalışma anı maddeleri gönderim yolunda ayrıca denetlenir). Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
  * ölçülemeyen madde `unknown` (doğrulanmadı) olarak kalır. Hukuki onaylar `LEGAL_APPROVALS` sabitlerindendir ve
  * kullanıcı beyanıyla değişmez.
  */
@@ -48,6 +51,11 @@ export interface ReadinessItem {
   status: ReadinessStatus;
   /** Bu maddeyi kapatabilecek taraf: yazılım, şirket, hukuk veya dış servis. */
   owner: "software" | "company" | "legal" | "external";
+  /**
+   * İsteğe bağlı açıklama kodu (arayüz Türkçe metne çevirir). `provider_managed`: bağlı bütün gerçek kutular kişisel
+   * Gmail; SPF/DKIM/DMARC Google tarafından yönetilir, kullanıcının DNS kaydı eklemesi gerekmez.
+   */
+  detail?: "provider_managed";
 }
 
 export interface LiveReadiness {
@@ -67,7 +75,7 @@ const legal = (key: ReadinessKey, flag: LegalApprovalKey): ReadinessItem => ({
 
 export async function getLiveReadiness(
   db: DbExecutor,
-  opts: { now?: number } = {},
+  opts: { now?: number; env?: Env } = {},
 ): Promise<LiveReadiness> {
   const now = opts.now ?? Date.now();
   const consent = await getSetting(db, "consent");
@@ -86,10 +94,18 @@ export async function getLiveReadiness(
 
   // Çıkış uç noktası ve teslimat: yalnızca SAKLANAN uçtan uca kanıttan (kullanıcı beyanı kanıt değildir).
   const channel = await getSetting(db, "mail.unsubscribeChannel");
-  const hasChannelKey = channel.keys.some((k) => k.kid === channel.current && k.revokedAt === null);
-  const endpointVerified = await isOneClickEndpointVerified(db, now);
-  const delivery = await evaluateDelivery(db, hasChannelKey, now);
+  // Özel anahtarı okunamayan (gizli bilgiler sıfırlanmış) anahtar "var" sayılmaz: imzalanamaz/çekilemez.
+  const hasChannelKey =
+    channel.keys.some((k) => k.kid === channel.current && k.revokedAt === null) &&
+    !(await channelPrivateKeyMissing(db));
+  const endpointVerified =
+    (await isOneClickEndpointVerified(db, now)) && !(await signingPrivateKeyMissing(db));
+  // Teslimat: çekme işi KAPALIYSA gerçek çıkış talepleri uygulamaya hiç ulaşmaz → engel (canlı kampanya gönderimi de
+  // bu durumda ertelenir; bkz. `evaluateDrainGate`). Açıksa saklanan son sağlık kaydından (bayat → doğrulanmadı).
+  const drainActive = await isUnsubscribeDrainActive(db, opts.env ?? process.env);
+  const delivery = drainActive ? await evaluateDelivery(db, hasChannelKey, now) : "blocked";
   const dns = await evaluateDnsReadiness(db, realConnected, now);
+  const dnsManaged = realConnected.length > 0 && realConnected.every(isDnsProviderManaged);
   const inboxSync = await evaluateInboxSync(db, realConnected, now);
 
   const [nonBlockedLive] = await db
@@ -103,7 +119,7 @@ export async function getLiveReadiness(
     { key: "company_profile", status: profile.success ? "ok" : "blocked", owner: "company" },
     { key: "real_mailbox", status: realConnected.length > 0 ? "ok" : "blocked", owner: "external" },
     { key: "inbox_access", status: inboxOk ? "ok" : "blocked", owner: "external" },
-    // Gerçek gelen kutusu okuma kilidi ve Gmail başlık güven kilidi: kodda kapalı sabitler (kullanıcı beyanıyla açılmaz).
+    // Gerçek gelen kutusu okuma kilidi ve Gmail başlık güven kilidi: kodda sabitler (kullanıcı beyanıyla değişmez).
     {
       key: "live_inbox_flag",
       status: LIVE_INBOX_READING_ENABLED ? "ok" : "blocked",
@@ -117,7 +133,13 @@ export async function getLiveReadiness(
     // Okuma izni ≠ okuma çalışıyor: yalnızca taze ve başarılı bir gerçek eşitleme kaydı "tamam" olur.
     { key: "inbox_sync", status: inboxSync, owner: "external" },
     // DNS: yalnızca kullanıcı "Kontrol et"e bastığında saklanan sonuçtan; kayıt yok/bayat/uyarı → doğrulanmadı.
-    { key: "dns_auth", status: dns, owner: "external" },
+    // Kişisel Gmail kutusu (gmail.com/googlemail.com) Google tarafından yönetilir ve kayıt aranmadan "tamam" sayılır.
+    {
+      key: "dns_auth",
+      status: dns,
+      owner: "external",
+      ...(dnsManaged ? { detail: "provider_managed" as const } : {}),
+    },
     // Uç nokta: yalnızca saklanan uçtan uca doğrulamadan VE sürüm kapısından (LEGAL_APPROVALS) ikisi birden.
     {
       key: "https_unsubscribe",

@@ -423,6 +423,11 @@ interface ComposeInput {
   mode: FooterMode;
   purpose: "preview" | "send";
   unsubscribeUrl?: string | null;
+  /**
+   * Yalnızca `live` + KENDİNE TEST (C11, `test-send.ts`): canlı gönderim kilidinden bağımsızdır; alt bilgi "[TEST]"
+   * işaretlidir ve uç nokta doğrulanmadıysa örnek çıkış bağlantısı kullanılır. Kampanya yolu bunu ASLA vermez.
+   */
+  selfTest?: boolean;
 }
 
 type ComposeSource = Pick<
@@ -452,7 +457,7 @@ async function composeCore(
     missing: [],
   };
 
-  if (input.mode === "live" && !isLiveSendingPermitted())
+  if (input.mode === "live" && !isLiveSendingPermitted() && !input.selfTest)
     errors.push({ code: "live_sending_disabled" });
 
   if (!tpl) {
@@ -485,6 +490,7 @@ async function composeCore(
       mode: input.mode,
       unsubscribeUrl: input.unsubscribeUrl,
       recipientCountry: ctx.countryCode,
+      ...(input.selfTest && input.mode === "live" ? { selfTest: true } : {}),
     });
   } catch (e) {
     if (!(e instanceof FooterError)) throw e;

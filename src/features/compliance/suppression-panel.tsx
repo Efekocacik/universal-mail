@@ -30,7 +30,13 @@ import {
   type SuppressionState,
 } from "@/lib/client/compliance";
 import { fmtDate, fmtNumber } from "@/lib/client/format";
+import {
+  confirmationPreview,
+  suppressionImportApi,
+  type CsvImportPreview,
+} from "@/lib/client/suppression-import";
 import { t } from "@/lib/i18n";
+import { importNeedsConfirmation, importWritesAnything, previewReasons } from "./import-model";
 import {
   csvErrorName,
   csvFileProblem,
@@ -187,16 +193,52 @@ function ImportDialog({
 }) {
   const [file, setFile] = useState<{ name: string; size: number; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [preview, setPreview] = useState<CsvImportPreview | null>(null);
   const [report, setReport] = useState<CsvImportReport | null>(null);
-  const importer = useSafeMutation(() => complianceApi.importCsv(file!.text), {
-    invalidate: INVALIDATE,
-    onSuccess: (r) => setReport(r),
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Önizleme hiçbir şey yazmaz (sunucuda aynı hesap yapılır ve geri alınır).
+  const previewer = useSafeMutation((text: string) => suppressionImportApi.preview(text), {
+    onSuccess: (p, text) => {
+      // Bu arada başka dosya seçildiyse eski önizleme gösterilmez.
+      if (file?.text === text) setPreview(p);
+    },
+    onError: (info) => setProblem(info.message),
   });
+  const importer = useSafeMutation(
+    (v: { text: string; confirmIrreversible: boolean }) =>
+      suppressionImportApi.run(v.text, v.confirmIrreversible),
+    {
+      invalidate: INVALIDATE,
+      // Önizlemeden sonra veri değiştiyse 409 CONFIRMATION_REQUIRED olağan bir onay adımıdır: kırmızı hata bildirimi
+      // değil, yalnızca onay penceresi gösterilir (bkz. runImport).
+      silentCodes: ["CONFIRMATION_REQUIRED"],
+      onSuccess: (r) => {
+        setConfirmOpen(false);
+        setReport(r);
+      },
+    },
+  );
+  const runImport = async (confirmIrreversible: boolean) => {
+    if (!file) return;
+    try {
+      await importer.mutateAsync({ text: file.text, confirmIrreversible });
+    } catch (e) {
+      // Önizlemeden sonra veri değiştiyse sunucu güncel önizlemeyi döner: kırmızı onay penceresi açılır.
+      const fresh = confirmationPreview(e);
+      if (fresh) {
+        setPreview(fresh);
+        setConfirmOpen(true);
+      }
+      if (confirmIrreversible) throw e; // onay penceresi açık kalır
+    }
+  };
 
   const reset = () => {
     setFile(null);
     setProblem(null);
+    setPreview(null);
     setReport(null);
+    setConfirmOpen(false);
   };
   return (
     <Dialog
@@ -247,13 +289,16 @@ function ImportDialog({
                   const f = e.target.files?.[0];
                   setProblem(null);
                   setFile(null);
+                  setPreview(null);
                   if (!f) return;
                   const p = csvFileProblem(f);
                   if (p) {
                     setProblem(t(p === "too_large" ? "sup.import.tooLarge" : "sup.import.empty"));
                     return;
                   }
-                  setFile({ name: f.name, size: f.size, text: await f.text() });
+                  const text = await f.text();
+                  setFile({ name: f.name, size: f.size, text });
+                  previewer.mutate(text);
                 }}
               />
               <FieldHint>{t("sup.import.format")}</FieldHint>
@@ -265,6 +310,60 @@ function ImportDialog({
                   kb: Math.max(1, Math.round(file.size / 1024)),
                 })}
               </p>
+            )}
+            {file && previewer.isPending && (
+              <p className="text-[13px] text-muted-foreground" aria-live="polite">
+                {t("sup.import.preview.loading")}
+              </p>
+            )}
+            {file && preview && !previewer.isPending && (
+              <div className="space-y-2 text-[13px]" aria-live="polite">
+                <p className="font-medium">
+                  {t("sup.import.preview", {
+                    added: fmtNumber(preview.added),
+                    strengthened: fmtNumber(preview.strengthened),
+                    duplicates: fmtNumber(preview.duplicates),
+                    invalid: fmtNumber(preview.invalid.length),
+                  })}
+                </p>
+                {previewReasons(preview).length > 0 && (
+                  <ul
+                    className="flex flex-wrap gap-1.5"
+                    aria-label={t("sup.import.preview.reasons")}
+                  >
+                    {previewReasons(preview).map((r) => (
+                      <li key={r.reason}>
+                        <Badge variant={IRREVERSIBLE_REASONS.has(r.reason) ? "warning" : "outline"}>
+                          {reasonName(r.reason)}: {fmtNumber(r.n)}
+                        </Badge>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {importNeedsConfirmation(preview) && (
+                  <Notice tone="warning">
+                    {t("sup.import.preview.irreversible", {
+                      n: fmtNumber(preview.irreversible),
+                      domains: fmtNumber(preview.irreversibleDomains),
+                    })}
+                  </Notice>
+                )}
+                {!importWritesAnything(preview) && (
+                  <p className="text-muted-foreground">{t("sup.import.preview.nothing")}</p>
+                )}
+                {preview.invalid.length > 0 && (
+                  <div>
+                    <p className="text-muted-foreground">{t("sup.import.invalid")}</p>
+                    <ul className="mt-1 max-h-32 list-disc space-y-0.5 overflow-auto pl-4">
+                      {preview.invalid.slice(0, 50).map((r) => (
+                        <li key={`${r.line}-${r.error}`}>
+                          {t("sup.import.line", { line: r.line })}: {csvErrorName(r.error)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
             )}
             {problem && <FieldError>{problem}</FieldError>}
           </div>
@@ -285,15 +384,33 @@ function ImportDialog({
                 {t("common.cancel")}
               </Button>
               <Button
-                onClick={() => importer.mutate(undefined)}
-                disabled={!file}
-                loading={importer.isPending}
+                onClick={() => {
+                  if (!preview) return;
+                  if (importNeedsConfirmation(preview)) setConfirmOpen(true);
+                  else void runImport(false);
+                }}
+                disabled={!file || !preview || previewer.isPending}
+                loading={importer.isPending && !confirmOpen}
               >
                 <Upload /> {t("sup.import.run")}
               </Button>
             </>
           )}
         </DialogFooter>
+        {preview && (
+          <ConfirmDialog
+            open={confirmOpen}
+            onOpenChange={setConfirmOpen}
+            tone="danger"
+            title={t("sup.import.confirm.title")}
+            description={t("sup.import.confirm.body", {
+              n: fmtNumber(preview.irreversible),
+              domains: fmtNumber(preview.irreversibleDomains),
+            })}
+            confirmLabel={t("sup.import.confirm.run")}
+            onConfirm={() => runImport(true)}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

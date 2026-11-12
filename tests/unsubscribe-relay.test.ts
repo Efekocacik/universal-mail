@@ -8,6 +8,7 @@ import {
   MemoryEventQueue,
   MemoryRateLimiter,
   MemoryReplayStore,
+  REPLAY_WINDOW_MS,
   createRelayHandler,
   type RelayOptions,
 } from "@/lib/unsubscribe/relay";
@@ -137,7 +138,7 @@ describe("RFC 8058: POST tek tıklamalı çıkış", () => {
     ]) {
       expect((await h(post(t, body))).status, body).toBe(400);
     }
-    for (const ct of ["application/json", "text/plain", "multipart/form-data; boundary=x", ""]) {
+    for (const ct of ["application/json", "text/plain", "multipart/mixed; boundary=x", ""]) {
       const req = new Request(`${BASE}/u/${t}`, {
         method: "POST",
         headers: ct ? { "Content-Type": ct } : {},
@@ -167,6 +168,72 @@ describe("RFC 8058: POST tek tıklamalı çıkış", () => {
     });
     expect((await h(stream)).status).toBe(413);
     expect(queue.events).toHaveLength(1); // yalnızca charset'li geçerli istek
+  });
+
+  it("RFC 8058 §3.1: multipart/form-data (SHOULD) kabul edilir → 200, tek olay", async () => {
+    const h = setup();
+    const t = mint();
+    const fd = new FormData();
+    fd.set("List-Unsubscribe", "One-Click");
+    // FormData gövdesi: istemci kendi sınırını (boundary) üretir.
+    const res = await h(new Request(`${BASE}/u/${t}`, { method: "POST", body: fd }));
+    await assertSafe(res);
+    expect(res.status).toBe(200);
+    expect(queue.events).toEqual([{ v: 1, token: t, receivedAt: NOW + 60_000, via: "one_click" }]);
+    // elle yazılmış çok parçalı gövde (posta sağlayıcılarının gönderdiği biçim), fazladan alanla
+    const raw =
+      `--b1\r\nContent-Disposition: form-data; name="foo"\r\n\r\nbar\r\n` +
+      `--b1\r\nContent-Disposition: form-data; name="List-Unsubscribe"\r\n\r\nOne-Click\r\n--b1--\r\n`;
+    const t2 = mint();
+    expect(
+      (await h(post(t2, raw, { "Content-Type": "multipart/form-data; boundary=b1" }))).status,
+    ).toBe(200);
+    expect(queue.events).toHaveLength(2);
+    // tekrar: idempotent
+    expect((await h(new Request(`${BASE}/u/${t}`, { method: "POST", body: fd }))).status).toBe(200);
+    expect(queue.events).toHaveLength(2);
+  });
+
+  it("multipart: yanlış/eksik alan, bozuk gövde, sınırsız tür, dosya alanı → 400; aşırı büyük → 413", async () => {
+    const h = setup();
+    const MP = "multipart/form-data; boundary=x";
+    const part = (name: string, value: string, extra = "") =>
+      `--x\r\nContent-Disposition: form-data; name="${name}"${extra}\r\n\r\n${value}\r\n--x--\r\n`;
+    const cases: [string, string, string][] = [
+      ["yanlış değer", part("List-Unsubscribe", "Other"), MP],
+      ["küçük harf değer", part("List-Unsubscribe", "one-click"), MP],
+      ["başka alan", part("foo", "One-Click"), MP],
+      ["dosya alanı", part("List-Unsubscribe", "One-Click", '; filename="a.txt"'), MP],
+      ["çok parçalı değil (urlencoded gövde)", "List-Unsubscribe=One-Click", MP],
+      ["sınır (boundary) yok", part("List-Unsubscribe", "One-Click"), "multipart/form-data"],
+      ["boş gövde", "", MP],
+    ];
+    for (const [name, body, ct] of cases) {
+      const res = await h(post(mint(), body, { "Content-Type": ct }));
+      await assertSafe(res);
+      expect(res.status, name).toBe(400);
+    }
+    const big = part("List-Unsubscribe", "One-Click") + "a".repeat(MAX_BODY_BYTES);
+    expect((await h(post(mint(), big, { "Content-Type": MP }))).status).toBe(413);
+    const stream = new Request(`${BASE}/u/${mint()}`, {
+      method: "POST",
+      headers: { "Content-Type": MP },
+      body: new ReadableStream({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(big));
+          c.close();
+        },
+      }),
+      // @ts-expect-error duplex Node/undici gerektirir
+      duplex: "half",
+    });
+    expect((await h(stream)).status).toBe(413);
+    // geçersiz belirteç: alan doğru olsa da 400, süresi dolmuş 410
+    expect(
+      (await h(post("u2.abc.def", part("List-Unsubscribe", "One-Click"), { "Content-Type": MP })))
+        .status,
+    ).toBe(400);
+    expect(queue.events).toHaveLength(0);
   });
 
   it("geçerli POST fazladan form alanlarını yok sayar", async () => {
@@ -322,6 +389,38 @@ describe("bellek içi yardımcılar", () => {
     expect(l.check("k", 10)).not.toBeNull();
     expect(l.check("k", 1500)).toBeNull();
   });
+  it("tekrar oynatma kaydı süresi dolunca 'görülmedi' sayılır", () => {
+    let t = 1000;
+    const s = new MemoryReplayStore(10, () => t);
+    s.remember("a", 2000);
+    expect(s.seen("a")).toBe(true);
+    t = 2000;
+    expect(s.seen("a")).toBe(false);
+  });
+  it("hız sınırlayıcı: çok sayıda farklı anahtarla sel, sınırı AŞMIŞ istemcinin sayacını sıfırlamaz", () => {
+    const l = new MemoryRateLimiter(2, 60_000, 5);
+    for (let i = 0; i < 3; i++) l.check("saldırgan", 0);
+    expect(l.check("saldırgan", 1)).not.toBeNull();
+    for (let i = 0; i < 50; i++) expect(l.check(`sel-${i}`, 2 + i)).toBeNull();
+    expect(l.check("saldırgan", 100)).not.toBeNull(); // hâlâ sınırlı
+    expect(l.check("saldırgan", 60_001)).toBeNull(); // pencere dolunca normal sıfırlanır
+  });
+});
+
+describe("tekrar oynatma penceresi (aktarıcı)", () => {
+  it("aynı belirteç pencere içinde tekilleştirilir; pencereden sonra yeniden kuyruğa girer (uygulama tekilleştirir)", async () => {
+    let now = NOW + 60_000;
+    queue = new MemoryEventQueue();
+    const h = createRelayHandler({ keys: () => [K.entry], sink: queue, now: () => now });
+    const t = mint();
+    expect((await h(post(t))).status).toBe(200);
+    now += REPLAY_WINDOW_MS - 1;
+    expect((await h(post(t))).status).toBe(200);
+    expect(queue.events).toHaveLength(1);
+    now += 2;
+    expect((await h(post(t))).status).toBe(200);
+    expect(queue.events).toHaveLength(2); // bellek, belirtecin 180 günlük ömrü boyunca tutulmaz
+  });
 });
 
 /* ------------------------------------------------------------------------------------------ */
@@ -376,6 +475,20 @@ describe("gerçek HTTP üzerinden (127.0.0.1), posta istemcisi gibi", () => {
     // tarayıcı önizleme/güvenlik tarayıcısı GET'i durum değiştirmez
     const g = await fetch(`${origin}/u/${mint()}`, { redirect: "manual" });
     expect(g.status).toBe(200);
+    expect(queue.events).toHaveLength(1);
+  });
+
+  it("multipart/form-data ile gerçek POST (RFC 8058 §3.1 önerilen biçim) → 200, tek olay", async () => {
+    const h = setup();
+    const origin = await serve(h);
+    const t = mint();
+    const send = () => {
+      const fd = new FormData();
+      fd.set("List-Unsubscribe", "One-Click");
+      return fetch(`${origin}/u/${t}`, { method: "POST", body: fd, redirect: "manual" });
+    };
+    expect((await send()).status).toBe(200);
+    expect((await send()).status).toBe(200);
     expect(queue.events).toHaveLength(1);
   });
 

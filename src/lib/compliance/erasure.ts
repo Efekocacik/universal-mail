@@ -15,7 +15,7 @@ import {
 import { parseEmail } from "@/lib/email/address";
 import { refreshLeadSummary } from "@/lib/email/store";
 import { DAY_MS } from "./frequency";
-import { ERASURE_OF_TRANSMISSION_RECORDS_APPROVED } from "./legal-status";
+import { ERASURE_OF_TRANSMISSION_RECORDS_APPROVED, LEGAL_APPROVALS } from "./legal-status";
 import { policyScopeForMailbox } from "./policies";
 import { hashEmail, suppressEmailInTx } from "./suppression";
 
@@ -29,12 +29,14 @@ import { hashEmail, suppressEmailInTx } from "./suppression";
  *    `recipient_hash`, kişiye başka bir yerden bağlanamayan RASTGELE bir yer tutucuyla değiştirilir.
  *  - HUKUKİ DEĞERLENDİRME BEKLEYENLER: GERÇEK bir posta kutusundan fiilen iletilmiş iletilerin kayıtları ve bu
  *    iletilere bağlı diziler. Bunların silinmesi/anonimleştirilmesi yasal saklama yükümlülükleriyle çakışabilir.
- *    `LEGAL_APPROVALS.erasureOfTransmissionRecords` yazılı hukuki onayla bir yazılım sürümünde `true` yapılana kadar
- *    DOKUNULMAZ ve "bekliyor" olarak gösterilir. Kullanıcının "yükümlülüğüm yok" beyanı bu onayın yerine GEÇMEZ.
+ *    `LEGAL_APPROVALS.erasureOfTransmissionRecords` bir yazılım sürümünde `true` yapılana kadar DOKUNULMAZ ve
+ *    "bekliyor" olarak gösterilir. Kullanıcının "yükümlülüğüm yok" beyanı bu onayın yerine GEÇMEZ. Bu sürümde değer
+ *    sahip kararıyla `true`'dur (11 Kasım 2026, dış hukuki inceleme yok): kayıtlar ilk çalıştırmada temizlenir.
  *
  * SUPPRESSION ÖZETİ: Silme sonrası kişiye yeniden ileti gönderilmesini önlemek için `erasure` nedenli engel kaydı
  * (e-posta ÖZETİ ve alan adı; maskeli adres tutulmaz) bırakılır. Özetin her durumda anonim olmadığı bilinir; bu
- * saklamanın hukuki dayanağı `LEGAL_APPROVALS.suppressionHashRetention` onaylanana kadar "bekliyor" sayılır.
+ * saklamanın dayanağı `LEGAL_APPROVALS.suppressionHashRetention` `true` olana kadar "bekliyor" sayılır (bu sürümde sahip
+ * kararıyla `true`).
  *
  * YER TUTUCU GÜVENLİĞİ: Yer tutucu = sha256("um-erased-v1:" + 128 bit rastgele). Geçerli bir e-posta özeti DEĞİLDİR
  * (girdisi e-posta biçiminde olamaz), bu yüzden başka bir alıcıyla EŞLEŞMEZ. Aynı kişinin tüm kayıtları aynı yer
@@ -394,7 +396,7 @@ export async function executeErasure(
       notesCleared,
       overdue,
       suppression: sup.outcome,
-      suppressionRetentionPendingLegal: true,
+      suppressionRetentionPendingLegal: !LEGAL_APPROVALS.suppressionHashRetention,
     };
   });
 }

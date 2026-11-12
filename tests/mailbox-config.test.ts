@@ -177,18 +177,18 @@ describe("posta kutusu ekleme ve doğrulama", () => {
     ).toBe("limit");
   });
 
-  it("eklenen kutu kampanyaya atanamaz ve canlı hazırlığı 'tamam' yapmaz", async () => {
+  it("eklenen (bağlanmamış) kutu kampanyaya atanamaz ve canlı hazırlığı 'tamam' yapmaz", async () => {
     const { id } = await createGmailMailbox(db, {
       label: "Satış",
       address: "satis@firma-ornek.com",
     });
     await expect(
       createCampaignService(db, { name: "Deneme", mailboxId: id }, { now: 1 }),
-    ).rejects.toMatchObject({ code: "live_disabled" });
+    ).rejects.toMatchObject({ code: "invalid_input", detail: { mailboxStatus: "not_configured" } });
     const r = await getLiveReadiness(db);
     expect(r.items.find((i) => i.key === "real_mailbox")?.status).toBe("blocked");
     expect(r.allOk).toBe(false);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
   });
 });
 
@@ -359,11 +359,11 @@ describe("API: ekleme ve istemci ayarı", () => {
     expect(await secretExists(OAUTH_CLIENT_SECRET)).toBe(false);
   });
 
-  it("güvenlik: gerçek gönderim kapalı kalır ve istemci bilgisi eklemek hazırlığı açmaz", async () => {
+  it("güvenlik: istemci bilgisi eklemek ve kutu oluşturmak hazırlığı açmaz (kod kapısı açık olsa da)", async () => {
     await setGmailClient(db, { clientId: CLIENT_ID, clientSecret: SECRET });
     await createGmailMailbox(db, { label: "Satış", address: "satis@firma-ornek.com" });
     const r = await getLiveReadiness(db);
-    expect(r.liveSendingEnabled).toBe(false);
+    expect(r.liveSendingEnabled).toBe(true);
     expect(r.allOk).toBe(false);
     expect(r.items.find((i) => i.key === "real_mailbox")?.status).toBe("blocked");
   });

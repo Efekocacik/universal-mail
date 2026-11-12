@@ -26,13 +26,14 @@ export async function listCampaignMessages(
   db: DbExecutor,
   campaignId: number,
   opts: { beforeId?: number; limit?: number } = {},
-): Promise<{ items: CampaignMessageItem[] }> {
+): Promise<{ items: CampaignMessageItem[]; nextBeforeId: number | null }> {
   const [c] = await db
     .select({ id: campaigns.id })
     .from(campaigns)
     .where(eq(campaigns.id, campaignId))
     .limit(1);
   if (!c) throw new CampaignError("not_found", "Kampanya bulunamadı.");
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const rows = await db
     .select({
       id: messages.id,
@@ -55,8 +56,10 @@ export async function listCampaignMessages(
       ),
     )
     .orderBy(desc(messages.id))
-    .limit(Math.min(Math.max(opts.limit ?? 100, 1), 500));
+    .limit(limit);
   return {
+    // Daha eski sayfanın imleci (gönderim günlüğüyle aynı biçim): sayfa doluysa son kimlik.
+    nextBeforeId: rows.length === limit ? rows[rows.length - 1]!.id : null,
     items: rows.map(({ toAddress, status, ...r }) => {
       const at = toAddress?.lastIndexOf("@") ?? -1;
       return {

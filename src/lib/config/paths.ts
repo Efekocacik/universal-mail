@@ -15,6 +15,11 @@ export function dbPath(): string {
 /** Google oturum önbelleği dosya adı (geçici; açılışta ve kapanışta silinir). */
 export const SESSION_CACHE_FILENAME = "google-session.db";
 
+/**
+ * Electron ana sürecinin işçi çökme döngüsünü kaydettiği dosya (veri klasöründe); sunucu okuyup arayüzde uyarı gösterir.
+ */
+export const WORKER_STATUS_FILENAME = "worker-status.json";
+
 /** Verilen ana veritabanı dosyasıyla aynı klasördeki oturum önbelleği yolu (ana veritabanına ATTACH edilir). */
 export function cacheDbPathFor(mainDbFile: string): string {
   return (

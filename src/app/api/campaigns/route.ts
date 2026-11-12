@@ -1,5 +1,5 @@
 import { body, database, json, route } from "@/lib/api/http";
-import { createCampaign, listCampaigns } from "@/lib/campaigns/service";
+import { countCampaigns, createCampaign, listCampaigns } from "@/lib/campaigns/service";
 import { campaignStatusSchema, createCampaignSchema, queryInt, requireConsent } from "./schema";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +10,16 @@ export const GET = route(async (req: Request) => {
   const status = sp.get("status") ? campaignStatusSchema.parse(sp.get("status")) : undefined;
   const limit = Math.min(Math.max(queryInt(sp, "limit", 50), 1), 200);
   const offset = queryInt(sp, "offset", 0);
-  return json({ items: await listCampaigns(db, { status, limit, offset }), limit, offset });
+  const items = await listCampaigns(db, { status, limit, offset });
+  const total = await countCampaigns(db, { status });
+  return json({
+    items,
+    limit,
+    offset,
+    total,
+    // Sonraki sayfa: sayfa doluysa bir sonraki başlangıç; yoksa null.
+    nextOffset: items.length === limit ? offset + limit : null,
+  });
 });
 
 export const POST = route(async (req: Request) => {

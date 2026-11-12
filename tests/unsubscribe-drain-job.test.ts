@@ -13,6 +13,7 @@ import {
   UNSUBSCRIBE_DRAIN_JOB,
   buildHttpSource,
   createUnsubscribeDrainHandler,
+  httpSourceProblem,
   isUnsubscribeDrainEnabled,
   startUnsubscribeDrain,
 } from "@/lib/unsubscribe/drain-job";
@@ -105,6 +106,79 @@ describe("işleyici", () => {
     await createUnsubscribeDrainHandler({ enabled: true, now: () => NOW })(ctx(logs));
     expect(logs.join("|")).toContain("yapılandırılmadı");
     expect(await queued()).toHaveLength(1);
+  });
+
+  it("açma anahtarı okunamazsa (ör. geçici veritabanı hatası) tur atlanır ama zincir KOPMAZ", async () => {
+    const logs: string[] = [];
+    let built = false;
+    const h = createUnsubscribeDrainHandler({
+      enabled: async () => {
+        throw new Error("SQLITE_BUSY");
+      },
+      sourceFactory: async () => {
+        built = true;
+        return null;
+      },
+      now: () => NOW,
+    });
+    await h(ctx(logs));
+    expect(built).toBe(false);
+    expect(logs.join("|")).toContain("çekme anahtarı okunamadı");
+    const q = await queued();
+    expect(q).toHaveLength(1);
+    expect(q[0]!.runAt).toBe(NOW + 60_000);
+  });
+
+  it("tur sonunda anahtar okunamazsa da sonraki tur planlanır; gerçekten kapatıldıysa planlanmaz", async () => {
+    let calls = 0;
+    const flaky = async () => {
+      calls += 1;
+      if (calls > 1) throw new Error("SQLITE_BUSY");
+      return true;
+    };
+    await createUnsubscribeDrainHandler({
+      enabled: flaky,
+      sourceFactory: async () => null,
+      now: () => NOW,
+    })(ctx());
+    expect(await queued()).toHaveLength(1);
+    await db.delete(jobs);
+    let on = true;
+    const turnsOff = async () => {
+      const v = on;
+      on = false;
+      return v;
+    };
+    await createUnsubscribeDrainHandler({
+      enabled: turnsOff,
+      sourceFactory: async () => null,
+      now: () => NOW,
+    })(ctx());
+    expect(await queued()).toHaveLength(0);
+  });
+
+  it("gizli bilgiler sıfırlandıysa (kanal özel anahtarı okunamıyor): ağ yok, sağlık kaydı no_channel_key", async () => {
+    await setUnsubscribeBaseUrl(db, "https://cikis.firma-ornek.com", NOW);
+    await ensureChannelKey(db, NOW);
+    expect(await httpSourceProblem(db)).toBe("not_configured"); // anahtar okunabilir: sorun yok sayılmaz
+    process.env.UM_MASTER_KEY = "cd".repeat(32); // ana anahtar değişti → eski gizli bilgiler çözülemez
+    expect(await buildHttpSource(db)).toBeNull();
+    expect(await httpSourceProblem(db)).toBe("no_channel_key");
+    const logs: string[] = [];
+    await createUnsubscribeDrainHandler({ enabled: true, now: () => NOW })(ctx(logs));
+    expect(logs.join("|")).toContain("okunamıyor");
+    expect((await getSetting(db, "mail.unsubscribeEndpoint")).delivery).toEqual({
+      checkedAt: NOW,
+      ok: false,
+      depth: 0,
+      oldestAgeMs: null,
+      corrupt: 0,
+      code: "no_channel_key",
+    });
+    expect(await queued()).toHaveLength(1);
+    // Yeni anahtara geçilince kaynak yeniden kurulabilir.
+    await ensureChannelKey(db, NOW + 1);
+    expect(await buildHttpSource(db)).not.toBeNull();
   });
 
   it("olayları çeker, işler, ONAYLAR ve sağlık kaydını yazar; sonraki turu planlar", async () => {

@@ -15,8 +15,14 @@ import fs from "node:fs";
 import http from "node:http";
 import net from "node:net";
 import path from "node:path";
-import { SESSION_CACHE_FILENAME } from "../src/lib/config/paths";
+import { SESSION_CACHE_FILENAME, WORKER_STATUS_FILENAME } from "../src/lib/config/paths";
 import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
+import {
+  loadOrRecoverMasterKey,
+  MASTER_KEY_FILENAME,
+  MasterKeyQuit,
+  SECRETS_FILENAME,
+} from "./master-key";
 
 /**
  * Universal Mail masaüstü kabuğu.
@@ -32,6 +38,8 @@ const SMOKE = process.env.UM_SMOKE_TEST === "1";
 const DEV_URL = process.env.UM_DEV_URL; // geliştirme: `npm run dev` sunucusuna bağlan
 const children = new Map<string, ChildProcess>();
 let quitting = false;
+/** Kullanıcı kapatmayı onayladı (tarama sorusu geçildi); pencere kapanırken sayfanın kayıt koruması yine sorar. */
+let closeApproved = false;
 let origin = "";
 let mainWindow: BrowserWindow | null = null;
 
@@ -81,8 +89,9 @@ function dataDir(): string {
 
 /**
  * Gizli depo (API anahtarları) için ana anahtar. Rastgele üretilir, işletim sistemi anahtarlığıyla
- * (macOS Keychain / Windows DPAPI) şifrelenip diske yazılır. Anahtar çözülemezse eski gizli depo kullanılamaz
- * hale gelir; yeni anahtar üretilir ve kullanıcıdan API anahtarlarını yeniden girmesi beklenir.
+ * (macOS Keychain / Windows DPAPI) şifrelenip diske yazılır. Anahtar çözülemezse SESSİZCE yenisi üretilmez:
+ * engelleyici bir iletişim kutusu kapatma, yeniden deneme veya (ikinci onayla) sıfırlama sunar; sıfırlamada eski
+ * anahtar dosyası ve secrets.json silinmez, yedek adla saklanır (bkz. ./master-key.ts).
  */
 function loadMasterKey(): string {
   try {
@@ -111,25 +120,24 @@ function loadMasterKeyUnsafe(): string {
     app.exit(1);
     return "";
   }
-  const file = path.join(app.getPath("userData"), "master.key.enc");
-  if (fs.existsSync(file)) {
-    try {
-      const key = safeStorage.decryptString(fs.readFileSync(file));
-      if (/^[0-9a-f]{64}$/i.test(key)) return key;
-      throw new Error("beklenmeyen biçim");
-    } catch (e) {
-      log(
-        "main",
-        `Ana anahtar çözülemedi (${(e as Error).message}); yenisi üretiliyor, eski gizli depo yedeğe alınıyor.`,
-      );
-      fs.renameSync(file, `${file}.bak-${Date.now()}`);
-      const secrets = path.join(dataDir(), "secrets.json");
-      if (fs.existsSync(secrets)) fs.renameSync(secrets, `${secrets}.bak-${Date.now()}`);
-    }
-  }
-  const key = crypto.randomBytes(32).toString("hex");
-  fs.writeFileSync(file, safeStorage.encryptString(key), { mode: 0o600 });
-  return key;
+  const result = loadOrRecoverMasterKey({
+    keyFile: path.join(app.getPath("userData"), MASTER_KEY_FILENAME),
+    secretsFile: path.join(dataDir(), SECRETS_FILENAME),
+    smoke: SMOKE,
+    exists: (p) => fs.existsSync(p),
+    readFile: (p) => fs.readFileSync(p),
+    writeKeyFile: (p, data) => fs.writeFileSync(p, data, { mode: 0o600 }),
+    rename: (from, to) => fs.renameSync(from, to),
+    decrypt: (data) => safeStorage.decryptString(data),
+    encrypt: (plain) => safeStorage.encryptString(plain),
+    randomKey: () => crypto.randomBytes(32).toString("hex"),
+    showDialog: (spec) => dialog.showMessageBoxSync(spec),
+    reveal: (p) => shell.showItemInFolder(p),
+    log: (message) => log("main", message),
+    now: () => Date.now(),
+  });
+  if (result.kind === "quit") throw new MasterKeyQuit();
+  return result.key;
 }
 
 /* ------------------------------ alt süreçler ------------------------------ */
@@ -207,16 +215,55 @@ async function waitForHealth(url: string, timeoutMs = 45_000): Promise<void> {
 }
 
 let workerRestarts = 0;
+/** Bu kadar süre sorunsuz çalışan işçinin çökme sayacı sıfırlanır (aralıklı çökmeler ömür boyu birikmesin). */
+const WORKER_HEALTHY_RESET_MS = 10 * 60_000;
+const WORKER_FAST_RESTARTS = 5;
+/** Hızlı yeniden başlatma hakkı bitince işçi bırakılmaz; uzun aralıkla denenmeye devam edilir. */
+const WORKER_SLOW_RETRY_MS = 5 * 60_000;
+
+/**
+ * Çökme döngüsü kaydı (`worker-status.json`, veri klasöründe): web sunucusu bunu okuyup arayüzde kırmızı uyarı gösterir
+ * (bkz. src/lib/jobs/worker-status.ts). İşçi yeterince uzun sağlıklı çalışınca silinir. Yazılamazsa uygulama etkilenmez.
+ */
+function writeWorkerStatus(entry: { restarts: number; code: number | null } | null): void {
+  const file = path.join(dataDir(), WORKER_STATUS_FILENAME);
+  try {
+    if (entry === null) fs.rmSync(file, { force: true });
+    else
+      fs.writeFileSync(
+        file,
+        JSON.stringify({ v: 1, state: "crash_loop", at: Date.now(), ...entry }),
+        { mode: 0o600 },
+      );
+  } catch {
+    /* yoksay */
+  }
+}
+
 function startWorker(env: NodeJS.ProcessEnv): void {
   const w = spawnChild("worker", "worker.cjs", env);
+  const startedAt = Date.now();
+  const healthyTimer = setTimeout(() => {
+    if (w.exitCode !== null) return;
+    if (workerRestarts > 0) log("main", "İşçi kararlı çalışıyor; çökme sayacı sıfırlandı.");
+    workerRestarts = 0;
+    writeWorkerStatus(null);
+  }, WORKER_HEALTHY_RESET_MS);
+  healthyTimer.unref();
   w.on("exit", (code) => {
+    clearTimeout(healthyTimer);
     if (quitting) return;
-    if (workerRestarts >= 5) {
-      log("main", "İşçi çok kez çöktü; yeniden başlatılmıyor.");
-      return;
-    }
+    if (Date.now() - startedAt > WORKER_HEALTHY_RESET_MS) workerRestarts = 0;
     workerRestarts++;
-    const delay = 1500 * workerRestarts;
+    let delay: number;
+    if (workerRestarts > WORKER_FAST_RESTARTS) {
+      delay = WORKER_SLOW_RETRY_MS;
+      if (workerRestarts === WORKER_FAST_RESTARTS + 1)
+        log("main", "İşçi çok kez çöktü; uzun aralıklarla yeniden denenecek.");
+      writeWorkerStatus({ restarts: workerRestarts, code });
+    } else {
+      delay = 1500 * workerRestarts;
+    }
     log("main", `İşçi ${delay} ms sonra yeniden başlatılacak (kod=${code}).`);
     setTimeout(() => !quitting && startWorker(env), delay);
   });
@@ -282,11 +329,28 @@ function createWindow(url: string): BrowserWindow {
       if (/^https?:/i.test(target)) void shell.openExternal(target);
     }
   });
+  // Sayfada kaydedilmemiş değişiklik varken (`beforeunload`, ör. kampanya sihirbazı) kapatma veya yenileme: Electron
+  // iletişim kutusu göstermeden engeller; burada Türkçe yerel bir soru sorulur. "Değişiklikleri at" seçilirse
+  // `preventDefault` ile kapanış/yenileme SÜRER; aksi halde pencere açık kalır.
+  win.webContents.on("will-prevent-unload", (e) => {
+    const response = dialog.showMessageBoxSync(win, {
+      type: "question",
+      buttons: ["Değişiklikleri at", "Düzenlemeye dön"],
+      defaultId: 1,
+      cancelId: 1,
+      title: "Kaydedilmemiş değişiklikler",
+      message: "Kaydedilmemiş değişiklikler kaybolsun mu?",
+      detail:
+        "Bu sayfada kaydetmediğiniz değişiklikler var. Devam ederseniz bu değişiklikler kaybolur.",
+    });
+    if (response === 0) e.preventDefault();
+    else closeApproved = false;
+  });
   void win.loadURL(url);
 
   // Süren bir tarama varken kapatma: kullanıcıya bilgi ver.
   win.on("close", (e) => {
-    if (quitting || SMOKE) return;
+    if (quitting || SMOKE || closeApproved) return;
     e.preventDefault();
     void confirmQuit(win);
   });
@@ -315,7 +379,11 @@ async function confirmQuit(win: BrowserWindow): Promise<void> {
     });
     if (response !== 0) return;
   }
-  app.quit();
+  // Pencere kapatılır (uygulama doğrudan sonlandırılmaz): böylece sayfanın kayıt koruması (`beforeunload` →
+  // will-prevent-unload) çalışır. Pencere kapanınca window-all-closed → app.quit → güvenli kapanış.
+  closeApproved = true;
+  if (win.isDestroyed()) app.quit();
+  else win.close();
 }
 
 function buildMenu(): void {
@@ -473,6 +541,13 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     try {
       origin = new URL(await startBackend()).origin;
     } catch (e) {
+      if (e instanceof MasterKeyQuit) {
+        // Kullanıcının bilinçli seçimi: ek hata kutusu gösterilmez, hiçbir dosya değiştirilmedi.
+        log("main", e.message);
+        await shutdown();
+        app.exit(0);
+        return;
+      }
       log("main", `Başlatma hatası: ${(e as Error).message}`);
       if (SMOKE) {
         console.log(
@@ -499,6 +574,12 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
   app.on("before-quit", (e) => {
     if (quitting) return;
     e.preventDefault();
+    // Menüden/Cmd+Q ile çıkış: açık pencere varsa önce pencere kapatma akışı (tarama sorusu + kayıt koruması).
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+    if (win && !closeApproved && !SMOKE) {
+      void confirmQuit(win);
+      return;
+    }
     void shutdown().then(() => app.exit(0));
   });
   app.on("activate", () => {

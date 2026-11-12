@@ -5,7 +5,7 @@ import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db/client";
 import * as cacheSchema from "@/lib/db/cache-schema";
 import * as schema from "@/lib/db/schema";
@@ -25,6 +25,14 @@ import {
 } from "@/lib/mail/template-service";
 import { BUILTIN_CATEGORIES, seedCategories } from "@/lib/scan/categories";
 import { setSetting } from "@/lib/settings";
+
+// Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapalı kapı davranışı için kapı YALNIZCA test içinde
+// `gate.closed` ile geçici olarak kapatılabilir.
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
 
 /**
  * Bağlam oluşturucu ve şablon servisi. Veritabanı BELLEKTE açılır; gerçek `.data`'ya dokunulmaz, ileti gönderilmez.
@@ -357,25 +365,39 @@ describe("ön izleme ve gönderim çıktısı", () => {
     expect(r.subject).toBe("For The Corner Café");
   });
 
-  it("live: bu sürümde her zaman gönderilemez; güvenli çıkış bağlantısı da zorunludur", async () => {
+  it("live: güvenli çıkış bağlantısı zorunludur; kapı kapalıysa bağlantı olsa da gönderilemez", async () => {
     const leadId = await addLead();
     const templateId = await builtinId("en");
+    const url = "https://optout.firma-iletisim.com/u/abc";
     const noLink = await composeEmail(db, { templateId, leadId, mode: "live", purpose: "send" });
     expect(noLink.sendable).toBe(false);
-    expect(noLink.errors.map((e) => e.code).sort()).toEqual([
-      "live_sending_disabled",
-      "unsubscribe_link_required",
-    ]);
+    expect(noLink.errors.map((e) => e.code)).toEqual(["unsubscribe_link_required"]);
     expect(noLink.html).not.toContain("[DEMO]");
     const withLink = await composeEmail(db, {
       templateId,
       leadId,
       mode: "live",
       purpose: "send",
-      unsubscribeUrl: "https://optout.firma-iletisim.com/u/abc",
+      unsubscribeUrl: url,
     });
-    expect(withLink.sendable).toBe(false);
-    expect(withLink.errors).toEqual([{ code: "live_sending_disabled" }]);
+    // Kapı açık (bu sürüm): bağlantılı canlı içerik gönderime hazırdır; bağlantı alt bilgide yer alır.
+    expect(withLink.errors).toEqual([]);
+    expect(withLink.sendable).toBe(true);
+    expect(withLink.text).toContain(url);
+    gate.closed = true;
+    try {
+      const closed = await composeEmail(db, {
+        templateId,
+        leadId,
+        mode: "live",
+        purpose: "send",
+        unsubscribeUrl: url,
+      });
+      expect(closed.sendable).toBe(false);
+      expect(closed.errors).toEqual([{ code: "live_sending_disabled" }]);
+    } finally {
+      gate.closed = false;
+    }
   });
 
   it("firma profili yoksa alt bilgi ve gönderim yok; çıktıda uydurma bilgi yok", async () => {

@@ -11,7 +11,7 @@ import { createMailSendHandler, MAIL_SEND_JOB } from "@/lib/mail/scheduler/job";
 import { createInboxSyncHandler, INBOX_SYNC_JOB } from "@/lib/mail/scheduler/inbox-job";
 import {
   createUnsubscribeDrainHandler,
-  isUnsubscribeDrainEnabled,
+  isUnsubscribeDrainActive,
   UNSUBSCRIBE_DRAIN_JOB,
 } from "@/lib/unsubscribe/drain-job";
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
@@ -140,10 +140,13 @@ export function registerMailHandlers(opts: {
     INBOX_SYNC_JOB,
     createInboxSyncHandler({ enabled: opts.inboxEnabled === true }),
   );
-  // Aşama 15.7: çıkış olayı çekme işi. Kendi bayrağı (UM_UNSUBSCRIBE_DRAIN_ENABLED) kapalıyken hiçbir ağ isteği yapılmaz.
+  // Aşama 15.7 / C4: çıkış olayı çekme işi. Ortam bayrağı (UM_UNSUBSCRIBE_DRAIN_ENABLED) VEYA Ayarlar'daki anahtar
+  // (`mail.unsubscribeDrain`) HER TURDA okunur; ikisi de kapalıyken hiçbir ağ isteği yapılmaz.
   registerJobHandler(
     UNSUBSCRIBE_DRAIN_JOB,
-    createUnsubscribeDrainHandler({ enabled: isUnsubscribeDrainEnabled(process.env) }),
+    createUnsubscribeDrainHandler({
+      enabled: (db) => isUnsubscribeDrainActive(db, process.env),
+    }),
   );
   return dispatcher;
 }

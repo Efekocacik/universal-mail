@@ -13,19 +13,19 @@ import {
   templates,
 } from "@/lib/db/schema";
 import { pickTemplateLanguage, suggestLanguage } from "@/lib/mail/language";
-import { isDemoSchedulerEnabled } from "@/lib/mail/scheduler/job";
+import { isMailSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
 import { effectiveWindow, nextWindowStart, timeZonesForCountry } from "@/lib/mail/scheduler/window";
 import { composeEmail } from "@/lib/mail/template-service";
 import { getSetting, getSettings } from "@/lib/settings";
 import { CampaignError } from "./errors";
-import { assertDemoMailbox } from "./service";
+import { assertSendableMailbox } from "./service";
 
 /**
  * Başlatma öncesi denetim ve özet (FR-CMP-04). Veritabanına YAZMAZ, ileti göndermez.
  *
- * - Kampanya geneli engeller: kullanım onayı, gönderen profili, demo posta kutusu, adımlar, pencere, zamanlayıcı
- *   bayrağı, en az bir uygun dizi.
+ * - Kampanya geneli engeller: kullanım onayı, gönderen profili, gönderime uygun posta kutusu (demo; canlı kapı açıksa
+ *   gönderim izinli Gmail), adımlar, pencere, zamanlayıcı (demo bayrağı veya canlı kapı), en az bir uygun dizi.
  * - Her `pending` dizi `evaluateEnrollment` ile yeniden denetlenir (dizinin kendisi "zaten kampanyada" sayılmaz);
  *   alıcı adresi eklendiği andan sonra değiştiyse dizi uygun sayılmaz.
  * - `confirmToken`: kampanyanın sürümü, adımlar ve uygun/uygunsuz dizilerden türetilir. Başlatma bu belirteci ister;
@@ -81,7 +81,7 @@ export async function campaignBlockers(
   if (c.mailboxId === null) out.push("mailbox_missing");
   else {
     try {
-      await assertDemoMailbox(db, c.mailboxId);
+      await assertSendableMailbox(db, c.mailboxId);
     } catch (e) {
       if (!(e instanceof CampaignError)) throw e;
       out.push(
@@ -100,7 +100,7 @@ export async function campaignBlockers(
   if (step0.length === 0) out.push("steps_missing");
   else if (!(await stepsStillValid(db, c.id))) out.push("steps_invalid");
   if (!effectiveWindow(c.sendWindow)) out.push("invalid_send_window");
-  if (!isDemoSchedulerEnabled(env)) out.push("scheduler_disabled");
+  if (!isMailSchedulerEnabled(env)) out.push("scheduler_disabled");
   return out;
 }
 

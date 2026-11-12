@@ -1,7 +1,7 @@
 import type { Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as controlRoute from "@/app/api/campaigns/[id]/control/route";
 import * as leadRoute from "@/app/api/campaigns/[id]/leads/[clId]/route";
 import * as leadsRoute from "@/app/api/campaigns/[id]/leads/route";
@@ -22,7 +22,15 @@ import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fix
  * Kampanya API'si: giriş doğrulama, hata biçimi, kurulum/onay kapısı, demo/live ayrımı ve güvenlik kurallarının API
  * üzerinden atlatılamaması. Bellek içi veritabanı, `getDb()`'nin kullandığı süreç tutamacına yerleştirilir; gerçek
  * `.data` açılmaz.
+ *
+ * Canlı gönderim kapısı bu sürümde açıktır (gerçek sabitler); kapı kapalıyken API eşlemesini (`SCHEDULER_DISABLED`)
+ * korumak için kapı YALNIZCA test içinde `gate.closed` ile geçici olarak kapatılabilir.
  */
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
 
 const ORIGIN = "http://127.0.0.1:3000";
 const HANDLE = "__umDbHandle";
@@ -257,23 +265,36 @@ describe("kampanya API: lead, başlatma ve güvenlik kuralları", () => {
     expect(JSON.stringify(queue.body)).not.toContain("info@api");
   });
 
-  it("başlatma: belirteç zorunlu; bayrak kapalıyken 409; açıkken çalışır ve sonra düzenlenemez", async () => {
+  it("başlatma: belirteç zorunlu; zamanlayıcı kapalıyken (bayrak ve kapı kapalı) 409; açıkken çalışır ve sonra düzenlenemez", async () => {
     const { id } = await readyViaApi([await lead()]);
-    const pf = await call(
+    // Canlı kapı açıkken (bu sürüm) zamanlayıcı demo bayrağı olmadan da açıktır: engel yok.
+    const open = await call(
       preflightRoute.GET(req("GET", `/api/campaigns/${id}/preflight`), ctx({ id })),
     );
-    expect(pf.status).toBe(200);
-    expect(pf.body.blockers).toEqual(["scheduler_disabled"]);
-    const token = pf.body.confirmToken as string;
+    expect(open.status).toBe(200);
+    expect(open.body.blockers).toEqual([]);
 
-    const off = await call(
-      controlRoute.POST(
-        req("POST", `/api/campaigns/${id}/control`, { action: "start", confirmToken: token }),
-        ctx({ id }),
-      ),
-    );
-    expect(off.status).toBe(409);
-    expect(off.body.code).toBe("SCHEDULER_DISABLED");
+    gate.closed = true;
+    try {
+      const pf = await call(
+        preflightRoute.GET(req("GET", `/api/campaigns/${id}/preflight`), ctx({ id })),
+      );
+      expect(pf.status).toBe(200);
+      expect(pf.body.blockers).toEqual(["scheduler_disabled"]);
+      const off = await call(
+        controlRoute.POST(
+          req("POST", `/api/campaigns/${id}/control`, {
+            action: "start",
+            confirmToken: pf.body.confirmToken as string,
+          }),
+          ctx({ id }),
+        ),
+      );
+      expect(off.status).toBe(409);
+      expect(off.body.code).toBe("SCHEDULER_DISABLED");
+    } finally {
+      gate.closed = false;
+    }
 
     process.env[SCHEDULER_FLAG] = "1";
     const noToken = await call(

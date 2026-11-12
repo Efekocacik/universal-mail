@@ -4,7 +4,7 @@ import { createClient, type Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@/lib/db/client";
 import * as cacheSchema from "@/lib/db/cache-schema";
 import * as schema from "@/lib/db/schema";
@@ -37,6 +37,14 @@ import { composeEmail } from "@/lib/mail/template-service";
 import { seedCategories } from "@/lib/scan/categories";
 import { setSetting } from "@/lib/settings";
 import { decodeEncodedWords, decodeQuotedPrintable, parseMessage } from "./helpers/mime-parse";
+
+// Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapalı kapı davranışı için kapı YALNIZCA test içinde
+// `gate.closed` ile geçici olarak kapatılabilir.
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
 
 /** MIME ve başlıklar. Hiçbir ileti gönderilmez; ağ yok. */
 
@@ -475,22 +483,34 @@ describe("ileti oluşturucu", () => {
     expect(p.parts[1]!.body).not.toMatch(/<img|<script|src=|@import|url\(/i);
   });
 
-  it("live bu sürümde her zaman reddedilir (güvenli bağlantı ve gerçek kutu olsa bile)", async () => {
+  it("live: kapı kapalıysa her zaman reddedilir; açıkken (bu sürüm) yalnızca alt bilgiyle aynı çıkış bağlantısıyla kurulur", async () => {
     const c = await composed("en");
-    expect(() =>
+    const url = "https://optout.firma-iletisim.com/u/1";
+    const live = (text: string) =>
       buildEmailMessage({
-        composed: { ...c, sendable: true, errors: [] },
+        composed: { ...c, text, sendable: true, errors: [] },
         mailbox: { provider: "gmail", address: "sales@firma-iletisim.com", status: "connected" },
         profile: PROFILE,
         recipient: "info@cafe.example",
         mode: "live",
         now: T,
-        unsubscribe: {
-          url: "https://optout.firma-iletisim.com/u/1",
-          oneClickEndpointVerified: true,
-        },
-      }),
-    ).toThrow(expect.objectContaining({ kind: "live_sending_disabled" }));
+        unsubscribe: { url, oneClickEndpointVerified: true },
+      });
+    gate.closed = true;
+    try {
+      expect(() => live(`${c.text}\n${url}`)).toThrow(
+        expect.objectContaining({ kind: "live_sending_disabled" }),
+      );
+    } finally {
+      gate.closed = false;
+    }
+    // Kapı açık: alt bilgide aynı bağlantı yoksa yine reddedilir.
+    expect(() => live(c.text)).toThrow(expect.objectContaining({ kind: "unsubscribe_mismatch" }));
+    const built = live(`${c.text}\n${url}`);
+    const p = parseMessage(built.raw);
+    expect(p.headers.get("list-unsubscribe")).toEqual([`<${url}>`]);
+    expect(p.headers.get("list-unsubscribe-post")).toEqual(["List-Unsubscribe=One-Click"]);
+    expect(built.from).toBe("sales@firma-iletisim.com");
   });
 
   it("güvenlik kontrolleri: kapsam uyuşmazlığı, gönderime hazır olmayan içerik, kutu, profil, alıcı", async () => {

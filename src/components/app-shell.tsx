@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { fmtUsd } from "@/lib/client/format";
 import { useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
+import { WorkerStatusBanner } from "./worker-status-banner";
 
 /**
  * Gezinme öğeleri (docs/07-UI-REHBERI.md: 4 sabit öğe). Şablonlar ve Uyum ekranları "Kampanyalar" altındadır
@@ -140,6 +141,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <BudgetPill />
           </div>
         </header>
+        <WorkerStatusBanner />
         <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
           {children}
         </main>

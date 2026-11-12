@@ -88,8 +88,6 @@ export const complianceApi = {
       "/api/compliance/suppressions",
       { method: "POST", json: input },
     ),
-  importCsv: (csv: string) =>
-    api<CsvImportReport>("/api/compliance/suppressions/import", { method: "POST", json: { csv } }),
   lift: (id: number, justification: string) =>
     api<{ ok: true }>(`/api/compliance/suppressions/${id}/lift`, {
       method: "POST",

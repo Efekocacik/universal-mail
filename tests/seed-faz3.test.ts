@@ -90,14 +90,14 @@ describe("ülke politikaları", () => {
     expect(await seedCountryPolicies(db, NOW + 3)).toBe(0);
   });
 
-  it("live kapsamı her zaman blocked döner (onaylı ve kilidi açık satır olsa bile)", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
+  it("seed canlı kapsamı kilitli ve engelli ekler; yalnızca onay kaydıyla açılan satır izinli olur (kod kapısı açık)", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
     await seedCountryPolicies(db, NOW);
     expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({
       mode: "blocked",
-      reason: "live_disabled",
+      reason: "locked",
     });
-    // Veritabanının izin verdiği tek gevşetme yolu (onay kaydıyla) bile bu sürümde gönderimi açmaz.
+    // Veritabanının izin verdiği tek gevşetme yolu (onay kaydıyla; sahibin onay betiğinin yaptığı) satırı açar.
     await db
       .update(countryPolicies)
       .set({
@@ -108,7 +108,11 @@ describe("ülke politikaları", () => {
         approvedAt: NOW,
       })
       .where(and(eq(countryPolicies.scope, "live"), eq(countryPolicies.countryCode, "GB")));
-    expect((await resolveCountryPolicy(db, "live", "GB")).mode).toBe("blocked");
+    expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({ mode: "allowed", reason: null });
+    // Diğer ülkeler kilitli kalır; seed yeniden çalışsa da açılmış satıra dokunmaz.
+    expect((await resolveCountryPolicy(db, "live", "FR")).reason).toBe("locked");
+    await seedCountryPolicies(db, NOW + 1);
+    expect((await resolveCountryPolicy(db, "live", "GB")).mode).toBe("allowed");
   });
 
   it("eksik, bilinmeyen veya boş ülke her zaman blocked sayılır", async () => {

@@ -7,7 +7,7 @@ import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages } from "@/lib/db/schema";
 import { LINKABLE_FROM } from "@/lib/mail/inbound/process";
 import { getSetting, setSetting } from "@/lib/settings";
-import { loadPublicKeys, recipientTag, tagsEqual } from "./keys";
+import { loadPublicKeys, loadRevokedPublicKeys, recipientTag, tagsEqual } from "./keys";
 import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
 
 /**
@@ -16,8 +16,10 @@ import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
  * Aktarıcı (relay) yalnızca imzayı denetleyip olayı kuyruğa koyar. Uygulama olayı yeniden doğrular:
  *  1. Olay biçimi (katı şema) ve olay zamanı (ileri sapma ve aşırı eski değil).
  *  2. Belirteç: Ed25519 imzası uygulamanın genel anahtarlarıyla, süre TIKLAMA ANINA göre (aktarıcının aldığı an).
- *  3. Kapsam ve bağ: kampanya alıcısı var, (varsa) ileti o alıcının giden kampanya iletisi, ve alıcı etiketi
- *     (gizli anahtarlı HMAC) kaydın GÜNCEL alıcısıyla eşleşiyor — yanlış alıcı/yeniden kullanılmış kimlik reddedilir.
+ *  3. Kapsam ve bağ: kampanya alıcısı var ve (varsa) ileti o alıcının giden kampanya iletisi; aksi reddedilir.
+ *     Alıcı etiketi (ana anahtardan türetilen gizli anahtarlı HMAC) kaydın GÜNCEL alıcısıyla eşleşmezse olay
+ *     REDDEDİLMEZ (bkz. `ingestUnsubscribeEvent` içindeki not): çıkış, imzalı belirtecin gösterdiği kampanya alıcısına
+ *     uygulanır ve uyuşmazlık ayrıca denetime yazılır.
  *  4. Tekrar oynatma: `jti` başına tek satır (`messages` gelen ileti kaydı, benzersiz dizin) → tam bir kez işlenir;
  *     tekrar gelen olay "duplicate" döner, ikinci suppression/denetim kaydı OLUŞMAZ.
  *  5. Etki: mevcut suppression sistemiyle (`unsubscribe`, kaynak `link`; mevcut kaydı yalnızca güçlendirir), aynı
@@ -47,8 +49,7 @@ export type RejectReason =
   | "not_yet_valid"
   | "lead_not_found"
   | "no_mailbox"
-  | "message_mismatch"
-  | "recipient_mismatch";
+  | "message_mismatch";
 
 export type IngestOutcome =
   /** Uç nokta sınama belirteci (kapsam "p"): yalnızca uç nokta doğrulamasını etkiler; hiçbir alıcı/engel etkilenmez. */
@@ -110,7 +111,25 @@ export async function ingestUnsubscribeEvent(
   const at = Math.min(event.receivedAt, now);
 
   const keys = await loadPublicKeys(db);
-  const verdict = verifyToken(event.token, keys, at);
+  let verdict = verifyToken(event.token, keys, at);
+  let viaRevokedKey = false;
+  if (!verdict.ok && verdict.reason === "unknown_key") {
+    // İptal edilmiş anahtar: aktarıcı tıklamayı İPTALDEN ÖNCE aldıysa (receivedAt < revokedAt) çıkış yine uygulanır.
+    // Etki yalnızca kısıtlayıcıdır (alıcı çıkarılır); sızmış anahtarla sahte olay üretilse bile gönderim açılamaz.
+    // İptal anında veya sonrasında alınan olaylar ve SINAMA belirteçleri reddedilmeye devam eder.
+    const revoked = (await loadRevokedPublicKeys(db)).filter((k) => k.revokedAt > at);
+    if (revoked.length > 0) {
+      const retry = verifyToken(
+        event.token,
+        revoked.map((k) => ({ kid: k.kid, x: k.x })),
+        at,
+      );
+      if (retry.ok && retry.claims.s !== "p") {
+        verdict = retry;
+        viaRevokedKey = true;
+      }
+    }
+  }
   if (!verdict.ok) {
     const reason: RejectReason =
       verdict.reason === "expired"
@@ -137,6 +156,7 @@ export async function ingestUnsubscribeEvent(
       const { cl } = row;
 
       let mailboxId = row.mailboxId;
+      let messagePeerHash: string | null = null;
       if (claims.m !== null) {
         const [m] = await tx
           .select({
@@ -144,6 +164,7 @@ export async function ingestUnsubscribeEvent(
             purpose: messages.purpose,
             campaignLeadId: messages.campaignLeadId,
             mailboxId: messages.mailboxId,
+            peerHash: messages.peerHash,
           })
           .from(messages)
           .where(eq(messages.id, claims.m))
@@ -160,23 +181,19 @@ export async function ingestUnsubscribeEvent(
           return { outcome: "rejected", reason: "message_mismatch" };
         }
         mailboxId = m.mailboxId ?? mailboxId;
+        messagePeerHash = m.peerHash;
       }
 
       // Alıcı silinmişse (adres ve özet boşaltılmış) yapılacak bir şey yok; engel silme kaydında zaten var.
       if (!cl.recipientEmail || !cl.recipientHash) return { outcome: "already" };
 
-      // Alıcı bağı: etiket kaydın GÜNCEL alıcısına ait olmalı.
-      if (!tagsEqual(claims.r, recipientTag(cl.recipientHash))) {
-        await audit(
-          tx,
-          "unsubscribe.rejected",
-          "campaign_lead",
-          cl.id,
-          { reason: "recipient_mismatch", kid: claims.k },
-          now,
-        );
-        return { outcome: "rejected", reason: "recipient_mismatch" };
-      }
+      // Alıcı etiketi uyuşmazlığı (C5): imza ve anahtar kimliği GEÇERLİ olduğuna göre belirteci yalnızca bizim
+      // gönderimlerimiz taşıyabilir. Etiket anahtarı ana anahtardan türetildiği için en olası neden ana anahtarın
+      // değişmesidir (anahtarlık sıfırlandı/uygulama yeniden kuruldu); kampanya alıcısının adresi kayıt anında sabitlenir
+      // ve yalnızca silmede boşaltılır (yukarıda). Eskiden olay reddedilip kuyruktan onaylanıyordu ve çıkış isteği KALICI
+      // olarak kayboluyordu. Artık çıkış, imzalı belirtecin gösterdiği kampanya alıcısının GÜNCEL alıcısına uygulanır
+      // (kısıtlayıcı/güvenli yön) ve uyuşmazlık ayrı bir denetim kaydıyla izlenir (adres veya belirteç yazılmaz).
+      const tagMismatch = !tagsEqual(claims.r, recipientTag(cl.recipientHash));
 
       // Gelen ileti kaydı bir posta kutusuna bağlanır; kutusuz kampanya hiç gönderim yapmamıştır.
       if (mailboxId === null) return { outcome: "rejected", reason: "no_mailbox" };
@@ -227,6 +244,23 @@ export async function ingestUnsubscribeEvent(
               .returning({ id: messages.id });
       const inboundId = inbound!.id;
 
+      if (tagMismatch) {
+        await audit(
+          tx,
+          "unsubscribe.recipient_tag_mismatch",
+          "campaign_lead",
+          cl.id,
+          {
+            kid: claims.k,
+            applied: true,
+            // İleti bağı varsa: giden iletinin alıcı özeti kaydın güncel alıcısıyla aynı mı (ek kanıt; adres değil).
+            messagePeerMatch:
+              messagePeerHash === null ? null : messagePeerHash === cl.recipientHash,
+          },
+          now,
+        );
+      }
+
       const res = await suppressEmailInTx(
         tx,
         { email: cl.recipientEmail, reason: "unsubscribe", source: "link", messageId: inboundId },
@@ -253,9 +287,21 @@ export async function ingestUnsubscribeEvent(
           via: event.via,
           kid: claims.k,
           ...(reclick ? { reclick: true } : {}),
+          ...(tagMismatch ? { recipientTagMismatch: true } : {}),
+          ...(viaRevokedKey ? { viaRevokedKey: true } : {}),
         },
         now,
       );
+      if (viaRevokedKey) {
+        await audit(
+          tx,
+          "unsubscribe.revoked_key_accepted",
+          "unsubscribe_key",
+          claims.k,
+          undefined,
+          now,
+        );
+      }
       if (res.outcome === "existing" && stopped.length === 0) return { outcome: "already" };
       return { outcome: "unsubscribed", stopped: stopped.length, suppression: res.outcome };
     });

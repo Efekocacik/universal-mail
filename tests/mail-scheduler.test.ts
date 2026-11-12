@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { and, eq, inArray, min } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { suppressEmail } from "@/lib/compliance/suppression";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, jobs, mailboxes, messages } from "@/lib/db/schema";
@@ -45,7 +45,15 @@ import {
 /**
  * Aşama 9: dağıtıcı, zamanlama kuralları ve `mail.send` iş entegrasyonu. Veritabanı BELLEKTE; ağ yok, gerçek
  * gönderim yok, `.data` kullanılmaz. Saat dışarıdan verilir (gerçek bekleme yok).
+ *
+ * Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapı kapalıyken korunması gereken zamanlayıcı davranışı
+ * için kapı YALNIZCA test içinde `gate.closed` ile geçici olarak kapatılabilir.
  */
+const gate = vi.hoisted(() => ({ closed: false }));
+vi.mock("@/lib/compliance/live-gate", async (orig) => {
+  const m = await orig<typeof import("@/lib/compliance/live-gate")>();
+  return { ...m, isLiveSendingPermitted: () => !gate.closed && m.isLiveSendingPermitted() };
+});
 
 let client: Client;
 let db: Db;
@@ -155,6 +163,24 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     expect(sends).toHaveLength(2);
   });
 
+  it("tavanına takılan kampanyanın çok sayıda dizisi aynı kutudaki başka kampanyayı aç bırakmaz (aday sayfalama)", async () => {
+    const capped = await createCampaign(db, { steps: 1, dailyCap: 1 });
+    for (let i = 0; i < 12; i++) await addSequence(db, capped);
+    const other = await createCampaign(db, { steps: 1 });
+    const { cl } = await addSequence(db, other);
+    const p = fake();
+    const d = new MailDispatcher(db);
+    expect((await d.dispatchOnce({ now: () => T0, provider: p, batchSize: 5 })).send?.outcome).toBe(
+      "sent",
+    );
+    // Kapalı kampanyanın en eski dizileri ilk sayfayı doldurur; yine de diğer kampanyanın dizisine ulaşılır.
+    const later = T0 + 10 * MIN;
+    const r = await d.dispatchOnce({ now: () => later, provider: p, batchSize: 5 });
+    expect(r.send?.outcome).toBe("sent");
+    expect((await seq(cl)).status).toBe("completed");
+    expect(p.calls).toBe(2);
+  });
+
   it("pencere dışında gönderim yok; dizi alıcının yerel açılışına ertelenir", async () => {
     const c = await createCampaign(db, { steps: 1 });
     const { cl } = await addSequence(db, c);
@@ -232,15 +258,36 @@ describe("dağıtıcı: zamanlama ve sınırlar", () => {
     expect(perDomainDay.size).toBe(rows.length);
   });
 
-  it("aynı alan adına aynı gün ikinci ileti gönderilmez; dizi dışlanmaz, ertelenir", async () => {
+  it("aynı kampanyada aynı işletme alan adına ikinci dizi gönderilmez ve dışlanır (C8: işletme başına tek dizi)", async () => {
     const c = await createCampaign(db, { steps: 1 });
     const x = await addSequence(db, c, { email: "info@ortak.example" });
     const y = await addSequence(db, c, { email: "sales@ortak.example" });
     const p = fake();
-    const { sends } = await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 3));
+    const { sends } = await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 5));
     expect(sends).toHaveLength(1);
-    const statuses = [(await seq(x.cl)).status, (await seq(y.cl)).status].sort();
-    expect(statuses).toEqual(["completed", "scheduled"]);
+    expect(p.calls).toBe(1);
+    expect((await seq(x.cl)).status).toBe("completed");
+    const second = await seq(y.cl);
+    expect(second.status).not.toMatch(/^(scheduled|waiting_next|in_flight|completed)$/);
+    expect(second.exclusionReasons).toContain("business_already_in_campaign");
+  });
+
+  it("başka kampanyada aynı işletmeye yazıldıysa ikinci kampanyanın dizisi dışlanmaz, ertelenir (C8)", async () => {
+    const c1 = await createCampaign(db, { steps: 1 });
+    const x = await addSequence(db, c1, { email: "info@ortak.example" });
+    const p = fake();
+    await simulate(new MailDispatcher(db), p, T0, Date.UTC(2026, 10, 3));
+    expect((await seq(x.cl)).status).toBe("completed");
+    const c2 = await createCampaign(db, { steps: 1 });
+    const y = await addSequence(db, c2, { email: "sales@shop.ortak.example" });
+    const before = p.calls;
+    await simulate(new MailDispatcher(db), p, Date.UTC(2026, 10, 3), Date.UTC(2026, 10, 6));
+    expect(p.calls).toBe(before);
+    const deferred = await seq(y.cl);
+    expect(deferred.status).toBe("scheduled");
+    expect(deferred.exclusionReasons).toEqual([]);
+    // Bekleme (yanıtsız tamamlanan dizi: 180 gün) bitene kadar ertelenmiş.
+    expect(deferred.nextSendAt!).toBeGreaterThanOrEqual(T0 + 180 * DAY);
   });
 });
 
@@ -441,7 +488,7 @@ describe("dağıtıcı: uygunluk ve güvenlik", () => {
     expect(p.calls).toBe(0);
   });
 
-  it("duraklatılmış kampanya ve canlı posta kutulu kampanya hiç seçilmez", async () => {
+  it("duraklatılmış kampanya seçilmez; gönderime hazır olmayan canlı kutulu kampanya gönderilmeden duraklar", async () => {
     const paused = await createCampaign(db, { steps: 1, status: "paused" });
     const pl = await addSequence(db, paused);
     const [mb] = await db
@@ -464,8 +511,11 @@ describe("dağıtıcı: uygunluk ve güvenlik", () => {
     expect(await allMessages()).toHaveLength(0);
     expect((await seq(pl.cl)).status).toBe("scheduled");
     expect((await seq(ll.cl)).status).toBe("scheduled");
+    // Kapı açık: canlı kampanya aday olur, ama gönderim izni olmayan kutu (ve kilitli ülke) yüzünden ileti gitmez;
+    // kampanya kutu düzelene kadar duraklatılır, diziye dokunulmaz.
     const [lc] = await db.select().from(campaigns).where(eq(campaigns.id, live));
-    expect(lc!.status).toBe("running"); // canlı kampanyaya dokunulmaz
+    expect(lc!.status).toBe("paused");
+    expect(lc!.pauseReason).toContain("mailbox_not_ready");
   });
 
   it("ayırma işlemi başarısız olursa sağlayıcı çağrılmaz ve dizi değişmez", async () => {
@@ -524,13 +574,25 @@ describe("mail.send işi ve worker entegrasyonu", () => {
     return s;
   }
 
-  it("bayrak kapalıyken başlangıç veritabanına hiç yazmaz (uzlaştırma ve iş yok)", async () => {
+  it("bayrak ve canlı kapı kapalıyken başlangıç veritabanına hiç yazmaz (uzlaştırma ve iş yok)", async () => {
     await staleSendingRow();
     const before = JSON.stringify(await allMessages());
-    const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
-    expect(s).toMatchObject({ enabled: false, reconciled: 0 });
+    gate.closed = true;
+    try {
+      const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
+      expect(s).toMatchObject({ enabled: false, reconciled: 0 });
+    } finally {
+      gate.closed = false;
+    }
     expect(JSON.stringify(await allMessages())).toBe(before);
     expect(await db.select().from(jobs)).toHaveLength(0);
+  });
+
+  it("kapı açma sürümü: demo bayrağı olmadan da başlangıç uzlaştırır ve dağıtım işini kurar", async () => {
+    await staleSendingRow();
+    const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
+    expect(s).toMatchObject({ enabled: true, reconciled: 1 });
+    expect(await db.select().from(jobs)).toHaveLength(1);
   });
 
   it("bayrak kapalıyken işleyici gönderim yapmaz ve kalıcı hata verir", async () => {

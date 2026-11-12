@@ -8,18 +8,20 @@ Bu kılavuz, kod yazılmadan önce **arkadaşınızın şirketi adına** açıla
 
 ## 0. Özet: sıra, süre, maliyet
 
-Sıra önemlidir. Özellikle **Workspace, Google Cloud'dan önce** açılmalıdır (neden: Adım 5'te).
+Sıra önemlidir. Workspace kullanılacaksa **Workspace, Google Cloud'dan önce** açılmalıdır (neden: Adım 5'te).
+
+> **Güncelleme (11 Kasım 2026, sahip kararı): Google Workspace ZORUNLU DEĞİLDİR; isteğe bağlı/önerilir.** Şirket gönderimi sıradan bir kişisel Gmail hesabından (`…@gmail.com`) yapmaya karar verdi; uygulama bunu destekler. Bu yolda **Adım 1–3 (alan adı, Workspace, SPF/DKIM/DMARC) gerekmez**: `gmail.com` alan adının e-posta kimlik doğrulamasını Google yönetir, uygulama DNS denetimini "Google tarafından yönetiliyor" olarak geçer. Adım 5 projeyi kişisel hesapla açar ("Kuruluş yok"), Adım 8'de kitle **External** seçilir ve uygulama **In production** durumuna alınır (aşağıdaki notlar). Kişisel Gmail'in günlük gönderim sınırı düşüktür; uygulama bu kutuyu günde 10'dan başlatıp en çok 50 ile sınırlar. Ayrıntılı kurulum sırası: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md) Bölüm 1.1. Tek tıklamalı çıkış aktarıcısı (Adım 4 sonu) yine gerekir; şirketin web sitesi alan adının bir alt alan adında çalışır.
 
 | # | Adım | Kim yapar | Elle süre | Maliyet |
 |---|---|---|---|---|
 | 1 | Alan adı satın al | Arkadaş (şirket kartı) | 20 dk | yaklaşık 10–15 USD/yıl (.com) |
-| 2 | Google Workspace aç | Arkadaş, siz yanında | 30 dk | yaklaşık 7–8,4 USD/ay (1 kullanıcı) |
-| 3 | SPF, DKIM, DMARC kayıtları | Siz yönlendirin, arkadaş girer | 45 dk + 1–2 gün bekleme | 0 |
+| 2 | Google Workspace aç (**isteğe bağlı**; kişisel Gmail ile atlanır) | Arkadaş, siz yanında | 30 dk | yaklaşık 7–8,4 USD/ay (1 kullanıcı) |
+| 3 | SPF, DKIM, DMARC kayıtları (**yalnızca Workspace/kendi alan adı**; kişisel Gmail'de Google yönetir) | Siz yönlendirin, arkadaş girer | 45 dk + 1–2 gün bekleme | 0 |
 | 4 | Alan adına vitrin ve gizlilik sayfası | Siz | 1 saat | 0 |
-| 5 | Google Cloud projesi (Workspace hesabıyla) | Arkadaş, siz yanında | 20 dk | 0 |
+| 5 | Google Cloud projesi (Workspace hesabıyla; yoksa kişisel Gmail hesabıyla) | Arkadaş, siz yanında | 20 dk | 0 |
 | 6 | Faturalandırma, **günlük kota**, bütçe uyarısı | Arkadaş, siz yanında | 30 dk | 0 (kartı kaydetmek şart) |
 | 7 | API'leri aç, anahtarları oluştur | Siz yönlendirin | 30 dk | 0 (ücretsiz kota içinde) |
-| 8 | Gmail bağlantısı (OAuth, Internal) | Siz yönlendirin | 30 dk | 0 |
+| 8 | Gmail bağlantısı (OAuth; Workspace: Internal, kişisel Gmail: External + In production) | Siz yönlendirin | 30 dk | 0 |
 | 9 | Ücretsiz sicil API hesapları (Faz 5 için, ertelenebilir) | Siz | 30 dk | 0 |
 | 10 | Sizin geliştirme test projeniz | Siz | 30 dk | 0 |
 | 11 | Anahtarları saklama ve teslim kuralları | İkiniz | 10 dk | 0 |
@@ -57,9 +59,9 @@ Arkadaşınızdan bu bilgileri bir kağıda alın. Gönderen kimliği (footer) v
 
 ---
 
-## Adım 2 — Google Workspace
+## Adım 2 — Google Workspace (isteğe bağlı, önerilir)
 
-Alan adına bağlı kurumsal Gmail kutusu. Kişisel `@gmail.com` adresinden soğuk e-posta göndermeyin: hesap kapanma ve spam riski yüksektir.
+Alan adına bağlı kurumsal Gmail kutusu. **Önerilir ama zorunlu değildir.** Kişisel `@gmail.com` adresinden gönderim uygulamada desteklenir (sahip kararı); riskleri: günlük sınır düşüktür (Google'ın genel sınırı yaklaşık 500 alıcı/gün, yeni hesaplarda çok daha az), toplu gönderimde hesap geçici kısıtlanabilir ve alıcılar kişisel adresi daha az güvenilir bulabilir. Uygulama bu yüzden kişisel Gmail kutusunu günde 10 iletiyle başlatır ve en çok 50 ile sınırlar. Kişisel Gmail ile ilerleniyorsa bu adımı ve Adım 3'ü atlayın.
 
 - [ ] Google Workspace sitesinden **Business Starter** planını seçin. Alan adı olarak az önce aldığınız adı girin ("Alan adım var").
 - [ ] İlk hesabın adı gerçek kişinin adı olsun (örn. `ahmet@sirket-export.com`). Bu hesap aynı zamanda **yönetici (süper admin)** olur.
@@ -74,6 +76,8 @@ Alan adına bağlı kurumsal Gmail kutusu. Kişisel `@gmail.com` adresinden soğ
 ---
 
 ## Adım 3 — E-posta kimlik doğrulaması (SPF, DKIM, DMARC)
+
+> **Kişisel Gmail (`@gmail.com`) ile bu adım YOKTUR:** `gmail.com` alan adının kayıtlarını Google yönetir; siz ekleyemezsiniz ve eklemeniz gerekmez. Uygulamadaki "Kontrol et" bu kutu için DNS sorgusu yapmaz ve "Google tarafından yönetiliyor" gösterir. Aşağıdakiler yalnızca Workspace/kendi alan adıyla gönderim içindir.
 
 Bu üç kayıt, e-postalarınızın "gerçekten bu alan adından geldiğini" kanıtlar. Olmazsa e-postalar spam'e düşer ya da reddedilir. Kayıtlar kayıt şirketinin **DNS** ekranında eklenir.
 
@@ -103,15 +107,17 @@ Alıcılar adresi görüp "bu kim?" diye bakacaktır. Boş bir alan adı güven 
 - [ ] `sirket-export.com` adresine girilince tek sayfalık bir site açılsın (şirketin asıl sitesine yönlendirme de olur ama tek sayfa daha iyi).
 - [ ] Sayfada: şirket unvanı, adres, iletişim e-postası, kısa tanıtım, ürün görselleri.
 - [ ] **Gizlilik bildirimi** bölümü: "Kimiz, iş e-posta adreslerini kamuya açık web sitelerinden hangi amaçla (ürün tanıtımı) kullanıyoruz, nasıl çıkabilirsiniz (çıkış bağlantısı veya `optout@...`), verileriniz silinsin isterseniz kime yazmalısınız."
-- [ ] Çıkış için **ek kanal** olarak `optout@sirket-export.com` adresi (Workspace'te takma ad/alias olarak tanımlayın, ücretsizdir). Gerçek **tek tıklamalı çıkış** için bu yeterli değildir: yalnızca `mailto:` bağlantısı tek tıkla çıkış sayılmaz. Bunun için alan adınızda çalışan bir **HTTPS çıkış bağlantısı** gerekir (küçük, ücretsiz bir bulut işlevi ya da statik sayfa + form servisi). Teknik tasarımı Faz 3'te yapacağız (SRS FR-CMP-08); Faz 0'da yalnızca vitrin sayfasını barındıracağınız yeri seçin (ör. Cloudflare Pages), çünkü ileride aynı yerde çıkış uç noktası da çalışacak.
+- [ ] Çıkış için **ek kanal** olarak `optout@sirket-export.com` adresi (Workspace'te takma ad/alias olarak tanımlayın, ücretsizdir). Gerçek **tek tıklamalı çıkış** için bu yeterli değildir: yalnızca `mailto:` bağlantısı tek tıkla çıkış sayılmaz. Bunun için alan adınızda çalışan bir **HTTPS çıkış bağlantısı** gerekir (SRS FR-CMP-08). Faz 3'te tasarlandı: çıkış talepleri, **kalıcı diski olan** küçük bir Linux sunucusunda (VPS) çalışan bir aktarıcıya yazılır ve uygulama onları oradan imzalı bir kanalla çeker. Statik barındırma (GitHub Pages, Cloudflare Pages) ve kalıcı diski olmayan bulut işlevleri bu aktarıcıyı **barındıramaz**. Aktarıcı ayrı bir alt alan adında (ör. `cikis.sirket-export.com`) ve standart 443 portunda çalışır; ayrıntı: [`10-CANLIYA-GECIS.md`](10-CANLIYA-GECIS.md).
 
-Barındırma için ücretsiz seçenekler yeterlidir (GitHub Pages, Cloudflare Pages vb.). Bu sayfayı Faz 3'te birlikte yazarız.
+Vitrin sayfası için ücretsiz statik barındırma yeterlidir (GitHub Pages, Cloudflare Pages vb.). Bu sayfayı Faz 3'te birlikte yazarız.
 
 ---
 
 ## Adım 5 — Google Cloud projesi
 
 **Neden Workspace önce?** Gmail'e bağlanan uygulamamız Google'ın "hassas izin" (gönderme/okuma) kategorisini kullanır. Normalde bu tür uygulamalar Google'ın uzun bir doğrulama sürecinden geçmek zorundadır. Ancak proje **Workspace kuruluşuna ait** ve uygulama türü **"Internal"** ise doğrulama gerekmez. Proje kişisel `@gmail.com` hesabıyla açılırsa "Internal" seçeneği hiç çıkmaz.
+
+> **Kişisel Gmail yolu:** projeyi gönderen Gmail hesabıyla açın; konum "Kuruluş yok" olur. "Internal" çıkmaz; Adım 8'de **External** seçilip uygulama **In production** durumuna alınır. Tek kullanıcılı, şirket içi kullanım için Google doğrulamasına başvurmak gerekmez; bağlanırken "Google bu uygulamayı doğrulamadı" ekranı çıkar ve "Gelişmiş → Universal Mail sayfasına git (güvenli değil)" ile geçilir (doğrulanmamış uygulama en çok 100 kullanıcıya izin verir; bize bir kullanıcı yeter).
 
 - [ ] Tarayıcıda **Workspace yönetici hesabıyla** giriş yapıp console.cloud.google.com adresini açın. İlk girişte kuruluşunuz (organizasyon) genellikle otomatik oluşur.
 - [ ] Yeni proje açın: ad `universal-mail`, konum olarak şirketin organizasyonunu seçin.
@@ -162,18 +168,20 @@ Google Maps ürünleri kullanım başına ücretlendirilir. Ücretsiz aylık kot
 
 ---
 
-## Adım 8 — Gmail bağlantısı (OAuth, "Internal")
+## Adım 8 — Gmail bağlantısı (OAuth; Workspace: "Internal", kişisel Gmail: "External" + "In production")
+
+> **Kişisel Gmail hesabında:** **Kitle (Audience)** → **External**; "Test kullanıcıları"na gönderen Gmail adresini ekleyin, sonra **"Uygulamayı yayınla" (Publish app)** ile durumu **In production** yapın. **"Testing" durumunda bırakmayın:** Gmail kapsamlı yenileme belirteçleri 7 gün sonra geçersiz olur; uygulama bunu `invalid_grant` olarak görür, kutuyu "Yeniden bağlanmalı" yapar ve o kutunun kampanya gönderimlerini yeniden bağlanana kadar erteler (dizi başarısız sayılmaz). `gmail.send` hassas, `gmail.readonly` kısıtlı kapsamdır; doğrulanmamış uygulama uyarısı tek kullanıcı için kabul edilebilir. Gönderen kutu adresi hesabın **birincil** adresi olmalıdır (noktalarıyla, Google hesabında göründüğü gibi; `+etiket` olmaz).
 
 Uygulama, arkadaşın kutusundan e-posta gönderecek ve yanıt/bounce okuyacak.
 
 - [ ] Yönetici hesabıyla *Google Auth Platform* (eski adıyla "OAuth izin ekranı") bölümüne gidin.
 - [ ] **Marka:** Uygulama adı `Universal Mail`, destek e-postası şirket adresi.
-- [ ] **Kitle (Audience):** **Internal** seçin. (Seçenek görünmüyorsa proje Workspace organizasyonuna bağlı değildir: Adım 5'e dönün.)
-- [ ] **Veri erişimi (Scopes):** `gmail.send` (gönderme) ve `gmail.readonly` (yanıt ve bounce okuma) ekleyin.
+- [ ] **Kitle (Audience):** Workspace'te **Internal** seçin. (Seçenek görünmüyorsa proje Workspace organizasyonuna bağlı değildir: Adım 5'e dönün; kişisel Gmail ile ilerliyorsanız yukarıdaki notu izleyin: External + In production.)
+- [ ] **Veri erişimi (Scopes):** `openid` ve `email` (bağlanan hesabın gönderen kutusuyla aynı olduğunu doğrulamak için), `gmail.send` (gönderme) ve otomatik yanıt/bounce okuma istenirse `gmail.readonly` ekleyin. Başka kapsam eklemeyin: Google beklenmeyen bir kapsam döndürürse uygulama bağlantıyı reddeder (`scope_excess`).
 - [ ] **İstemciler → İstemci oluştur:** Uygulama türü **Masaüstü uygulaması**. Oluşan **JSON dosyasını** indirmeyin ya da indirirseniz hemen şifre yöneticisine koyup dosyayı silin. (İçinde gizli anahtar vardır.)
-- [ ] Uygulama ilk kez bağlanırken arkadaş kendi Workspace hesabıyla giriş yapıp izin verecek (Faz 3).
+- [ ] Uygulama ilk kez bağlanırken arkadaş gönderen hesapla (Workspace veya kişisel Gmail) giriş yapıp izin verecek (Faz 3).
 
-> Alternatif (önerilmez): Workspace olmadan "External / Test" modu. İzin süresi genellikle 7 gün sonunda dolar ve uygulama kendini her hafta yeniden bağlamak ister. "Internal" bu sorunu önler.
+> Workspace olmadan **"External / Testing"** modunda kalmayın: izin 7 gün sonunda dolar ve kutu her hafta yeniden bağlanmak ister. Kişisel Gmail'de çözüm **External + In production**'dır; Workspace'te "Internal".
 
 ---
 
@@ -207,15 +215,15 @@ Geliştirme sırasında arkadaşın kotasını ve kartını kullanmamak için **
 ## Faz 0 bitti mi? Kontrol listesi
 
 - [ ] Alan adı satın alındı, iki adımlı doğrulama açık
-- [ ] Workspace çalışıyor, gönderen kutusu hazır, aylık fatura planı seçili
-- [ ] SPF, DKIM, DMARC kayıtlı ve test e-postasında üçü de `PASS`
+- [ ] Gönderen kutu hazır: Workspace (aylık fatura planı seçili) **veya** kişisel Gmail hesabı (iki adımlı doğrulama açık)
+- [ ] Yalnızca Workspace/kendi alan adı: SPF, DKIM, DMARC kayıtlı ve test e-postasında üçü de `PASS` (kişisel Gmail'de gerekmez)
 - [ ] Postmaster Tools'a alan adı eklendi
 - [ ] Alan adında vitrin ve gizlilik sayfası yayında, `optout@` adresi çalışıyor, çıkış uç noktası için barındırma yeri seçildi
-- [ ] Google Cloud projesi Workspace organizasyonu altında
+- [ ] Google Cloud projesi Workspace organizasyonu altında (kişisel Gmail'de "Kuruluş yok")
 - [ ] Fatura hesabı bağlı, bütçe uyarısı (20 USD) kuruldu, **günlük kotalar düşürüldü**
 - [ ] Places API (New), Maps JavaScript API, Gmail API açık
 - [ ] Sunucu ve tarayıcı anahtarları oluşturulup API'ye göre kısıtlandı, Map ID alındı
-- [ ] OAuth: Internal, Masaüstü istemci, iki izin eklendi
+- [ ] OAuth: Internal (Workspace) veya External + **In production** (kişisel Gmail), Masaüstü istemci; `openid`, `email`, `gmail.send` (+ istenirse `gmail.readonly`) kapsamları eklendi
 - [ ] Sizin `um-dev` test projeniz hazır, kota düşük
 - [ ] Gönderen bilgileri (unvan, adres, vergi/MERSİS, imzalayan kişi) yazılı
 - [ ] `docs/03-ANLASMA-NOTU.md` iki tarafça onaylandı
@@ -227,7 +235,9 @@ Geliştirme sırasında arkadaşın kotasını ve kartını kullanmamak için **
 
 | Sorun | Neden / çözüm |
 |---|---|
-| "Internal" seçeneği yok | Proje kişisel hesapla açılmış. Workspace yönetici hesabıyla yeni proje açın. |
+| "Internal" seçeneği yok | Proje kişisel hesapla açılmış. Workspace kullanılacaksa Workspace yönetici hesabıyla yeni proje açın; kişisel Gmail ile ilerleniyorsa External seçip uygulamayı **In production** yapın. |
+| Gmail bağlantısı her hafta düşüyor ("Yeniden bağlanmalı") | OAuth uygulaması "Testing" durumunda (7 günlük belirteç). Google Auth Platform → Kitle → **Uygulamayı yayınla**; sonra uygulamada "Yeniden bağlan". |
+| "Google bu uygulamayı doğrulamadı" ekranı | Kişisel hesapta doğrulanmamış uygulama için beklenir. "Gelişmiş → Universal Mail sayfasına git (güvenli değil)" ile devam edin (yalnızca kendi şirket hesabınız için). |
 | DKIM "doğrulanmadı" | DNS henüz yayılmamış, birkaç saat bekleyin; kaydı kayıt şirketinde **tam** kopyaladığınızdan emin olun (bazı ekranlar alan adını otomatik ekler, kaydı iki kez yazmayın). |
 | SPF hatası | Alan adında birden fazla SPF TXT kaydı var. Tek kayıtta birleştirin. |
 | Harita "Bu sayfa Google Haritalar'ı doğru yüklemedi" | Faturalandırma bağlı değil ya da API açık değil ya da tarayıcı anahtarı yanlış API'ye kısıtlı. |

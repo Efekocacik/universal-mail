@@ -200,14 +200,14 @@ describe("dns_auth hazırlık durumu (yalnızca saklanan sonuçtan)", () => {
 });
 
 describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () => {
-  it("varsayılan: canlı gelen kutusu kilidi ve Gmail başlık güveni ENGEL; teslimat engel; çıkış uç noktası engel", async () => {
+  it("varsayılan: kod kapıları açık; Gmail başlık güveni ENGEL; teslimat engel; çıkış uç noktası engel", async () => {
     const s = await by();
     expect(s).toMatchObject({
-      live_inbox_flag: "blocked",
+      live_inbox_flag: "ok",
       inbox_header_trust: "blocked",
       event_delivery: "blocked",
       https_unsubscribe: "blocked",
-      live_flag: "blocked",
+      live_flag: "ok",
     });
     expect((await getLiveReadiness(db, { now: NOW })).allOk).toBe(false);
   });
@@ -217,6 +217,9 @@ describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () =>
     await ensureChannelKey(db, NOW);
     expect((await by()).event_delivery).toBe("blocked"); // adres yok
     await setUnsubscribeBaseUrl(db, "https://cikis.firma-ornek.com", NOW);
+    // Çekme işi kapalıyken (varsayılan) çıkış talepleri uygulamaya hiç ulaşmaz: engel.
+    expect((await by()).event_delivery).toBe("blocked");
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
     expect((await by()).event_delivery).toBe("unknown");
     await checkDeliveryHealth(
       db,
@@ -225,6 +228,15 @@ describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () =>
     );
     expect((await by(NOW + 1000)).event_delivery).toBe("ok");
     expect((await by(NOW + 25 * 3600_000)).event_delivery).toBe("unknown");
+    // Ortam bayrağı da çekmeyi açar (ayar kapalıyken).
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: false });
+    expect((await by(NOW + 1000)).event_delivery).toBe("blocked");
+    const viaEnv = await getLiveReadiness(db, {
+      now: NOW + 1000,
+      env: { UM_UNSUBSCRIBE_DRAIN_ENABLED: "1" },
+    });
+    expect(viaEnv.items.find((i) => i.key === "event_delivery")?.status).toBe("ok");
+    await setSetting(db, "mail.unsubscribeDrain", { enabled: true });
     await checkDeliveryHealth(
       db,
       { getStats: async () => ({ depth: 3, oldestAgeMs: 2 * 3600_000, corrupt: 0 }) },
@@ -233,18 +245,32 @@ describe("yeni hazırlık maddeleri (hiçbiri varsayımla 'tamam' olmaz)", () =>
     expect((await by(NOW + 1000)).event_delivery).toBe("blocked");
   });
 
-  it("kullanıcı beyanıyla/ayar yazmayla çıkış uç noktası 'tamam' OLMAZ; kanıt olsa bile sürüm kapısı (LEGAL_APPROVALS) da gerekir", async () => {
-    expect(LEGAL_APPROVALS.httpsUnsubscribeEndpoint).toBe(false);
+  it("sürüm kapısı (LEGAL_APPROVALS) açıkken de çıkış uç noktası YALNIZCA saklanan doğrulama kaydıyla 'tamam' olur", async () => {
+    expect(LEGAL_APPROVALS.httpsUnsubscribeEndpoint).toBe(true);
     await ensureSigningKey(db, NOW);
     const kid = (await getSetting(db, "mail.unsubscribeKeys")).current!;
-    await setSetting(db, "mail.unsubscribeEndpoint", {
+    const base = {
       baseUrl: "https://cikis.firma-ornek.com",
       pending: null,
-      verified: { baseUrl: "https://cikis.firma-ornek.com", kid, jti: "x", verifiedAt: NOW },
       lastAttempt: null,
       delivery: null,
+    };
+    // Adres var ama doğrulama kaydı yok → engel (adres yazmak/beyan kanıt değildir).
+    await setSetting(db, "mail.unsubscribeEndpoint", { ...base, verified: null });
+    expect((await by(NOW + 1000)).https_unsubscribe).toBe("blocked");
+    // Başka adres için doğrulama → engel.
+    await setSetting(db, "mail.unsubscribeEndpoint", {
+      ...base,
+      verified: { baseUrl: "https://baska.firma-ornek.com", kid, jti: "x", verifiedAt: NOW },
     });
-    expect((await by(NOW + 1000)).https_unsubscribe).toBe("blocked"); // kanıt (sahte) olsa da sürüm kapısı kapalı
+    expect((await by(NOW + 1000)).https_unsubscribe).toBe("blocked");
+    // Güncel anahtarla aynı adres için saklanan doğrulama → tamam. (Bu kayıt ayarlar API'siyle YAZILAMAZ; yalnızca
+    // uçtan uca doğrulama yazar: live-integration-review.test.ts.)
+    await setSetting(db, "mail.unsubscribeEndpoint", {
+      ...base,
+      verified: { baseUrl: base.baseUrl, kid, jti: "x", verifiedAt: NOW },
+    });
+    expect((await by(NOW + 1000)).https_unsubscribe).toBe("ok");
   });
 
   it("okuma yalnızdır: hazırlık değerlendirmesi hiçbir ayar/denetim kaydı yazmaz", async () => {

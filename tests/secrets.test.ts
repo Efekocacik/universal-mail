@@ -47,6 +47,34 @@ describe("gizli bilgi deposu", () => {
     expect(await secretStatus("google.placesKey")).toMatchObject({ set: true, source: "env" });
   });
 
+  it("bozuk secrets.json yazmada ÜZERİNE YAZILMAZ: yedeklenir ve hata verilir; okuma boş döner", async () => {
+    process.env.UM_MASTER_KEY = "a".repeat(64);
+    await setSecret("google.placesKey", "first-key-value-123");
+    const file = path.join(dir, "secrets.json");
+    const truncated = fs.readFileSync(file, "utf8").slice(0, 20);
+    fs.writeFileSync(file, truncated);
+    expect(await getSecret("google.placesKey")).toBeUndefined();
+    await expect(setSecret("hunter.apiKey", "hunter-value-12345")).rejects.toThrow(
+      /okunamadı; dosya yedeklendi/,
+    );
+    await expect(deleteSecret("google.placesKey")).rejects.toThrow(/yedeklendi/);
+    expect(fs.readFileSync(file, "utf8")).toBe(truncated);
+    const backups = fs.readdirSync(dir).filter((f) => f.startsWith("secrets.json.corrupt-"));
+    expect(backups.length).toBeGreaterThanOrEqual(1);
+    expect(fs.readFileSync(path.join(dir, backups[0]!), "utf8")).toBe(truncated);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+
+  it("dosya yoksa yazma boş depodan başlar; bayat kilit dosyası yazmayı engellemez", async () => {
+    const lock = path.join(dir, "secrets.json.lock");
+    fs.writeFileSync(lock, "");
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(lock, old, old);
+    await setSecret("google.placesKey", "fresh-key-value-1");
+    expect(await getSecret("google.placesKey")).toBe("fresh-key-value-1");
+    expect(fs.existsSync(lock)).toBe(false);
+  });
+
   it("UM_MASTER_KEY ile çalışır; yanlış ana anahtarla okunamaz", async () => {
     process.env.UM_MASTER_KEY = "a".repeat(64);
     await setSecret("google.mapsKey", "maps-key-abcdefgh");

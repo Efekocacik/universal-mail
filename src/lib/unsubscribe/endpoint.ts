@@ -2,6 +2,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { isSafeLiveUnsubscribeUrl } from "@/lib/mail/footer";
 import { getSetting, setSetting } from "@/lib/settings";
+import { ChannelError } from "./channel";
 import { drainUnsubscribeEvents, type UnsubscribeEventSource } from "./ingest";
 import { buildUnsubscribeUrl, getSigner, mintProbeToken, mintUnsubscribeToken } from "./keys";
 
@@ -102,7 +103,18 @@ export type VerifyOutcome =
   | {
       ok: false;
       code: "not_configured" | "no_key" | "post_failed" | "bad_status" | "not_delivered";
+    }
+  | {
+      ok: false;
+      /** Aktarıcı kanalından olay çekilemedi (ör. aktarıcı kanal anahtarını tanımıyor → 401). */
+      code: "channel_failed";
+      detail: string;
     };
+
+/** Kanal hatasının güvenli, kısa ayrıntısı (ör. `http_error_401`); kişisel veri veya adres içermez. */
+function channelDetail(e: ChannelError): string {
+  return e.code === "http_error" && e.status !== undefined ? `http_error_${e.status}` : e.code;
+}
 
 /**
  * UÇTAN UCA doğrulama: sınama belirteci → gerçek RFC 8058 POST (yönlendirme izlenmez) → 200 → olay kuyruktan çekilir
@@ -117,7 +129,12 @@ export async function verifyOneClickEndpoint(db: Db, o: VerifyOptions): Promise<
     await setSetting(db, "mail.unsubscribeEndpoint", {
       ...cur,
       pending: out.ok ? null : cur.pending,
-      lastAttempt: { at: clock(), ok: out.ok, code: out.code },
+      lastAttempt: {
+        at: clock(),
+        ok: out.ok,
+        code: out.code,
+        ...("detail" in out ? { detail: out.detail } : {}),
+      },
     });
     return out;
   };
@@ -156,7 +173,19 @@ export async function verifyOneClickEndpoint(db: Db, o: VerifyOptions): Promise<
   const sleep = o.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const attempts = Math.max(1, o.attempts ?? 5);
   for (let i = 0; i < attempts; i++) {
-    await drainUnsubscribeEvents(db, o.source, { now: clock });
+    try {
+      await drainUnsubscribeEvents(db, o.source, { now: clock });
+    } catch (e) {
+      // Kanal hatası (ör. aktarıcı kanal anahtarını tanımıyor): kanıt YAZILMAZ, neden kayda geçer (sessiz kalmaz).
+      if (e instanceof ChannelError) {
+        // Sınama işlenip kanıt yazıldıktan SONRA yalnızca onay (ack) başarısız olduysa doğrulama başarılıdır: onaylanmayan
+        // sınama olayı sonra yeniden çekilir ve zararsızca yok sayılır.
+        const after = await getSetting(db, "mail.unsubscribeEndpoint");
+        if (after.verified?.jti === probe.jti) return finish({ ok: true, code: "verified" });
+        return finish({ ok: false, code: "channel_failed", detail: channelDetail(e) });
+      }
+      throw e;
+    }
     const cur = await getSetting(db, "mail.unsubscribeEndpoint");
     if (cur.verified?.jti === probe.jti) return finish({ ok: true, code: "verified" });
     if (i < attempts - 1) await sleep(o.delayMs ?? 500);
@@ -220,6 +249,47 @@ export async function checkDeliveryHealth(
   return { ok: rec.ok, code: rec.code };
 }
 
+/**
+ * Kanal kurulamadığı için sağlık denetimi YAPILAMADI (ör. `no_channel_key`: etkin kanal anahtarının özel anahtarı gizli
+ * depoda okunamıyor). Kayda sağlıksız olarak geçer ki uyarı bandı ve hazırlık ekranı sessiz kalmasın. Denetim kaydı
+ * yalnızca durum DEĞİŞTİĞİNDE yazılır (her turda yeni satır üretilmez).
+ */
+export async function recordDeliveryProblem(
+  db: Db,
+  code: "no_channel_key",
+  now = Date.now(),
+): Promise<void> {
+  const cur = await getSetting(db, "mail.unsubscribeEndpoint");
+  const changed = !cur.delivery || cur.delivery.ok || cur.delivery.code !== code;
+  await setSetting(db, "mail.unsubscribeEndpoint", {
+    ...cur,
+    delivery: { checkedAt: now, ok: false, depth: 0, oldestAgeMs: null, corrupt: 0, code },
+  });
+  if (changed) {
+    await audit(
+      db,
+      "unsubscribe.delivery_unhealthy",
+      "unsubscribe_endpoint",
+      undefined,
+      { code },
+      now,
+    );
+  }
+}
+
+/** Doğrulama BAŞLATILAMADI (ör. `no_channel_key`): neden `lastAttempt` olarak kaydedilir (sessiz kalmaz). */
+export async function recordVerifyProblem(
+  db: Db,
+  code: "no_channel_key",
+  now = Date.now(),
+): Promise<void> {
+  const cur = await getSetting(db, "mail.unsubscribeEndpoint");
+  await setSetting(db, "mail.unsubscribeEndpoint", {
+    ...cur,
+    lastAttempt: { at: now, ok: false, code },
+  });
+}
+
 export type DeliveryStatus = "ok" | "blocked" | "unknown";
 
 /** Hazırlık ekranı için: kanal/uç nokta yoksa engel; hiç denetlenmediyse/bayatsa bilinmiyor; sağlıksızsa engel. */
@@ -264,4 +334,28 @@ export async function prepareLiveUnsubscribe(
     throw new EndpointError("lead_unavailable", "Alıcı için çıkış belirteci üretilemedi.");
   }
   return { url: buildUnsubscribeUrl(cfg.baseUrl, token), oneClick: true };
+}
+
+/** Kendine test iletisindeki sınama bağlantısının geçerlilik süresi (iletiyi açıp düğmeyi denemek için). */
+export const SELF_TEST_UNSUBSCRIBE_TTL_MS = 7 * 86_400_000;
+
+/**
+ * KENDİNE TEST gönderimi (C11) için çıkış bağlantısı: uç nokta doğrulanmışsa ve etkin imza anahtarı varsa, hiçbir
+ * alıcıya bağlı OLMAYAN bir SINAMA belirteci (kapsam "p") ile gerçek RFC 8058 bağlantısı döner. Posta istemcisinin
+ * "Abonelikten çık" düğmesine basılırsa olay aktarıcıya ulaşır, uygulamaya çekilir ve zararsızca yok sayılır (bekleyen
+ * sınamayla eşleşmez; kendi adresiniz engellenmez). Uç nokta yoksa/doğrulanmadıysa `null` (ileti List-Unsubscribe
+ * başlığı OLMADAN ve açıkça "test" olarak işaretlenerek oluşturulur). Hiçbir şey yazmaz.
+ */
+export async function prepareSelfTestUnsubscribe(
+  db: DbExecutor,
+  now = Date.now(),
+): Promise<{ url: string; oneClick: true } | null> {
+  const cfg = await getSetting(db, "mail.unsubscribeEndpoint");
+  if (!cfg.baseUrl || !(await isOneClickEndpointVerified(db, now))) return null;
+  try {
+    const { token } = await mintProbeToken(db, now, SELF_TEST_UNSUBSCRIBE_TTL_MS);
+    return { url: buildUnsubscribeUrl(cfg.baseUrl, token), oneClick: true };
+  } catch {
+    return null;
+  }
 }

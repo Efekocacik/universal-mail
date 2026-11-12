@@ -18,6 +18,7 @@
     "build": "npm run build:web && npm run build:bundles && npm run build:standalone",
     "build:web": "next build",
     "build:bundles": "node scripts/build-bundles.mjs",
+    "build:relay": "node scripts/build-bundles.mjs --relay",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "cities:build": "node scripts/build-cities.mjs",

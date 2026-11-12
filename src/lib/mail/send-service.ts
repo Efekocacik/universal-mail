@@ -1,4 +1,18 @@
-import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  gt,
+  lt,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { evaluateSend, type IneligibleReason } from "@/lib/compliance/eligibility";
 import {
   DAY_MS,
@@ -20,8 +34,20 @@ import {
   type CampaignLeadStatus,
 } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
+import { evaluateDrainGate } from "@/lib/unsubscribe/delivery-alert";
+import { evaluateDnsReadiness } from "./dns-store";
 import { EndpointError, prepareLiveUnsubscribe } from "@/lib/unsubscribe/endpoint";
 import { getLiveProvider } from "./gmail/provider";
+import {
+  MAILBOX_PERMANENT_DEFER_MS,
+  MAILBOX_PERMANENT_REJECT_CODES,
+  MAILBOX_SCOPED_REJECT_CODES,
+  RECENT_UNKNOWN_COOLDOWN_MS,
+  extendMailboxBackoff,
+  getMailboxBackoff,
+  mailboxBackoffUntil,
+  pauseMailboxCampaigns,
+} from "./mailbox-backoff";
 import { mailboxSendBlock } from "./mailbox-health";
 import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import {
@@ -55,10 +81,12 @@ import { composeEmail, type ComposeIssue } from "./template-service";
  *    GÖNDERİLMEZ: yalnızca kayıt yeniden denenir (`retryPendingRecord`); olmazsa kayıt `sending` kalır ve uzlaştırma
  *    onu `unknown` yapar.
  *
- * Gerçek gönderim kapalıdır (`LIVE_SENDING_ENABLED`): kapalıyken yalnızca demo posta kutusu ve demo sağlayıcısı çalışır;
- * canlı kapsamdaki kutu ilk kapıda `provider_unavailable` ile durur. Canlı yol (kapı açılırsa) şunları ZORUNLU kılar:
- * uygunluk/ülke politikası, doğrulanmış HTTPS çıkış uç noktası ve iletiye özgü imzalı çıkış bağlantısı
- * (`unsubscribe_unavailable`), Gmail sağlayıcısının kendi kapıları. Ham ileti kalıcı saklanmaz.
+ * Canlı gönderim kapısı (`isLiveSendingPermitted`) kapalıyken yalnızca demo posta kutusu ve demo sağlayıcısı çalışır;
+ * canlı kapsamdaki kutu ilk kapıda `provider_unavailable` ile durur. Kapı açıkken canlı yol şunları ÇALIŞMA ANINDA
+ * ZORUNLU kılar: uygunluk/kilidi açılmış canlı ülke politikası, doğrulanmış HTTPS çıkış uç noktası ve iletiye özgü
+ * imzalı çıkış bağlantısı (`unsubscribe_unavailable`), sağlıklı çıkış çekme işi (`unsubscribe_drain_unhealthy`),
+ * kutunun alan adı için taze ve üçü de geçen DNS denetimi (`dns_not_verified`), Gmail sağlayıcısının kendi kapıları
+ * (bağlı kutu, `gmail.send`). Ham ileti kalıcı saklanmaz.
  */
 
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
@@ -69,6 +97,24 @@ export const STALE_SENDING_MS = 10 * 60_000;
  * eşik dolmadan bitmemiş olamaz, yani aktif bir gönderim yanlışlıkla `unknown` yapılmaz.
  */
 export const MAX_PROVIDER_TIMEOUT_MS = STALE_SENDING_MS / 2;
+/** Çekme kapısı kapalıyken (`unsubscribe_drain_unhealthy`) dizinin yeniden deneneceği süre. */
+export const DRAIN_GATE_RETRY_MS = 15 * 60_000;
+/** DNS kapısı kapalıyken (`dns_not_verified`) dizinin yeniden deneneceği süre. */
+export const DNS_GATE_RETRY_MS = 15 * 60_000;
+/**
+ * Gönderen kutunun Google yetkisi geçersiz/iptal (`invalid_grant`; ör. "Testing" durumundaki OAuth projesinde 7 günlük
+ * yenileme belirteci süresi doldu): dizi bu kadar sonra yeniden denenir. Kampanya DURAKLATILMAZ, dizi başarısız
+ * SAYILMAZ ve deneme hakkından düşülmez; kullanıcı "Yeniden bağlan" ile kutuyu bağlayınca gönderim kendiliğinden sürer.
+ */
+export const REAUTH_DEFER_MS = 30 * 60_000;
+/**
+ * Sağlayıcının, iletiyi göndermeden (ağ isteğinden önce) kutunun yetkisi olmadığı için verdiği ret kodları. Kutu
+ * düzeyinde ve kullanıcı eylemiyle düzelir: dizi ertelenir, başarısız sayılmaz.
+ */
+const MAILBOX_AUTH_REJECT_CODES: ReadonlySet<string> = new Set([
+  "reauthorization_required",
+  "not_connected",
+]);
 
 export type NotSendableCode =
   | "provider_unavailable"
@@ -84,7 +130,18 @@ export type NotSendableCode =
   | "compose_failed"
   | "build_failed"
   /** Canlı ileti için doğrulanmış çıkış uç noktası/bağlantısı hazırlanamadı: gönderim YOK. */
-  | "unsubscribe_unavailable";
+  | "unsubscribe_unavailable"
+  /**
+   * Canlı ileti: çıkış talepleri çekilmiyor (çekme işi kapalı, son sağlık kaydı kötü ya da 24 saatten eski).
+   * Gönderim YOK; dizi ERTELENİR (dışlanmaz, başarısız sayılmaz). `detail`: `DrainGateCode`.
+   */
+  | "unsubscribe_drain_unhealthy"
+  /**
+   * Canlı ileti: kutunun alan adı için taze (30 gün) ve SPF/DKIM/DMARC üçü de `pass` olan saklı bir DNS denetimi yok
+   * (hiç denetlenmedi, bayat, uyarı veya hata). Gönderim YOK; dizi ERTELENİR. `detail`: `unknown` | `blocked`.
+   * Kişisel Gmail (`gmail.com`, `googlemail.com`) kutusunda DNS Google tarafından yönetildiği için bu kapı geçer.
+   */
+  | "dns_not_verified";
 
 /** Gönderim kaydı yazılamadığında yeniden denemek için gereken asgari bilgi (ham ileti ve alıcı İÇERMEZ). */
 export interface PendingRecord {
@@ -254,6 +311,33 @@ export async function sendCampaignStep(
         }
       }
 
+      // Çıkış talepleri gerçekten çekiliyor mu? Çekme kapalı/sağlıksız/bayatken canlı kampanya ERTELENİR: aksi halde
+      // gerçek çıkış tıklamaları aktarıcıda birikirken gönderim sürerdi. (Uç nokta eksikliği ise yapılandırma
+      // hatasıdır ve yukarıda kampanyayı duraklatır; bu geçici bir işletim durumudur.)
+      if (mode === "live") {
+        const drain = await evaluateDrainGate(tx, { now });
+        if (!drain.ok) {
+          throw new Abort({
+            outcome: "not_sendable",
+            code: "unsubscribe_drain_unhealthy",
+            detail: drain.code,
+            retryAt: now + DRAIN_GATE_RETRY_MS,
+          });
+        }
+        // Gönderen alan adının kimlik doğrulaması (SPF/DKIM/DMARC): yalnızca kullanıcının "Kontrol et" ile kaydettiği
+        // taze ve üçü de geçen sonuç kabul edilir (hazırlık ekranındaki `dns_auth` maddesiyle aynı ölçüt). Ağ yok.
+        // İstisna: kişisel Gmail adresi (sağlayıcı yönetimli alan adı) kayıt aranmadan geçer (`isDnsProviderManaged`).
+        const dns = await evaluateDnsReadiness(tx, [mailbox], now);
+        if (dns !== "ok") {
+          throw new Abort({
+            outcome: "not_sendable",
+            code: "dns_not_verified",
+            detail: dns,
+            retryAt: now + DNS_GATE_RETRY_MS,
+          });
+        }
+      }
+
       const composed = await composeEmail(tx, {
         templateId: step.templateId,
         leadId: cl.leadId,
@@ -403,7 +487,8 @@ export async function sendCampaignStep(
   }
 }
 
-const RECORD_RETRIES = 8;
+/** Sonuç kaydı meşgul veritabanında en çok bu kadar yeniden denenir (ileti asla yeniden gönderilmez). */
+export const RECORD_RETRIES = 8;
 
 /**
  * Yazılamamış bir gönderim sonucunu YALNIZCA veritabanına yeniden kaydetmeyi dener; sağlayıcıyı çağırmaz.
@@ -452,6 +537,34 @@ async function checkPacing(
   // Posta kutusu düzeyi sağlık (SRS 5.6.1): durdurulmuş veya oranı eşiği aşan kutudan gönderilmez.
   if ((await mailboxSendBlock(tx, mailbox.id, now)).blocked)
     return ns("mailbox_halted", now + 5 * 60_000);
+
+  // Kutu düzeyi bekleme (Gmail kotası/429, yetki uç noktası veya ağ erişilemez): kalıcıdır, yeniden başlatmada da geçerli.
+  const backoff = await getMailboxBackoff(tx, mailbox.id, now);
+  if (backoff) return ns("mailbox_halted", backoff.until, backoff.code);
+
+  // Devre kesici: kutunun son belirsiz (`unknown`) kampanya iletisinden sonra bir süre başka dizi GÖNDERİLMEZ. Bağlantı
+  // kesintisi veya sağlayıcı arızasında her aralıkta yeni bir dizinin belirsiz sonuca (ve elle incelemeye) düşmesi önlenir.
+  const [recentUnknown] = await tx
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.mailboxId, mailbox.id),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+        eq(messages.status, "unknown"),
+        gt(messages.createdAt, now - RECENT_UNKNOWN_COOLDOWN_MS),
+      ),
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(1);
+  if (recentUnknown) {
+    return ns(
+      "mailbox_halted",
+      recentUnknown.createdAt + RECENT_UNKNOWN_COOLDOWN_MS,
+      "recent_unknown",
+    );
+  }
 
   // Planlanan zaman (takip aralığı, yeniden deneme beklemesi).
   if (cl.nextSendAt !== null && cl.nextSendAt > now) return ns("not_due", cl.nextSendAt);
@@ -581,52 +694,72 @@ async function recordResult(
         .returning({ id: messages.id, mailboxId: messages.mailboxId });
       // Arada uzlaştırma kaydı `unknown` yaptıysa ona dokunulmaz.
       if (updated.length === 0) return;
-      const [cl] = await tx
-        .select({ campaignId: campaignLeads.campaignId, leadId: campaignLeads.leadId })
-        .from(campaignLeads)
-        .where(eq(campaignLeads.id, p.campaignLeadId));
-      const stepRows = await tx
-        .select({ stepIndex: campaignSteps.stepIndex, delayDays: campaignSteps.delayDays })
-        .from(campaignSteps)
-        .where(eq(campaignSteps.campaignId, cl!.campaignId));
-      const total = Math.min(
-        new Set(stepRows.map((s) => s.stepIndex)).size,
-        limits.maxMessagesPerSequence,
+      await advanceAfterSent(
+        tx,
+        {
+          campaignLeadId: p.campaignLeadId,
+          stepIndex: p.stepIndex,
+          mailboxId: updated[0]!.mailboxId,
+          sentAt: now,
+        },
+        now,
+        limits,
       );
-      const nextStep = p.stepIndex + 1;
-      // Sonraki adımın en erken zamanı: adım gecikmesi ve takip aralığı alt sınırının büyüğü. Pencereye kaydırma
-      // gönderim anında yapılır.
-      const delayDays = Math.max(
-        limits.minFollowupGapDays,
-        ...stepRows.filter((s) => s.stepIndex === nextStep).map((s) => s.delayDays),
-      );
-      const done = nextStep >= total;
+      return;
+    }
+
+    if (result.status === "rejected" && MAILBOX_AUTH_REJECT_CODES.has(result.code)) {
+      // Kutunun yetkisi yok (iptal/süresi dolmuş yenileme belirteci): ileti GÖNDERİLMEDİ (istek atılmadı). Kayıt
+      // `failed` olur ama dizi başarısız sayılmaz ve deneme hakkı tüketilmez; yeniden bağlanana kadar ertelenir.
+      const updated = await tx
+        .update(messages)
+        .set({ status: "failed", errorCode: result.code, errorMessage: "mailbox_auth" })
+        .where(own)
+        .returning({ id: messages.id });
+      if (updated.length === 0) return;
       await tx
         .update(campaignLeads)
         .set({
-          nextStep,
-          status: done ? "completed" : "waiting_next",
-          lastSentAt: now,
-          nextSendAt: done ? null : now + delayDays * DAY_MS,
-          attempts: 0,
-          lastError: null,
+          status: p.previousStatus,
+          nextSendAt: now + REAUTH_DEFER_MS,
+          lastError: "reauthorization_required",
           updatedAt: now,
         })
         .where(inFlight);
+      await settleIfCancelled(tx, p.campaignLeadId, now);
+      return;
+    }
+
+    if (result.status === "rejected" && MAILBOX_SCOPED_REJECT_CODES.has(result.code)) {
+      // Kutu düzeyi ret (kota/429, yetki uç noktası veya ağ erişilemez, Google 403): alıcıya özgü değildir. Dizinin deneme
+      // hakkı TÜKETİLMEZ; dizi önceki durumuna döner ve kutu beklemesinin sonuna ertelenir. Kalıcı kutu retinde
+      // kutunun çalışan kampanyaları duraklatılır (kullanıcı düzeltip sürdürür).
+      const updated = await tx
+        .update(messages)
+        .set({ status: "failed", errorCode: result.code, errorMessage: "mailbox_scope" })
+        .where(own)
+        .returning({ id: messages.id, mailboxId: messages.mailboxId });
+      if (updated.length === 0) return;
+      const mailboxId = updated[0]!.mailboxId;
+      let until: number;
+      if (MAILBOX_PERMANENT_REJECT_CODES.has(result.code)) {
+        until = now + MAILBOX_PERMANENT_DEFER_MS;
+        if (mailboxId !== null) await pauseMailboxCampaigns(tx, mailboxId, result.code, now);
+      } else {
+        until = mailboxBackoffUntil(result.code, result.retryAfterMs, now);
+        if (mailboxId !== null)
+          until = await extendMailboxBackoff(tx, mailboxId, result.code, until, now);
+      }
       await tx
-        .update(leads)
+        .update(campaignLeads)
         .set({
-          lastContactedAt: now,
-          status: sql`CASE WHEN ${leads.status} IN ('new', 'enriched', 'queued') THEN 'sent' ELSE ${leads.status} END`,
+          status: p.previousStatus,
+          nextSendAt: until,
+          lastError: result.code,
           updatedAt: now,
         })
-        .where(eq(leads.id, cl!.leadId));
+        .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
-      // Isınma, kutunun ilk başarılı gönderimiyle başlar.
-      await tx
-        .update(mailboxes)
-        .set({ warmupStartedAt: now, updatedAt: now })
-        .where(and(eq(mailboxes.id, updated[0]!.mailboxId), isNull(mailboxes.warmupStartedAt)));
       return;
     }
 
@@ -642,6 +775,7 @@ async function recordResult(
         .returning({ id: messages.id });
       if (updated.length === 0) return;
       // Bu adımın başarısız deneme sayısı (az önceki dahil). Kalıcı ret veya hak bitti: dizi `failed`.
+      // Kutu yetkisi veya kutu düzeyi ret nedeniyle düşen kayıtlar deneme hakkından sayılmaz.
       const [{ n: failedAttempts } = { n: 0 }] = await tx
         .select({ n: count() })
         .from(messages)
@@ -649,6 +783,10 @@ async function recordResult(
           and(
             eq(messages.idempotencyKey, `cl:${p.campaignLeadId}:s:${p.stepIndex}`),
             eq(messages.status, "failed"),
+            or(
+              isNull(messages.errorMessage),
+              notInArray(messages.errorMessage, ["mailbox_auth", "mailbox_scope"]),
+            ),
           ),
         );
       const delay = retryDelayMs(failedAttempts, result.permanent, result.retryAfterMs);
@@ -673,10 +811,74 @@ async function recordResult(
 }
 
 /**
+ * Gönderildiği kesinleşen adımdan sonra diziyi ilerletir: sonraki adım ve zamanı (son adımsa `completed`), lead'in son
+ * temas zamanı, iptal edilmiş kampanyada diziyi kapatma ve posta kutusu ısınmasının başlangıcı. Yalnızca `in_flight`
+ * dizi ilerler. Kabul edilen gönderimin kaydında ve incelemedeki "gönderildi" kararında (`scheduler/resolve-review.ts`)
+ * AYNI kurallarla kullanılır. `sentAt`: iletinin gönderildiği an (kabulde `now`); `now`: kaydın yazıldığı an.
+ */
+export async function advanceAfterSent(
+  tx: DbExecutor,
+  p: { campaignLeadId: number; stepIndex: number; mailboxId: number; sentAt: number },
+  now: number,
+  limits: FrequencyLimits,
+): Promise<void> {
+  const inFlight = and(
+    eq(campaignLeads.id, p.campaignLeadId),
+    eq(campaignLeads.status, "in_flight"),
+  );
+  const [cl] = await tx
+    .select({ campaignId: campaignLeads.campaignId, leadId: campaignLeads.leadId })
+    .from(campaignLeads)
+    .where(eq(campaignLeads.id, p.campaignLeadId));
+  const stepRows = await tx
+    .select({ stepIndex: campaignSteps.stepIndex, delayDays: campaignSteps.delayDays })
+    .from(campaignSteps)
+    .where(eq(campaignSteps.campaignId, cl!.campaignId));
+  const total = Math.min(
+    new Set(stepRows.map((s) => s.stepIndex)).size,
+    limits.maxMessagesPerSequence,
+  );
+  const nextStep = p.stepIndex + 1;
+  // Sonraki adımın en erken zamanı: adım gecikmesi ve takip aralığı alt sınırının büyüğü. Pencereye kaydırma
+  // gönderim anında yapılır.
+  const delayDays = Math.max(
+    limits.minFollowupGapDays,
+    ...stepRows.filter((s) => s.stepIndex === nextStep).map((s) => s.delayDays),
+  );
+  const done = nextStep >= total;
+  await tx
+    .update(campaignLeads)
+    .set({
+      nextStep,
+      status: done ? "completed" : "waiting_next",
+      lastSentAt: p.sentAt,
+      nextSendAt: done ? null : p.sentAt + delayDays * DAY_MS,
+      attempts: 0,
+      lastError: null,
+      updatedAt: now,
+    })
+    .where(inFlight);
+  await tx
+    .update(leads)
+    .set({
+      lastContactedAt: p.sentAt,
+      status: sql`CASE WHEN ${leads.status} IN ('new', 'enriched', 'queued') THEN 'sent' ELSE ${leads.status} END`,
+      updatedAt: now,
+    })
+    .where(eq(leads.id, cl!.leadId));
+  await settleIfCancelled(tx, p.campaignLeadId, now);
+  // Isınma, kutunun ilk başarılı gönderimiyle başlar.
+  await tx
+    .update(mailboxes)
+    .set({ warmupStartedAt: p.sentAt, updatedAt: now })
+    .where(and(eq(mailboxes.id, p.mailboxId), isNull(mailboxes.warmupStartedAt)));
+}
+
+/**
  * Gönderim sürerken kampanya iptal edildiyse (ayrılmış ileti tamamlanabilir; bkz. campaigns/lifecycle.ts), sonucu
  * kaydedilen dizi bekleyen durumda kalmaz, `cancelled` olur. Tamamlanmış dizi (`completed`) olduğu gibi kalır.
  */
-async function settleIfCancelled(tx: DbExecutor, campaignLeadId: number, now: number) {
+export async function settleIfCancelled(tx: DbExecutor, campaignLeadId: number, now: number) {
   await tx
     .update(campaignLeads)
     .set({ status: "cancelled", nextSendAt: null, updatedAt: now })
@@ -701,28 +903,35 @@ export async function reconcileStaleSending(
   opts: { now?: number; olderThanMs?: number } = {},
 ): Promise<number> {
   const now = opts.now ?? Date.now();
-  const cutoff = now - (opts.olderThanMs ?? STALE_SENDING_MS);
-  return db.transaction(async (tx) => {
-    const stale = await tx
-      .update(messages)
-      .set({ status: "unknown", errorCode: "stale_sending" })
-      .where(
-        and(
-          eq(messages.direction, "out"),
-          eq(messages.status, "sending"),
-          lt(messages.createdAt, cutoff),
-        ),
-      )
-      .returning({ campaignLeadId: messages.campaignLeadId });
-    const ids = [
-      ...new Set(stale.map((s) => s.campaignLeadId).filter((x): x is number => x !== null)),
-    ];
-    if (ids.length > 0) {
-      await tx
-        .update(campaignLeads)
-        .set({ lastError: "stale_sending", updatedAt: now })
-        .where(and(inArray(campaignLeads.id, ids), eq(campaignLeads.status, "in_flight")));
-    }
-    return stale.length;
-  });
+  return db.transaction((tx) => reconcileStaleSendingIn(tx, now, opts.olderThanMs));
+}
+
+/** `reconcileStaleSending`'in açık bir işlem içinde çalışan gövdesi (inceleme kararı aynı işlemde uzlaştırır). */
+export async function reconcileStaleSendingIn(
+  tx: DbExecutor,
+  now: number,
+  olderThanMs: number = STALE_SENDING_MS,
+): Promise<number> {
+  const cutoff = now - olderThanMs;
+  const stale = await tx
+    .update(messages)
+    .set({ status: "unknown", errorCode: "stale_sending" })
+    .where(
+      and(
+        eq(messages.direction, "out"),
+        eq(messages.status, "sending"),
+        lt(messages.createdAt, cutoff),
+      ),
+    )
+    .returning({ campaignLeadId: messages.campaignLeadId });
+  const ids = [
+    ...new Set(stale.map((s) => s.campaignLeadId).filter((x): x is number => x !== null)),
+  ];
+  if (ids.length > 0) {
+    await tx
+      .update(campaignLeads)
+      .set({ lastError: "stale_sending", updatedAt: now })
+      .where(and(inArray(campaignLeads.id, ids), eq(campaignLeads.status, "in_flight")));
+  }
+  return stale.length;
 }

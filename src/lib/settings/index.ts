@@ -94,6 +94,14 @@ export const settingSchemas = {
     z.string(),
     z.object({ send: z.boolean(), read: z.boolean(), at: z.number().int() }),
   ),
+  /**
+   * Kutu düzeyi geçici gönderim beklemesi (Gmail kotası/429, yetki uç noktası veya ağ erişilemez): kutu kimliği →
+   * bitiş anı ve neden kodu. Yalnızca gönderim servisi yazar (bkz. src/lib/mail/mailbox-backoff.ts).
+   */
+  "mail.mailboxSendBackoff": z.record(
+    z.string(),
+    z.object({ until: z.number().int(), code: z.string(), at: z.number().int() }),
+  ),
   "mail.mailboxHalts": z.record(
     z.string(),
     z.object({
@@ -149,7 +157,18 @@ export const settingSchemas = {
         verifiedAt: z.number().int(),
       })
       .nullable(),
-    lastAttempt: z.object({ at: z.number().int(), ok: z.boolean(), code: z.string() }).nullable(),
+    lastAttempt: z
+      .object({
+        at: z.number().int(),
+        ok: z.boolean(),
+        code: z.string(),
+        /** Kanal hatasında güvenli ayrıntı (ör. `http_error_401`, `timeout`); kişisel veri veya adres içermez. */
+        detail: z
+          .string()
+          .regex(/^[a-z0-9_]{1,40}$/)
+          .optional(),
+      })
+      .nullable(),
     delivery: z
       .object({
         checkedAt: z.number().int(),
@@ -186,6 +205,12 @@ export const settingSchemas = {
    * boşken hiçbir ARF şikâyeti doğrulanmaz (yalnızca inceleme kuyruğuna düşer). Yalnızca ARF servisi yazar.
    */
   "mail.arfReporters": z.array(z.string().regex(/^[a-z0-9.-]{3,253}$/)).max(50),
+  /**
+   * Çıkış olayı çekme işinin (`unsubscribe.drain`) kullanıcı anahtarı (TB-3/C4). Varsayılan KAPALI. Yalnızca çekme işi
+   * servisi yazar (ayarlar API'si değiştiremez); ortam bayrağı `UM_UNSUBSCRIBE_DRAIN_ENABLED` ile VEYA birleşir ve
+   * iş her turda yeniden okur. Gönderimi açmaz; yalnızca aktarıcıdaki çıkış olaylarının uygulamaya çekilmesini sağlar.
+   */
+  "mail.unsubscribeDrain": z.object({ enabled: z.boolean() }),
   "seed.faz3": z.object({
     templates: z.number().int().min(0),
     demoMailbox: z.number().int().min(0),
@@ -213,6 +238,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
   "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
   "mail.mailboxHalts": {},
+  "mail.mailboxSendBackoff": {},
   "mail.gmailOAuth": { clientId: "" },
   "mail.gmailGrants": {},
   "mail.unsubscribeKeys": { current: null, keys: [] },
@@ -220,6 +246,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.dnsReports": {},
   "mail.inboxSync": {},
   "mail.arfReporters": [],
+  "mail.unsubscribeDrain": { enabled: false },
   "mail.unsubscribeEndpoint": {
     baseUrl: null,
     pending: null,

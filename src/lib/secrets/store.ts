@@ -109,6 +109,7 @@ export function resolveMasterKey(): Buffer {
   return Buffer.from(fs.readFileSync(file, "utf8").trim(), "hex");
 }
 
+/** Okuma yolları için: dosya yok veya okunamıyorsa boş depo (değer yok sayılır, kullanıcıdan yeniden istenir). */
 function readFile(): SecretFile {
   try {
     const parsed = JSON.parse(fs.readFileSync(secretsPath(), "utf8")) as SecretFile;
@@ -118,10 +119,94 @@ function readFile(): SecretFile {
   }
 }
 
+/**
+ * Yazma (oku-değiştir-yaz) yolları için: YALNIZCA dosya yoksa boş depo. Dosya okunamıyor/ayrıştırılamıyorsa veya biçimi
+ * tanınmıyorsa ÜZERİNE YAZILMAZ (aksi hâlde tek bir yazma bütün yenileme belirteçlerini ve geri getirilemeyen imza
+ * anahtarlarını silerdi): dosya `secrets.json.corrupt-<zaman>` adıyla yedeklenir ve hata fırlatılır.
+ */
+function readFileForWrite(): SecretFile {
+  const target = secretsPath();
+  let raw: string;
+  try {
+    raw = fs.readFileSync(target, "utf8");
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return { v: 1, items: {} };
+    throw new Error("Gizli bilgi deposu okunamadı; dosyaya dokunulmadı.");
+  }
+  try {
+    const parsed = JSON.parse(raw) as SecretFile;
+    if (
+      parsed &&
+      parsed.v === 1 &&
+      typeof parsed.items === "object" &&
+      parsed.items !== null &&
+      !Array.isArray(parsed.items)
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* aşağıda yedeklenir */
+  }
+  try {
+    const backup = `${target}.corrupt-${Date.now()}`;
+    fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
+    fs.chmodSync(backup, 0o600);
+  } catch {
+    /* yedek alınamasa da asıl dosyanın üzerine yazılmaz */
+  }
+  throw new Error("Gizli bilgi deposu okunamadı; dosya yedeklendi.");
+}
+
+const LOCK_STALE_MS = 10_000;
+const LOCK_WAIT_MS = 3_000;
+
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Süreçler arası kilit (web sunucusu ve arka plan işçisi aynı dosyayı yazar): `O_EXCL` kilit dosyası; çökmüş bir
+ * sürecin bıraktığı kilit `LOCK_STALE_MS` sonra bayat sayılır. Oku-değiştir-yaz zaman uyumludur, kilit kısa tutulur.
+ */
+function withFileLock<T>(fn: () => T): T {
+  const lock = `${secretsPath()}.lock`;
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  let fd: number | null = null;
+  while (fd === null) {
+    try {
+      fd = fs.openSync(lock, "wx", 0o600);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code !== "EEXIST") throw e;
+      try {
+        if (Date.now() - fs.statSync(lock).mtimeMs > LOCK_STALE_MS) {
+          fs.rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+        continue; // kilit bu arada kalktı
+      }
+      if (Date.now() > deadline) throw new Error("Gizli bilgi deposu meşgul; tekrar deneyin.");
+      sleepSync(20);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
+}
+
 function writeFile(file: SecretFile): void {
   const target = secretsPath();
   const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(file), { mode: 0o600 });
+  const fd = fs.openSync(tmp, "w", 0o600);
+  try {
+    fs.writeSync(fd, JSON.stringify(file));
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
   fs.renameSync(tmp, target);
 }
 
@@ -155,16 +240,22 @@ export async function setSecret(name: SecretName, value: string): Promise<void> 
   assertKnownName(name);
   const trimmed = value.trim();
   if (!trimmed) throw new Error("Boş değer kaydedilemez.");
-  const file = readFile();
-  file.items[name] = encrypt(name, trimmed, resolveMasterKey());
-  writeFile(file);
+  const item = encrypt(name, trimmed, resolveMasterKey());
+  withFileLock(() => {
+    const file = readFileForWrite();
+    file.items[name] = item;
+    writeFile(file);
+  });
 }
 
 export async function deleteSecret(name: SecretName): Promise<void> {
   assertKnownName(name);
-  const file = readFile();
-  delete file.items[name];
-  writeFile(file);
+  withFileLock(() => {
+    const file = readFileForWrite();
+    if (!(name in file.items)) return;
+    delete file.items[name];
+    writeFile(file);
+  });
 }
 
 export async function getSecret(name: SecretName): Promise<string | undefined> {

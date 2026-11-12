@@ -74,10 +74,10 @@ async function livePolicies() {
 }
 
 describe("ülke politikası", () => {
-  it("demo ve live ayrı döner; live tamamen engelli, kilitli ve değiştirilemez; gerçek gönderim kapalı", async () => {
+  it("demo ve live ayrı döner; kod kapısı açık ama live tamamen engelli, kilitli ve uygulamadan değiştirilemez", async () => {
     const r = await getPolicies();
     expect(r.status).toBe(200);
-    expect(r.body.liveSendingEnabled).toBe(false);
+    expect(r.body.liveSendingEnabled).toBe(true);
     const demo = r.body.demo as Json[];
     const live = r.body.live as Json[];
     expect(demo.length).toBeGreaterThan(20);

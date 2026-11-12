@@ -89,6 +89,10 @@ const TEXTS = {
     phone: "Telefon",
     unsubscribe: "Bu tür e-postaları almak istemiyorsanız",
     unsubscribeLink: "iletişimden çıkın",
+    selfTest:
+      "[TEST] Bu ileti gönderenin kendi posta kutusuna gönderilmiş bir sınamadır; hiçbir alıcıya gönderilmemiştir.",
+    selfTestNoLink:
+      "[TEST] Bu ileti gönderenin kendi posta kutusuna gönderilmiş bir sınamadır; hiçbir alıcıya gönderilmemiştir. Çıkış uç noktası henüz doğrulanmadığı için çıkış bağlantısı örnektir.",
   },
   en: {
     demo: "[DEMO] This message is a demo preview and is not sent. The unsubscribe link is a placeholder.",
@@ -100,6 +104,10 @@ const TEXTS = {
     phone: "Phone",
     unsubscribe: "If you prefer not to receive these emails",
     unsubscribeLink: "unsubscribe here",
+    selfTest:
+      "[TEST] This message is a self-test sent to the sender's own mailbox; it was not sent to any recipient.",
+    selfTestNoLink:
+      "[TEST] This message is a self-test sent to the sender's own mailbox; it was not sent to any recipient. The unsubscribe endpoint is not verified yet, so the unsubscribe link is a placeholder.",
   },
 } as const;
 
@@ -119,6 +127,11 @@ export function buildFooter(input: {
    * ve alan boşken hiçbir şey eklenmez veya engellenmez (zorunluluk kuralı hukuki değerlendirme bekler).
    */
   recipientCountry?: string | null;
+  /**
+   * Yalnızca `live` + KENDİNE TEST (C11): alt bilgi açıkça "[TEST]" olarak işaretlenir. Güvenli çıkış bağlantısı
+   * verilmediyse (uç nokta doğrulanmadı) hata yerine örnek (`.invalid`) bağlantı konur ve bu da açıkça yazılır.
+   */
+  selfTest?: boolean;
 }): Footer {
   const missing = missingProfileFields(input.profile);
   if (missing.length > 0) {
@@ -129,7 +142,11 @@ export function buildFooter(input: {
   }
   const p = input.profile as SenderProfile;
   let url: string;
-  if (input.mode === "live") {
+  let placeholder = false;
+  if (input.mode === "live" && input.selfTest && !isSafeLiveUnsubscribeUrl(input.unsubscribeUrl)) {
+    url = demoUnsubscribeUrl("self-test");
+    placeholder = true;
+  } else if (input.mode === "live") {
     if (!isSafeLiveUnsubscribeUrl(input.unsubscribeUrl)) {
       throw new FooterError(
         "unsubscribe_link_required",
@@ -157,7 +174,14 @@ export function buildFooter(input: {
     if (mersis) lines.push(`${t.mersis}: ${mersis}`);
     if (registry) lines.push(`${t.tradeRegistry}: ${registry}`);
   }
-  const demo = input.mode === "demo" ? t.demo : null;
+  const demo =
+    input.mode === "demo"
+      ? t.demo
+      : input.selfTest
+        ? placeholder
+          ? t.selfTestNoLink
+          : t.selfTest
+        : null;
 
   const html = [
     `<hr>`,

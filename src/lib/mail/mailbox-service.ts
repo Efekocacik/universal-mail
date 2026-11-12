@@ -1,3 +1,4 @@
+import { isConsumerGmailDomain } from "./consumer-gmail";
 import { clearDnsReport } from "./dns-store";
 import { and, count, eq, ne } from "drizzle-orm";
 import { audit } from "@/lib/db/audit";
@@ -20,8 +21,12 @@ import {
  *  - Eklenen Gmail kutusu `not_configured` durumunda başlar. `connected` durumuna YALNIZCA OAuth tamamlanınca
  *    (sonraki aşama) geçilir; bu servis `connected` yazmaz.
  *  - Kimlik bilgisi (yenileme belirteci, istemci sırrı) SQLite'a YAZILMAZ; gizli depoda tutulur.
- *  - Demo kutusu eklenemez, değiştirilemez, silinemez. Canlı kutu kampanyaya atanamaz (kampanya servisi demo ister).
- *  - Gerçek gönderim `LIVE_SENDING_ENABLED=false` ile kapalıdır; kutu eklemek bunu değiştirmez.
+ *  - Demo kutusu eklenemez, değiştirilemez, silinemez. Canlı kutu kampanyaya yalnızca canlı gönderim kapısı açıkken,
+ *    bağlı ve `gmail.send` izinliyken atanabilir (`assertSendableMailbox`).
+ *  - Kutu eklemek tek başına gönderim değildir; gönderim yolu DNS, HTTPS çıkış, çekme ve ülke kilidini ayrıca denetler.
+ *  - Google Workspace ZORUNLU DEĞİLDİR: kişisel `@gmail.com` / `@googlemail.com` hesabı da eklenebilir. Adres hesabın
+ *    BİRİNCİL adresi olmalıdır (OAuth kimlik belirtecindeki e-postayla büyük/küçük harf duyarsız birebir eşleşir).
+ *    Kişisel Gmail'de `+etiket` takma adı birincil adres olamayacağından baştan reddedilir.
  */
 
 const GMAIL_OAUTH_SETTING = "mail.gmailOAuth";
@@ -76,6 +81,12 @@ export async function createGmailMailbox(
     throw new MailboxServiceError(
       "reserved_domain",
       "Bu alan adı gerçek bir posta kutusu için kullanılamaz.",
+    );
+  }
+  if (isConsumerGmailDomain(parsed.domain) && parsed.local.includes("+")) {
+    throw new MailboxServiceError(
+      "invalid_email",
+      "Gmail “+” takma adı birincil adres değildir; Google hesabının birincil adresini girin.",
     );
   }
   return db.transaction(async (tx) => {

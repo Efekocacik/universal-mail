@@ -1,34 +1,42 @@
 /**
  * Hukuki ve operasyonel onay durumları (Aşama 14).
  *
- * BU DEĞERLERİN HİÇBİRİ ÇALIŞMA ANINDA, KULLANICI BEYANIYLA veya ayarla değişmez. Kullanıcının "yasal saklama
- * yükümlülüğü yok" demesi hukuki onay yerine GEÇMEZ. Bir değer yalnızca yazılı hukuki onay alındıktan sonra, kaydı
- * tutulan yeni bir yazılım sürümüyle `true` yapılır (canlı ülke politikası kilidi ve `LIVE_SENDING_ENABLED` ile
- * aynı yöntem). Hepsi bu sürümde `false`'tur.
+ * BU DEĞERLERİN HİÇBİRİ ÇALIŞMA ANINDA, KULLANICI BEYANIYLA veya ayarla değişmez; yalnızca kaydı tutulan bir yazılım
+ * sürümüyle değişir (canlı ülke politikası kilidi ve `LIVE_SENDING_ENABLED` ile aynı yöntem).
+ *
+ * SAHİP KARARI (11 Kasım 2026): yedi maddenin hepsi bu sürümde `true` yapıldı. Uygulama DIŞ HUKUKİ İNCELEME
+ * OLMADAN yayımlandı; hukuki sorumluluk şirkettedir. Bu değerler bir hukukçunun onayını belgelemez; yalnızca sahibin
+ * yazılım kapısını açma kararını kaydeder. Çalışma anı denetimleri (ör. HTTPS çıkış uç noktasının uçtan uca
+ * doğrulanması, ülke kilidi) bu kararla atlanmaz.
  */
 
 export const LEGAL_APPROVALS = {
-  /** `docs/LIA.md` şirket ve hukuk tarafından tamamlandı ve onaylandı. */
-  lia: false,
-  /** `docs/UYUM.md` kullanıcıya sunulacak biçimiyle hukuk tarafından onaylandı. */
-  uyum: false,
-  /** Canlı ülke politikalarının kilidinin açılmasına yazılı hukuki onay verildi. */
-  liveCountryPolicies: false,
+  /** `docs/LIA.md`: sahip kararıyla kabul edildi (dış hukuki inceleme yok). */
+  lia: true,
+  /** `docs/UYUM.md`: sahip kararıyla kabul edildi (dış hukuki inceleme yok). */
+  uyum: true,
+  /**
+   * Canlı ülke politikalarının kilidinin açılabilmesi: sahip kararı. Kilidi bu sabit AÇMAZ; ülke bazında yalnızca
+   * sürüm dışı canlı ülke onay betiğiyle (`scripts/`, docs/10) sahip açar.
+   */
+  liveCountryPolicies: true,
   /**
    * Gerçek bir posta kutusundan fiilen gönderilmiş iletilerin kayıtlarının (alıcı adresi, konu) silme talebinde
-   * anonimleştirilmesi/silinmesi ile yasal saklama yükümlülükleri arasındaki ilişki hukuken değerlendirildi.
+   * anonimleştirilmesi/silinmesi: sahip kararıyla işlenir (dış hukuki inceleme yok).
    */
-  erasureOfTransmissionRecords: false,
-  /** Silme talebinden sonra suppression özetinin (e-posta özeti) saklanmasının hukuki dayanağı onaylandı. */
-  suppressionHashRetention: false,
+  erasureOfTransmissionRecords: true,
+  /** Silme talebinden sonra suppression özetinin (e-posta özeti) saklanması: sahip kararı. */
+  suppressionHashRetention: true,
   /**
-   * Türkiye'ye yönelik gönderimlerde MERSİS / ticaret sicil gibi kurumsal tanımlayıcıların ZORUNLULUK kuralı hukuken
-   * belirlendi. Alanlar isteğe bağlıdır; bu kural belirlenene kadar hiçbir gönderim bu yüzden engellenmez ve
-   * canlı gönderim zaten kapalıdır.
+   * Türkiye'ye yönelik gönderimlerde MERSİS / ticaret sicil gibi kurumsal tanımlayıcılar: sahip kararı. Alanlar
+   * isteğe bağlı kalır; hiçbir gönderim bu yüzden engellenmez.
    */
-  trSenderIdentifierRules: false,
-  /** Genel HTTPS tek tıklamalı çıkış uç noktası kuruldu ve doğrulandı. */
-  httpsUnsubscribeEndpoint: false,
+  trSenderIdentifierRules: true,
+  /**
+   * Genel HTTPS tek tıklamalı çıkış uç noktasının SÜRÜM kapısı: sahip kararı. Uç noktanın kendisi yine çalışma
+   * anında uçtan uca doğrulanmış olmalıdır (`isOneClickEndpointVerified`); doğrulanmamışsa canlı ileti gitmez.
+   */
+  httpsUnsubscribeEndpoint: true,
 } as const;
 
 export type LegalApprovalKey = keyof typeof LEGAL_APPROVALS;

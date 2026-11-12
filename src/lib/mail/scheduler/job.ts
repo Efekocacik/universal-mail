@@ -1,4 +1,5 @@
 import { and, eq, inArray, lt, ne } from "drizzle-orm";
+import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobHandler } from "@/lib/jobs/registry";
@@ -12,9 +13,12 @@ import { MailDispatcher } from "./dispatcher";
  * iş kendini bir sonraki uygun ana yeniden planlar. Kampanya durumunun doğru kaynağı iş kuyruğu değil,
  * `campaign_leads` / `messages` tablolarıdır; bu yüzden iş iki kez çalışsa bile aynı adım ikinci kez gönderilmez.
  *
- * GÜVENLİK: Zamanlayıcı varsayılan olarak KAPALIDIR. Yalnızca `FAZ3_DEMO_SCHEDULER_ENABLED=1` ortam değişkeniyle
- * (bu sürümde yalnızca testlerde) açılır. Kapalıyken hiçbir gönderim, uzlaştırma veya kampanya durum değişikliği
- * yapılmaz. Açıkken bile yalnızca demo posta kutusu ve demo sağlayıcısı kullanılabilir; canlı gönderim kapalıdır.
+ * GÜVENLİK: Zamanlayıcı varsayılan olarak KAPALIDIR. İki yoldan biriyle açılır:
+ *  - `FAZ3_DEMO_SCHEDULER_ENABLED=1` ortam değişkeni (demo; bu sürümde yalnızca testlerde ve yerel demo ortamında),
+ *  - gerçek gönderimin TEK birleşik kapısı `isLiveSendingPermitted()` (kodda sabit bayrak VE bütün hukuki onaylar).
+ * Kapalıyken hiçbir gönderim, uzlaştırma veya kampanya durum değişikliği yapılmaz. Kapı kapalıyken davranış öncekiyle
+ * aynıdır: yalnızca demo posta kutusu ve demo sağlayıcısı kullanılabilir. Kapı açık olsa bile her ileti gönderimden
+ * hemen önce `sendCampaignStep` içinde aynı kapıdan ve diğer bütün kurallardan yeniden geçer.
  */
 
 export const MAIL_SEND_JOB = "mail.send";
@@ -29,6 +33,16 @@ export function isDemoSchedulerEnabled(
 ): boolean {
   const v = env[SCHEDULER_FLAG];
   return v === "1" || v === "true";
+}
+
+/**
+ * `mail.send` dağıtıcısı çalışmalı mı? Demo bayrağı VEYA canlı gönderim kapısı (`isLiveSendingPermitted`). Kapı
+ * kodda sabittir; kapalıyken sonuç yalnızca demo bayrağına bağlıdır (önceki davranış).
+ */
+export function isMailSchedulerEnabled(
+  env: NodeJS.ProcessEnv | Record<string, string | undefined>,
+): boolean {
+  return isDemoSchedulerEnabled(env) || isLiveSendingPermitted();
 }
 
 /**
@@ -107,7 +121,7 @@ export function createMailSendHandler(opts: MailHandlerOptions): JobHandler {
   return async (ctx) => {
     if (!opts.enabled) {
       throw new NonRetryableJobError(
-        `${SCHEDULER_FLAG} kapalı: demo zamanlayıcısı çalıştırılmadı, gönderim yapılmadı.`,
+        `${SCHEDULER_FLAG} kapalı ve canlı gönderim kapısı kapalı: zamanlayıcı çalıştırılmadı, gönderim yapılmadı.`,
       );
     }
     const clock = opts.now ?? Date.now;
@@ -145,8 +159,8 @@ export function createMailSendHandler(opts: MailHandlerOptions): JobHandler {
 }
 
 /**
- * Worker başlangıcı: bayrak açıksa eski `sending` kayıtlarını uzlaştırır (10 dk eşiği; aktif gönderimlere
- * dokunulmaz), sahipsiz işleri geri alır, dağıtıcıyı planlar ve periyodik bakımı kurar. Bayrak kapalıysa
+ * Worker başlangıcı: zamanlayıcı açıksa (`isMailSchedulerEnabled`) eski `sending` kayıtlarını uzlaştırır (10 dk eşiği;
+ * aktif gönderimlere dokunulmaz), sahipsiz işleri geri alır, dağıtıcıyı planlar ve periyodik bakımı kurar. Kapalıysa
  * veritabanına HİÇ yazmaz.
  */
 export async function startMailScheduler(
@@ -158,7 +172,7 @@ export async function startMailScheduler(
     timers?: boolean;
   },
 ): Promise<{ enabled: boolean; reconciled: number; stop: () => void }> {
-  if (!isDemoSchedulerEnabled(opts.env)) return { enabled: false, reconciled: 0, stop: () => {} };
+  if (!isMailSchedulerEnabled(opts.env)) return { enabled: false, reconciled: 0, stop: () => {} };
   const clock = opts.now ?? Date.now;
   const log = opts.log ?? (() => undefined);
   const reconciled = await reconcileStaleSending(db, { now: clock() });

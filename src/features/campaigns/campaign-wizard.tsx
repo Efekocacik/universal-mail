@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
@@ -33,6 +34,7 @@ import { DemoBadge, LoadError, Notice } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { QueueTable } from "./queue-table";
 import { useSafeMutation } from "./use-safe-mutation";
+import { basicsDirty, leavingHref, stepsDirty } from "./wizard-dirty";
 
 /**
  * Kampanya sihirbazı (FR-CMP-01, 4 adım): temel ayarlar → adımlar → hedef lead'ler → özet ve başlat.
@@ -55,12 +57,22 @@ function FieldIssues({ info, path }: { info: MutationErrorInfo | null; path: str
 
 /* 1. Temel ayarlar ------------------------------------------------------------------------------ */
 
+/** Adımın kaydedilmemiş değişiklik durumunu sihirbaza bildirir; adım kapanınca "temiz" sayılır. */
+function useReportDirty(dirty: boolean, onDirtyChange: (dirty: boolean) => void) {
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+}
+
 function BasicsStep({
   campaign,
   onCreated,
+  onDirtyChange,
 }: {
   campaign?: CampaignDetail;
   onCreated: (id: number) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   const mailboxes = useMailboxes();
   const [name, setName] = useState(campaign?.name ?? "");
@@ -71,6 +83,8 @@ function BasicsStep({
   const [maxGapS, setMaxGap] = useState(campaign?.maxGapS ?? 240);
   const [issues, setIssues] = useState<MutationErrorInfo | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
+  // Kullanıcı posta kutusunu kendisi seçti mi? (Otomatik seçim kullanıcı düzenlemesi sayılmaz.)
+  const [mailboxTouched, setMailboxTouched] = useState(false);
 
   // Varsayılan: tek uygun (demo) posta kutusu.
   useEffect(() => {
@@ -104,6 +118,14 @@ function BasicsStep({
   const gapMaxOk = maxGapS >= minGapS && maxGapS <= 3600;
   const valid = nameOk && windowOk && capOk && gapMinOk && gapMaxOk;
   const readOnly = campaign !== undefined && campaign.status !== "draft";
+  const dirty =
+    !readOnly &&
+    basicsDirty(
+      campaign ?? null,
+      { name, mailboxId, sendWindow: win, dailyCap, minGapS, maxGapS },
+      { mailboxTouched },
+    );
+  useReportDirty(dirty, onDirtyChange);
 
   return (
     <form
@@ -136,7 +158,10 @@ function BasicsStep({
           <Select
             id="cw-mailbox"
             value={mailboxId ?? ""}
-            onChange={(e) => setMailboxId(e.target.value ? Number(e.target.value) : null)}
+            onChange={(e) => {
+              setMailboxTouched(true);
+              setMailboxId(e.target.value ? Number(e.target.value) : null);
+            }}
             disabled={readOnly}
           >
             <option value="">{t("wizard.mailbox.none")}</option>
@@ -266,6 +291,9 @@ function BasicsStep({
           {!valid && (
             <span className="text-[12px] text-muted-foreground">{t("wizard.invalid")}</span>
           )}
+          {valid && dirty && campaign && (
+            <span className="text-[12px] text-muted-foreground">{t("wizard.dirty.unsaved")}</span>
+          )}
         </div>
       )}
     </form>
@@ -274,7 +302,15 @@ function BasicsStep({
 
 /* 2. Adımlar ------------------------------------------------------------------------------------ */
 
-function StepsStep({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: () => void }) {
+function StepsStep({
+  campaign,
+  onSaved,
+  onDirtyChange,
+}: {
+  campaign: CampaignDetail;
+  onSaved: () => void;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const templates = useTemplates();
   const initial = useMemo(
     () => (templates.data ?? []).filter((x) => x.kind === "initial"),
@@ -320,6 +356,8 @@ function StepsStep({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: (
     steps.length > 0 &&
     steps.every((s) => s.templateId > 0) &&
     delays.slice(0, extra).every((d) => d >= 5 && d <= 90);
+  const dirty = !readOnly && stepsDirty(campaign.steps, steps);
+  useReportDirty(dirty, onDirtyChange);
 
   const save = useSafeMutation(() => campaignApi.setSteps(campaign.id, campaign.updatedAt, steps), {
     successMessage: t("common.saved"),
@@ -454,6 +492,9 @@ function StepsStep({ campaign, onSaved }: { campaign: CampaignDetail; onSaved: (
           </Button>
           {!valid && (
             <span className="text-[12px] text-muted-foreground">{t("wizard.steps.invalid")}</span>
+          )}
+          {valid && dirty && (
+            <span className="text-[12px] text-muted-foreground">{t("wizard.dirty.unsaved")}</span>
           )}
         </div>
       )}
@@ -595,6 +636,49 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
     successMessage: t("preflight.backToDraft.done"),
   });
 
+  // Kaydedilmemiş değişiklik koruması: adım değiştirme, bağlantıyla ayrılma ve pencere/sekme kapatma veya yenileme.
+  const [dirty, setDirty] = useState(false);
+  const [leaveTo, setLeaveTo] = useState<{ step: Step } | { href: string } | null>(null);
+  // Düzenleme sürerken kampanya yenilenirse (ör. lead eklendi → updatedAt değişti) adım yeniden kurulup yerel
+  // değişiklikleri silmesin: anahtar, değişiklik varken sabit tutulur ve kullanıcıya bilgi verilir.
+  const liveKey = campaign?.updatedAt ?? "new";
+  const [heldKey, setHeldKey] = useState<string | number>(liveKey);
+  useEffect(() => {
+    if (!dirty) setHeldKey(liveKey);
+  }, [dirty, liveKey]);
+  const stepKey = dirty ? heldKey : liveKey;
+  const serverChanged = dirty && heldKey !== liveKey;
+
+  useEffect(() => {
+    if (!dirty) return;
+    // Tarayıcıda yerel onay iletişim kutusunu açar. Electron'da `beforeunload` kapatmayı/yenilemeyi iletişim kutusu
+    // göstermeden engeller; ana süreç bunu `will-prevent-unload` ile yakalayıp Türkçe yerel bir soru gösterir
+    // (electron/main.ts): "Değişiklikleri at" seçilirse kapanış/yenileme sürer.
+    const onUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    const onClick = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a) return;
+      const href = leavingHref(
+        e,
+        { href: a.href, target: a.target, hasDownload: a.hasAttribute("download") },
+        window.location.href,
+      );
+      if (!href) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setLeaveTo({ href });
+    };
+    window.addEventListener("beforeunload", onUnload);
+    document.addEventListener("click", onClick, true);
+    return () => {
+      window.removeEventListener("beforeunload", onUnload);
+      document.removeEventListener("click", onClick, true);
+    };
+  }, [dirty]);
+
   if (enabled && q.isLoading) {
     return (
       <div className="mx-auto max-w-5xl space-y-4 p-4 sm:p-6">
@@ -613,9 +697,16 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
     );
   }
   const closed = campaign && !["draft", "ready"].includes(campaign.status);
-  const go = (s: Step) => {
+  /** Adıma koşulsuz geçer (kayıttan sonra veya değişiklikler bilerek bırakıldığında). */
+  const proceed = (s: Step) => {
     setStep(s);
     if (campaign) router.replace(`/campaigns/${campaign.id}/edit?step=${s}`);
+  };
+  /** Kullanıcının adım değiştirmesi: kaydedilmemiş değişiklik varsa önce sorulur. */
+  const go = (s: Step) => {
+    if (s === step) return;
+    if (dirty) setLeaveTo({ step: s });
+    else proceed(s);
   };
   const stepIndex = STEPS.indexOf(step);
   const done: Record<Step, boolean> = {
@@ -703,21 +794,28 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_16rem]">
           <div className="min-w-0 space-y-4">
             <section key={step} className="um-enter rounded-xl border bg-card p-4 sm:p-5">
+              {serverChanged && (step === "basics" || step === "steps") && (
+                <div className="mb-4">
+                  <Notice>{t("wizard.dirty.serverChanged")}</Notice>
+                </div>
+              )}
               {step === "basics" && (
                 <BasicsStep
-                  key={campaign?.updatedAt ?? "new"}
+                  key={stepKey}
                   campaign={campaign}
+                  onDirtyChange={setDirty}
                   onCreated={(newId) => {
                     if (!campaign) router.replace(`/campaigns/${newId}/edit?step=steps`);
-                    else go("steps");
+                    else proceed("steps");
                   }}
                 />
               )}
               {step === "steps" && campaign && (
                 <StepsStep
-                  key={campaign.updatedAt}
+                  key={stepKey}
                   campaign={campaign}
-                  onSaved={() => go("leads")}
+                  onDirtyChange={setDirty}
+                  onSaved={() => proceed("leads")}
                 />
               )}
               {step === "leads" && campaign && <LeadsStep campaign={campaign} />}
@@ -747,6 +845,25 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
           {campaign && <WizardSummary campaign={campaign} />}
         </div>
       </div>
+      <ConfirmDialog
+        open={leaveTo !== null}
+        onOpenChange={(open) => {
+          if (!open) setLeaveTo(null);
+        }}
+        tone="danger"
+        title={t("wizard.dirty.title")}
+        description={t("wizard.dirty.body")}
+        confirmLabel={t("wizard.dirty.discard")}
+        cancelLabel={t("wizard.dirty.stay")}
+        onConfirm={() => {
+          const target = leaveTo;
+          setLeaveTo(null);
+          setDirty(false);
+          if (!target) return;
+          if ("step" in target) proceed(target.step);
+          else router.push(target.href);
+        }}
+      />
     </div>
   );
 }

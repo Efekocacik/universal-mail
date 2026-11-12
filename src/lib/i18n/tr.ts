@@ -98,6 +98,14 @@ export const tr = {
 
   // Liste
   "list.count": "{n} işletme",
+  "export.leads": "Dışa aktar",
+  "export.leads.title": "Listeyi CSV olarak dışa aktar",
+  "export.leads.body":
+    "Geçerli süzgeçlere uyan işletmeler CSV dosyası olarak indirilir. Dışa aktarma işlem kaydına yazılır.",
+  "export.leads.confirm": "İndir",
+  "export.leads.google": "Google kaynaklı alanları dahil et",
+  "export.leads.google.hint":
+    "Ad, adres, telefon, web sitesi gibi Google Places alanları. Google şartları gereği yalnızca bilinçli olarak ve kendi kullanımınız için dahil edin.",
   "list.sort": "Sıralama",
   "list.sort.novelty": "Yenilik skoru",
   "list.sort.recent": "En yeni tespit",
@@ -677,7 +685,7 @@ export const tr = {
   "setup.google.body":
     "Gerçek işletmeleri bulmak için Google anahtarlarınızı girin. Önce uygulamayı denemek isterseniz demo modunu seçin.",
   "setup.google.guide":
-    "Anahtarı nasıl alacağınızı anlatan adım adım kılavuz için destek ekibinize ulaşın.",
+    "Anahtarlar şirketin kendi Google Cloud hesabından alınır. Google Workspace gerekmez; şirketin kullandığı Google hesabı (kişisel @gmail.com dahil) yeterlidir. Workspace varsa onun yönetici hesabı önerilir.\n1. console.cloud.google.com'da yeni bir proje açın (Workspace yoksa kuruluş: 'Kuruluş yok').\n2. Faturalandırma'da şirket kartını bağlayın; aylık bütçe uyarısı (ör. 20 USD) ve Places API (New) için günlük kota sınırı koyun. Bütçe uyarısı harcamayı durdurmaz, kota durdurur.\n3. API'ler ve Hizmetler → Kitaplık'ta Places API (New) ve Maps JavaScript API'yi etkinleştirin. Adında '(New)' olmayan eski Places API'yi açmayın.\n4. Kimlik Bilgileri'nde iki ayrı API anahtarı oluşturun: birini yalnızca Places API (New), diğerini yalnızca Maps JavaScript API ile kısıtlayın.\n5. İlkini 'İşletme arama anahtarı', ikincisini 'Harita anahtarı' alanına yapıştırıp 'Anahtarı test et' düğmesine basın. Anahtarları sohbet, e-posta veya ekran görüntüsüyle paylaşmayın.\nGmail gönderimi için aynı projede Gmail API ve OAuth izin ekranı da kurulur (kişisel hesapta kitle 'External', durum 'In production'); bu adım kurulumdan sonra Ayarlar → Gönderim hesabı'nda yapılır.\nAyrıntılar: Faz 0 Kılavuzu, Adım 5–8; Canlıya Geçiş belgesi.",
   "setup.google.demoNote":
     "Demo modunda yapay işletmeler üretilir; Google'a istek atılmaz, ücret doğmaz. Gerçek anahtarları sonradan Ayarlar'dan girebilirsiniz.",
   "setup.budget.title": "Aylık bütçe",
@@ -723,6 +731,9 @@ export const tr = {
   "setup.err.budget": "0 ile 100.000 arasında bir tutar girin.",
   "setup.err.key":
     "Anahtar çok kısa görünüyor; Google'dan kopyaladığınız anahtarı eksiksiz yapıştırın.",
+  // Paket C15 (kurulum kılavuzu ve belgeler): sihirbazdaki isteğe bağlı MERSİS / ticaret sicil alanları
+  "setup.err.identifier":
+    "En çok 40 karakter girin; yalnızca harf, rakam, boşluk ve . - / kullanılabilir.",
   "setup.keyTest.ok": "Anahtar çalışıyor.",
   "setup.keyTest.fail":
     "Anahtar doğrulanamadı. Anahtarı kontrol edip yeniden deneyin ya da Demo modunu seçin.",
@@ -751,7 +762,9 @@ export const tr = {
   "campaigns.filter": "Duruma göre süz",
   "campaigns.filter.all": "Tüm durumlar",
   "campaigns.demoNote":
-    "Bu sürümde gerçek e-posta gönderimi kapalıdır. Kampanyalar yalnızca demo posta kutusuyla çalışır; demo iletiler hiçbir alıcıya ulaşmaz.",
+    "Demo posta kutusuyla iletiler hiçbir alıcıya ulaşmaz. Gönderim izni verilmiş Gmail kutusuyla iletiler GERÇEK alıcılara gider; ancak Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi hazır olmadan hiçbir ileti gönderilmez.",
+  "campaigns.partial": "{total} kampanyanın {shown} tanesi gösteriliyor.",
+  "campaigns.more": "Daha fazla yükle",
   "campaigns.empty.title": "Henüz kampanya yok",
   "campaigns.empty.body":
     "Bir kampanya oluşturun, şablonunu seçin ve Keşif ekranından lead ekleyin. Başlatmadan önce özeti ve önizlemeleri görürsünüz.",
@@ -853,9 +866,9 @@ export const tr = {
   "wizard.name": "Kampanya adı",
   "wizard.mailbox": "Gönderen posta kutusu",
   "wizard.mailbox.none": "Seçin",
-  "wizard.mailbox.disabled": "bu sürümde kapalı",
+  "wizard.mailbox.disabled": "gönderime hazır değil",
   "wizard.mailbox.note":
-    "Gerçek posta kutuları (Gmail, SMTP) bu sürümde kullanılamaz; yalnızca demo posta kutusu seçilebilir.",
+    "Gerçek gönderim için bağlı ve gönderim izni verilmiş bir Gmail kutusu seçin; demo posta kutusu hiçbir alıcıya ileti göndermez. SMTP kutuları kullanılamaz.",
   "wizard.window": "Gönderim günleri ve saatleri",
   "wizard.window.start": "Başlangıç saati",
   "wizard.window.end": "Bitiş saati",
@@ -931,6 +944,8 @@ export const tr = {
   "queue.filter": "Dizi durumuna göre süz",
   "queue.filter.all": "Tüm diziler",
   "queue.empty": "Bu kampanyada henüz dizi yok.",
+  "queue.partial": "{total} dizinin ilk {shown} tanesi gösteriliyor.",
+  "queue.more": "Daha fazla yükle",
   "queue.noRecipient": "Alıcı yok",
   "queue.step": "{n}. adım",
   "queue.next": "sıradaki: {at}",
@@ -945,6 +960,20 @@ export const tr = {
   "queue.col.status": "Durum",
   "queue.col.when": "Adım ve zaman",
   "queue.col.action": "İşlem",
+  // C9: süzgeçle sayfa sayfa ekleme ve hariç tutulanları yeniden denetleme
+  "addToCampaign.bodyPaged":
+    "Süzgece uyan {total} işletmeden bu kampanyada henüz olmayanların ilk {n} tanesi eklenir. Her biri uygunluk denetiminden geçer; daha önce hariç tutulanlar yeniden denetlenir.",
+  "addToCampaign.remaining":
+    "Süzgece uyan {n} işletme daha bu kampanyaya eklenmedi. Devam etmek için sıradakileri ekleyin.",
+  "addToCampaign.allDone": "Süzgece uyan bütün işletmeler bu kampanyada.",
+  "addToCampaign.next": "Sıradaki {n} işletmeyi ekle",
+  "addToCampaign.reevaluated": "Daha önce hariç tutulan {n} işletme yeniden denetlendi.",
+  "queue.reevaluate": "Hariç tutulanları yeniden denetle",
+  "queue.reevaluate.help":
+    "{n} alıcı hariç tutuldu. Gerekçe giderildiyse (posta kutusu, gönderen profili, e-posta doğrulaması…) yeniden denetleyin; uygun olanlar kuyruğa alınır.",
+  "queue.reevaluate.done":
+    "{pending} alıcı kuyruğa alındı · {excluded} alıcı hâlâ hariç tutuluyor.",
+  "queue.reevaluate.none": "Yeniden denetlenecek hariç tutulan alıcı yok.",
   "messages.col.recipient": "Alıcı",
   "messages.col.status": "Durum",
   "messages.col.when": "Adım ve zaman",
@@ -955,6 +984,7 @@ export const tr = {
     'Ne yapabilirsiniz: sonuç netleşene kadar bu ileti yeniden gönderilmez; "İnceleme bekleyenler" sayfasına bakın.',
   "messages.title": "Gönderim günlüğü",
   "messages.empty": "Henüz gönderim yok.",
+  "messages.more": "Daha fazla yükle",
 
   "preflight.draft":
     "Başlatmadan önce kampanyayı hazır duruma getirin. Posta kutusu, e-posta adımları ve gönderim saatleri kontrol edilir.",
@@ -975,7 +1005,7 @@ export const tr = {
   "preflight.confirm":
     "Özeti ve önizlemeleri inceledim; kampanyanın kurallara göre otomatik yürütülmesini onaylıyorum.",
   "preflight.confirm.note":
-    "Bu sürümde gönderim demo modundadır: iletiler gerçek alıcılara gitmez. Her gönderimden hemen önce uygunluk yeniden denetlenir.",
+    "Gmail kutusuyla başlatılan kampanya GERÇEK alıcılara ileti gönderir; demo posta kutusuyla iletiler hiçbir alıcıya gitmez. Her gönderimden hemen önce uygunluk ve gönderim hazırlığı yeniden denetlenir.",
   "preflight.start": "Başlat",
   "preflight.started": "Kampanya başlatıldı.",
   "preflight.check.title": "Göndermeden önce kontrol",
@@ -1015,11 +1045,37 @@ export const tr = {
   "review.empty": "İnceleme bekleyen gönderim yok.",
   "review.noCode": "Ek bilgi yok",
   "review.openCampaign": "Kampanya #{id}",
+  // C7: sonucu belirsiz gönderimin kullanıcı kararıyla çözülmesi
+  "review.resolve.help":
+    "Her e-posta için posta kutunuzun Gönderilmiş klasörüne bakıp karar verin. Emin değilseniz «Gönderimi durdur»u seçin: bu kişiye bu kampanyadan başka e-posta gitmez.",
+  "review.resolve.actions": "Karar",
+  "review.markSent": "Gönderildi",
+  "review.markNotSent": "Gönderilmedi",
+  "review.stop": "Gönderimi durdur",
+  "review.markSent.title": "Bu e-posta gönderildi olarak işaretlensin mi?",
+  "review.markSent.body":
+    "Yalnızca e-postayı Gönderilmiş klasöründe gördüyseniz seçin. Kayıt «gönderildi» olur ve kişi bir sonraki adıma geçer; sonraki e-posta bekleme süresi dolunca olağan kurallarla gönderilir. Geri alınamaz.",
+  "review.markSent.confirm": "Gönderildi olarak işaretle",
+  "review.markNotSent.title": "Bu e-posta gönderilmedi olarak işaretlensin mi?",
+  "review.markNotSent.body":
+    "Yalnızca e-postanın gitmediğinden eminseniz seçin (Gönderilmiş klasöründe yok). Bu adım yeniden gönderime açılır ve olağan kurallarla tekrar gönderilir. Karar yanlışsa aynı kişiye ikinci e-posta gider. Geri alınamaz.",
+  "review.markNotSent.confirm": "Gönderilmedi, yeniden gönderime aç",
+  "review.stop.title": "Bu kişiye gönderim durdurulsun mu?",
+  "review.stop.body":
+    "Bu kişiye bu kampanyadan başka e-posta gönderilmez. Kayıt «sonuç belirsiz» olarak kalır; bu yüzden kişi diğer kampanyalarda da engelli kalır. Emin değilseniz en güvenli seçenek budur. Geri alınamaz.",
+  "review.stop.confirm": "Gönderimi durdur",
+  "review.resolved.mark_sent": "Gönderildi olarak işaretlendi.",
+  "review.resolved.mark_not_sent":
+    "Gönderilmedi olarak işaretlendi; adım yeniden gönderime açıldı.",
+  "review.resolved.stop_sequence": "Bu kişiye gönderim durduruldu.",
+  "review.testSend": "Test e-postası",
+  "reason.resolved_not_sent": "Gönderilmediği kullanıcı tarafından doğrulandı",
+  "reason.review_stopped": "Sonuç belirsiz olduğu için gönderim durduruldu",
 
   "blocker.consent_missing": "Kullanım onayı verilmemiş",
   "blocker.sender_profile_incomplete": "Gönderen firma bilgileri eksik",
   "blocker.mailbox_missing": "Posta kutusu seçilmemiş",
-  "blocker.live_disabled": "Gerçek posta kutusuyla gönderim kapalı",
+  "blocker.live_disabled": "Bu posta kutusuyla gerçek gönderim yapılamaz",
   "blocker.mailbox_not_ready": "Posta kutusu hazır değil",
   "blocker.steps_missing": "İlk e-posta adımı tanımlanmamış",
   "blocker.steps_invalid": "Bir adımın şablonu artık kullanılamıyor",
@@ -1031,7 +1087,8 @@ export const tr = {
   "blocker.hint.sender_profile_incomplete":
     "Ayarlar'dan firma adı, adres ve iletişim bilgilerini doldurun.",
   "blocker.hint.mailbox_missing": "Sihirbazın ilk adımında bir gönderen posta kutusu seçin.",
-  "blocker.hint.live_disabled": "Bu sürümde yalnızca demo posta kutusu kullanılabilir.",
+  "blocker.hint.live_disabled":
+    "Demo posta kutusunu veya gönderim izni verilmiş bağlı bir Gmail kutusunu seçin.",
   "blocker.hint.mailbox_not_ready": "Posta kutusu kullanıma hazır olunca yeniden deneyin.",
   "blocker.hint.steps_missing": "E-posta adımları sayfasında en az bir ilk e-posta şablonu seçin.",
   "blocker.hint.steps_invalid":
@@ -1070,10 +1127,14 @@ export const tr = {
   "reason.suppressed": "Engelli listesinde (bu adrese yazılmayacak)",
   "reason.already_in_campaign": "Zaten bu kampanyada",
   "reason.domain_already_in_campaign": "Aynı firma web adresi zaten bu kampanyada",
+  "reason.business_already_in_campaign":
+    "Aynı işletmenin başka bir adresi bu kampanyada (işletme başına tek dizi)",
   "reason.active_sequence_elsewhere": "Başka bir kampanyada süren dizi var",
   "reason.recontact_requires_review": "Yeniden temas elle değerlendirme gerektirir",
   "reason.rest_period": "Bu işletmeye son 180 gün içinde yazıldı; sonra tekrar deneyin",
   "reason.cross_campaign_gap": "Son temastan bu yana 30 gün geçmedi",
+  "reason.business_contact_cooldown":
+    "Bu işletmenin başka bir adresine başka kampanyada yakın zamanda yazıldı (bekleme süresi dolmadı)",
   "reason.unresolved_delivery": "Önceki gönderimin sonucu belirsiz",
   "reason.step_out_of_range": "E-posta adımı bulunamadı",
   "reason.step_missing": "Bu dil için şablon yok",
@@ -1087,10 +1148,17 @@ export const tr = {
   "reason.provider_unavailable": "Posta servisi kullanılamıyor",
   "reason.arf_complaint": "Şikâyet raporu (ARF)",
   "reason.unsubscribe_unavailable": "Doğrulanmış çıkış bağlantısı hazırlanamadı",
+  "reason.unsubscribe_drain_unhealthy":
+    "Çıkış talepleri çekilmiyor (çekme kapalı veya son 24 saatte sağlıklı kayıt yok); gönderim ertelendi",
+  "reason.reauthorization_required":
+    "Gönderen Gmail kutusunun Google yetkisi geçersiz veya iptal edilmiş; kutu yeniden bağlanana kadar gönderim ertelendi",
+  "reason.dns_not_verified":
+    'Gönderen alan adının DNS denetimi (SPF/DKIM/DMARC) taze değil veya geçmedi; Günlük → Gönderim sağlığı → "Kontrol et". Gönderim ertelendi',
   "reason.mailbox_daily_cap": "Posta kutusunun günlük tavanı doldu",
   "reason.campaign_daily_cap": "Kampanyanın günlük tavanı doldu",
   "reason.mailbox_gap": "Gönderimler arası bekleme sürüyor",
-  "reason.mailbox_halted": "Posta kutusu bounce oranı nedeniyle durduruldu",
+  "reason.mailbox_halted":
+    "Posta kutusundan gönderim geçici olarak durduruldu (bounce oranı, Gmail sınırı veya belirsiz sonuç)",
   "reason.not_due": "Planlanan zaman gelmedi",
   "reason.outside_window": "Alıcının gönderim penceresi dışında",
   "reason.invalid_send_window": "Gönderim penceresi geçersiz",
@@ -1107,6 +1175,18 @@ export const tr = {
   "reason.demo_only": "Demo posta servisi yalnızca demo iletilerini kabul eder",
   "reason.try_later": "Posta servisi daha sonra denenmesini istedi",
   "reason.rate_limited": "Posta servisi çok hızlı gönderildiği için bekletti; otomatik denenecek",
+  "reason.rate_limited_daily":
+    "Gmail günlük gönderim kotası doldu; kutu ertesi güne kadar bekletildi (dizi başarısız sayılmaz)",
+  "reason.auth_unavailable":
+    "Google yetki servisine ulaşılamadı; ileti gönderilmedi, kutu kısa süre bekletildi",
+  "reason.network_unreachable":
+    "İnternet bağlantısı yok veya Gmail'e ulaşılamadı; ileti gönderilmedi, kutu kısa süre bekletildi",
+  "reason.forbidden":
+    "Gmail bu kutudan gönderimi reddetti (yetki/izin); kutunun kampanyaları duraklatıldı",
+  "reason.scope_missing":
+    "Gmail kutusunun gönderim izni yok; kutuyu yeniden bağlayın (kampanyalar duraklatıldı)",
+  "reason.recent_unknown":
+    "Son gönderimin sonucu belirsiz; aynı kutudan 30 dakika başka gönderim yapılmaz",
 
   /* Faz 3 – Aşama 12: şablonlar ve uyum */
   "subnav.label": "Kampanya araçları",
@@ -1276,11 +1356,11 @@ export const tr = {
   "policy.strictest": "En kısıtlayıcı",
   "policy.error.conflict":
     "Politika aynı anda değiştirilmiş. Güncel hâli yüklendi; yeniden deneyin.",
-  "policy.live.title": "Gerçek gönderim politikaları (kilitli)",
+  "policy.live.title": "Gerçek gönderim politikaları (uygulamada değiştirilemez)",
   "policy.live.on": "Açık",
   "policy.live.off": "Kapalı",
   "policy.live.body":
-    "Gerçek e-posta gönderimi bu sürümde kapalıdır; bütün ülkeler engelli ve kilitlidir. Bu satırlar yalnızca bilgi içindir, değiştirilemez.",
+    "Gerçek gönderim kapısı bu sürümde açıktır, ancak ülkeler engelli ve kilitli başlar. Bir ülkenin kilidi yalnızca şirket sahibinin çalıştırdığı canlı ülke onay betiğiyle açılır; kilitli ülkeye hiçbir ileti gönderilmez. Bu satırlar uygulama içinden değiştirilemez.",
 
   "supReason.unsubscribe": "Çıkış talebi",
   "supReason.bounce_hard": "Kalıcı teslimat hatası",
@@ -1459,7 +1539,8 @@ export const tr = {
   "audit.empty": "Kayıt yok",
   "audit.col.action": "İşlem",
   "audit.col.detail": "Ayrıntı",
-  "health.demoNote": "Demo: gerçek e-posta gönderimi kapalıdır.",
+  "health.demoNote":
+    "Demo posta kutusunun iletileri hiçbir alıcıya ulaşmaz; gerçek iletiler yalnızca gönderim izni verilmiş Gmail kutusundan gider.",
   "health.autostop.title": "Otomatik durdurma",
   "health.autostop.help":
     "Bir kampanyada doğrulanmış kalıcı teslim hatası oranı eşiği aşarsa kampanya duraklatılır. Eşikler yalnızca sıkılaştırılabilir (durdurma daha kolay tetiklenir).",
@@ -1477,6 +1558,11 @@ export const tr = {
   "health.dns.selector": "DKIM seçici adı (isteğe bağlı)",
   "health.dns.check": "Kontrol et",
   "health.dns.demo": "Demo posta kutusu gerçek bir alan adı kullanmaz; DNS sorgusu yapılmadı.",
+  "health.dns.help.consumer":
+    "Bu kutu kişisel Gmail adresi kullanır. Alan adının SPF, DKIM ve DMARC kayıtları Google'ın elindedir; “Kontrol et” DNS sorgusu yapmaz.",
+  "health.dns.managed.title": "Google tarafından yönetiliyor",
+  "health.dns.managed.body":
+    "{domain} kişisel Gmail alan adıdır: SPF, DKIM ve DMARC kayıtlarını Google yönetir ve iletileri kendi alan adıyla imzalar. Sizin DNS kaydı eklemeniz gerekmez (eklenemez de). DNS sorgusu yapılmadı; bu kutu gönderim hazırlığında “tamam” sayılır.",
   "health.dns.spf": "SPF",
   "health.dns.dkim": "DKIM",
   "health.dns.dmarc": "DMARC",
@@ -1514,6 +1600,35 @@ export const tr = {
   "health.test.sent": "Test iletisi demo kutusuna gönderildi.",
   "health.test.notSendable": "Şablon gönderime hazır değil; eksik bilgileri tamamlayın.",
   "health.test.failed": "Test iletisi gönderilemedi.",
+  "health.test.liveTitle": "Kendime gerçek test e-postası gönder (Gmail)",
+  "health.test.liveHelp":
+    "Gerçek bir e-posta, bağlı Gmail kutusu üzerinden YALNIZCA bu kutunun kendi adresine ({address}) gönderilir; başka alıcı seçilemez. Canlıya geçişten önce iletinin görünümünü, alt bilgisini ve başlıklarını kendi gelen kutunuzda doğrulamak içindir. Konu “[TEST]” önekli, alt bilgi “[TEST]” işaretlidir. Kampanya sayaçlarını etkilemez; kutu başına günde en fazla 10 test.",
+  "health.test.liveLeadHint":
+    "İşletme yalnızca değişkenleri doldurmak için kullanılır; bu işletmeye hiçbir e-posta gitmez.",
+  "health.test.liveSend": "Kendime gerçek test gönder",
+  "health.test.liveConfirmTitle": "Kendinize gerçek bir e-posta gönderilsin mi?",
+  "health.test.liveConfirmBody":
+    "Gmail üzerinden {address} adresine gerçek bir test e-postası gönderilecek. Başka hiçbir alıcıya gönderilmez.",
+  "health.test.liveConfirm": "Gönder",
+  "health.test.liveSent":
+    "Test e-postası {address} adresine gönderildi. Gmail gelen kutunuzu kontrol edin.",
+  "health.test.liveNoUnsubscribe":
+    "Çıkış uç noktası henüz doğrulanmadığı için iletide tek tıklamalı çıkış (List-Unsubscribe) başlığı yoktur.",
+  "health.test.liveFailed": "Gmail iletiyi kabul etmedi; gönderilmedi (kod: {code}).",
+  "health.test.recordError":
+    "Sonuç kaydı şu an yazılamadı (veritabanı meşgul); kayıt birkaç dakika içinde uzlaştırılacak. Yeniden göndermeyin.",
+  "health.test.reauth":
+    "Gmail yetkisi geçersiz veya iptal edilmiş; ileti gönderilmedi. Ayarlar → Gönderim hesabı'ndan “Yeniden bağlan”a basın.",
+  "health.test.liveUnknown":
+    "Gönderim sonucu belirsiz: ileti gitmiş olabilir. Otomatik olarak yeniden gönderilmez; gelen kutunuzu kontrol edin ve Kampanyalar › İnceleme ekranından karar verin.",
+  "health.test.error.SEND_SCOPE_MISSING":
+    "Bu Gmail kutusu için gönderim izni yok. Ayarlar'dan kutuyu gönderim izniyle yeniden bağlayın.",
+  "health.test.error.PROFILE_INCOMPLETE":
+    "Firma profili eksik veya geçersiz. Ayarlar'dan firma bilgilerini tamamlayın.",
+  "health.test.error.MAILBOX_NOT_READY": "Posta kutusu bağlı değil veya adresi yok.",
+  "health.test.error.IN_PROGRESS": "Bu kutuda süren bir test gönderimi var; bitmesini bekleyin.",
+  "health.test.error.BUILD_FAILED": "Test iletisi oluşturulamadı.",
+  "health.test.error.LIVE_SCOPE": "Bu posta kutusuyla test gönderimi yapılamaz.",
   "unsub.title": "İletişimden çıkma",
   "unsub.body": "Bu adrese bir daha ticari e-posta gönderilmeyecek. Onaylıyor musunuz?",
   "unsub.confirm": "Çıkışı onayla",
@@ -1556,7 +1671,7 @@ export const tr = {
     "Şu an: %{rate} üzeri, en az {recipients} alıcıda; daha azında {guard} doğrulanmış hata.",
   "ready.title": "Canlı gönderime hazırlık",
   "ready.help":
-    "Gerçek gönderim kapalıdır ve bu ekrandan açılamaz. Maddeler gerçek duruma bakılarak hesaplanır; hiçbiri varsayımla tamamlanmış sayılmaz.",
+    "Kod kapıları bu sürümde açıktır; yine de Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi tamamlanmadan gerçek ileti gönderilmez. Bu ekran hiçbir şeyi açmaz; maddeler gerçek duruma bakılarak hesaplanır, hiçbiri varsayımla tamamlanmış sayılmaz.",
   "ready.summary": "{blocked} engel, {unknown} doğrulanmamış madde",
   "ready.status.ok": "Tamam",
   "ready.status.blocked": "Engel var",
@@ -1565,29 +1680,31 @@ export const tr = {
   "ready.owner.company": "Şirket",
   "ready.owner.legal": "Hukuk",
   "ready.owner.external": "Dış hesap/hizmet",
-  "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda kapalı)",
+  "ready.item.live_flag": "Gerçek gönderim anahtarı (kodda sabit)",
   "ready.item.consent": "Kullanım onayı",
   "ready.item.company_profile": "Gönderen firma profili",
   "ready.item.inbox_access":
     "Gelen kutusu okuma izni (bounce ve yanıt koruması için gmail.readonly)",
   "ready.item.real_mailbox": "Bağlı gerçek posta kutusu (Gmail/SMTP)",
-  "ready.item.dns_auth": "SPF/DKIM/DMARC doğrulaması (gerçek alan adı; son denetim sonucu)",
+  "ready.item.dns_auth":
+    "SPF/DKIM/DMARC doğrulaması (kendi alan adı: son denetim sonucu; kişisel Gmail: Google yönetir)",
+  "ready.detail.provider_managed":
+    "Kişisel Gmail (@gmail.com): SPF, DKIM ve DMARC Google tarafından yönetilir; DNS kaydı eklemeniz gerekmez.",
   "ready.item.inbox_sync": "Gelen kutusu okuması çalışıyor (son başarılı eşitleme)",
-  "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda kapalı)",
+  "ready.item.live_inbox_flag": "Gerçek gelen kutusu okuma anahtarı (kodda sabit)",
   "ready.item.inbox_header_trust":
     "Gmail başlık güven kilidi (gerçek hesapla doğrulanana kadar kapalı)",
   "ready.item.event_delivery":
-    "Çıkış olaylarının dayanıklı teslimatı (kuyruk sağlığı ve imzalı kanal)",
+    "Çıkış olaylarının dayanıklı teslimatı (çekme açık, son 24 saatte sağlıklı kuyruk kaydı, imzalı kanal)",
   "ready.item.https_unsubscribe":
     "Genel HTTPS tek tıklamalı çıkış uç noktası (uçtan uca doğrulanmış)",
-  "ready.item.live_country_policies": "Canlı ülke politikaları (kilitli)",
-  "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi) onayı",
-  "ready.item.legal_uyum": "UYUM belgesinin hukuk onayı",
-  "ready.item.legal_live_countries": "Canlı ülke politikası kilidi için yazılı hukuki onay",
-  "ready.item.legal_erasure_records":
-    "Gönderilmiş ileti kayıtlarının silinmesi: hukuki değerlendirme",
-  "ready.item.legal_suppression_hash":
-    "Engel listesinde e-posta özetinin saklanması: hukuki dayanak",
+  "ready.item.live_country_policies":
+    "Canlı ülke politikaları (en az bir ülkenin kilidi sahip onay betiğiyle açıldı)",
+  "ready.item.legal_lia": "LIA (meşru menfaat değerlendirmesi): sahip kararı",
+  "ready.item.legal_uyum": "UYUM belgesi: sahip kararı",
+  "ready.item.legal_live_countries": "Canlı ülke kilidini açma yetkisi: sahip kararı",
+  "ready.item.legal_erasure_records": "Gönderilmiş ileti kayıtlarının silinmesi: sahip kararı",
+  "ready.item.legal_suppression_hash": "Engel listesinde e-posta özetinin saklanması: sahip kararı",
   "ready.item.pilot": "Pilot (günde en çok 20 e-posta, ilk hafta)",
   "erasure.title": "Kişisel veri silme talebi",
   "erasure.help":
@@ -1608,7 +1725,7 @@ export const tr = {
   "erasure.pending.body":
     "Gerçek bir posta kutusundan fiilen iletilmiş {messages} ileti ve {sequences} dizi kaydı yasal saklama yükümlülükleriyle çakışabilir. Hukuki değerlendirme tamamlanana kadar bu kayıtlar korunur; iletişim yine de durdurulur.",
   "erasure.legal.suppression":
-    "Silme sonrası yeniden iletişimi önlemek için e-posta özeti ve alan adı engel listesinde saklanır. Bu saklamanın hukuki dayanağı henüz onaylanmadı (hukuki değerlendirme bekliyor).",
+    "Silme sonrası yeniden iletişimi önlemek için e-posta özeti ve alan adı engel listesinde saklanır. Bu saklama şirket sahibinin kararıdır; dış hukuki inceleme yapılmadı.",
   "erasure.backup":
     "Yedekler: şema güncellemesi öncesi alınan en çok 5 yedek dosyası eski veriyi taşıyabilir. Bu işlem onları değiştirmez; döngüde silinene kadar kalırlar.",
   "erasure.exists": "Bu adres için silme kaydı zaten var.",
@@ -1630,22 +1747,23 @@ export const tr = {
   "company.trHint":
     "Bu iki alan isteğe bağlıdır ve yalnızca Türkiye'ye yönelik iletilerin alt bilgisine eklenir. Gerekliliği hukuki değerlendirmeye bağlıdır; boş bırakmak hiçbir gönderimi engellemez.",
   "preflight.advisory.tr_identifiers_missing":
-    "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu bilgilerin gerekliliği hukuki değerlendirme bekliyor; gönderim engellenmez (gerçek gönderim zaten kapalıdır).",
+    "Kampanyada {n} Türkiye alıcısı var, ancak firma profilinde MERSİS veya ticaret sicil numarası yok. Bu alanlar isteğe bağlıdır (sahip kararı); gönderim engellenmez.",
   "ready.item.legal_tr_identifiers":
-    "Türkiye için MERSİS/ticaret sicil zorunluluk kuralı: hukuki değerlendirme",
+    "Türkiye için MERSİS/ticaret sicil kuralı: sahip kararı (alanlar isteğe bağlı)",
 
   "settings.nav.mailbox": "Gönderim hesabı",
   "mbx.title": "Gönderim hesabı (Gmail)",
   "mbx.desc":
-    "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlarsınız. Bağlantı kurma bir sonraki aşamada eklenecek.",
+    "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlar, kutuyu Google izin ekranıyla Gmail'e bağlarsınız (gönderim izni; isteğe bağlı gelen kutusu okuma izni).",
   "mbx.note":
-    "Gerçek e-posta gönderimi bu sürümde kapalıdır. Eklediğiniz kutu “yapılandırılmadı” durumunda kalır; hiçbir hesaba bağlanılmaz ve hiçbir ileti gönderilmez. Kimlik bilgileri veritabanına değil, şifreli depoya yazılır.",
+    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır. Gmail bağlamak tek başına ileti göndermez: gönderim izni, DNS denetimi (kişisel @gmail.com adresinde Google yönetir, gerekmez), HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Google Workspace zorunlu değildir; kişisel Gmail hesabı da kullanılabilir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
   "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
   "mbx.status.connected": "Bağlı",
   "mbx.status.disabled": "Devre dışı",
   "mbx.status.not_configured": "Yapılandırılmadı",
+  "mbx.status.reauth": "Yeniden bağlanmalı",
   "mbx.label": "Ad",
-  "mbx.address": "Gmail / Workspace adresi",
+  "mbx.address": "Gmail adresi (kişisel @gmail.com veya Workspace)",
   "mbx.add": "Kutu ekle",
   "mbx.added": "Posta kutusu eklendi (henüz bağlı değil).",
   "mbx.enable": "Etkinleştir",
@@ -1658,7 +1776,7 @@ export const tr = {
   "mbx.removed": "Posta kutusu silindi.",
   "mbx.client.title": "Google OAuth istemcisi",
   "mbx.client.help":
-    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Burada yalnızca saklanır; bu aşamada Google'a hiçbir istek gönderilmez ve geçerliliği sınanmaz.",
+    "Google Cloud'da oluşturduğunuz “Desktop app” istemcisinin kimliği ve sırrı. Kaydederken geçerliliği sınanmaz; yalnızca “Gmail'e bağlan” ile başlattığınız Google OAuth bağlantısında kullanılır. Kişisel Gmail hesabında Google Auth Platform kitlesi “External” olmalı ve uygulama “In production” (yayında) durumuna alınmalıdır: “Testing” durumunda bağlantı 7 günde bir düşer. Doğrulanmamış uygulama uyarısında “Gelişmiş → … sayfasına git (güvenli değil)” ile devam edilebilir (yalnızca kendi hesabınız için).",
   "mbx.client.id": "İstemci kimliği",
   "mbx.client.secret": "İstemci sırrı",
   "mbx.client.secret.hint":
@@ -1686,7 +1804,7 @@ export const tr = {
   "mbx.oauth.read.enable": "Gelen kutusu okumayı etkinleştir",
   "mbx.oauth.read.title": "Gelen kutusu okuma izni istensin mi?",
   "mbx.oauth.read.body":
-    "Bounce ve yanıt tespiti için Google'dan “gmail.readonly” izni istenir. Bu izin posta kutunuzdaki tüm iletileri okuma yetkisi verir (kısıtlı kapsam). Yalnızca gerekiyorsa verin; gönderim izni bundan bağımsızdır. Gerçek gönderim bu sürümde kapalıdır.",
+    "Bounce ve yanıt tespiti için Google'dan “gmail.readonly” izni istenir. Bu izin posta kutunuzdaki tüm iletileri okuma yetkisi verir (kısıtlı kapsam). Yalnızca gerekiyorsa verin; gönderim izni bundan bağımsızdır.",
   "mbx.oauth.read.confirm": "İzni iste",
   "mbx.oauth.disconnect": "Bağlantıyı kes",
   "mbx.oauth.disconnect.title": "Gmail bağlantısı kesilsin mi?",
@@ -1696,7 +1814,22 @@ export const tr = {
   "mbx.oauth.disconnected.norevoke":
     "Bağlantı kesildi, ancak Google'daki yetki iptal edilemedi; Google hesap ayarlarından kaldırabilirsiniz.",
   "mbx.oauth.reauth": "Yetki geçersiz veya iptal edilmiş; yeniden bağlanmanız gerekir.",
-  "mbx.oauth.result.ok": "Gmail kutusu bağlandı. Gerçek gönderim yine de kapalıdır.",
+  "mbx.oauth.reauth.help":
+    "Google bu kutunun iznini artık kabul etmiyor: izin Google hesabından kaldırılmış ya da OAuth projesi “Testing” durumunda olduğu için 7 günlük süre dolmuş olabilir. Bu kutudan kampanya gönderimleri yeniden bağlanana kadar ertelenir; diziler başarısız sayılmaz. Sürekli tekrarlıyorsa Google Cloud'da projeyi “In production” (yayında) durumuna alın.",
+  "mbx.oauth.reconnect": "Yeniden bağlan",
+  "mbx.reauthBanner.title": "Gmail bağlantısı yenilenmeli",
+  "mbx.reauthBanner.body":
+    "{list}: Google yetkisi geçersiz veya iptal edilmiş. Bu kutudan kampanya gönderimleri yeniden bağlanana kadar ertelenir (diziler başarısız sayılmaz).",
+  "worker.banner.title": "Arka plan işçisi çalışmıyor",
+  "worker.banner.overdue":
+    "{count} zamanlanmış iş (gönderim, gelen kutusu veya çıkış olayı çekme) {since} tarihinden beri bekliyor ve çalışan bir işçi yok. Kampanyalar ilerlemez, yanıtlar ve çıkış istekleri işlenmez. Uygulamayı kapatıp yeniden açın; sürerse günlük dosyasına bakın.",
+  "worker.banner.crashLoop":
+    "Arka plan işçisi art arda çöktü ({restarts} kez, son: {at}). Uygulama birkaç dakikada bir yeniden deniyor; bu sürede gönderim, gelen kutusu ve çıkış olayı çekme durur. Uygulamayı yeniden başlatın ve günlük dosyasına bakın.",
+  "mbx.limits.consumer":
+    "Kişisel Gmail: bugün en çok {today} ileti. Isınma günde {base} ile başlar, bu kutu için üst sınır günde {max}. Kişisel Gmail'in Google gönderim sınırı Workspace'ten çok düşüktür; yüksek hacim hesabın kısıtlanmasına yol açabilir.",
+  "mbx.limits.workspace":
+    "Bugün en çok {today} ileti. Isınma günde {base} ile başlar, üst sınır günde {max}.",
+  "mbx.oauth.result.ok": "Gmail kutusu bağlandı.",
   "mbx.oauth.result.readDenied":
     "Gelen kutusu okuma izni verilmedi; kutu yalnızca gönderim izniyle bağlandı.",
   "mbx.oauth.result.error": "Bağlantı kurulamadı.",
@@ -1709,4 +1842,216 @@ export const tr = {
   "mbx.oauth.reason.no_refresh_token": "Google kalıcı yetki vermedi; yeniden deneyin.",
   "mbx.oauth.reason.transient": "Google'a ulaşılamadı; daha sonra yeniden deneyin.",
   "mbx.oauth.reason.other": "Google yetkilendirmeyi tamamlayamadı.",
+
+  // Paket C3+C4 (TB-3): abonelikten çıkış altyapısı ayar kartı (anahtarlar, aktarıcı, doğrulama, çekme, ARF).
+  "settings.nav.unsubscribe": "Çıkış altyapısı",
+  "unsubInfra.title": "Abonelikten çıkış altyapısı (HTTPS)",
+  "unsubInfra.desc":
+    "Gerçek iletilerdeki tek tıklamalı çıkış bağlantısı için gereken anahtarlar, çıkış sunucusunun adresi ve doğrulaması. Adımları sırayla izleyin.",
+  "unsubInfra.note":
+    "Gerçek gönderim bu ekrandan açılmaz. Çıkış sunucusuna yalnızca “Doğrula” veya “Kuyruğu denetle” düğmesine bastığınızda ya da düzenli çekmeyi açtığınızda bağlanılır.",
+  "unsubInfra.legal.pending":
+    "Genel HTTPS çıkış uç noktası onayı bu sürümde kapalıdır; doğrulama başarılı olsa da canlı gönderime hazırlıkta bu madde açılmaz.",
+  "unsubInfra.step": "Adım {n}",
+  "unsubInfra.done": "Tamam",
+  "unsubInfra.todo": "Bekliyor",
+  "unsubInfra.signing.title": "İmza anahtarı",
+  "unsubInfra.signing.help":
+    "Her iletideki çıkış bağlantısı bu anahtarla imzalanır. Özel anahtar yalnızca bu bilgisayardaki şifreli depoda durur.",
+  "unsubInfra.signing.rotate.title": "İmza anahtarı yenilensin mi?",
+  "unsubInfra.signing.rotate.body":
+    "Yeni anahtar etkin olur; eski anahtar emekli kalır ve daha önce gönderilmiş bağlantılar çalışmaya devam eder. Çıkış sunucusu yeni anahtar dosyasını alıp uç nokta yeniden doğrulanana kadar uç nokta DOĞRULANMAMIŞ sayılır.",
+  "unsubInfra.signing.revoke.title": "İmza anahtarı iptal edilsin mi?",
+  "unsubInfra.signing.revoke.body":
+    "Bu işlem GERİ ALINAMAZ. Anahtar silinir ve bu anahtarla imzalanmış, daha önce gönderilmiş iletilerdeki çıkış bağlantıları ÇALIŞMAZ olur. Yalnızca anahtar sızdıysa kullanın; olağan yenileme için “Yeni anahtara geç”i seçin.",
+  "unsubInfra.channel.title": "Kanal anahtarı",
+  "unsubInfra.channel.help":
+    "Uygulama, çıkış sunucusunda bekleyen talepleri bu anahtarla imzalanmış isteklerle çeker. Sunucu yalnızca genel anahtarı bilir.",
+  "unsubInfra.channel.rotate.title": "Kanal anahtarı yenilensin mi?",
+  "unsubInfra.channel.rotate.body":
+    "Yeni anahtar etkin olur; eski kanal anahtarı iptal edilir ve silinir (yeni dosya yüklenince sunucuda da tanınmaz). Çıkış sunucusu yeni anahtar dosyasını alana kadar talepler çekilemez (talepler sunucuda bekler, kaybolmaz).",
+  "unsubInfra.channel.revoke.title": "Kanal anahtarı iptal edilsin mi?",
+  "unsubInfra.channel.revoke.body":
+    "Bu işlem GERİ ALINAMAZ. Anahtar silinir; etkin anahtarı iptal ederseniz yeni anahtar oluşturup sunucuya yükleyene kadar çıkış talepleri uygulamaya ulaşmaz.",
+  "unsubInfra.key.create": "Anahtar oluştur",
+  "unsubInfra.key.created": "Anahtar oluşturuldu.",
+  "unsubInfra.key.rotate": "Yeni anahtara geç",
+  "unsubInfra.key.rotated":
+    "Yeni anahtar etkin. Anahtar dosyasını yeniden indirip sunucuya yükleyin ve uç noktayı yeniden doğrulayın.",
+  "unsubInfra.key.active": "Etkin",
+  "unsubInfra.key.retired": "Emekli (eski bağlantılar için)",
+  "unsubInfra.key.unreadable": "Okunamıyor",
+  "unsubInfra.key.privateMissing":
+    "Bu anahtarın özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir); anahtar kullanılamaz. “Yeni anahtara geç” ile yeni anahtar oluşturun, ardından anahtar dosyasını yeniden indirip sunucuya yükleyin ve uç noktayı doğrulayın.",
+  "unsubInfra.channel.legacy": "Eski kanal anahtarı (sunucuda hâlâ geçerli; iptal edin)",
+  "unsubInfra.key.createdAt": "Oluşturma: {at}",
+  "unsubInfra.key.revoke": "Anahtarı iptal et",
+  "unsubInfra.key.revoke.aria": "{kid} anahtarını iptal et",
+  "unsubInfra.key.revokedToast": "Anahtar iptal edildi.",
+  "unsubInfra.base.title": "Çıkış sunucusu adresi",
+  "unsubInfra.base.help":
+    "Yalnızca kök HTTPS adresi; port, yol veya sorgu olmadan (örn. https://cikis.firmaniz.com). Bağlantılar bu adresin /u/ yolunu kullanır.",
+  "unsubInfra.base.label": "Çıkış sunucusu adresi",
+  "unsubInfra.base.save": "Adresi kaydet",
+  "unsubInfra.base.saved": "Adres kaydedildi. Uç noktayı yeniden doğrulayın.",
+  "unsubInfra.base.cleared": "Adres kaldırıldı.",
+  "unsubInfra.base.invalid": "Geçerli bir HTTPS kök adresi girin (port, yol veya sorgu olmadan).",
+  "unsubInfra.base.clear": "Adresi kaldır",
+  "unsubInfra.base.clear.title": "Çıkış adresi kaldırılsın mı?",
+  "unsubInfra.base.change.title": "Çıkış adresi değiştirilsin mi?",
+  "unsubInfra.base.change.body":
+    "Mevcut doğrulama kanıtı silinir. Yeni adres doğrulanana kadar çıkış uç noktası doğrulanmamış sayılır.",
+  "unsubInfra.base.change.confirm": "Adresi değiştir",
+  "unsubInfra.base.clear.body":
+    "Doğrulama kanıtı silinir. Yeni bir adres kaydedilip doğrulanana kadar canlı iletiler için çıkış bağlantısı hazırlanamaz ve çıkış sunucusundaki bekleyen talepler çekilmez.",
+  "unsubInfra.file.title": "Anahtar dosyasını sunucuya yükleyin",
+  "unsubInfra.file.help":
+    "Dosya yalnızca GENEL anahtarları içerir. Yine de yalnızca SSH ile kopyalayın ve başkasıyla paylaşmayın.",
+  "unsubInfra.file.download": "Anahtar dosyasını indir",
+  "unsubInfra.file.downloaded": "relay-keys.json indirildi.",
+  "unsubInfra.file.needs": "Önce 1-3. adımları tamamlayın.",
+  "unsubInfra.file.scp":
+    "Dosyayı sunucuya kopyalayın (KULLANICI yerine sunucudaki sudo yetkili kullanıcınızı, SUNUCU yerine kendi sunucunuzu yazın). Sunucu dosyayı birkaç saniye içinde kendisi yükler; yeniden başlatma gerekmez.",
+  "unsubInfra.file.after":
+    "Anahtar yenilediğinizde, iptal ettiğinizde veya adresi değiştirdiğinizde dosyayı yeniden indirip yükleyin.",
+  "unsubInfra.verify.title": "Uçtan uca doğrula",
+  "unsubInfra.verify.help":
+    "İmzalı bir SINAMA bağlantısı sunucuya gerçek bir tek tıklamalı çıkış isteğiyle gönderilir ve uygulamaya geri çekilir. Hiçbir alıcıya dokunmaz.",
+  "unsubInfra.verify.run": "Doğrula",
+  "unsubInfra.verify.running": "Doğrulanıyor; birkaç saniye sürebilir…",
+  "unsubInfra.verify.ok": "Doğrulandı ({at}). Kanıt {days} gün içinde sona erer.",
+  "unsubInfra.verify.expiring":
+    "Doğrulama kanıtı {days} gün içinde sona erecek; düzenli çekme kapalıysa elle yeniden doğrulayın.",
+  "unsubInfra.verify.none": "Henüz doğrulanmadı.",
+  "unsubInfra.verify.stale":
+    "Kanıt eski imza anahtarına ait. Güncel anahtar dosyasını sunucuya yükleyip yeniden doğrulayın.",
+  "unsubInfra.verify.expired": "Doğrulama kanıtının süresi doldu; yeniden doğrulayın.",
+  "unsubInfra.verify.last": "Son deneme ({at}): {msg}",
+  "unsubInfra.verify.autoNote":
+    "Düzenli çekme açıkken kanıt 25 günden eskiyince uygulama uç noktayı kendiliğinden yeniden doğrular (kanıt 30 gün geçerlidir).",
+  "unsubInfra.verify.code.verified": "Uç nokta doğrulandı.",
+  "unsubInfra.verify.code.not_configured": "Çıkış sunucusu adresi tanımlı değil.",
+  "unsubInfra.verify.code.no_key": "Etkin imza anahtarı yok; 1. adımı tamamlayın.",
+  "unsubInfra.verify.code.no_channel_key":
+    "Kanal anahtarının özel anahtarı okunamıyor; 2. adımda “Yeni anahtara geç”i seçip anahtar dosyasını yeniden yükleyin.",
+  "unsubInfra.verify.code.post_failed":
+    "Sunucuya ulaşılamadı (adres, DNS veya sertifika sorunu olabilir).",
+  "unsubInfra.verify.code.bad_status":
+    "Sunucu isteği kabul etmedi: sunucu çalışmıyor veya güncel anahtar dosyası yüklenmemiş.",
+  "unsubInfra.verify.code.not_delivered":
+    "Sunucu isteği aldı ama talep uygulamaya ulaşmadı; sunucunun kuyruk ayarını denetleyin.",
+  "unsubInfra.verify.code.channel_failed_401":
+    "Sunucu kanal anahtarını tanımıyor: güncel anahtar dosyasını yükleyin.",
+  "unsubInfra.verify.code.channel_failed_network":
+    "Sunucunun talep kuyruğuna ulaşılamadı; bağlantıyı denetleyip yeniden deneyin.",
+  "unsubInfra.verify.code.channel_failed": "Sunucunun talep kuyruğu okunamadı.",
+  "unsubInfra.verify.code.other": "Doğrulama tamamlanamadı.",
+  "unsubInfra.health.title": "Talep kuyruğu sağlığı",
+  "unsubInfra.health.help":
+    "Sunucuda bekleyen çıkış taleplerinin sayısı ve yaşı. Talepler uzun süre beklerse kişiler listeden geç çıkar.",
+  "unsubInfra.health.run": "Kuyruğu denetle",
+  "unsubInfra.health.never": "Henüz denetlenmedi.",
+  "unsubInfra.health.detail":
+    "Son denetim {at}: {depth} bekleyen talep, en eskisi {age}, {corrupt} bozuk kayıt.",
+  "unsubInfra.health.age.none": "yok",
+  "unsubInfra.health.age.min": "{n} dk",
+  "unsubInfra.health.code.ok": "Kuyruk sağlıklı.",
+  "unsubInfra.health.code.corrupt_events":
+    "Kuyrukta bozuk kayıt var; sunucunun diskini ve günlüklerini denetleyin.",
+  "unsubInfra.health.code.queue_deep":
+    "Kuyrukta 1000'den fazla bekleyen talep var; düzenli çekmenin açık olduğundan emin olun.",
+  "unsubInfra.health.code.events_stale":
+    "Bir saatten eski bekleyen talep var; düzenli çekme çalışmıyor olabilir.",
+  "unsubInfra.health.code.unreachable":
+    "Sunucuya ulaşılamadı veya sunucu kanal anahtarını tanımadı.",
+  "unsubInfra.health.code.no_channel_key":
+    "Kuyruk denetlenemedi: kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). Kanal anahtarında “Yeni anahtara geç”i seçin.",
+  "unsubInfra.health.code.other": "Kuyruk durumu bilinmiyor.",
+  "unsubInfra.drain.title": "Çıkış taleplerini düzenli çek",
+  "unsubInfra.drain.help":
+    "Açıkken uygulama dakikada bir sunucudaki çıkış taleplerini çeker ve kişileri iletişim listesinden çıkarır. Uygulama açık olmalıdır; gönderimi açmaz.",
+  "unsubInfra.drain.label": "Talepleri düzenli çek",
+  "unsubInfra.drain.on": "Düzenli çekme açıldı.",
+  "unsubInfra.drain.off": "Düzenli çekme kapatıldı.",
+  "unsubInfra.drain.env":
+    "Ortam değişkeni (UM_UNSUBSCRIBE_DRAIN_ENABLED) ile açık; bu anahtar kapalı olsa da çekme çalışır.",
+  "unsubInfra.drain.needsBase": "Çıkış sunucusu adresi tanımlanınca çalışmaya başlar.",
+  "unsubInfra.arf.title": "Şikâyet raporu sağlayıcıları (ARF)",
+  "unsubInfra.arf.help":
+    "Şikâyet (spam) raporu göndermesine güvendiğiniz sağlayıcıların alan adları; her satıra bir tane, en çok 50. Boş bırakırsanız gelen raporlar yalnızca inceleme kuyruğuna düşer.",
+  "unsubInfra.arf.label": "Güvenilen sağlayıcı alan adları",
+  "unsubInfra.arf.save": "Listeyi kaydet",
+  "unsubInfra.arf.saved": "Liste kaydedildi.",
+  "unsubInfra.arf.count": "{n} alan adı kayıtlı",
+  "unsubInfra.arf.tooMany": "En çok 50 alan adı girilebilir.",
+  // Paket C12 + C13 + C14: OAuth sonuç sayfası ve ipuçları, CSV içe aktarma onayı, sihirbaz/şablon kayıt korumaları, çıkış teslimat uyarısı
+  "mbx.oauth.page.title": "Universal Mail · Gmail bağlantısı",
+  "mbx.oauth.page.ok": "Bağlantı tamamlandı",
+  "mbx.oauth.page.error": "Bağlantı kurulamadı",
+  "mbx.oauth.page.close": "Bu sekmeyi kapatıp Universal Mail uygulamasına dönebilirsiniz.",
+  "mbx.oauth.page.retry":
+    "Uygulamada “Gmail'e bağlan” düğmesine yeniden basarak tekrar deneyebilirsiniz.",
+  "mbx.oauth.hint.expired":
+    "İstek 10 dakika geçerlidir ve uygulama kapanırsa geçersiz olur. Uygulamayı açık tutup bağlantıyı yeniden başlatın.",
+  "mbx.oauth.hint.access_denied": "Bağlanmak için Google izin ekranında izin vermeniz gerekir.",
+  "mbx.oauth.hint.account_mismatch":
+    "Google'da kutunun birincil adresiyle giriş yapın. Takma ad (alias), “+etiket” veya başka bir hesapla bağlanılamaz. Kişisel Gmail'de adresi Google hesabında göründüğü gibi (noktalarıyla) yazın: “ad.soyad@gmail.com” ile “adsoyad@gmail.com” farklı yazım sayılır.",
+  "mbx.oauth.hint.scope":
+    "İzin ekranında yalnızca istenen izinleri onaylayın. Sorun sürerse Google Cloud'daki izin ekranı ayarlarını (openid, email, gmail.send; gelen kutusu okuma için gmail.readonly) kontrol edin.",
+  "mbx.oauth.hint.no_refresh_token":
+    "Yeniden deneyin. Sorun sürerse Google hesabınızdaki üçüncü taraf erişimlerinden bu uygulamanın eski iznini kaldırıp tekrar bağlanın.",
+  "mbx.oauth.keepOpen":
+    "Google'da giriş yaparken Universal Mail açık kalmalıdır; uygulama kapanırsa istek geçersiz olur.",
+  "mbx.oauth.primaryAddress":
+    "Google'da bu kutunun birincil adresiyle giriş yapın; takma ad (alias) veya farklı yazım (ör. noktasız Gmail adresi) “hesap aynı değil” hatası verir. Kişisel Gmail'de Google bir “doğrulanmamış uygulama” uyarısı gösterebilir: “Gelişmiş → devam et” ile ilerleyin.",
+  "mbx.oauth.result.timeout":
+    "Google'dan 10 dakika içinde sonuç gelmedi. Gerekirse bağlantıyı yeniden başlatın.",
+  "mbx.oauth.result.dismiss": "Kapat",
+  "mbx.address.hint":
+    "Google hesabının birincil adresini girin: kişisel Gmail (@gmail.com) veya Google Workspace adresi. Takma ad (alias) ya da “+etiket” ile bağlantı kurulamaz; Gmail adresini noktalarıyla, Google hesabında göründüğü gibi yazın.",
+  "sup.import.preview.loading": "Önizleme hazırlanıyor… Henüz hiçbir şey eklenmedi.",
+  "sup.import.preview":
+    "Önizleme: {added} eklenecek · {strengthened} güçlendirilecek · {duplicates} zaten var · {invalid} geçersiz satır. Henüz hiçbir şey eklenmedi.",
+  "sup.import.preview.reasons": "Eklenecek kayıtların nedenleri",
+  "sup.import.preview.irreversible":
+    "{n} kayıt çıkış veya şikâyet nedeniyle eklenecek ya da güçlendirilecek ({domains} tanesi alan adının tamamını engeller). Bu kayıtlar sonradan kaldırılamaz.",
+  "sup.import.preview.nothing":
+    "Bu dosya yeni kayıt eklemiyor; geçerli satırların tamamı zaten aynı veya daha güçlü nedenle engelli.",
+  "sup.import.confirm.title": "Kaldırılamayacak kayıtlar içe aktarılsın mı?",
+  "sup.import.confirm.body":
+    "{n} kayıt çıkış veya şikâyet nedeniyle eklenecek ya da güçlendirilecek; {domains} tanesi alan adının tamamını engeller. Bu engeller sonradan sıradan işlemle kaldırılamaz. Emin değilseniz bu satırların nedenini dosyada “manual” yapın.",
+  "sup.import.confirm.run": "Kalıcı olarak içe aktar",
+  "wizard.dirty.unsaved": "Kaydedilmemiş değişiklikler var.",
+  "wizard.dirty.title": "Kaydedilmemiş değişiklikler kaybolsun mu?",
+  "wizard.dirty.body":
+    "Bu adımda kaydetmediğiniz değişiklikler var. Devam ederseniz bu değişiklikler kaybolur. Saklamak için düzenlemeye dönüp “Kaydet”e basın.",
+  "wizard.dirty.discard": "Değişiklikleri at",
+  "wizard.dirty.stay": "Düzenlemeye dön",
+  "wizard.dirty.serverChanged":
+    "Kampanya bu arada güncellendi (ör. lead eklendi). Kaydedilmemiş değişiklikleriniz korunuyor; kaydettiğinizde bu adımın alanları sizin girdiğiniz değerlerle güncellenir.",
+  "tplEditor.editedWhileSaving":
+    "Şablon kaydedildi, ancak kayıt sürerken yaptığınız son değişiklikler bu kayda girmedi. Lütfen kontrol edip yeniden girin.",
+  "deliveryAlert.title": "Çıkış talepleri uyarısı",
+  "deliveryAlert.unhealthy.queue_deep":
+    "Aktarıcıda işlenmeyi bekleyen çok sayıda çıkış talebi birikti.",
+  "deliveryAlert.unhealthy.events_stale":
+    "Aktarıcıdaki çıkış talepleri 1 saatten uzun süredir işlenmedi.",
+  "deliveryAlert.unhealthy.corrupt_events": "Aktarıcıda okunamayan (bozuk) çıkış olayları var.",
+  "deliveryAlert.unhealthy.unreachable": "Çıkış aktarıcısına ulaşılamadı.",
+  "deliveryAlert.unhealthy.no_channel_key":
+    "Çıkış talepleri çekilemiyor: kanal anahtarının özel anahtarı okunamıyor (gizli bilgiler sıfırlanmış olabilir). Ayarlar'da imza ve kanal anahtarında “Yeni anahtara geç”i seçin, anahtar dosyasını yeniden yükleyin.",
+  "deliveryAlert.unhealthy.other": "Çıkış taleplerinin teslimatı sağlıksız.",
+  "deliveryAlert.stale":
+    "Çıkış talep kuyruğu 24 saatten uzun süredir denetlenmedi (son denetim: {at}). Düzenli çekme kapalı veya çalışmıyor olabilir; talepler işlenmiyor olabilir.",
+  "deliveryAlert.stale.never":
+    "Çıkış talep kuyruğu hiç denetlenmedi. Ayarlar'da “Talepleri düzenli çek”i açın ve “Kuyruğu denetle” ile kontrol edin.",
+  "deliveryAlert.verifyFailed":
+    "Çıkış uç noktası doğrulanamadı ({at}); canlı gönderim için çıkış bağlantısı hazırlanamıyor. Ayarlar'da nedeni görüp yeniden doğrulayın.",
+  "deliveryAlert.verifyFailed.noChannelKey":
+    "Çıkış uç noktası doğrulanamadı ({at}): kanal anahtarının özel anahtarı okunamıyor. Ayarlar'da kanal anahtarında “Yeni anahtara geç”i seçin.",
+  "deliveryAlert.checkedAt": "(Son denetim: {at})",
+  "deliveryAlert.expiring":
+    "Çıkış uç noktası doğrulaması {days} gün içinde ({at}) sona eriyor. Süresi dolarsa gerçek gönderim durur; yeniden doğrulayın.",
+  "deliveryAlert.expired":
+    "Çıkış uç noktası doğrulamasının süresi {at} tarihinde doldu; gerçek gönderim için yeniden doğrulayın.",
 } as const;

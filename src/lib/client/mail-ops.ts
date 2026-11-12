@@ -133,8 +133,13 @@ export const mailOpsApi = {
   dnsCheck: (mailboxId: number, input: { selector?: string }) =>
     api<DnsReport>(`/api/mailboxes/${mailboxId}/dns-check`, { method: "POST", json: input }),
   testSend: (mailboxId: number, input: { templateId: number; leadId: number }) =>
-    api<{ outcome: "sent" | "failed" | "unknown"; messageRowId: number }>(
-      `/api/mailboxes/${mailboxId}/test-send`,
-      { method: "POST", json: input },
-    ),
+    api<{
+      outcome: "sent" | "failed" | "unknown";
+      messageRowId: number;
+      scope: "demo" | "live";
+      listUnsubscribe: boolean;
+      code?: string;
+      /** Sonuç sağlayıcıdan alındı ama kaydı yazılamadı (uzlaştırılacak); yeniden göndermeyin. */
+      recordError?: boolean;
+    }>(`/api/mailboxes/${mailboxId}/test-send`, { method: "POST", json: input }),
 };

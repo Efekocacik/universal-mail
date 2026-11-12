@@ -5,10 +5,12 @@ import { verifyToken, type PublicKeyEntry } from "./token";
  *
  * Bu modül yalnızca web standardı `Request`/`Response` ve `./token` (saf, GENEL anahtarla doğrulama) kullanır:
  * veritabanı, dosya sistemi, gizli depo, ağ ÇIKIŞI yoktur. Herhangi bir Node tabanlı HTTPS sunucusuna bağlanabilir.
- * Bu sürümde dağıtım dosyası/alan adı YOKTUR; gerçek HTTPS ve alan adı kararı sonraki aşamalara aittir.
+ * Bağımsız sunucu girişi ve dağıtım dosyaları: src/relay/ ve deploy/relay/ (bu modül onlardan habersizdir).
  *
  * Protokol kuralları:
- *  - POST + `application/x-www-form-urlencoded` gövde `List-Unsubscribe=One-Click`: çıkışı kaydeder (RFC 8058).
+ *  - POST + gövde alanı `List-Unsubscribe=One-Click`: çıkışı kaydeder (RFC 8058). İçerik türü
+ *    `multipart/form-data` (RFC 8058 §3.1 "SHOULD") VEYA `application/x-www-form-urlencoded` ("MAY") olabilir;
+ *    başka tür 415. Gövde sınırı (1 KiB) her iki türde de AYRIŞTIRMADAN ÖNCE uygulanır.
  *    Çerez, kimlik doğrulama veya yönlendirme YOKTUR; yanıt 3xx ASLA olmaz.
  *  - GET/HEAD durum DEĞİŞTİRMEZ (tarayıcı önizleme, güvenlik tarayıcısı, bağlantı ön yüklemesi çıkış yaptırmasın):
  *    yalnızca onay formu gösterir; onay POST ile yapılır.
@@ -60,6 +62,7 @@ export interface EventSink {
   push(event: UnsubscribeEvent): Promise<DeliveryReceipt>;
 }
 
+/** Kısa süreli sel koruması: `remember` en çok `REPLAY_WINDOW_MS` kadar ileriye kaydedilir; asıl tekilleştirme uygulamadadır. */
 export interface ReplayStore {
   seen(jti: string): boolean | Promise<boolean>;
   remember(jti: string, expiresAtMs: number): void | Promise<void>;
@@ -102,21 +105,31 @@ const isReceipt = (r: unknown): r is DeliveryReceipt =>
   (r as DeliveryReceipt).id.length > 0;
 
 export const MAX_BODY_BYTES = 1024;
+/**
+ * Tekrar oynatma kaydının penceresi. Aktarıcıdaki kayıt yalnızca kısa süreli SEL korumasıdır: yetkili tekilleştirme
+ * uygulama tarafındadır (jti + alınma zamanı). Kayıt belirtecin tüm ömrü (≈180 gün) boyunca tutulsaydı, belgelenmiş bir
+ * engel kaldırma sonrasında AYNI bağlantıya yapılan yeni bir tıklama sessizce yutulurdu (uygulama bunu yeni çıkış sayar).
+ */
+export const REPLAY_WINDOW_MS = 10 * 60_000;
 const PATH_RE = /^\/u\/([A-Za-z0-9._-]{1,700})$/;
 const ONE_CLICK_FIELD = "List-Unsubscribe";
 const ONE_CLICK_VALUE = "One-Click";
 
 /* ---------------------------------------------------------------------------------------------- */
 
-/** Bellekte sınırlı tekrar oynatma kaydı (en eski kayıt atılır). */
+/** Bellekte sınırlı tekrar oynatma kaydı (en eski kayıt atılır; süresi dolan kayıt "görülmedi" sayılır). */
 export class MemoryReplayStore implements ReplayStore {
   private readonly map = new Map<string, number>();
-  constructor(private readonly max = 100_000) {}
+  constructor(
+    private readonly max = 100_000,
+    private readonly clock: () => number = Date.now,
+  ) {}
   seen(jti: string): boolean {
-    return this.map.has(jti);
+    const exp = this.map.get(jti);
+    return exp !== undefined && exp > this.clock();
   }
   remember(jti: string, expiresAtMs: number): void {
-    const now = Date.now();
+    const now = this.clock();
     if (this.map.size >= this.max) {
       for (const [k, exp] of this.map) {
         if (exp <= now) this.map.delete(k);
@@ -131,7 +144,11 @@ export class MemoryReplayStore implements ReplayStore {
   }
 }
 
-/** Sabit pencereli basit hız sınırlayıcı (anahtar sayısı sınırlı). */
+/**
+ * Sabit pencereli basit hız sınırlayıcı (anahtar sayısı sınırlı). Sınıra ulaşınca önce süresi dolmuş kovalar, sonra en
+ * eski kovalar atılır; tüm kovalar ASLA birden temizlenmez (aksi halde çok sayıda farklı adresle gelen biri, sınırı
+ * aşmış diğer istemcilerin sayaçlarını da sıfırlayabilirdi).
+ */
 export class MemoryRateLimiter implements RateLimiter {
   private readonly buckets = new Map<string, { start: number; count: number }>();
   constructor(
@@ -142,13 +159,27 @@ export class MemoryRateLimiter implements RateLimiter {
   check(key: string, now: number): number | null {
     const b = this.buckets.get(key);
     if (!b || now - b.start >= this.windowMs) {
-      if (this.buckets.size >= this.maxKeys) this.buckets.clear();
+      if (b) this.buckets.delete(key);
+      if (this.buckets.size >= this.maxKeys) this.evict(now);
       this.buckets.set(key, { start: now, count: 1 });
       return null;
     }
     b.count++;
     if (b.count > this.limit) return Math.max(1, Math.ceil((b.start + this.windowMs - now) / 1000));
     return null;
+  }
+  private evict(now: number): void {
+    for (const [k, b] of this.buckets) if (now - b.start >= this.windowMs) this.buckets.delete(k);
+    // Ekleme sırası = pencere başlangıcı sırası (yenilenen kova silinip yeniden eklenir). Önce sınırı AŞMAMIŞ en eski
+    // kovalar atılır (sınırı aşan istemci sel sayesinde sıfırlanmasın); yine yer yoksa en eskiler.
+    for (const [k, b] of this.buckets) {
+      if (this.buckets.size < this.maxKeys) return;
+      if (b.count <= this.limit) this.buckets.delete(k);
+    }
+    for (const k of this.buckets.keys()) {
+      if (this.buckets.size < this.maxKeys) return;
+      this.buckets.delete(k);
+    }
   }
 }
 
@@ -213,10 +244,10 @@ function html(status: number, body: string, head: boolean): Response {
 }
 
 /** Gövdeyi en çok `MAX_BODY_BYTES` bayt okur; aşılırsa null. */
-async function readLimited(req: Request): Promise<string | null> {
+async function readLimited(req: Request): Promise<Uint8Array<ArrayBuffer> | null> {
   const len = req.headers.get("content-length");
   if (len !== null && (!/^\d{1,9}$/.test(len) || Number(len) > MAX_BODY_BYTES)) return null;
-  if (!req.body) return "";
+  if (!req.body) return new Uint8Array(0);
   const reader = req.body.getReader();
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -236,12 +267,41 @@ async function readLimited(req: Request): Promise<string | null> {
     buf.set(c, off);
     off += c.byteLength;
   }
-  return new TextDecoder("utf-8", { fatal: false }).decode(buf);
+  return buf;
+}
+
+const FORM_URLENCODED = "application/x-www-form-urlencoded";
+const MULTIPART_FORM = "multipart/form-data";
+
+/**
+ * Sınırlı gövdeden `List-Unsubscribe` alanının DÜZ METİN değerini çıkarır; ayrıştırılamazsa null.
+ * `multipart/form-data` ayrıştırması platformun standart `FormData` ayrıştırıcısıyla yapılır (sınır/boundary eksik
+ * veya gövde bozuksa hata → null → 400). Dosya olarak gönderilen alan (filename) kabul EDİLMEZ.
+ */
+async function oneClickField(
+  mediaType: string,
+  rawContentType: string,
+  body: Uint8Array<ArrayBuffer>,
+): Promise<string | null> {
+  if (mediaType === FORM_URLENCODED) {
+    return new URLSearchParams(new TextDecoder("utf-8", { fatal: false }).decode(body)).get(
+      ONE_CLICK_FIELD,
+    );
+  }
+  try {
+    const form = await new Response(body, {
+      headers: { "Content-Type": rawContentType },
+    }).formData();
+    const value = form.get(ONE_CLICK_FIELD);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 export function createRelayHandler(opts: RelayOptions): (req: Request) => Promise<Response> {
   const clock = opts.now ?? Date.now;
-  const replay = opts.replay ?? new MemoryReplayStore();
+  const replay = opts.replay ?? new MemoryReplayStore(100_000, clock);
   assertSinkAllowed(opts.sink);
   const sinkTimeout = opts.sinkTimeoutMs ?? DEFAULT_SINK_TIMEOUT_MS;
   /** Aynı jti için eşzamanlı istekler tek `push` çağrısında birleşir. */
@@ -326,11 +386,15 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
     }
 
     // POST: RFC 8058 tek tıklamalı çıkış.
-    const ct = (req.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-    if (ct !== "application/x-www-form-urlencoded") return text(415, "Unsupported media type");
+    // RFC 8058 §3.1: multipart/form-data (SHOULD) veya application/x-www-form-urlencoded (MAY).
+    const rawCt = req.headers.get("content-type") ?? "";
+    const ct = rawCt.split(";")[0]!.trim().toLowerCase();
+    if (ct !== FORM_URLENCODED && ct !== MULTIPART_FORM) {
+      return text(415, "Unsupported media type");
+    }
     const body = await readLimited(req);
     if (body === null) return text(413, "Payload too large");
-    if (new URLSearchParams(body).get(ONE_CLICK_FIELD) !== ONE_CLICK_VALUE) {
+    if ((await oneClickField(ct, rawCt, body)) !== ONE_CLICK_VALUE) {
       return text(400, "Invalid request");
     }
     if (!verdict.ok) {
@@ -352,7 +416,7 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
           .then(async (ok) => {
             if (ok) {
               try {
-                await replay.remember(j, e * 1000);
+                await replay.remember(j, Math.min(e * 1000, clock() + REPLAY_WINDOW_MS));
               } catch {
                 /* olay dayanıklı kaydedildi; uygulama tarafı tekilleştirir */
               }

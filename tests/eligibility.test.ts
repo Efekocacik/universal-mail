@@ -293,7 +293,7 @@ describe("kampanyaya ekleme uygunluğu", () => {
     });
   });
 
-  it("aynı lead gerçek bir posta kutusuyla live kapsamında engellenir", async () => {
+  it("aynı lead gerçek bir posta kutusuyla live kapsamında engellenir (kapı açık: ülke kilidi ve gönderim izni)", async () => {
     const [mb] = await db
       .insert(mailboxes)
       .values({
@@ -311,8 +311,9 @@ describe("kampanyaya ekleme uygunluğu", () => {
     const r = await evaluateEnrollment(db, { campaignId, leadId: lead.leadId }, { now: T0 });
     expect(r.scope).toBe("live");
     expect(r.eligible).toBe(false);
-    expect(codes(r)).toEqual(["country_blocked", "live_sending_disabled"]);
-    expect(reason(r, "country_blocked")?.detail).toBe("live_disabled");
+    expect(codes(r)).toEqual(["country_blocked", "mailbox_not_ready"]);
+    expect(reason(r, "country_blocked")?.detail).toBe("locked");
+    expect(reason(r, "mailbox_not_ready")?.detail).toBe("send_grant_missing");
   });
 
   it("onay ve gönderen profili zorunlu", async () => {
@@ -753,17 +754,18 @@ describe("gönderim öncesi uygunluk", () => {
         { campaignLeadId: b.cl, stepIndex: 0 },
         { now: T0 + 3_600_000 },
       );
-      expect(codes(r)).toEqual(["domain_daily_cap"]);
+      // Aynı alan adı aynı işletmedir (C8): günlük sınırın yanında işletme beklemesi de uygulanır.
+      expect(codes(r)).toEqual(["business_contact_cooldown", "domain_daily_cap"]);
       expect(reason(r, "domain_daily_cap")?.until).toBe(Date.UTC(2026, 10, 3));
       expect(
-        (
+        codes(
           await evaluateSend(
             db,
             { campaignLeadId: b.cl, stepIndex: 0 },
             { now: Date.UTC(2026, 10, 3) },
-          )
-        ).eligible,
-      ).toBe(true);
+          ),
+        ),
+      ).toEqual(["business_contact_cooldown"]);
     });
 
     it("gün sınırı UTC gece yarısıdır: 23:59 UTC ile 00:00 UTC farklı günlerdir", async () => {
@@ -778,16 +780,16 @@ describe("gönderim öncesi uygunluk", () => {
             { now: Date.UTC(2026, 10, 2, 23, 59, 30) },
           ),
         ),
-      ).toEqual(["domain_daily_cap"]);
+      ).toEqual(["business_contact_cooldown", "domain_daily_cap"]);
       expect(
-        (
+        codes(
           await evaluateSend(
             db,
             { campaignLeadId: b.cl, stepIndex: 0 },
             { now: Date.UTC(2026, 10, 3, 0, 0, 0) },
-          )
-        ).eligible,
-      ).toBe(true);
+          ),
+        ),
+      ).toEqual(["business_contact_cooldown"]);
     });
 
     it("belirsiz ileti günü doldurur; sağlayıcıya ulaşmamış ileti doldurmaz", async () => {
@@ -803,7 +805,7 @@ describe("gönderim öncesi uygunluk", () => {
         codes(
           await evaluateSend(db, { campaignLeadId: b.cl, stepIndex: 0 }, { now: T0 + 120_000 }),
         ),
-      ).toEqual(["domain_daily_cap"]);
+      ).toEqual(["business_contact_cooldown", "domain_daily_cap", "unresolved_delivery"]);
     });
   });
 
@@ -839,7 +841,7 @@ describe("gönderim öncesi uygunluk", () => {
       await db.update(campaigns).set({ mailboxId: mb!.id }).where(eq(campaigns.id, campaignId));
       const r = await evaluateSend(db, { campaignLeadId: cl, stepIndex: 0 }, { now: T0 });
       expect(r.scope).toBe("live");
-      expect(codes(r)).toEqual(["country_blocked", "live_sending_disabled", "mailbox_not_ready"]);
+      expect(codes(r)).toEqual(["country_blocked", "mailbox_not_ready"]);
     });
 
     it("lead e-postası değişti, silindi veya alıcı silme talebiyle kaldırıldı", async () => {

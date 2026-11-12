@@ -250,11 +250,11 @@ describe("kapsam ayrımı ve güvenli varsayılan", () => {
     }
   });
 
-  it("demo'da izinli ülke live kapsamında engelli kalır", async () => {
+  it("demo'da izinli ülke live kapsamında engelli kalır (kod kapısı açık; satır kilitli)", async () => {
     expect((await resolveCountryPolicy(db, "demo", "GB")).mode).toBe("allowed");
     expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({
       mode: "blocked",
-      reason: "live_disabled",
+      reason: "locked",
     });
     expect((await resolveCountryPolicy(db, policyScopeForMailbox("gmail"), "GB")).mode).toBe(
       "blocked",

@@ -84,10 +84,14 @@ test.afterAll(async () => {
   await page.close();
 });
 
-test("gezinme ve boş liste; yalnızca demo posta kutusu gönderebilir", async () => {
+test("gezinme ve boş liste; bağlı Gmail olmadan yalnızca demo posta kutusu gönderebilir", async () => {
   await page.goto("/campaigns");
   await expect(page.getByRole("heading", { name: "Kampanyalar" })).toBeVisible();
-  await expect(page.getByText(/gerçek e-posta gönderimi kapalıdır/)).toBeVisible();
+  // Gerçek gönderim kapısı bu sürümde açık; ancak E2E ortamında bağlı/izinli Gmail kutusu yoktur.
+  await expect(
+    page.getByText(/Demo posta kutusuyla iletiler hiçbir alıcıya ulaşmaz/),
+  ).toBeVisible();
+  await expect(page.getByText(/ülke kilidi hazır olmadan hiçbir ileti gönderilmez/)).toBeVisible();
   const mailboxes = (await (await page.request.get("/api/mailboxes")).json()).items as {
     provider: string;
     sendable: boolean;

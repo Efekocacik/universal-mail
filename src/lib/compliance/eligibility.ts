@@ -1,4 +1,5 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, like, ne, or } from "drizzle-orm";
+import { getDomain } from "tldts";
 import type { DbExecutor } from "@/lib/db/client";
 import {
   campaignLeads,
@@ -37,11 +38,23 @@ import { checkSuppression, hashEmail } from "./suppression";
  * "uygun değil" sonucunu verir. Sonuç makine tarafından işlenebilir ret nedenleri listesidir.
  *
  * Kapsam (`scope`) kampanyanın posta kutusundan gelir. `demo` sonucu yalnızca ağa çıkmayan demo posta kutusu için
- * geçerlidir ve GERÇEK GÖNDERİM İZNİ DEĞİLDİR; demo dışındaki her sağlayıcı `live` sayılır ve bu sürümde
- * (`LIVE_SENDING_ENABLED = false`) her zaman `live_sending_disabled` ile reddedilir.
+ * geçerlidir ve GERÇEK GÖNDERİM İZNİ DEĞİLDİR; demo dışındaki her sağlayıcı `live` sayılır. Canlı gönderim kapısı
+ * (`isLiveSendingPermitted`) kapalıysa `live_sending_disabled` ile reddedilir; açıkken (bu sürüm) canlı ülke politikası
+ * (kilitli ülke `country_blocked`), bağlı kutu ve `gmail.send` izni ayrıca zorunludur.
  *
  * Bu aşamadaki kararlar: yalnızca doğrulanmış (`verified`) GENEL işletme adreslerine gönderilir (`personal` ve
  * `consumer` hariç); daha önce kampanya iletisi almış bir alıcı, süreler dolsa da elle inceleme gerektirir.
+ *
+ * İşletme başına sınırlar (SRS 5.6.1 "Aynı işletme veya aynı e-posta adresine", go-live C8): adres sınırlarına EK
+ * olarak işletme de sayılır. İşletme = lead kaydı (yer kaydı başına tek lead) VEYA alıcının kayıtlı alan adı
+ * (`businessDomainOf`; kişisel posta sağlayıcıları ve genel uzantılar işletme sayılmaz). Kurallar:
+ *  - bir kampanyada işletme başına tek dizi (`business_already_in_campaign`; dağıtıcı dışlar),
+ *  - başka kampanyada aynı işletmenin başka adresine yapılan temastan sonra adres sınırlarıyla aynı bekleme
+ *    (yanıtsız tamamlanan dizide dinlenme, aksi halde kampanyalar arası aralık; `business_contact_cooldown`;
+ *    dağıtıcı erteler).
+ * Engeller (suppression) ADRES veya açık ALAN ADI kapsamlıdır; bir adresin çıkışı/şikâyeti aynı işletmenin diğer
+ * adreslerini kendiliğinden engellemez. İşletme düzeyindeki kesin "iletişim kurma" kararı lead durumudur
+ * (`do_not_contact`) ve `lead_status_blocked` ile uygulanır.
  */
 
 export type IneligibleCode =
@@ -73,10 +86,12 @@ export type IneligibleCode =
   | "suppressed"
   | "already_in_campaign"
   | "domain_already_in_campaign"
+  | "business_already_in_campaign"
   | "active_sequence_elsewhere"
   | "recontact_requires_review"
   | "rest_period"
   | "cross_campaign_gap"
+  | "business_contact_cooldown"
   | "unresolved_delivery"
   | "step_out_of_range"
   | "step_missing"
@@ -108,7 +123,8 @@ export interface EligibilityOptions {
   limits?: FrequencyLimits;
   /**
    * Yalnızca `evaluateEnrollment`: kampanyadaki bu dizinin KENDİSİ "zaten kampanyada" sayılmaz. Kampanya başlatılırken
-   * `pending` dizilerin yeniden denetlenmesi için kullanılır; diğer bütün kontroller aynen uygulanır.
+   * `pending` dizilerin yeniden denetlenmesi için kullanılır; diğer bütün kontroller aynen uygulanır. Bu dizi `pending`
+   * ise aynı alan adındaki/işletmedeki büyük kimlikli `pending` kardeş onu engellemez (küçük kimlik kazanır).
    */
   ignoreCampaignLeadId?: number;
 }
@@ -200,34 +216,74 @@ export async function evaluateEnrollment(
         .from(campaignLeads)
         .where(eq(campaignLeads.campaignId, campaign.id));
       const inCampaign = inCampaignAll.filter((r) => r.id !== opts.ignoreCampaignLeadId);
+      // Başlatma öncesi yeniden denetimde (`pending` dizinin kendisi) eski çift `pending` diziler arasında gönderimdeki
+      // kural uygulanır: küçük kimlik işletmeyi tutar; büyük kimlikli `pending` kardeş bu diziyi engellemez (yoksa
+      // ikisi de dışlanır ve işletmeye hiç yazılmaz).
+      const self = inCampaignAll.find((r) => r.id === opts.ignoreCampaignLeadId);
+      const siblings =
+        self?.status === "pending"
+          ? inCampaign.filter((r) => !(r.status === "pending" && r.id > self.id))
+          : inCampaign;
       if (inCampaign.some((r) => r.leadId === lead.id || r.hash === recipient.hash)) {
         c.add("already_in_campaign");
       } else if (
-        inCampaign.some(
+        siblings.some(
           (r) =>
             r.domain === recipient.domain &&
             !["excluded", "removed", "cancelled"].includes(r.status),
         )
       ) {
         c.add("domain_already_in_campaign");
+      } else {
+        await checkCampaignBusinessAtEnrollment(
+          db,
+          c,
+          campaign.id,
+          businessDomainOf(recipient.domain),
+          siblings,
+        );
       }
     }
 
-    // Başka kampanyada sürmekte olan dizi.
+    // Başka kampanyada sürmekte olan dizi: aynı adres veya aynı lead (işletme); yoksa aynı işletme alan adında
+    // gönderimi başlamış dizi (`pending` sayılmaz: başlatılmamış taslak başka kampanyayı kilitlemez).
     const active = await db
       .select({ id: campaignLeads.id })
       .from(campaignLeads)
       .where(
         and(
-          eq(campaignLeads.recipientHash, recipient.hash),
+          or(eq(campaignLeads.recipientHash, recipient.hash), eq(campaignLeads.leadId, lead.id)),
           ne(campaignLeads.campaignId, input.campaignId),
           inArray(campaignLeads.status, [...ACTIVE_SEQUENCE]),
         ),
       )
       .limit(1);
+    const business = { leadId: lead.id, domain: businessDomainOf(recipient.domain) };
     if (active.length > 0) c.add("active_sequence_elsewhere");
+    else if (business.domain) {
+      const sameDomain = await db
+        .select({ domain: campaignLeads.recipientDomain })
+        .from(campaignLeads)
+        .where(
+          and(
+            domainMatches(campaignLeads.recipientDomain, business.domain),
+            ne(campaignLeads.campaignId, input.campaignId),
+            inArray(campaignLeads.status, ["scheduled", "in_flight", "waiting_next"]),
+          ),
+        );
+      if (sameDomain.some((r) => businessDomainOf(r.domain) === business.domain)) {
+        c.add("active_sequence_elsewhere", { detail: "business" });
+      }
+    }
 
     await checkHistory(db, c, recipient.hash, now, limits, null);
+    await checkBusinessHistory(
+      db,
+      c,
+      { ...business, hash: recipient.hash, campaignId: input.campaignId },
+      now,
+      limits,
+    );
     return c.result(scope);
   } catch (e) {
     c.add("evaluation_error", { detail: e instanceof Error ? e.name : "unknown" });
@@ -373,6 +429,20 @@ export async function evaluateSend(
 
     if (recipient) {
       await checkHistory(db, c, recipient.hash, now, limits, cl.id);
+      const businessDomain = businessDomainOf(recipient.domain);
+      await checkBusinessHistory(
+        db,
+        c,
+        {
+          leadId: cl.leadId,
+          domain: businessDomain,
+          hash: recipient.hash,
+          campaignId: cl.campaignId,
+        },
+        now,
+        limits,
+      );
+      await checkCampaignBusinessAtSend(db, c, cl, businessDomain, own);
       // Alan adı başına günlük sınır (UTC günü; veritabanı dizini de zorlar).
       const day = utcDay(now);
       const sameDay = await db
@@ -424,7 +494,10 @@ async function loadCampaign(db: DbExecutor, id: number, c: Collector) {
   return row ?? null;
 }
 
-/** Posta kutusu kapsamı belirler. Demo dışı her sağlayıcı `live`'dır ve bu sürümde gönderemez. */
+/**
+ * Posta kutusu kapsamı belirler. Demo dışı her sağlayıcı `live`'dır; canlı kutu yalnızca canlı gönderim kapısı açıkken,
+ * bağlıyken ve `gmail.send` izni kayıtlıyken gönderebilir.
+ */
 async function checkMailbox(
   db: DbExecutor,
   mailboxId: number | null,
@@ -441,7 +514,16 @@ async function checkMailbox(
   }
   const scope = policyScopeForMailbox(mb.provider);
   if (scope === "live" && !isLiveSendingPermitted()) c.add("live_sending_disabled");
-  if (mb.status !== "connected") c.add("mailbox_not_ready", { detail: mb.status });
+  if (mb.status !== "connected") {
+    // Google yetkisi geçersiz/iptal (`invalid_grant`): ayrı ayrıntı; dağıtıcı kampanyayı duraklatmaz, ERTELER.
+    const reauth = mb.status === "error" && mb.lastError === "reauthorization_required";
+    c.add("mailbox_not_ready", { detail: reauth ? "reauthorization_required" : mb.status });
+  } else if (scope === "live" && isLiveSendingPermitted()) {
+    // Bağlı ama `gmail.send` izni verilmemiş (yalnızca okuma veya izin geri alındı) kutu gönderemez: sağlayıcıya
+    // ulaşmadan kampanya duraklar (aksi halde her dizi sağlayıcıda `scope_missing` ile başarısız sayılırdı).
+    const grants = (await getSettings(db, ["mail.gmailGrants"] as const))["mail.gmailGrants"];
+    if (!grants[String(mb.id)]?.send) c.add("mailbox_not_ready", { detail: "send_grant_missing" });
+  }
   return scope;
 }
 
@@ -568,4 +650,206 @@ async function checkHistory(
     const gapUntil = addDays(lastAt, limits.crossCampaignGapDays);
     if (now < gapUntil) c.add("cross_campaign_gap", { until: gapUntil });
   }
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * İşletme başına sınırlar (go-live C8)
+ * ---------------------------------------------------------------------------------------------- */
+
+/** Bir kampanyada işletmeyi "tutan" sayılmayan (kapanmış veya hiç başlamamış) dizi durumları. */
+const CLOSED_IN_CAMPAIGN: readonly CampaignLeadStatus[] = ["excluded", "removed", "cancelled"];
+/** Gönderimi başlamış, sürmekte olan dizi durumları (kampanya içi sıralama için). */
+const SENDING_SEQUENCE: readonly CampaignLeadStatus[] = ["scheduled", "in_flight", "waiting_next"];
+
+/**
+ * Adresin işletme alan adı: kayıtlı alan adı (eTLD+1, Public Suffix List, özel uzantılar dahil; ör.
+ * `shop.firma.de` → `firma.de`). Kişisel posta sağlayıcıları (gmail.com…) ve genel uzantının kendisi bir işletmeyi
+ * temsil etmediği için `null` döner (bu adresler zaten gönderilemez; yine de alan adı eşleşmesine katılmaz).
+ */
+export function businessDomainOf(domain: string | null | undefined): string | null {
+  if (!domain) return null;
+  const d = domain.toLowerCase();
+  if (isConsumerDomain(d)) return null;
+  const reg = getDomain(d, { allowPrivateDomains: true });
+  if (!reg || isConsumerDomain(reg)) return null;
+  return reg;
+}
+
+/** SQL ön süzgeci: alan adı `reg` veya onun alt alan adı. Kesin eşleşme `businessDomainOf` ile ayrıca yapılır. */
+function domainMatches(
+  column: typeof messages.peerDomain | typeof campaignLeads.recipientDomain,
+  reg: string,
+) {
+  return or(eq(column, reg), like(column, `%.${reg}`));
+}
+
+/**
+ * Eklemede kampanya içi işletme kontrolü (aynı lead/adres/tam alan adı kontrolleri tetiklenmediyse): aynı işletme alan
+ * adında açık bir dizi VARSA veya kapanmış olsa bile bu kampanyada o işletmeye ileti GİTMİŞSE eklenmez.
+ */
+async function checkCampaignBusinessAtEnrollment(
+  db: DbExecutor,
+  c: Collector,
+  campaignId: number,
+  businessDomain: string | null,
+  inCampaign: readonly { id: number; domain: string | null; status: CampaignLeadStatus }[],
+) {
+  if (!businessDomain) return;
+  const same = inCampaign.filter((r) => businessDomainOf(r.domain) === businessDomain);
+  if (same.length === 0) return;
+  if (same.some((r) => !CLOSED_IN_CAMPAIGN.includes(r.status))) {
+    c.add("business_already_in_campaign");
+    return;
+  }
+  const contacted = await db
+    .select({ id: messages.id })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.campaignId, campaignId),
+        inArray(
+          messages.campaignLeadId,
+          same.map((r) => r.id),
+        ),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+        inArray(messages.status, [...CONTACTED]),
+      ),
+    )
+    .limit(1);
+  if (contacted.length > 0) c.add("business_already_in_campaign");
+}
+
+/**
+ * Gönderimde kampanya içi işletme kontrolü: aynı kampanyada aynı işletme alan adına giden BAŞKA bir dizi varsa
+ * yalnızca biri gönderebilir. Sahip: işletmeye ilk iletisi gitmiş dizi (eşitlikte küçük kimlik); hiçbirine gitmemişse
+ * gönderimi başlamış diziler arasında en küçük kimlik. Diğerleri `business_already_in_campaign` alır (dışlanır).
+ * Normalde eklemedeki kontrol bunu önler; bu, eski veya yarışla oluşmuş kayıtlar için son savunmadır.
+ */
+async function checkCampaignBusinessAtSend(
+  db: DbExecutor,
+  c: Collector,
+  cl: { id: number; campaignId: number },
+  businessDomain: string | null,
+  own: readonly { status: string; createdAt: number }[],
+) {
+  if (!businessDomain) return;
+  const rows = await db
+    .select({
+      id: campaignLeads.id,
+      domain: campaignLeads.recipientDomain,
+      status: campaignLeads.status,
+    })
+    .from(campaignLeads)
+    .where(
+      and(
+        eq(campaignLeads.campaignId, cl.campaignId),
+        ne(campaignLeads.id, cl.id),
+        domainMatches(campaignLeads.recipientDomain, businessDomain),
+      ),
+    );
+  const same = rows.filter((r) => businessDomainOf(r.domain) === businessDomain);
+  if (same.length === 0) return;
+  const sent = await db
+    .select({ campaignLeadId: messages.campaignLeadId, createdAt: messages.createdAt })
+    .from(messages)
+    .where(
+      and(
+        inArray(
+          messages.campaignLeadId,
+          same.map((r) => r.id),
+        ),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+        inArray(messages.status, [...CONTACTED]),
+      ),
+    );
+  const firstOther = new Map<number, number>();
+  for (const m of sent) {
+    if (m.campaignLeadId === null) continue;
+    const prev = firstOther.get(m.campaignLeadId);
+    if (prev === undefined || m.createdAt < prev) firstOther.set(m.campaignLeadId, m.createdAt);
+  }
+  const ownTimes = own
+    .filter((m) => (CONTACTED as readonly string[]).includes(m.status))
+    .map((m) => m.createdAt);
+  let blocked: boolean;
+  if (ownTimes.length > 0) {
+    const ownFirst = Math.min(...ownTimes);
+    blocked = [...firstOther].some(([id, at]) => at < ownFirst || (at === ownFirst && id < cl.id));
+  } else {
+    blocked =
+      firstOther.size > 0 || same.some((r) => r.id < cl.id && SENDING_SEQUENCE.includes(r.status));
+  }
+  if (blocked) c.add("business_already_in_campaign");
+}
+
+/**
+ * Aynı işletmenin BAŞKA adreslerine (aynı lead veya aynı işletme alan adı) BAŞKA kampanyalarda yapılan temas.
+ * Adresin kendi geçmişi `checkHistory`'dedir; burada adres sınırlarıyla aynı bekleme uygulanır: yanıtsız tamamlanan
+ * dizide dinlenme süresi, aksi halde kampanyalar arası aralık (hangisi geç biterse). Belirsiz ileti
+ * `unresolved_delivery` verir. Elle inceleme (`recontact_requires_review`) yalnızca adres düzeyindedir.
+ */
+async function checkBusinessHistory(
+  db: DbExecutor,
+  c: Collector,
+  b: { leadId: number; domain: string | null; hash: string; campaignId: number },
+  now: number,
+  limits: FrequencyLimits,
+) {
+  const match = b.domain
+    ? or(eq(messages.leadId, b.leadId), domainMatches(messages.peerDomain, b.domain))
+    : eq(messages.leadId, b.leadId);
+  const rows = await db
+    .select({
+      campaignId: messages.campaignId,
+      campaignLeadId: messages.campaignLeadId,
+      leadId: messages.leadId,
+      peerDomain: messages.peerDomain,
+      status: messages.status,
+      sentAt: messages.sentAt,
+      createdAt: messages.createdAt,
+    })
+    .from(messages)
+    .where(
+      and(
+        match,
+        ne(messages.peerHash, b.hash),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+        inArray(messages.status, [...CONTACTED]),
+      ),
+    );
+  const others = rows.filter(
+    (m) =>
+      m.campaignId !== b.campaignId &&
+      (m.leadId === b.leadId || (b.domain !== null && businessDomainOf(m.peerDomain) === b.domain)),
+  );
+  if (others.length === 0) return;
+  if (others.some((m) => (UNRESOLVED as readonly string[]).includes(m.status)))
+    c.add("unresolved_delivery");
+
+  const bySequence = new Map<number | null, number>();
+  for (const m of others) {
+    const at = Math.max(m.sentAt ?? 0, m.createdAt);
+    bySequence.set(m.campaignLeadId, Math.max(bySequence.get(m.campaignLeadId) ?? 0, at));
+  }
+  const ids = [...bySequence.keys()].filter((k): k is number => k !== null);
+  const statuses = new Map(
+    (ids.length
+      ? await db
+          .select({ id: campaignLeads.id, status: campaignLeads.status })
+          .from(campaignLeads)
+          .where(inArray(campaignLeads.id, ids))
+      : []
+    ).map((r) => [r.id, r.status]),
+  );
+  let until = 0;
+  for (const [seq, lastAt] of bySequence) {
+    const status = seq === null ? undefined : statuses.get(seq);
+    const completedNoReply = status === undefined || status === "completed";
+    until = Math.max(until, addDays(lastAt, limits.crossCampaignGapDays));
+    if (completedNoReply) until = Math.max(until, addDays(lastAt, limits.restAfterSequenceDays));
+  }
+  if (now < until) c.add("business_contact_cooldown", { until });
 }

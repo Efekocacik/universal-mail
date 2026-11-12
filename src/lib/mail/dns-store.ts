@@ -1,6 +1,7 @@
 import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { getSetting, setSetting } from "@/lib/settings";
+import { domainOfAddress, isConsumerGmailDomain } from "./consumer-gmail";
 import type { CheckItem, DnsReport } from "./dns-check";
 
 /**
@@ -17,10 +18,12 @@ export const DNS_FRESH_MS = 30 * 86_400_000;
 
 export type DnsReadiness = "ok" | "blocked" | "unknown";
 
-const domainOf = (address: string | null): string | null =>
-  address && address.includes("@")
-    ? address.slice(address.lastIndexOf("@") + 1).toLowerCase()
-    : null;
+const domainOf = (address: string | null): string | null => domainOfAddress(address);
+
+/** Kutunun gönderen alan adının e-posta kimlik doğrulaması sağlayıcı (Google) tarafından mı yönetiliyor? */
+export function isDnsProviderManaged(mailbox: { address: string | null }): boolean {
+  return isConsumerGmailDomain(domainOf(mailbox.address));
+}
 
 /**
  * Bir denetim sonucunu saklar. Saklanırsa true. Saklanmaz: demo/denetlenmemiş rapor, alan adı kutunun adresinin
@@ -78,6 +81,7 @@ const status = (i: CheckItem["status"] | null): i is CheckItem["status"] => i !=
 /**
  * Bağlı gerçek posta kutuları için DNS durumu.
  *  - Bağlı gerçek kutu yok → unknown (ölçülemez).
+ *  - Sağlayıcı yönetimli (kişisel Gmail) kutu kayıt aranmadan `pass` sayılır.
  *  - Herhangi bir kutuda `fail` → blocked (taze sonuçta).
  *  - Hepsinde taze + üç denetim `pass` → ok.
  *  - Aksi halde (kayıt yok, bayat, uyarı, DKIM seçicisi verilmemiş, alan adı değişmiş) → unknown.
@@ -91,6 +95,7 @@ export async function evaluateDnsReadiness(
   const reports = await getSetting(db, "mail.dnsReports");
   let allPass = true;
   for (const b of boxes) {
+    if (isDnsProviderManaged(b)) continue; // Google yönetir: kullanıcı kaydı yok ve gerekmez
     const r = reports[String(b.id)];
     const fresh =
       !!r &&

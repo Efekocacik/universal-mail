@@ -2,7 +2,8 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 
 /**
  * Günlük, inceleme kuyruğu, işlem kaydı ve gönderim sağlığı (Aşama 13) uçtan uca: demo, geçici veri klasörü, ağa
- * çıkılmaz. Gerçek gönderim kapalıdır. Demo gönderimler saate bağlı olduğundan kampanya gönderimi beklenmez;
+ * çıkılmaz. Gerçek gönderim kapısı kodda açıktır, ancak bağlı Gmail kutusu, DNS ve ülke kilidi olmadığından hiçbir gerçek ileti
+ * gönderilmez. Demo gönderimler saate bağlı olduğundan kampanya gönderimi beklenmez;
  * "kendime test gönder" demo sağlayıcıya (bellek) gider.
  */
 test.describe.configure({ mode: "serial" });
@@ -86,9 +87,11 @@ test("alt gezinme: Günlük sekmesi açılır; üst çubukta Kampanyalar etkin k
 
 test("kendime test gönder: demo kutusuna gider ve günlükte maskeli görünür", async () => {
   await page.goto("/mail-log?tab=health");
-  await expect(page.getByRole("heading", { name: "Kendime test gönder" })).toBeVisible();
-  await expect(page.locator("#test-lead")).not.toHaveValue("");
-  await page.getByRole("button", { name: "Test gönder" }).click();
+  // Her kutunun kendi kartı vardır (demo + bağlı Gmail kutuları); demo kartına odaklanılır.
+  const card = page.getByRole("region", { name: "Kendime test gönder", exact: true });
+  await expect(card).toBeVisible();
+  await expect(card.getByLabel("Önizleme işletmesi")).not.toHaveValue("");
+  await card.getByRole("button", { name: "Test gönder" }).click();
   await expect(page.getByText("Test iletisi demo kutusuna gönderildi.")).toBeVisible();
 
   await page.goto("/mail-log");
@@ -177,13 +180,23 @@ test("posta kutusu sağlığı ve canlı gönderime hazırlık: gerçek duruma b
   await expect(page.getByText(/Şikâyet oranı: ölçülemiyor/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Canlı gönderime hazırlık" })).toBeVisible();
   await expect(page.getByTestId("ready-summary")).toContainText("engel");
-  await expect(page.getByText("Gerçek gönderim kapalıdır ve bu ekrandan açılamaz.")).toBeVisible();
-  // Hukuki maddeler hiçbir koşulda 'Tamam' değildir.
-  const legal = page.getByRole("listitem").filter({ hasText: "Hukuk" });
-  await expect(legal.first()).toContainText("Engel var");
+  await expect(page.getByText(/Kod kapıları bu sürümde açıktır/)).toBeVisible();
+  await expect(page.getByText(/Bu ekran hiçbir şeyi açmaz/)).toBeVisible();
+  // Hukuki maddeler sahip kararıyla 'Tamam'dır; canlı ülke kilidi ise ekrandan açılamaz ve engel olarak kalır.
+  const owner = page.getByRole("listitem").filter({ hasText: "sahip kararı" });
+  await expect(owner).toHaveCount(6);
+  for (const item of await owner.all()) await expect(item).toContainText("Tamam");
+  const country = page.getByRole("listitem").filter({ hasText: "Canlı ülke politikaları" });
+  await expect(country).toContainText("Engel var");
   const r = await (await page.request.get("/api/compliance/live-readiness")).json();
   expect(r.allOk).toBe(false);
-  expect(r.liveSendingEnabled).toBe(false);
+  expect(r.liveSendingEnabled).toBe(true);
+  const status = (key: string) =>
+    (r.items as { key: string; status: string }[]).find((i) => i.key === key)?.status;
+  expect(status("live_flag")).toBe("ok");
+  expect(status("live_country_policies")).toBe("blocked");
+  expect(status("real_mailbox")).toBe("blocked");
+  expect(status("https_unsubscribe")).toBe("blocked");
 });
 
 test("silme talebi: önizleme sayı gösterir, uygulama geri alınamaz onayıyla yapılır, adres hiçbir yerde kalmaz", async () => {
@@ -205,7 +218,7 @@ test("silme talebi: önizleme sayı gösterir, uygulama geri alınamaz onayıyla
   const preview = page.getByTestId("erasure-preview");
   await expect(preview).toContainText("Kayıtlı e-posta: 1");
   await expect(preview).toContainText("Hukuki değerlendirme bekleyen");
-  await expect(preview).toContainText("hukuki dayanağı henüz onaylanmadı");
+  await expect(preview).toContainText("Bu saklama şirket sahibinin kararıdır");
   await expect(preview).not.toContainText(email);
 
   await page.getByRole("button", { name: "Silmeyi uygula" }).click();
@@ -300,11 +313,15 @@ test("firma profili: MERSİS ve ticaret sicil isteğe bağlı alanlardır, kayde
 test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istemci sırrı sızmaz, silinir; hiçbir şey bağlanmaz", async () => {
   await page.goto("/settings");
   const section = page.locator("#mailbox");
-  await expect(section.getByText("Gerçek e-posta gönderimi bu sürümde kapalıdır")).toBeVisible();
+  await expect(
+    section.getByText(/Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır/),
+  ).toBeVisible();
   await expect(section.getByText("Demo (gerçek gönderim yapmaz)")).toBeVisible();
 
   await section.getByLabel("Ad", { exact: true }).fill("Satış hesabı E2E");
-  await section.getByLabel("Gmail / Workspace adresi").fill("satis-e2e@firma-ornek.com");
+  await section
+    .getByLabel("Gmail adresi (kişisel @gmail.com veya Workspace)")
+    .fill("satis-e2e@firma-ornek.com");
   await section.getByRole("button", { name: "Kutu ekle" }).click();
   const row = section.getByRole("listitem").filter({ hasText: "Satış hesabı E2E" });
   const rowId = async () => {
@@ -368,12 +385,12 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
     reauthorizationRequired: false,
   });
 
-  // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz.
+  // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz (kod kapısı açık, kutu bağlı değil).
   const r = await (await page.request.get("/api/compliance/live-readiness")).json();
   expect(r.allOk).toBe(false);
-  expect(r.liveSendingEnabled).toBe(false);
+  expect(r.liveSendingEnabled).toBe(true);
   expect(r.items.find((i: { key: string }) => i.key === "real_mailbox").status).toBe("blocked");
-  // Canlı kutu kampanyaya atanamaz (kampanya servisi demo ister).
+  // Bağlı ve gönderim izinli olmayan Gmail kutusu kampanyaya atanamaz.
   const mbs = (await (await page.request.get("/api/mailboxes")).json()).items as {
     id: number;
     sendable: boolean;

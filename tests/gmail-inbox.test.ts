@@ -185,20 +185,50 @@ const dsn = (nonce: string, o: { returnPath?: string } = {}) =>
 /* ---------------------------------------------------------------------------------------------- */
 
 describe("kapılar: ağ isteğinden ÖNCE", () => {
-  it("gelen kutusu okuma kilidi kapalıyken (varsayılan) hiçbir istek atılmaz", async () => {
-    expect(LIVE_INBOX_READING_ENABLED).toBe(false);
+  it("gelen kutusu okuma kilidi kapalıyken (testte kapatılır) hiçbir istek atılmaz", async () => {
     inbox.add({ labels: ["INBOX"], raw: reply("a1") });
-    const closed = new GmailInboxReader({ db, oauth: deps, apiBase: inbox.base }); // kilit geçersiz kılınmadı
+    const closed = new GmailInboxReader({
+      db,
+      oauth: deps,
+      apiBase: inbox.base,
+      liveInboxEnabled: () => false,
+    });
     await expect(closed.fetch(gid, null, 10)).rejects.toMatchObject({
       code: "live_inbox_disabled",
     });
     // eşitleme turu da kilide bağlıdır: okuyucu açık olsa bile syncInbox kilidi kapalıysa çalışmaz
-    const r = await syncInbox(db, reader, gid, { now: () => NOW });
+    const r = await syncInbox(db, reader, gid, { now: () => NOW, liveInboxEnabled: () => false });
     expect(r).toMatchObject({ fetched: 0, processed: 0, error: null });
     expect(inbox.requests).toHaveLength(0);
     expect(oauth.requests).toHaveLength(0);
     expect(await inboundRows()).toHaveLength(0);
     expect(await cursorOf()).toBeNull();
+  });
+
+  it("kapı açma sürümü: GERÇEK okuma kilidi açık, başlık güveni KAPALI → okur ama yalnızca incelemeye kaydeder; etki yok", async () => {
+    expect(LIVE_INBOX_READING_ENABLED).toBe(true);
+    expect(GMAIL_HEADER_TRUST_VERIFIED).toBe(false);
+    // Okuma kilidi ve güven kilidi için geçersiz kılma YOK; yalnızca sahte sunucunun adresi verilir.
+    const real = new GmailInboxReader({ db, oauth: deps, apiBase: inbox.base });
+    inbox.add({
+      id: "rl-a",
+      threadId: "t-out1",
+      labels: ["INBOX"],
+      raw: reply("rl1", "Please unsubscribe me."),
+    });
+    inbox.add({ id: "rl-b", threadId: "t-out1", labels: ["INBOX"], raw: dsn("rl2") });
+    for (let i = 0; i < 4; i++)
+      expect((await syncInbox(db, real, gid, { now: () => NOW })).error).toBeNull();
+    expect(inbox.requests.length).toBeGreaterThan(0);
+    const rows = await inboundRows();
+    expect(rows).toHaveLength(2);
+    for (const r of rows) {
+      expect(r.status).toBe("received");
+      expect(r.errorCode).toBe("no_attestation");
+      expect(r.campaignLeadId).toBeNull();
+    }
+    expect(await suppressedCount()).toBe(0);
+    expect(await clStatus()).toBe("waiting_next");
   });
 
   it("test geçersiz kılmaları üretimde kabul edilmez", () => {
@@ -1042,7 +1072,7 @@ describe("hata ve belirsizlikte veri kaybı/yanlış işleme yok", () => {
   });
 });
 
-describe("güven kilidi (GMAIL_HEADER_TRUST_VERIFIED, varsayılan KAPALI)", () => {
+describe("güven kilidi (GMAIL_HEADER_TRUST_VERIFIED, KAPALI; okuma kapısı açık sürümde de)", () => {
   /** Gerçek Gmail'inkiyle BİREBİR aynı görünen, mükemmel başlıklar: sıra/biçim kanıt değildir. */
   const perfectReply = () => reply("lk1", "Please unsubscribe me from your list.");
 

@@ -57,6 +57,12 @@ export interface GmailProviderOptions {
   apiBase?: string;
   /** YALNIZCA testlerde (`NODE_ENV=test`): canlı gönderim anahtarı. Varsayılan `LIVE_SENDING_ENABLED`. */
   liveEnabled?: () => boolean;
+  /**
+   * KENDİNE TEST (C11; yalnızca `getSelfTestProvider`): canlı gönderim kilidi yerine DAHA DAR bir kural uygulanır:
+   * alıcı, posta kutusunun KENDİ adresiyle birebir aynı olmalıdır (aksi halde ağ isteği atılmadan `rejected`).
+   * Diğer bütün kapılar (gönderim izni, girdi doğrulaması, sonuç sınıflandırması) aynen geçerlidir.
+   */
+  selfTest?: boolean;
 }
 
 const rej = (code: string, permanent: boolean, retryAfterMs?: number): ProviderResult => ({
@@ -164,8 +170,15 @@ export class GmailProvider implements MailProvider {
   }
 
   async send(input: ProviderSendInput): Promise<ProviderResult> {
-    // 1. Canlı gönderim kilidi: kapalıysa HİÇBİR G/Ç yapılmaz.
-    if (!this.liveEnabled()) return rej("live_sending_disabled", true);
+    // 1. Canlı gönderim kilidi: kapalıysa HİÇBİR G/Ç yapılmaz. Kendine testte bunun yerine (kilit açık olsa bile)
+    //    yalnızca kutunun kendi adresine izin verilir.
+    if (this.opts.selfTest) {
+      const self = this.opts.mailbox.address ? parseEmail(this.opts.mailbox.address) : null;
+      const to = parseEmail(input.to);
+      if (!self || !to || to.email !== self.email || input.to !== self.email) {
+        return rej("self_test_recipient", true);
+      }
+    } else if (!this.liveEnabled()) return rej("live_sending_disabled", true);
     if (input.signal.aborted) return rej("aborted_before_send", false);
 
     // 2. Girdi doğrulaması (ağ yok).
@@ -178,7 +191,8 @@ export class GmailProvider implements MailProvider {
     } catch (e) {
       if (e instanceof OAuthError)
         return rej(e.kind === "scope_missing" ? "scope_missing" : "not_connected", true);
-      throw e;
+      // Ayar okunamadı (ör. veritabanı meşgul): ağ isteğinden ÖNCE; iletinin gönderilmediği kesin.
+      return rej("auth_unavailable", false);
     }
 
     // 4. Erişim belirteci, sonra gönderim (401'de tek kontrollü yenileme).
@@ -200,7 +214,8 @@ export class GmailProvider implements MailProvider {
     try {
       return await getAccessToken(this.opts.db, this.oauth, this.opts.mailbox.id);
     } catch (e) {
-      if (!(e instanceof OAuthError)) throw e;
+      // Belirteç alınamadı (OAuth dışı hata da: ör. gizli depo/veritabanı): gönderim isteği henüz atılmadı → kesin ret.
+      if (!(e instanceof OAuthError)) return rej("auth_unavailable", false);
       if (e.kind === "reauthorization_required" || e.kind === "not_connected") {
         return rej("reauthorization_required", true);
       }
@@ -228,8 +243,12 @@ export class GmailProvider implements MailProvider {
         redirect: "error",
         cache: "no-store",
       });
-    } catch {
-      // İstek atılmış olabilir (bağlantı kopması, zaman aşımı, iptal): SONUÇ BELİRSİZ.
+    } catch (err) {
+      // Bağlantı HİÇ kurulamadıysa (ad çözümlenemedi, bağlantı reddedildi, ağ/ana makine erişilemez, bağlantı kurma zaman
+      // aşımı) tek bir istek baytı gitmemiştir: kesin ret, kutu düzeyinde beklenir. Kurulduktan sonraki her kopma,
+      // zaman aşımı veya iptal ise SONUÇ BELİRSİZ kalır.
+      if (!input.signal.aborted && isPreConnectFailure(err))
+        return rej("network_unreachable", false);
       return unk("network_or_timeout");
     }
     let text: string;
@@ -295,6 +314,29 @@ export class GmailProvider implements MailProvider {
   }
 }
 
+/** Bağlantı kurulmadan oluşan ağ hataları (Node/undici `cause.code`; çoklu adres denemesinde `AggregateError.errors`). */
+const PRE_CONNECT_CODES: ReadonlySet<string> = new Set([
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "ENETDOWN",
+  "UND_ERR_CONNECT_TIMEOUT",
+]);
+
+/** Hata, bağlantı kurulmadan oluştuğu KANITLANAN bir ağ hatası mı? (Tüm kodlar bilinen bağlantı öncesi kodlar.) */
+export function isPreConnectFailure(err: unknown): boolean {
+  const cause = (err as { cause?: unknown } | null)?.cause as
+    { code?: unknown; errors?: unknown } | null | undefined;
+  if (!cause || typeof cause !== "object") return false;
+  const codes: unknown[] = [];
+  if (cause.code !== undefined) codes.push(cause.code);
+  if (Array.isArray(cause.errors))
+    for (const x of cause.errors) codes.push((x as { code?: unknown } | null)?.code);
+  return codes.length > 0 && codes.every((c) => typeof c === "string" && PRE_CONNECT_CODES.has(c));
+}
+
 /** Fabrika kapısı: canlı gönderim kapalıyken bağdaştırıcı HİÇ kurulmaz. */
 export function getLiveProvider(
   db: Db,
@@ -304,4 +346,17 @@ export function getLiveProvider(
     throw new ProviderUnavailableError(mailbox.provider);
   }
   return new GmailProvider({ db, mailbox });
+}
+
+/**
+ * KENDİNE TEST fabrikası (C11): canlı gönderim kilidinden ve hukuki onaylardan BAĞIMSIZDIR (açılış öncesi doğrulama
+ * adımıdır); yalnızca Gmail kutusu için ve yalnızca kutunun KENDİ adresine gönderebilen bir bağdaştırıcı kurar.
+ * Kampanya yolu bunu kullanmaz (`getLiveProvider`).
+ */
+export function getSelfTestProvider(
+  db: Db,
+  mailbox: { id: number; provider: string; address: string | null },
+): MailProvider {
+  if (mailbox.provider !== "gmail") throw new ProviderUnavailableError(mailbox.provider);
+  return new GmailProvider({ db, mailbox, selfTest: true });
 }

@@ -14,6 +14,7 @@ import {
   ensureSigningKey,
   exportRelayKeySet,
   loadPublicKeys,
+  mintProbeToken,
   mintUnsubscribeToken,
   recipientTag,
   revokeSigningKey,
@@ -144,6 +145,39 @@ describe("anahtar yönetimi", () => {
     await revokeSigningKey(db, k2.kid, NOW + 30);
     await expect(mint()).rejects.toMatchObject({ code: "no_key" });
     expect(await audits("unsubscribe.key_revoked")).toHaveLength(2);
+  });
+
+  it("iptalden ÖNCE alınmış tıklama iptal edilmiş anahtarla da uygulanır; iptal sonrası ve sınama reddedilir", async () => {
+    const k1 = await ensureSigningKey(db, NOW);
+    const before = await mint();
+    const after = await mint(b);
+    const probe = await mintProbeToken(db, NOW);
+    expect(await revokeSigningKey(db, k1.kid, NOW + 20)).toBe(true);
+    // aktarıcı tıklamayı iptalden önce (NOW+10) aldı, uygulama sonra işliyor
+    const r = await ingest(evt(before.token, NOW + 10));
+    expect(r).toMatchObject({ outcome: "unsubscribed", suppression: "added" });
+    expect(await clStatus(a)).toBe("unsubscribed");
+    const oneClick = await audits("unsubscribe.one_click");
+    expect(oneClick[0]!.detail).toMatchObject({ viaRevokedKey: true, kid: k1.kid });
+    const accepted = await audits("unsubscribe.revoked_key_accepted");
+    expect(accepted).toHaveLength(1);
+    expect(accepted[0]!.entityId).toBe(k1.kid);
+    expect(JSON.stringify(accepted)).not.toContain(RCPT);
+    // iptal anında/sonrasında alınan olay reddedilir
+    expect(await ingest(evt(after.token, NOW + 20))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
+    expect(await ingest(evt(after.token, NOW + 30))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
+    expect(await clStatus(b)).not.toBe("unsubscribed");
+    // sınama belirteci iptal edilmiş anahtarla ASLA doğrulanmaz
+    expect(await ingest(evt(probe.token, NOW + 10))).toEqual({
+      outcome: "rejected",
+      reason: "unknown_key",
+    });
   });
 
   it("alıcı etiketi gizli anahtarlıdır: adres özetinden farklı, kararlı, ana anahtar değişince değişir", async () => {
@@ -390,7 +424,7 @@ describe("olay işleme: mevcut suppression ve denetim sistemiyle entegrasyon", (
     expect(JSON.stringify(row)).not.toContain("garbage");
   });
 
-  it("yanlış alıcı: ileti başka alıcıya ait / alıcı kaydı sonradan değişti → ret, HİÇBİR engel veya durdurma yok", async () => {
+  it("yanlış ileti: ileti başka alıcıya ait / yok → ret, HİÇBİR engel veya durdurma yok", async () => {
     // ileti başka alıcının iletisi
     const wrongMsg = await mint(a, { messageId: b.outboundId });
     expect(await ingest(evt(wrongMsg.token))).toEqual({
@@ -403,23 +437,116 @@ describe("olay işleme: mevcut suppression ve denetim sistemiyle entegrasyon", (
       outcome: "rejected",
       reason: "message_mismatch",
     });
-    // alıcı kaydı değişti: etiket artık uymuyor
-    const t = await mint();
-    await db
-      .update(campaignLeads)
-      .set({
-        recipientHash: hashEmail("baska@baska-alan.com"),
-        recipientEmail: "baska@baska-alan.com",
-      })
-      .where(eq(campaignLeads.id, a.cl));
-    expect(await ingest(evt(t.token))).toEqual({
-      outcome: "rejected",
-      reason: "recipient_mismatch",
-    });
     expect(await suppressed()).toHaveLength(0);
+    expect(await clStatus(a)).toBe("waiting_next");
     expect(await clStatus(b)).toBe("waiting_next");
-    expect((await audits("unsubscribe.rejected")).length).toBe(3);
+    expect((await audits("unsubscribe.rejected")).length).toBe(2);
     expect(await inbound()).toHaveLength(0); // ret, tekrar oynatma kaydı da bırakmaz
+  });
+
+  describe("alıcı etiketi uyuşmazlığı (C5: ana anahtar değişti): çıkış KAYBOLMAZ", () => {
+    const changeMasterKey = () => {
+      process.env.UM_MASTER_KEY = "cd".repeat(32);
+    };
+
+    it("imza geçerli, etiket eski ana anahtarla: çıkış güncel alıcıya uygulanır, uyuşmazlık denetime yazılır", async () => {
+      const { token } = await mint();
+      changeMasterKey();
+      expect(await ingest(evt(token))).toEqual({
+        outcome: "unsubscribed",
+        stopped: 1,
+        suppression: "added",
+      });
+      const sup = await suppressed();
+      expect(sup).toHaveLength(1);
+      expect(sup[0]).toMatchObject({
+        reason: "unsubscribe",
+        source: "link",
+        emailHash: hashEmail(RCPT),
+      });
+      expect(await clStatus(a)).toBe("unsubscribed");
+      expect(await clStatus(b)).toBe("waiting_next"); // başka alıcı etkilenmez
+      expect(await audits("unsubscribe.rejected")).toHaveLength(0);
+      const mm = await audits("unsubscribe.recipient_tag_mismatch");
+      expect(mm).toHaveLength(1);
+      expect(mm[0]).toMatchObject({ entity: "campaign_lead", entityId: String(a.cl) });
+      expect(mm[0]!.detail).toEqual({
+        kid: expect.any(String),
+        applied: true,
+        messagePeerMatch: true,
+      });
+      const [oc] = await audits("unsubscribe.one_click");
+      expect(oc!.detail).toMatchObject({ suppression: "added", recipientTagMismatch: true });
+      // denetimde adres veya belirteç yok
+      const dump = JSON.stringify(await db.select().from(auditLog));
+      expect(dump).not.toContain(RCPT);
+      expect(dump).not.toContain(token);
+    });
+
+    it("etiket uyuşuyorsa uyuşmazlık kaydı yazılmaz ve tek-tık denetiminde işaret yoktur", async () => {
+      const { token } = await mint();
+      expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
+      expect(await audits("unsubscribe.recipient_tag_mismatch")).toHaveLength(0);
+      const [oc] = await audits("unsubscribe.one_click");
+      expect(oc!.detail).not.toHaveProperty("recipientTagMismatch");
+    });
+
+    it("tekrar oynatma: ikinci teslimat 'duplicate'; ikinci engel veya uyuşmazlık kaydı YOK", async () => {
+      const { token } = await mint();
+      changeMasterKey();
+      expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
+      const snap = await snapshot();
+      expect(await ingest(evt(token))).toEqual({ outcome: "duplicate" });
+      expect(await snapshot()).toBe(snap);
+      expect(await audits("unsubscribe.recipient_tag_mismatch")).toHaveLength(1);
+    });
+
+    it("ileti bağı olmayan belirteç: yine uygulanır; ek kanıt yok (messagePeerMatch null)", async () => {
+      const { token } = await mint(a, { messageId: null });
+      changeMasterKey();
+      expect((await ingest(evt(token))).outcome).toBe("unsubscribed");
+      const [mm] = await audits("unsubscribe.recipient_tag_mismatch");
+      expect(mm!.detail).toMatchObject({ applied: true, messagePeerMatch: null });
+    });
+
+    it("kayıttaki alıcı özeti değişmişse çıkış imzalı belirtecin gösterdiği kaydın GÜNCEL alıcısına uygulanır (kısıtlayıcı yön)", async () => {
+      const t = await mint();
+      const other = "baska@baska-alan.com";
+      await db
+        .update(campaignLeads)
+        .set({ recipientHash: hashEmail(other), recipientEmail: other })
+        .where(eq(campaignLeads.id, a.cl));
+      expect((await ingest(evt(t.token))).outcome).toBe("unsubscribed");
+      const sup = await suppressed();
+      expect(sup).toHaveLength(1);
+      expect(sup[0]!.emailHash).toBe(hashEmail(other));
+      const [mm] = await audits("unsubscribe.recipient_tag_mismatch");
+      // giden iletinin alıcı özeti artık kayıttakiyle aynı değil: denetimde görünür
+      expect(mm!.detail).toMatchObject({ applied: true, messagePeerMatch: false });
+    });
+
+    it("diğer ret yolları değişmez: ana anahtar değişse de yanlış ileti reddedilir", async () => {
+      const wrongMsg = await mint(a, { messageId: b.outboundId });
+      changeMasterKey();
+      expect(await ingest(evt(wrongMsg.token))).toEqual({
+        outcome: "rejected",
+        reason: "message_mismatch",
+      });
+      expect(await suppressed()).toHaveLength(0);
+      expect(await audits("unsubscribe.recipient_tag_mismatch")).toHaveLength(0);
+    });
+
+    it("silinmiş alıcı: etiket uyuşmasa da 'already'; engel veya uyuşmazlık kaydı YOK", async () => {
+      const t = await mint(b);
+      changeMasterKey();
+      await db
+        .update(campaignLeads)
+        .set({ recipientEmail: null, recipientHash: null, redactedAt: NOW })
+        .where(eq(campaignLeads.id, b.cl));
+      expect(await ingest(evt(t.token))).toEqual({ outcome: "already" });
+      expect(await suppressed()).toHaveLength(0);
+      expect(await audits("unsubscribe.recipient_tag_mismatch")).toHaveLength(0);
+    });
   });
 
   it("bilinmeyen kampanya alıcısı ve silinmiş alıcı", async () => {
@@ -526,6 +653,18 @@ describe("olay kuyruğunu boşaltma (drain)", () => {
     });
     expect(src.acked.sort()).toEqual(["1", "2", "3", "4"]);
     expect(await suppressed()).toHaveLength(2);
+  });
+
+  it("ana anahtar değişmiş olsa da çıkış olayı uygulanır ve ancak SONRA onaylanır (ret/kayıp yok)", async () => {
+    const t1 = await mint(a);
+    process.env.UM_MASTER_KEY = "cd".repeat(32);
+    const src = new MemSource([{ id: "1", event: evt(t1.token) }]);
+    const s = await drainUnsubscribeEvents(db, src, { now: () => NOW + 2000 });
+    expect(s).toMatchObject({ pulled: 1, unsubscribed: 1, rejected: 0, error: null });
+    expect(src.acked).toEqual(["1"]);
+    expect(await suppressed()).toHaveLength(1);
+    expect(await clStatus(a)).toBe("unsubscribed");
+    expect(await audits("unsubscribe.event_rejected")).toHaveLength(0);
   });
 
   it("altyapı hatasında olay onaylanmaz; sonraki turda yeniden çekilir ve çift etki oluşmaz", async () => {

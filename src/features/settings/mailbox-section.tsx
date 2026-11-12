@@ -1,8 +1,8 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Mail, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -12,32 +12,66 @@ import { FieldHint, Input, Label } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
+import { api } from "@/lib/client/api";
 import { ck, useMailboxes, type MailboxItem } from "@/lib/client/campaigns";
 import { mailboxApi, mbk, useGmailClient, useOAuthStatus } from "@/lib/client/mailboxes";
-import { t, type TrKey } from "@/lib/i18n";
-
-const KNOWN_REASONS = [
-  "invalid_state",
-  "expired",
-  "access_denied",
-  "account_mismatch",
-  "scope_missing",
-  "scope_excess",
-  "no_refresh_token",
-  "transient",
-];
+import { queryRetryDelay, shouldRetryQuery } from "@/lib/client/retry";
+import { t } from "@/lib/i18n";
+import { oauthResultText, type OAuthResultLike } from "@/lib/mail/gmail/oauth-messages";
 
 const INVALIDATE = [ck.mailboxes, mbk.gmailClient] as const;
 
+/** Uygulama penceresinde gösterilen son bağlantı sonucu (kutu başına). `timeout`: 10 dk içinde sonuç gelmedi. */
+type LastResult = (OAuthResultLike & { timeout?: false }) | { timeout: true };
+
+type ResultResponse =
+  | { status: "pending" }
+  | { status: "done"; ok: boolean; reason: string | null; readDenied: boolean; at: number };
+
+/** Yetki adresindeki `state`: geri çağrı sonucunu sorgulamak için (değer gösterilmez, saklanmaz). */
+function stateOf(authUrl: string | null): string | null {
+  if (!authUrl) return null;
+  try {
+    return new URL(authUrl).searchParams.get("state");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sistem tarayıcısında tamamlanan yetkilendirmenin sonucunu (başarı veya `account_mismatch` gibi neden) 3 sn aralıkla
+ * yerel sunucudan sorar. Yalnızca bekleyen bir istek varken çalışır; dış servise istek atmaz.
+ */
+function useOAuthResult(state: string | null) {
+  return useQuery({
+    queryKey: ["gmail-oauth-result", state ?? ""],
+    enabled: state !== null,
+    queryFn: () =>
+      api<ResultResponse>("/api/oauth/gmail/callback/result", {
+        method: "POST",
+        json: { state },
+      }),
+    refetchInterval: (q) => (q.state.data?.status === "done" ? false : 3000),
+    retry: shouldRetryQuery,
+    retryDelay: queryRetryDelay,
+  });
+}
+
 function statusBadge(m: MailboxItem) {
   if (m.provider === "demo") return <Badge variant="info">{t("mbx.status.demo")}</Badge>;
+  if (m.reauthorizationRequired) return <Badge variant="danger">{t("mbx.status.reauth")}</Badge>;
   if (m.status === "connected") return <Badge variant="success">{t("mbx.status.connected")}</Badge>;
   if (m.status === "disabled") return <Badge variant="outline">{t("mbx.status.disabled")}</Badge>;
   return <Badge variant="warning">{t("mbx.status.not_configured")}</Badge>;
 }
 
-/** Google izin sayfası açıldıktan sonra durumu 3 sn aralıkla yeniler (en çok 10 dk). */
-function useWaitForConnection(active: boolean, done: boolean, onStop: () => void) {
+/** Google izin sayfası açıldıktan sonra durumu 3 sn aralıkla yeniler (en çok 10 dk; sonra `onTimeout`). */
+function useWaitForConnection(
+  active: boolean,
+  done: boolean,
+  onStop: () => void,
+  onTimeout: () => void,
+) {
   const qc = useQueryClient();
   useEffect(() => {
     if (!active) return;
@@ -46,25 +80,72 @@ function useWaitForConnection(active: boolean, done: boolean, onStop: () => void
       return;
     }
     const id = setInterval(() => void qc.invalidateQueries({ queryKey: ["mailboxes"] }), 3000);
-    const stop = setTimeout(onStop, 10 * 60_000);
+    const stop = setTimeout(onTimeout, PENDING_WAIT_MS);
     return () => {
       clearInterval(id);
       clearTimeout(stop);
     };
-  }, [active, done, onStop, qc]);
+  }, [active, done, onStop, onTimeout, qc]);
+}
+
+/** Google isteğinin geçerlilik süresi (sunucudaki bekleyen istek süresiyle aynı: 10 dk). */
+const PENDING_WAIT_MS = 10 * 60_000;
+
+function LastResultNotice({ r, onDismiss }: { r: LastResult; onDismiss: () => void }) {
+  const text = r.timeout ? null : oauthResultText(r);
+  return (
+    <Notice tone={r.timeout ? "warning" : r.ok ? "info" : "danger"}>
+      <div className="flex items-start justify-between gap-2" data-testid="oauth-result">
+        <div className="space-y-0.5">
+          {r.timeout ? (
+            <p>{t("mbx.oauth.result.timeout")}</p>
+          ) : (
+            <>
+              <p className="font-medium">{text!.message}</p>
+              {text!.hint && <p className="text-[12px]">{text!.hint}</p>}
+            </>
+          )}
+        </div>
+        <Button size="sm" variant="ghost" onClick={onDismiss}>
+          {t("mbx.oauth.result.dismiss")}
+        </Button>
+      </div>
+    </Notice>
+  );
 }
 
 function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean }) {
+  const qc = useQueryClient();
   const oauth = useOAuthStatus(m.id, true);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [level, setLevel] = useState<"send" | "send_read">("send");
   const [readConfirm, setReadConfirm] = useState(false);
   const [discConfirm, setDiscConfirm] = useState(false);
+  const [lastResult, setLastResult] = useState<LastResult | null>(null);
   const o = oauth.data;
   const connected = o?.connected === true;
-  useWaitForConnection(authUrl !== null, connected && (level === "send" || o?.read === true), () =>
-    setAuthUrl(null),
+  const stopWaiting = useCallback(() => setAuthUrl(null), []);
+  const timedOut = useCallback(() => {
+    setAuthUrl(null);
+    setLastResult({ timeout: true });
+  }, []);
+  // Sistem tarayıcısındaki geri çağrının sonucu: başarı veya neden (ör. takma adla giriş → account_mismatch).
+  const pendingState = stateOf(authUrl);
+  const result = useOAuthResult(pendingState);
+  // Sonuç kaydı bağlantıyla aynı istekte yazılır; state okunamazsa yalnızca bağlantı durumuna bakılır.
+  useWaitForConnection(
+    authUrl !== null,
+    pendingState === null && connected && (level === "send" || o?.read === true),
+    stopWaiting,
+    timedOut,
   );
+  const done = result.data?.status === "done" ? result.data : null;
+  useEffect(() => {
+    if (!done) return;
+    setLastResult({ ok: done.ok, reason: done.reason, readDenied: done.readDenied });
+    setAuthUrl(null);
+    void qc.invalidateQueries({ queryKey: ["mailboxes"] });
+  }, [done, qc]);
   const start = useSafeMutation(
     (lv: "send" | "send_read") => {
       setLevel(lv);
@@ -72,7 +153,10 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
     },
     {
       invalidate: [...INVALIDATE, mbk.oauth(m.id)],
-      onSuccess: (r) => setAuthUrl(r.authUrl),
+      onSuccess: (r) => {
+        setLastResult(null);
+        setAuthUrl(r.authUrl);
+      },
     },
   );
   const disconnect = useSafeMutation(() => mailboxApi.oauthDisconnect(m.id), {
@@ -84,7 +168,23 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
   });
   return (
     <div className="basis-full space-y-2 border-t pt-2">
-      {o?.reauthorizationRequired && <Notice tone="danger">{t("mbx.oauth.reauth")}</Notice>}
+      {o?.reauthorizationRequired && (
+        <Notice tone="danger">
+          <div data-testid="mbx-reauth">
+            <p className="font-medium">{t("mbx.oauth.reauth")}</p>
+            <p className="text-[12px]">{t("mbx.oauth.reauth.help")}</p>
+            <Button
+              className="mt-2"
+              size="sm"
+              loading={start.isPending}
+              disabled={!clientReady || m.status === "disabled"}
+              onClick={() => start.mutate("send")}
+            >
+              {t("mbx.oauth.reconnect")}
+            </Button>
+          </div>
+        </Notice>
+      )}
       {connected ? (
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant={o?.send ? "success" : "outline"}>{t("mbx.oauth.perm.send")}</Badge>
@@ -102,23 +202,35 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
         </div>
       ) : (
         <div className="space-y-1">
-          <Button
-            size="sm"
-            loading={start.isPending}
-            disabled={!clientReady || m.status === "disabled"}
-            onClick={() => start.mutate("send")}
-          >
-            {t("mbx.oauth.connect")}
-          </Button>
+          {!o?.reauthorizationRequired && (
+            <Button
+              size="sm"
+              loading={start.isPending}
+              disabled={!clientReady || m.status === "disabled"}
+              onClick={() => start.mutate("send")}
+            >
+              {t("mbx.oauth.connect")}
+            </Button>
+          )}
           <p className="text-[12px] text-muted-foreground">
             {clientReady ? t("mbx.oauth.connect.help") : t("mbx.oauth.needClient")}
           </p>
+          {clientReady && (
+            <p className="text-[12px] text-muted-foreground">{t("mbx.oauth.primaryAddress")}</p>
+          )}
         </div>
+      )}
+      {lastResult && !authUrl && (
+        <LastResultNotice r={lastResult} onDismiss={() => setLastResult(null)} />
       )}
       {authUrl && (
         <Notice>
           <p className="font-medium">{t("mbx.oauth.link.title")}</p>
           <p className="text-[12px]">{t("mbx.oauth.link.body")}</p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-4 text-[12px]">
+            <li>{t("mbx.oauth.keepOpen")}</li>
+            <li>{t("mbx.oauth.primaryAddress")}</li>
+          </ul>
           <a
             className="mt-1 inline-block font-medium underline"
             href={authUrl}
@@ -182,6 +294,15 @@ function MailboxRow({ m, clientReady }: { m: MailboxItem; clientReady: boolean }
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{m.label}</p>
         <p className="truncate text-[12px] text-muted-foreground">{m.address ?? "—"}</p>
+        {m.provider === "gmail" && m.limits && (
+          <p className="text-[12px] text-muted-foreground" data-testid={`mbx-limits-${m.id}`}>
+            {t(m.consumerGmail ? "mbx.limits.consumer" : "mbx.limits.workspace", {
+              today: m.limits.todayCap,
+              base: m.limits.warmupBase,
+              max: m.limits.maxDaily,
+            })}
+          </p>
+        )}
       </div>
       {statusBadge(m)}
       {m.editable && (
@@ -264,11 +385,15 @@ function AddMailbox() {
           autoComplete="off"
           value={address}
           onChange={(e) => setAddress(e.target.value)}
+          aria-describedby="mbx-address-hint"
         />
       </div>
       <Button type="submit" loading={add.isPending} disabled={!ok}>
         {t("mbx.add")}
       </Button>
+      <FieldHint id="mbx-address-hint" className="sm:col-span-3">
+        {t("mbx.address.hint")}
+      </FieldHint>
     </form>
   );
 }
@@ -367,23 +492,6 @@ export function MailboxSettingsSection() {
   const client = useGmailClient();
   const clientReady =
     client.data?.clientIdConfigured === true && client.data?.secretConfigured === true;
-  const [result, setResult] = useState<{
-    ok: boolean;
-    reason: string | null;
-    readDenied: boolean;
-  } | null>(null);
-  useEffect(() => {
-    const sp = new URLSearchParams(window.location.search);
-    const g = sp.get("gmail");
-    if (g === "ok" || g === "error") {
-      setResult({
-        ok: g === "ok",
-        reason: sp.get("reason"),
-        readDenied: sp.get("read") === "denied",
-      });
-      window.history.replaceState(null, "", `${window.location.pathname}#mailbox`);
-    }
-  }, []);
   return (
     <Card className="um-enter">
       <CardHeader>
@@ -394,17 +502,6 @@ export function MailboxSettingsSection() {
       </CardHeader>
       <CardContent className="space-y-4 pt-3">
         <Notice>{t("mbx.note")}</Notice>
-        {result && (
-          <Notice tone={result.ok ? "info" : "danger"}>
-            {result.ok
-              ? result.readDenied
-                ? t("mbx.oauth.result.readDenied")
-                : t("mbx.oauth.result.ok")
-              : t(
-                  `mbx.oauth.reason.${KNOWN_REASONS.includes(result.reason ?? "") ? result.reason : "other"}` as TrKey,
-                )}
-          </Notice>
-        )}
         {q.isLoading ? (
           <Skeleton className="h-24 rounded-lg" />
         ) : q.isError || !q.data ? (

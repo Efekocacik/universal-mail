@@ -417,6 +417,33 @@ describe("imzalı çekme kanalı (K9)", () => {
     await expect(respond(200, "x".repeat(1_600_000)).pull(5)).rejects.toMatchObject({
       code: "bad_response",
     });
+    // Uzunluk başlığı olmayan akış: sınır aşılınca okuma DURUR (gövdenin tamamı belleğe alınmaz).
+    const streamed = (status: number, chunks: number) => {
+      let pulled = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(c) {
+          pulled += 1;
+          if (pulled > chunks) c.close();
+          else c.enqueue(new Uint8Array(64 * 1024).fill(0x20));
+        },
+      });
+      return {
+        src: source({ fetch: (async () => new Response(body, { status })) as typeof fetch }),
+        pulled: () => pulled,
+      };
+    };
+    const big = streamed(200, 10_000); // ~640 MB olurdu
+    await expect(big.src.pull(5)).rejects.toMatchObject({ code: "bad_response" });
+    expect(big.pulled()).toBeLessThan(40);
+    const bigErr = streamed(500, 10_000);
+    await expect(bigErr.src.pull(5)).rejects.toMatchObject({ code: "http_error", status: 500 });
+    expect(bigErr.pulled()).toBeLessThan(3); // hata gövdesi okunmaz
+    await expect(
+      source({
+        fetch: (async () =>
+          new Response(new Uint8Array([0x7b, 0xff, 0xfe, 0x7d]), { status: 200 })) as typeof fetch,
+      }).pull(5),
+    ).rejects.toMatchObject({ code: "bad_response" }); // geçersiz UTF-8
     await expect(
       respond(200, '{"acked":"x"}').ack(["1700000000000-aaaaaaaaaaaaaaaa"]),
     ).rejects.toMatchObject({ code: "bad_response" });

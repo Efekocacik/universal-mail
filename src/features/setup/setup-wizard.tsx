@@ -26,6 +26,13 @@ import { api } from "@/lib/client/api";
 import { qk, useCountries, useSettings } from "@/lib/client/queries";
 import type { CompanyProfile } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
+import {
+  companyPayload,
+  isCompanyStepValid,
+  isValidTrIdentifier,
+  TR_IDENTIFIER_KEYS,
+  type TrIdentifierKey,
+} from "./company-step";
 
 const STEPS = ["welcome", "company", "markets", "google", "budget", "finish"] as const;
 type Step = (typeof STEPS)[number];
@@ -38,6 +45,8 @@ const EMPTY_COMPANY: CompanyProfile = {
   contactName: "",
   contactTitle: "",
   website: "",
+  mersisNo: "",
+  tradeRegistryNo: "",
 };
 
 function Stepper({ index }: { index: number }) {
@@ -217,12 +226,7 @@ export function SetupWizard() {
   const step: Step = STEPS[index]!;
   const budgetNum = Number(budget.replace(",", "."));
   const budgetValid = Number.isFinite(budgetNum) && budgetNum >= 0 && budgetNum <= 100000;
-  const companyValid =
-    company.legalName.trim().length >= 2 &&
-    company.address.trim().length >= 5 &&
-    company.taxId.trim().length >= 2 &&
-    company.phone.trim().length >= 5 &&
-    company.contactName.trim().length >= 2;
+  const companyValid = isCompanyStepValid(company);
 
   const minErr = (v: string, n: number) =>
     v.trim().length === 0
@@ -238,13 +242,7 @@ export function SetupWizard() {
       if (step === "welcome") {
         await saveConsent.mutateAsync();
       } else if (step === "company") {
-        await saveSettings.mutateAsync({
-          "company.profile": {
-            ...company,
-            contactTitle: company.contactTitle || undefined,
-            website: company.website || undefined,
-          },
-        });
+        await saveSettings.mutateAsync({ "company.profile": companyPayload(company) });
       } else if (step === "markets") {
         await saveSettings.mutateAsync({ "targets.countries": selected });
       } else if (step === "google") {
@@ -283,12 +281,25 @@ export function SetupWizard() {
   const finishBlocked = step === "finish" && data.setup.missing.length > 0;
 
   const companyField = (
-    k: "legalName" | "taxId" | "phone" | "contactName" | "contactTitle" | "website",
+    k:
+      | "legalName"
+      | "taxId"
+      | "phone"
+      | "contactName"
+      | "contactTitle"
+      | "website"
+      | TrIdentifierKey,
     label: string,
     min: number,
     props: { placeholder?: string; autoComplete?: string } = {},
   ) => {
-    const e = min > 0 ? err(k, company[k] ?? "", min) : null;
+    // İsteğe bağlı TR tanımlayıcıları: biçim hatası yazarken hemen gösterilir (boş bırakmak her zaman geçerli).
+    const e =
+      min > 0
+        ? err(k, company[k] ?? "", min)
+        : (TR_IDENTIFIER_KEYS as readonly string[]).includes(k) && !isValidTrIdentifier(company[k])
+          ? t("setup.err.identifier")
+          : null;
     return (
       <div className="space-y-1.5">
         <Label htmlFor={`c-${k}`}>{label}</Label>
@@ -432,6 +443,11 @@ export function SetupWizard() {
                 <div className="sm:col-span-2">
                   {companyField("website", t("company.website"), 0, { placeholder: "https://" })}
                 </div>
+                {companyField("mersisNo", t("company.mersisNo"), 0)}
+                {companyField("tradeRegistryNo", t("company.tradeRegistryNo"), 0)}
+                <p className="text-[12px] text-muted-foreground sm:col-span-2">
+                  {t("company.trHint")}
+                </p>
               </div>
               <Why>{t("setup.why.company")}</Why>
             </>
@@ -654,7 +670,9 @@ export function SetupWizard() {
                       spellCheck={false}
                     />
                   </div>
-                  <p className="text-[12px] text-muted-foreground">{t("setup.google.guide")}</p>
+                  <p className="whitespace-pre-line text-[12px] text-muted-foreground">
+                    {t("setup.google.guide")}
+                  </p>
                 </div>
               ) : (
                 <p className="rounded-lg border border-dashed border-nov-future/50 bg-nov-future/5 p-3 text-[13px] text-muted-foreground">

@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { Client } from "@libsql/client";
@@ -140,10 +141,9 @@ const refreshCalls = () =>
     .length;
 
 describe("kapılar: ağ isteğinden ÖNCE", () => {
-  it("LIVE_SENDING_ENABLED kapalıyken (varsayılan) hiçbir istek atılmaz: ne Gmail'e ne OAuth'a", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(false);
+  it("canlı gönderim kapısı kapalıyken (testte kapatılır) hiçbir istek atılmaz: ne Gmail'e ne OAuth'a", async () => {
     const id = await connected();
-    const p = new GmailProvider({ db, mailbox: { id, address: ADDRESS }, oauth: deps }); // anahtar geçersiz kılınmadı
+    const p = provider(id, { liveEnabled: () => false });
     expect(await p.send(input())).toEqual({
       status: "rejected",
       code: "live_sending_disabled",
@@ -153,15 +153,38 @@ describe("kapılar: ağ isteğinden ÖNCE", () => {
     expect(oauth.requests).toHaveLength(0);
   });
 
-  it("fabrika: canlı kapalıyken Gmail bağdaştırıcısı hiç kurulmaz; getProvider de gerçek sağlayıcıda hata verir", async () => {
+  it("kapı açma sürümü: GERÇEK kapı açık (geçersiz kılma yok); gönderim izni yoksa yine ağa çıkılmaz", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true);
+    const noSend = await connected({ send: false, read: true });
+    // `liveEnabled` verilmez: üretimdeki birleşik kapı kullanılır. Yalnızca sahte sunucu adresi verilir.
+    const p = new GmailProvider({
+      db,
+      mailbox: { id: noSend, address: ADDRESS },
+      oauth: deps,
+      apiBase: gmail.base,
+    });
+    expect(await p.send(input())).toEqual({
+      status: "rejected",
+      code: "scope_missing",
+      permanent: true,
+    });
+    expect(gmail.requests).toHaveLength(0);
+    expect(oauth.requests).toHaveLength(0);
+  });
+
+  it("fabrika: kapı açıkken yalnızca Gmail kutusu için bağdaştırıcı kurulur (ağ yok); getProvider gerçek sağlayıcıda hata verir", async () => {
     const id = await connected();
     const mb = { id, provider: "gmail", address: ADDRESS };
-    expect(() => getLiveProvider(db, mb)).toThrow(ProviderUnavailableError);
+    expect(getLiveProvider(db, mb).id).toBe("gmail");
     expect(() => getLiveProvider(db, { ...mb, provider: "demo" })).toThrow(
+      ProviderUnavailableError,
+    );
+    expect(() => getLiveProvider(db, { ...mb, provider: "smtp" })).toThrow(
       ProviderUnavailableError,
     );
     expect(() => getProvider({ provider: "gmail" })).toThrow(ProviderUnavailableError);
     expect(gmail.requests).toHaveLength(0);
+    expect(oauth.requests).toHaveLength(0);
   });
 
   it("test geçersiz kılmaları üretimde kabul edilmez (apiBase, liveEnabled)", async () => {
@@ -514,6 +537,20 @@ describe("sonuç sınıflandırması: kesin ret / belirsiz", () => {
     setTimeout(() => ac.abort(), 150);
     expect(await pending).toEqual({ status: "unknown", code: "network_or_timeout" });
     expect(gmail.requests).toHaveLength(3); // her gönderim tam BİR istek
+  });
+
+  it("bağlantı KURULAMAZSA (ECONNREFUSED) istek gitmemiştir: kesin ret network_unreachable (belirsiz değil)", async () => {
+    const id = await connected();
+    const srv = net.createServer();
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", () => r()));
+    const port = (srv.address() as net.AddressInfo).port;
+    await new Promise<void>((r) => srv.close(() => r()));
+    const p = provider(id, { apiBase: `http://127.0.0.1:${port}` });
+    expect(await p.send(input())).toEqual({
+      status: "rejected",
+      code: "network_unreachable",
+      permanent: false,
+    });
   });
 
   it("sonuç kodları belirteç, adres veya sunucu gövdesi içermez", async () => {

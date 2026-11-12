@@ -23,8 +23,9 @@ const env = {
   UM_DATA_DIR: data,
   UM_MIGRATIONS_DIR: path.join(dir, "drizzle"),
   UM_STATIC_DATA_DIR: path.join(dir, "data"),
-  // Yalnızca E2E: demo gönderim zamanlayıcısı açılır (geçici veri klasörü). Yalnızca demo posta kutusu ve bellekteki
-  // demo sağlayıcı kullanılabilir; gerçek gönderim kodda kapalıdır (LIVE_SENDING_ENABLED=false, canlı sağlayıcı yok).
+  // Yalnızca E2E: demo gönderim zamanlayıcısı açılır (geçici veri klasörü). Gerçek gönderim kapısı kodda açıktır
+  // (LIVE_SENDING_ENABLED=true), ancak burada bağlı Gmail kutusu, DNS denetimi ve kilidi açık ülke yoktur; yalnızca demo
+  // posta kutusu ve bellekteki demo sağlayıcı kullanılabilir.
   FAZ3_DEMO_SCHEDULER_ENABLED: "1",
   // Yalnızca E2E: demo gelen kutusu simülatörü açılır (ağa çıkmaz; tasdik "demo_simulated"dır, gerçek doğrulama değildir).
   FAZ3_DEMO_INBOX_ENABLED: "1",
