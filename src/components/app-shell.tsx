@@ -38,6 +38,10 @@ export const NAV_ITEMS = [
   also?: readonly string[];
 }[];
 
+/**
+ * Bütçe hapı tek satırdır (`whitespace-nowrap`). Uzun metin ("Bu ay: $x / $y") yalnızca `xl` ve üstünde yazılır;
+ * daha darda kısa biçim ("$x / $y") kullanılır, tam metin erişilebilir adda ve balonda kalır. Bkz. `AppShell`.
+ */
 function BudgetPill() {
   const { data } = useStatus();
   if (!data) return <div className="h-8 w-24 animate-pulse rounded-full bg-muted sm:w-40" />;
@@ -58,6 +62,7 @@ function BudgetPill() {
     >
       <Link
         href="/settings#budget"
+        data-testid="budget-pill"
         className={cn(
           "flex h-8 min-w-0 shrink items-center gap-2.5 rounded-full border bg-card px-2.5 text-[12px] transition-colors duration-150 hover:bg-accent sm:px-3",
           tone === "warning" && "border-nov-likely/60 bg-nov-likely/10",
@@ -65,9 +70,9 @@ function BudgetPill() {
         )}
         aria-label={text}
       >
-        <span className="tabular font-semibold">
-          <span className="hidden sm:inline">{text}</span>
-          <span className="sm:hidden">
+        <span className="tabular whitespace-nowrap font-semibold">
+          <span className="hidden xl:inline">{text}</span>
+          <span className="xl:hidden">
             {fmtUsd(b.spentUsd)}
             <span className="font-normal text-muted-foreground max-[399px]:hidden">
               {" "}
@@ -111,6 +116,14 @@ function ProviderStrip() {
   );
 }
 
+/**
+ * Üst çubuk genişlik planı (5 gezinme öğesi; Inter gömülü olduğundan ölçüler işletim sisteminden bağımsızdır):
+ *  - Gezinme ASLA daraltılmaz (`shrink-0`): daralırsa öğeleri kutusundan taşar ve sağ grup (demo rozeti, zil, bütçe)
+ *    üzerine biner. Sığmayan yer sağ gruptan ve aşağıdaki kırılımlardan kazanılır.
+ *  - Gezinme etiketleri `lg` (1024 px) ve üstünde görünür; daha darda yalnızca simge (ad `aria-label` ve balonda).
+ *  - Logo yazısı ve bütçe hapının uzun metni `xl` (1280 px) ve üstünde.
+ * e2e/ui-polish.spec.ts 320–1440 px aralığında, Türkçe ve İngilizce, çakışma olmadığını sınar.
+ */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const theme = useResolvedTheme();
@@ -132,9 +145,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-[13px] font-bold text-primary-foreground shadow-sm">
               U
             </span>
-            <span className="hidden lg:inline">Universal Mail</span>
+            <span className="hidden xl:inline">Universal Mail</span>
           </Link>
-          <nav className="flex min-w-0 items-center gap-0.5 sm:gap-1" aria-label={t("nav.label")}>
+          <nav className="flex shrink-0 items-center gap-0.5 sm:gap-1" aria-label={t("nav.label")}>
             {NAV_ITEMS.map((item) => {
               const { href, key, icon: Icon } = item;
               const also: readonly string[] = "also" in item ? item.also : [];
@@ -156,13 +169,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                   >
                     <Icon className="size-4" aria-hidden />
-                    <span className="hidden md:inline">{t(key)}</span>
+                    <span className="hidden lg:inline">{t(key)}</span>
                   </Link>
                 </Tip>
               );
             })}
           </nav>
-          <div className="ml-auto flex min-w-0 items-center gap-1.5 min-[400px]:gap-3">
+          <div
+            className="ml-auto flex min-w-0 items-center gap-1.5 min-[400px]:gap-3"
+            data-testid="header-actions"
+          >
             <ProviderBadge />
             <NotificationBell />
             <BudgetPill />

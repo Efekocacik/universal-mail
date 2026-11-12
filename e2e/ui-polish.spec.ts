@@ -107,6 +107,59 @@ test.describe("Faz 4 · arayüz cilası (Paket D)", () => {
     }
   });
 
+  test("üst çubuk: 320–1440 px, Türkçe ve İngilizce; gezinme taşmaz, sağ grupla çakışmaz, bütçe tek satır", async ({
+    request,
+  }) => {
+    // Gerileme: 5. gezinme öğesi (Gösterge paneli) eklenince 390 px'te sayfa yatay kaydı; 768–1279 px'te gezinme
+    // daralıp öğeleri kutusundan taştı, demo rozeti "Ayarlar"ın üzerine bindi ve bütçe hapı iki satıra kırıldı.
+    // Belge taşması bunu yakalamaz (taşma üst çubuğun içinde kalır); kutular ayrıca ölçülür.
+    const measure = () =>
+      page.evaluate(() => {
+        const rect = (sel: string) => document.querySelector(sel)!.getBoundingClientRect();
+        const nav = document.querySelector("header nav")!;
+        const pill = document.querySelector<HTMLElement>("[data-testid=budget-pill]")!;
+        const header = rect("header");
+        const actions = [...document.querySelectorAll("[data-testid=header-actions] > *")].map(
+          (e) => e.getBoundingClientRect(),
+        );
+        return {
+          docOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+          navOverflow: nav.scrollWidth - nav.clientWidth,
+          // Gezinmenin sağ kenarı ile sağ grubun ilk görünen öğesi arasındaki boşluk (negatifse çakışma).
+          navToActions:
+            Math.min(...actions.filter((r) => r.width > 0).map((r) => r.left)) -
+            nav.getBoundingClientRect().right,
+          actionsOutside: actions.some((r) => r.width > 0 && r.right > header.right + 0.5),
+          pillWraps: pill.scrollHeight > pill.clientHeight + 1,
+          pillOverflow: pill.scrollWidth - pill.clientWidth,
+        };
+      });
+    try {
+      for (const lang of ["tr", "en"] as const) {
+        const res = await request.put("/api/settings", { headers, data: { "ui.language": lang } });
+        expect(res.status()).toBe(200);
+        for (const width of [320, 390, 640, 768, 1024, 1280, 1440]) {
+          await page.setViewportSize({ width, height: 720 });
+          await page.goto("/campaigns");
+          await expect(page.locator("html")).toHaveAttribute("lang", lang);
+          await expect(page.getByTestId("budget-pill")).toBeVisible();
+          await expect(page.getByTestId("notification-bell")).toBeVisible();
+          const m = await measure();
+          const where = `${lang} ${width}px`;
+          expect(m.docOverflow, where).toBeLessThanOrEqual(0);
+          expect(m.navOverflow, where).toBeLessThanOrEqual(0);
+          expect(m.navToActions, where).toBeGreaterThanOrEqual(0);
+          expect(m.actionsOutside, where).toBe(false);
+          expect(m.pillWraps, where).toBe(false);
+          expect(m.pillOverflow, where).toBeLessThanOrEqual(1);
+        }
+      }
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await resetUi(request);
+    }
+  });
+
   test("bildirim zili açılır (uç yoksa 'henüz etkin değil' der, sayfayı bozmaz)", async () => {
     await page.goto("/");
     await page.getByTestId("notification-bell").click();
