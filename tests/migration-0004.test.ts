@@ -330,7 +330,12 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
       ),
     ).toMatch(/scan_schedules_json_ck/);
     expect(await tryx(c, sched(3, "k3", ",ack_max_usd", ",5"))).toMatch(/scan_schedules_ack_ck/);
+    // NULL deliği: tutar yokken onay anı tek başına kalamaz (NULL >= 0 → NULL, CHECK'i geçerdi).
+    expect(await tryx(c, sched(3, "k3", ",ack_at", `,${T}`))).toMatch(/scan_schedules_ack_ck/);
     expect(await tryx(c, sched(3, "k3", ",ack_max_usd,ack_at", `,5,${T}`))).toBe("OK");
+    expect(
+      await tryx(c, `UPDATE scan_schedules SET ack_max_usd = NULL WHERE scan_key = 'k3'`),
+    ).toMatch(/scan_schedules_ack_ck/);
     expect(await tryx(c, sched(4, "k4", ",last_skip_code", ",'needs ack'"))).toMatch(
       /scan_schedules_skip_code_ck/,
     );

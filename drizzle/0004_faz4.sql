@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS `scan_schedules` (
 	CONSTRAINT "scan_schedules_profile_ck" CHECK(field_profile IN ('discovery', 'enrich')),
 	CONSTRAINT "scan_schedules_json_ck" CHECK(json_valid(category_set_ids) AND json_type(category_set_ids) = 'array' AND json_valid(custom_keywords) AND json_type(custom_keywords) = 'array'),
 	CONSTRAINT "scan_schedules_cost_ck" CHECK(max_cost_usd IS NULL OR max_cost_usd >= 0),
-	CONSTRAINT "scan_schedules_ack_ck" CHECK((ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd >= 0 AND ack_at IS NOT NULL)),
+	CONSTRAINT "scan_schedules_ack_ck" CHECK((ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd IS NOT NULL AND ack_max_usd >= 0 AND ack_at IS NOT NULL)),
 	CONSTRAINT "scan_schedules_outcome_ck" CHECK(last_outcome IS NULL OR last_outcome IN ('started', 'skipped', 'completed', 'failed')),
 	CONSTRAINT "scan_schedules_skip_code_ck" CHECK(last_skip_code IS NULL OR (length(last_skip_code) BETWEEN 1 AND 40 AND last_skip_code NOT GLOB '*[^A-Z0-9_]*')),
 	CONSTRAINT "scan_schedules_missed_ck" CHECK(missed_runs >= 0)
