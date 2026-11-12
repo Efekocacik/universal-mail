@@ -28,7 +28,8 @@ import { activeMaintenance, acquireMaintenance } from "./maintenance";
  *   `arf_complaint` (doğrulanmış) olarak işaretlenir; doğrulanmamış olup olmadığı ayırt edilemez ve bu yönde kabul edilir.
  * - 15.10-2 (TB-10) sonrası `completed` dizi çıkış/şikâyette durumunu korur ve yalnızca `stop_reason` alır. Eski sürüm
  *   bu durumu `unsubscribed` olarak yazardı; geri almada `stop_reason` dolu ve `status <> 'unsubscribed'` olan diziler
- *   eski gösterime (`unsubscribed`) katlanır, böylece neden kaybolmaz.
+ *   eski gösterime (`unsubscribed`) katlanır. NEDEN korunur (şikâyette işaretle), ama "önce tamamlandı" bilgisi
+ *   KAYBOLUR: 0003 yeniden uygulanınca `stop_reason` geri dolar, dizi ise `unsubscribed` kalır (kalıcı; testli).
  * - `stop_reason = 'complaint'` ve `status = 'unsubscribed'` olan dizilere `exclusion_reasons` içinde `"arf_complaint"` eklenir.
  * - Tüm kimlikler, `sqlite_sequence`, indeksler ve `suppressions.message_id` bağlantıları korunur; bekçiler (satır sayısı,
  *   kimlik toplamı, yabancı anahtar) başarısız olursa işlemin tamamı geri alınır.

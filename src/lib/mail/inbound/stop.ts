@@ -13,10 +13,14 @@ import { ARF_COMPLAINT_CODE, BUSINESS_COMPLAINT_CODE } from "./complaint";
  * Kurallar:
  *  - Süren dizi (`pending`, `scheduled`, `waiting_next`) durur: `status = 'unsubscribed'`, `stop_reason` yazılır,
  *    `next_send_at` boşaltılır. (`in_flight` gönderim ortasındadır; dokunulmaz — sonucu kaydedildikten sonra bir
- *    sonraki adım engel denetimine takılır.)
- *  - TB-10: `completed` dizi DURUMUNU KORUR; yalnızca `stop_reason` kaydedilir (gönderim zaten bitmişti).
- *  - Şikâyet çıkıştan ağırdır: aynı dizi önce çıkış, sonra şikâyet görürse neden `complaint`'e yükseltilir (yalnızca
- *    `completed`/`unsubscribed` satırlarda; durum değişmez). Tersi (şikâyetten sonra çıkış) nedeni değiştirmez.
+ *    sonraki adım engel denetimine takılır.) Durdurma kapsamı `target`'tır: adres düzeyindeki çıkış/şikâyette
+ *    alıcının BÜTÜN kampanyalardaki süren dizileri (engel adres düzeyindedir).
+ *  - Durumu korunan satırlara neden yazma ("not düşme") YALNIZCA olayın İLGİLİ OLDUĞU diziye (`about`) uygulanır:
+ *    - TB-10: `completed` dizi DURUMUNU KORUR; yalnızca `stop_reason` kaydedilir (gönderim zaten bitmişti).
+ *    - Şikâyet çıkıştan ağırdır: aynı dizi önce çıkış, sonra şikâyet görürse neden `complaint`'e yükseltilir
+ *      (yalnızca `completed`/`unsubscribed` satırlarda; durum değişmez). Tersi nedeni değiştirmez.
+ *    Böylece B kampanyasının iletisine yapılan şikâyet, A kampanyasında daha önce çıkışla durmuş ya da bitmiş diziyi
+ *    "şikâyet" saymaz; A'nın sayaçları kendi olaylarını gösterir (inceleme bulgusu, 15.10-2).
  *  - Çift yazım: şikâyet nedeni yazılan her satırda `exclusion_reasons` içinde `"arf_complaint"` bulunur (geri alma
  *    sözleşmesi). İşaret zaten varsa yinelenmez; diğer gerekçeler korunur.
  *  - Yeniden çalıştırma aynı sonucu verir (koşullu, sabit değer yazımı; artırım yok): tekrar teslim edilen olay
@@ -26,6 +30,14 @@ import { ARF_COMPLAINT_CODE, BUSINESS_COMPLAINT_CODE } from "./complaint";
 export const STOPPABLE: readonly CampaignLeadStatus[] = ["pending", "scheduled", "waiting_next"];
 
 export type StopTarget = { campaignLeadId: number } | { recipientHash: string };
+
+/** Denetim ayrıntısında tutulan kimlik listesinin üst sınırı (satır şişmesin; sayılar ayrıca tam yazılır). */
+export const AUDIT_ID_LIMIT = 50;
+
+/** Denetim kaydı için sınırlı kimlik listesi. */
+export function auditIds(ids: readonly number[]): number[] {
+  return ids.slice(0, AUDIT_ID_LIMIT);
+}
 
 export interface StopResult {
   /** Bu çağrıda durdurulan (`unsubscribed`'a geçen) diziler. */
@@ -49,11 +61,16 @@ export function appendReasonsSql(codes: readonly string[]): SQL {
   return sql`CASE WHEN json_valid(${campaignLeads.exclusionReasons}) THEN ${expr} ELSE ${JSON.stringify(codes)} END`;
 }
 
+/**
+ * @param about Olayın ilgili olduğu dizi (eşleşen giden iletinin dizisi / bağlantı belirtecindeki dizi). Durumu korunan
+ *   satırlara neden yalnızca bu diziye yazılır. Verilmezse: `target` tek diziyse o dizi, adres hedefiyse HİÇBİRİ.
+ */
 export async function stopSequences(
   tx: DbExecutor,
   target: StopTarget,
   reason: SequenceStopReason,
   now: number,
+  about?: number | null,
 ): Promise<StopResult> {
   const complaint = reason === "complaint";
   const markers = complaint ? { exclusionReasons: appendReasonsSql([ARF_COMPLAINT_CODE]) } : {};
@@ -69,8 +86,11 @@ export async function stopSequences(
     .where(and(targetSql(target), inArray(campaignLeads.status, [...STOPPABLE])))
     .returning({ id: campaignLeads.id });
 
-  // Durumu korunacak satırlar: `completed` (nedeni yoksa) ve şikâyette nedeni henüz `complaint` olmayan
-  // `completed`/`unsubscribed` satırlar.
+  // Durumu korunacak satırlar (yalnızca `about` dizisi): `completed` (nedeni yoksa) ve şikâyette nedeni henüz
+  // `complaint` olmayan `completed`/`unsubscribed` satırlar.
+  const aboutId =
+    about !== undefined ? about : "campaignLeadId" in target ? target.campaignLeadId : null;
+  if (aboutId === null) return { stopped: stopped.map((r) => r.id), annotated: [] };
   const annotateWhere = complaint
     ? and(
         inArray(campaignLeads.status, ["completed", "unsubscribed"]),
@@ -80,10 +100,16 @@ export async function stopSequences(
   const annotated = await tx
     .update(campaignLeads)
     .set({ stopReason: reason, updatedAt: now, ...markers })
-    .where(and(targetSql(target), annotateWhere))
+    .where(and(eq(campaignLeads.id, aboutId), annotateWhere))
     .returning({ id: campaignLeads.id });
 
   return { stopped: stopped.map((r) => r.id), annotated: annotated.map((r) => r.id) };
+}
+
+/** TB-11(d) sonucu: durdurulan dizi kimlikleri ve eşleşmede kullanılan işletme alan adı. */
+export interface BusinessStopResult {
+  stopped: number[];
+  businessDomain: string | null;
 }
 
 /**
@@ -94,20 +120,24 @@ export async function stopSequences(
  * KASITLI SINIR: Diğer adreslere suppression YAZILMAZ ve lead kalıcı olarak engellenmez; yalnızca o anda süren diziler
  * durur. Bitmiş dizilere dokunulmaz. İşletmeyi kalıcı engellemek kullanıcının kararıdır (lead durumu "iletişime
  * geçme" veya alan adı engeli).
+ *
+ * Dönüş: durdurulan dizi kimlikleri ve eşleşmede kullanılan işletme alan adı (kişisel sağlayıcıda `null`) — denetim
+ * kaydı başka adreslerin neden durduğunu izleyebilsin diye.
  */
 export async function stopBusinessSequences(
   tx: DbExecutor,
   business: { leadId: number | null; recipientDomain: string | null },
   now: number,
-): Promise<number[]> {
+): Promise<BusinessStopResult> {
   const reg = businessDomainOf(business.recipientDomain);
+  const none: BusinessStopResult = { stopped: [], businessDomain: reg };
   const scope: SQL[] = [];
   if (business.leadId !== null) scope.push(eq(campaignLeads.leadId, business.leadId));
   if (reg) {
     scope.push(eq(campaignLeads.recipientDomain, reg));
     scope.push(like(campaignLeads.recipientDomain, `%.${reg}`));
   }
-  if (scope.length === 0) return [];
+  if (scope.length === 0) return none;
   const candidates = await tx
     .select({
       id: campaignLeads.id,
@@ -124,7 +154,7 @@ export async function stopBusinessSequences(
         (reg !== null && businessDomainOf(r.domain) === reg),
     )
     .map((r) => r.id);
-  if (ids.length === 0) return [];
+  if (ids.length === 0) return none;
   const rows = await tx
     .update(campaignLeads)
     .set({
@@ -136,5 +166,5 @@ export async function stopBusinessSequences(
     })
     .where(and(inArray(campaignLeads.id, ids), inArray(campaignLeads.status, [...STOPPABLE])))
     .returning({ id: campaignLeads.id });
-  return rows.map((r) => r.id);
+  return { stopped: rows.map((r) => r.id), businessDomain: reg };
 }

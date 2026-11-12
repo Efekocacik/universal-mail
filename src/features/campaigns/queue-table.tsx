@@ -19,7 +19,7 @@ import {
 } from "@/lib/client/campaigns";
 import { countryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
-import { reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
+import { queueFilterLabel, reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
 import { LoadError, ReasonList, SequenceStatusBadge } from "./parts";
 import { useSafeMutation } from "./use-safe-mutation";
 
@@ -81,7 +81,7 @@ export function QueueTable({
           <option value="">{t("queue.filter.all")}</option>
           {SEQUENCE_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {t(`sequenceStatus.${s}`)}
+              {queueFilterLabel(s)}
             </option>
           ))}
         </Select>

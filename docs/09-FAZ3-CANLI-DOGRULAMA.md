@@ -171,7 +171,7 @@ Kod tarafı hazırdır (ayrıştırıcı, sınıflandırma, kanıt katmanları, 
 
 **Kısmi kapsam (şikâyet ORANI güvenilir değildir):** Şikâyet oranı kuralı (%0,1) HER ZAMAN "ölçülemiyor" gösterilir ve hiçbir otomatik durdurma kararına girmez. Çünkü ARF yalnızca FBL sunan sağlayıcılardan gelir (Gmail dahil birçoğu göndermez) ve alıcıların çoğu şikâyetini bildirmez; paydaya karşılık gelen şikâyet kapsamı bilinmez. Gösterilen sayı yalnızca son 30 gündeki doğrulanmış şikâyetli **alıcı** sayısının alt sınırıdır; incelemede bekleyen raporlar ayrı sayılır.
 
-**Veri modeli sınırı (15.10-1 sonrası):** Migrasyon `0003` (Aşama 15.10-1) `messages.classification` CHECK kısıtına `complaint` değerini ve `campaign_leads.stop_reason` (`unsubscribe`/`complaint`) sütununu ekledi; mevcut işaretli satırlar taşındı. **Aşama 15.10-2'den beri** (`cc00806`, `61009e2`; `08` TB-1, TB-2, TB-10, TB-11d) kod şikâyeti `classification = 'complaint'` olarak yazar ve eski işareti (`arf_complaint` / `arf_complaint:<neden>`) aynı satıra çift yazar; her durdurma yolu `stop_reason` yazar (şikâyette `"arf_complaint"` gerekçe işaretiyle). Okuma sütundan, eski satırlarda işaretten yapılır.
+**Veri modeli sınırı (15.10-1 sonrası):** Migrasyon `0003` (Aşama 15.10-1) `messages.classification` CHECK kısıtına `complaint` değerini ve `campaign_leads.stop_reason` (`unsubscribe`/`complaint`) sütununu ekledi; mevcut işaretli satırlar taşındı. **Aşama 15.10-2'den beri** (`08` TB-1, TB-2, TB-10, TB-11d) kod şikâyeti `classification = 'complaint'` olarak yazar ve eski işareti (`arf_complaint` / `arf_complaint:<neden>`) aynı satıra çift yazar; her durdurma yolu `stop_reason` yazar (şikâyette `"arf_complaint"` gerekçe işaretiyle). Okuma sütundan, eski satırlarda işaretten yapılır.
 
 Gerçek ortam gerektiren BEKLEYEN maddeler (YAPILMADI):
 - [ ] Hangi posta sağlayıcılarının FBL/JMRP sunduğu ve şirketin posta düzeni için kaydolunacak olanlar; rapor göndericisi alan adlarının listesi (`mail.arfReporters`; bu sürümde bilinmez, **varsayılan boş**). Listeyi ayarlamak için arayüz/API YOK (yalnızca servis işlevi).
@@ -233,7 +233,7 @@ Her adım ayrı bir sürüm ve kayıt gerektirir; bir adım doğrulanamazsa sonr
 4. HTTPS çıkış aktarıcısı dağıtımı, uçtan uca doğrulama ve K2 disk dayanıklılığı (Bölüm 3). Bu adımdan sonra `List-Unsubscribe-Post` doğrulanmış kanıtla türer.
 5. (İsteğe bağlı, otomatik gelen kutusu işleme için) okuma izni; Bölüm 1.3 doğrulaması; önce `LIVE_INBOX_READING_ENABLED`, ancak başlık doğrulaması tamamlandıysa `GMAIL_HEADER_TRUST_VERIFIED`. Aksi halde gelen iletiler elle incelenir (güvenli).
 6. ARF: güvenilir rapor sağlayıcı listesi (Bölüm 4).
-7. Aşama 15.10 kararı: TB-1/TB-2'nin kod tarafı (15.10-2) tamamlandı veya pilot için yazılı kabul edildi (`08` Bölüm 6; migrasyon 15.10-1'de yapıldı). **Kod tarafı tamamlandı (`cc00806`, `61009e2`).**
+7. Aşama 15.10 kararı: TB-1/TB-2'nin kod tarafı (15.10-2) tamamlandı veya pilot için yazılı kabul edildi (`08` Bölüm 6; migrasyon 15.10-1'de yapıldı). **Kod tarafı tamamlandı (15.10-2).**
 8. Hukuki onaylar → `LEGAL_APPROVALS`; ülke bazında canlı politika kilidi.
 9. Son olarak `LIVE_SENDING_ENABLED`; pilot (Bölüm 7).
 

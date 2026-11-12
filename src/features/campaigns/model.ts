@@ -162,16 +162,17 @@ export interface PlainCounts {
   queued: number;
   /** Teslim edilemedi (bounce) veya hiç gönderilemeden başarısız. */
   failed: number;
-  /** Hiç ileti almadan duran kişi (çıkış, şikâyet, başka kampanyadaki yanıt, çıkarma, iptal). */
+  /** Bu kampanyadan hiç ileti almadan önce (başka bir iletiye) yanıt verdiği için gönderilmeyen kişi. */
+  repliedBeforeSend: number;
+  /** Hiç ileti almadan duran kişi (çıkış, şikâyet, çıkarma, iptal; yanıt hariç). */
   stoppedBeforeSend: number;
-  /** Listeden çıkan kişi (gönderimden önce veya sonra; şikâyet edenler hariç). */
+  /** BİLGİ (kovalarla örtüşür): listeden çıkan kişi (gönderimden önce veya sonra; şikâyet edenler hariç). */
   optedOut: number;
-  /** Şikâyet eden (ARF) veya işletmesinin başka adresi şikâyet ettiği için durdurulan kişi. */
+  /** BİLGİ (kovalarla örtüşür): şikâyet eden (ARF) veya işletmesinin başka adresi şikâyet ettiği için duran kişi. */
   complained: number;
 }
 
 const STOPPED_STATUSES: ReadonlySet<CampaignLeadStatus> = new Set([
-  "replied",
   "unsubscribed",
   "removed",
   "cancelled",
@@ -182,14 +183,26 @@ const QUEUED_STATUSES: ReadonlySet<CampaignLeadStatus> = new Set([
   "in_flight",
 ]);
 
+const EMPTY_PLAIN: PlainCounts = {
+  sent: 0,
+  queued: 0,
+  failed: 0,
+  repliedBeforeSend: 0,
+  stoppedBeforeSend: 0,
+  optedOut: 0,
+  complained: 0,
+};
+
 /**
  * Düz dille ilerleme (Faz 4 "hata a" + 15.10-2 TB-2). Kovalar AYRIKTIR; her dizi en çok birine girer:
  *  - `sent`: en az bir ileti kabul edilmiş (`contacted`) ve teslim edilemedi olmayan;
  *  - `failed`: teslim edilemedi (bounce) + hiç gönderilemeden başarısız;
  *  - `queued`: hiç ileti almamış bekleyen/planlanan/gönderilmekte olan;
- *  - `stoppedBeforeSend`: hiç ileti almadan duran (çıkış, şikâyet, yanıt, çıkarma, iptal).
+ *  - `repliedBeforeSend`: hiç ileti almadan önce yanıt vermiş (başka kampanyanın iletisine);
+ *  - `stoppedBeforeSend`: hiç ileti almadan duran (çıkış, şikâyet, çıkarma, iptal).
  * Bir kişi hiç ileti almadıysa ASLA "gönderildi" sayılmaz. Hariç tutulanlar sayılmaz.
- * `optedOut` / `complained` bilgi amaçlıdır (kovalarla örtüşür): durma nedeni sütunundan, eski satırlarda işaretten.
+ * `optedOut` / `complained` kovalara EK bilgidir (örtüşür; ayrı satırda gösterilir, bkz. `plainCountsNote`):
+ * durma nedeni sütunundan, eski satırlarda işaretten.
  *
  * `breakdown` yoksa (eski önbellek yanıtı) temkinli yedek: yalnızca kesin gönderim almış durumlar
  * (`completed`, `waiting_next`) "gönderildi" sayılır; asla fazla göstermez.
@@ -202,37 +215,32 @@ export function plainCounts(
     keys.reduce((a, k) => a + (counts[k] ?? 0), 0);
   if (!breakdown) {
     return {
+      ...EMPTY_PLAIN,
       sent: sum(["completed", "waiting_next"]),
       queued: sum(["pending", "scheduled", "in_flight"]),
       failed: sum(["failed", "bounced"]),
-      stoppedBeforeSend: 0,
-      optedOut: 0,
-      complained: 0,
     };
   }
-  const out: PlainCounts = {
-    sent: 0,
-    queued: 0,
-    failed: 0,
-    stoppedBeforeSend: 0,
-    optedOut: 0,
-    complained: 0,
-  };
+  const out: PlainCounts = { ...EMPTY_PLAIN };
   for (const r of breakdown) {
+    if (r.status === "excluded") continue;
     if (r.stopReason === "complaint") out.complained += r.n;
     else if (r.stopReason === "unsubscribe") out.optedOut += r.n;
-    if (r.status === "excluded") continue;
     if (r.status === "bounced") out.failed += r.n;
     else if (r.contacted) out.sent += r.n;
     else if (r.status === "failed") out.failed += r.n;
     else if (QUEUED_STATUSES.has(r.status)) out.queued += r.n;
+    else if (r.status === "replied") out.repliedBeforeSend += r.n;
     else if (STOPPED_STATUSES.has(r.status)) out.stoppedBeforeSend += r.n;
     // Gönderimsiz `completed`/`waiting_next` normalde oluşmaz; oluşursa "gönderildi" sayılmaz.
   }
   return out;
 }
 
-/** Kampanya kartı ve ayrıntı başlığı için tek satırlık düz özet (sıfır olan ek parçalar gösterilmez). */
+/**
+ * Kampanya kartı ve ayrıntı başlığı için tek satırlık düz özet. Yalnızca AYRIK kovaları listeler (toplanabilir);
+ * sıfır olan ek parçalar gösterilmez. Durma nedenleri örtüştüğü için burada DEĞİL, `plainCountsNote` ile ayrı satırda.
+ */
 export function plainCountsText(
   p: PlainCounts,
   fmt: (n: number) => string = (n) => String(n),
@@ -244,11 +252,25 @@ export function plainCountsText(
       failed: fmt(p.failed),
     }),
   ];
+  if (p.repliedBeforeSend > 0)
+    parts.push(t("campaign.progress.repliedBeforeSend", { n: fmt(p.repliedBeforeSend) }));
   if (p.stoppedBeforeSend > 0)
     parts.push(t("campaign.progress.stoppedBeforeSend", { n: fmt(p.stoppedBeforeSend) }));
-  if (p.optedOut > 0) parts.push(t("campaign.progress.optedOut", { n: fmt(p.optedOut) }));
-  if (p.complained > 0) parts.push(t("campaign.progress.complained", { n: fmt(p.complained) }));
   return parts.join(" · ");
+}
+
+/**
+ * Durma nedenleri notu ("Bunlardan: 1 kişi listeden çıktı, 2 kişi şikâyet nedeniyle durdu"). Bu kişiler yukarıdaki
+ * kovaların İÇİNDEDİR (ek kişi değildir); bu yüzden ayrı satırda ve "Bunlardan" önekiyle gösterilir. Hiçbiri yoksa `null`.
+ */
+export function plainCountsNote(
+  p: PlainCounts,
+  fmt: (n: number) => string = (n) => String(n),
+): string | null {
+  const items: string[] = [];
+  if (p.optedOut > 0) items.push(t("campaign.progress.optedOut", { n: fmt(p.optedOut) }));
+  if (p.complained > 0) items.push(t("campaign.progress.complained", { n: fmt(p.complained) }));
+  return items.length === 0 ? null : t("campaign.progress.ofWhich", { list: items.join(", ") });
 }
 
 /* Gönderim penceresi: yalnızca varsayılan (hafta içi 09.00–17.00) daraltılabilir. ----------------- */
@@ -332,6 +354,38 @@ export function statusStats(
     out.push({ key: s, label: t(`sequenceStatus.${s}`), value: n });
   }
   return out;
+}
+
+export interface ReasonChip {
+  code: string;
+  label: string;
+  /** Uzun açıklama (araç ipucu); yoksa kodun kendisi. */
+  hint: string;
+}
+
+/**
+ * Gerekçe kodları → rozetler. TB-11(d) ile durdurulan dizide (`business_complaint`) çift yazım işareti
+ * `arf_complaint` da bulunur (geri alma sözleşmesi); bu adres şikâyet etmediği için o rozet GİZLENİR, yalnızca kısa
+ * "İşletmenin başka adresi şikâyet etti" rozeti ve açıklaması gösterilir.
+ */
+export function reasonChips(codes: readonly string[]): ReasonChip[] {
+  const business = codes.includes("business_complaint");
+  return codes
+    .filter((c) => !(business && c === "arf_complaint"))
+    .map((code) => {
+      const hintKey = `reason.${code}.hint`;
+      return { code, label: reasonLabel(code), hint: has(hintKey) ? t(hintKey) : code };
+    });
+}
+
+/**
+ * Kuyruk süzgeci seçeneği. `unsubscribed` durumu hem listeden çıkışı hem şikâyetle durdurmayı kapsar; rozetlerle
+ * çelişmesin diye süzgeçte ikisini birlikte adlandırır.
+ */
+export function queueFilterLabel(status: CampaignLeadStatus): string {
+  return status === "unsubscribed"
+    ? t("sequenceStop.filterStopped")
+    : t(`sequenceStatus.${status}`);
 }
 
 /** Uygunluk, engel ve hata kodlarının okunur karşılığı; sözlükte yoksa kodun kendisi. */

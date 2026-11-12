@@ -3,7 +3,10 @@ import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   plainCounts,
+  plainCountsNote,
   plainCountsText,
+  queueFilterLabel,
+  reasonChips,
   sequenceStatusLabel,
   statusStats,
   type BreakdownRow,
@@ -305,6 +308,53 @@ describe("TB-10: bitmiş dizi çıkış/şikâyette durumunu korur, yalnızca ne
   });
 });
 
+describe("şikâyet/çıkış kapsamı: durdurma alıcı genelinde, neden yazma yalnızca ilgili dizide", () => {
+  it("B kampanyasına şikâyet: A'daki çıkışla durmuş ve C'deki bitmiş dizi değişmez; D'deki süren dizi durur", async () => {
+    const cA = await createCampaign(db, { status: "running" });
+    const cC = await createCampaign(db, { status: "running" });
+    const cD = await createCampaign(db, { status: "running" });
+    const inA = await seedSent(db, cA, { email: RCPT, sentAt: NOW - 9 * 86_400_000 });
+    await unsubscribeMail(inA); // A: çıkışla durdu
+    const inC = await seedSent(db, cC, { email: RCPT, sentAt: NOW - 7 * 86_400_000 });
+    await setStatus(inC.cl, "completed"); // C: bitti, neden yok
+    const inD = await addSequence(db, cD, { email: RCPT }); // D: süren
+    const inB = await seedSent(db, campaign, { email: RCPT, sentAt: NOW - 2 * 86_400_000 }); // şikâyet edilen
+    const before = { a: await row(inA.cl), c: await row(inC.cl) };
+
+    await complain(inB);
+
+    expect(await row(inB.cl)).toMatchObject({ status: "unsubscribed", stopReason: "complaint" });
+    expect(await row(inD.cl)).toMatchObject({ status: "unsubscribed", stopReason: "complaint" });
+    // A ve C kendi olaylarını gösterir: şikâyete yükseltilmez / "Tamamlandı, sonra şikâyet etti" olmaz
+    expect(await row(inA.cl)).toEqual(before.a);
+    expect(before.a).toMatchObject({ status: "unsubscribed", stopReason: "unsubscribe" });
+    expect(await row(inC.cl)).toEqual(before.c);
+    expect(before.c).toMatchObject({ status: "completed", stopReason: null });
+    const [au] = await db.select().from(auditLog).where(eq(auditLog.action, "inbound.complaint"));
+    expect(au!.detail).toMatchObject({ annotated: 0, annotatedIds: [] });
+    expect([...(au!.detail as { stoppedIds: number[] }).stoppedIds].sort()).toEqual(
+      [inB.cl, inD.cl].sort(),
+    );
+  });
+
+  it("adres hedefli çağrı: `about` verilmezse durumu korunan hiçbir satıra neden yazılmaz; verilirse yalnızca ona", async () => {
+    const done1 = await seedSent(db, campaign, { email: RCPT, sentAt: NOW - 9 * 86_400_000 });
+    await setStatus(done1.cl, "completed");
+    const c2 = await createCampaign(db, { status: "running" });
+    const done2 = await seedSent(db, c2, { email: RCPT, sentAt: NOW - 7 * 86_400_000 });
+    await setStatus(done2.cl, "completed");
+    const target = { recipientHash: hashEmail(RCPT) };
+    expect(await db.transaction((tx) => stopSequences(tx, target, "unsubscribe", NOW))).toEqual({
+      stopped: [],
+      annotated: [],
+    });
+    expect(
+      await db.transaction((tx) => stopSequences(tx, target, "unsubscribe", NOW, done2.cl)),
+    ).toEqual({ stopped: [], annotated: [done2.cl] });
+    expect((await row(done1.cl)).stopReason).toBeNull();
+  });
+});
+
 describe("TB-11(d): doğrulanmış şikâyet işletmenin diğer süren dizilerini durdurur (kalıcı engel YOK)", () => {
   it("aynı lead'in başka adresi ve aynı işletme alan adı (alt alan adı dahil) durur; başka işletme ve bitmiş dizi etkilenmez", async () => {
     const a = await seedSent(db, campaign, { email: RCPT });
@@ -351,7 +401,16 @@ describe("TB-11(d): doğrulanmış şikâyet işletmenin diğer süren dizilerin
     expect(sup.map((s) => s.emailHash)).toEqual([hashEmail(RCPT)]);
     expect((await checkSuppression(db, "satis@shop.alici-ornek.com")).suppressed).toBe(false);
     const [au] = await db.select().from(auditLog).where(eq(auditLog.action, "inbound.complaint"));
-    expect(au!.detail).toMatchObject({ stopped: 1, businessStopped: 2 });
+    expect(au!.detail).toMatchObject({
+      stopped: 1,
+      stoppedIds: [a.cl],
+      businessStopped: 2,
+      businessDomain: "alici-ornek.com",
+    });
+    // TB-11(d) başka lead/kampanyaya uzanır: hangi dizilerin durduğu denetimden izlenebilir
+    expect([...(au!.detail as { businessStoppedIds: number[] }).businessStoppedIds].sort()).toEqual(
+      [sub.cl, sameLead!.id].sort(),
+    );
     // arayüz: gerekçe etiketi okunur
     const q = await listCampaignQueue(db, c2, {});
     const sq = q.items.find((i) => i.id === sub.cl)!;
@@ -372,12 +431,12 @@ describe("TB-11(d): doğrulanmış şikâyet işletmenin diğer süren dizilerin
     const stopped = await db.transaction((tx) =>
       stopBusinessSequences(tx, { leadId: null, recipientDomain: "gmail.com" }, NOW),
     );
-    expect(stopped).toEqual([]);
+    expect(stopped).toEqual({ stopped: [], businessDomain: null });
     const s = await addSequence(db, campaign, { email: "biri@gmail.com" });
     const res = await db.transaction((tx) =>
       stopBusinessSequences(tx, { leadId: s.leadId, recipientDomain: "gmail.com" }, NOW),
     );
-    expect(res).toEqual([s.cl]);
+    expect(res).toEqual({ stopped: [s.cl], businessDomain: null });
   });
 });
 
@@ -408,6 +467,7 @@ describe("kampanya sayaçları: gönderim almadan 'gönderildi' sayılmaz; çık
       sent: 2,
       queued: 1,
       failed: 0,
+      repliedBeforeSend: 0,
       stoppedBeforeSend: 0,
       optedOut: 1,
       complained: 1,
@@ -456,11 +516,12 @@ describe("kampanya sayaçları: gönderim almadan 'gönderildi' sayılmaz; çık
       sent: 3 + 1 + 2 + 1 + 1,
       queued: 5 + 1,
       failed: 2 + 4,
-      stoppedBeforeSend: 1 + 2 + 1 + 1,
+      repliedBeforeSend: 1,
+      stoppedBeforeSend: 2 + 1 + 1,
       optedOut: 1,
       complained: 2,
     });
-    expect(p.sent + p.queued + p.failed + p.stoppedBeforeSend).toBe(
+    expect(p.sent + p.queued + p.failed + p.repliedBeforeSend + p.stoppedBeforeSend).toBe(
       rows.filter((r) => r.status !== "excluded").reduce((a, r) => a + r.n, 0) - 1,
     );
   });
@@ -472,6 +533,7 @@ describe("kampanya sayaçları: gönderim almadan 'gönderildi' sayılmaz; çık
       sent: 3,
       queued: 1,
       failed: 0,
+      repliedBeforeSend: 0,
       stoppedBeforeSend: 0,
       optedOut: 0,
       complained: 0,
@@ -482,24 +544,48 @@ describe("kampanya sayaçları: gönderim almadan 'gönderildi' sayılmaz; çık
     ]);
   });
 
-  it("düz metin: sıfır olan ek parçalar gösterilmez", () => {
+  it("düz metin: yalnızca ayrık kovalar toplanır; durma nedenleri ayrı 'Bunlardan' notunda", () => {
     const base = {
       sent: 4,
       queued: 2,
       failed: 1,
+      repliedBeforeSend: 0,
       stoppedBeforeSend: 0,
       optedOut: 0,
       complained: 0,
     };
     expect(plainCountsText(base)).toBe("4 gönderildi · 2 sırada · 1 hata");
-    expect(
-      plainCountsText(
-        { ...base, stoppedBeforeSend: 3, optedOut: 1, complained: 2 },
-        (x) => `#${x}`,
-      ),
-    ).toBe(
-      "#4 gönderildi · #2 sırada · #1 hata · #3 kişi ileti almadan durdu · #1 kişi listeden çıktı · #2 kişi şikâyet nedeniyle durdu",
+    expect(plainCountsNote(base)).toBeNull();
+    const full = {
+      ...base,
+      repliedBeforeSend: 1,
+      stoppedBeforeSend: 3,
+      optedOut: 1,
+      complained: 2,
+    };
+    expect(plainCountsText(full, (x) => `#${x}`)).toBe(
+      "#4 gönderildi · #2 sırada · #1 hata · #1 kişi önceden yanıt verdiği için ileti almadı · #3 kişi ileti almadan durdu",
     );
+    // örtüşen sayılar ana satıra girmez (iki kez sayılmış gibi okunmasın)
+    expect(plainCountsText(full)).not.toContain("listeden");
+    expect(plainCountsNote(full, (x) => `#${x}`)).toBe(
+      "Bunlardan: #1 kişi listeden çıktı, #2 kişi şikâyet nedeniyle durdu",
+    );
+    expect(plainCountsNote({ ...base, complained: 1 })).toBe(
+      "Bunlardan: 1 kişi şikâyet nedeniyle durdu",
+    );
+  });
+
+  it("hariç tutulan dizinin nedeni sayılmaz", () => {
+    const rows: BreakdownRow[] = [
+      { status: "excluded", contacted: false, stopReason: "complaint", n: 3 },
+      { status: "unsubscribed", contacted: true, stopReason: "unsubscribe", n: 1 },
+    ];
+    expect(plainCounts({ excluded: 3, unsubscribed: 1 }, rows)).toMatchObject({
+      sent: 1,
+      optedOut: 1,
+      complained: 0,
+    });
   });
 
   it("boş kampanya: ayrıntı boş dizi, sayaçlar sıfır", async () => {
@@ -511,5 +597,29 @@ describe("kampanya sayaçları: gönderim almadan 'gönderildi' sayılmaz; çık
       .from(campaignLeads)
       .where(inArray(campaignLeads.campaignId, [campaign]));
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe("arayüz: gerekçe rozetleri ve kuyruk süzgeci", () => {
+  it("işletme şikâyetiyle durdurulan dizide `arf_complaint` rozeti gizlenir; kısa etiket + açıklama ipucu", () => {
+    const chips = reasonChips(["arf_complaint", "business_complaint"]);
+    expect(chips).toEqual([
+      {
+        code: "business_complaint",
+        label: "İşletmenin başka adresi şikâyet etti",
+        hint: expect.stringContaining("Bu adres engellenmedi"),
+      },
+    ]);
+    expect(chips[0]!.label.length).toBeLessThanOrEqual(40);
+    expect(reasonChips(["arf_complaint"]).map((c) => c.code)).toEqual(["arf_complaint"]);
+    expect(reasonChips(["bilinmeyen_kod"])).toEqual([
+      { code: "bilinmeyen_kod", label: "bilinmeyen_kod", hint: "bilinmeyen_kod" },
+    ]);
+    expect(reasonChips([])).toEqual([]);
+  });
+
+  it("kuyruk süzgecindeki `unsubscribed` seçeneği çıkış ve şikâyeti birlikte adlandırır", () => {
+    expect(queueFilterLabel("unsubscribed")).toBe("Durduruldu (listeden çıkış veya şikâyet)");
+    expect(queueFilterLabel("completed")).toBe("Tamamlandı");
   });
 });

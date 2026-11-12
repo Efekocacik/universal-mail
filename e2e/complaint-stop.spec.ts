@@ -3,7 +3,8 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
 /**
  * Aşama 15.10-2 (TB-2) ve kampanya sayaçları ("hata a") uçtan uca: demo, geçici veri klasörü, ağa çıkılmaz.
  * Hiç ileti almamış bir alıcı demo çıkış bağlantısıyla listeden çıkınca kampanya özeti onu "gönderildi" SAYMAZ;
- * "ileti almadan durdu" ve "listeden çıktı" olarak ayrı gösterir, kuyruk rozeti "Listeden çıktı" olur.
+ * "ileti almadan durdu" olarak sayar, durma nedenini ayrı "Bunlardan: … listeden çıktı" satırında gösterir (örtüşen
+ * sayı ana satıra girmez), kuyruk rozeti "Listeden çıktı" olur.
  * Şikâyet (ARF) yolu gönderilmiş ileti gerektirdiğinden (demo gönderimi saate bağlı) birim testlerindedir.
  */
 test.describe.configure({ mode: "serial" });
@@ -138,15 +139,21 @@ test.describe("15.10-2: çıkış ayrı sayılır; ileti almayan kişi 'gönderi
     await page.goto("/campaigns");
     const card = page.locator("article").filter({ hasText: "E2E çıkış sayacı" });
     await expect(card).toBeVisible();
-    await expect(card.getByText(/^0 gönderildi · /)).toBeVisible();
-    await expect(card.getByText(/1 kişi ileti almadan durdu/)).toBeVisible();
-    await expect(card.getByText(/1 kişi listeden çıktı/)).toBeVisible();
+    const main = card.getByText(/^0 gönderildi · /);
+    await expect(main).toBeVisible();
+    await expect(main).toContainText("1 kişi ileti almadan durdu");
+    // Nedeni ayrı satırda: aynı kişi iki kez sayılmış gibi okunmasın
+    await expect(main).not.toContainText("listeden çıktı");
+    await expect(card.getByText("Bunlardan: 1 kişi listeden çıktı", { exact: true })).toBeVisible();
     await expect(card.getByText(/şikâyet/)).toHaveCount(0);
   });
 
-  test("kuyruk rozeti 'Listeden çıktı'", async () => {
+  test("kuyruk rozeti 'Listeden çıktı'; süzgeç seçeneği çıkış ve şikâyeti birlikte adlandırır", async () => {
     await page.goto(`/campaigns/${campaignId}/edit?step=leads`);
     await expect(page.getByRole("heading", { name: /Kuyruk/ })).toBeVisible();
     await expect(page.getByText("Listeden çıktı", { exact: true }).first()).toBeVisible();
+    await expect(
+      page.getByRole("option", { name: "Durduruldu (listeden çıkış veya şikâyet)" }),
+    ).toHaveCount(1);
   });
 });

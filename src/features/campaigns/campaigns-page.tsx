@@ -16,6 +16,7 @@ import {
   CAMPAIGN_STATUSES,
   pauseReasonText,
   plainCounts,
+  plainCountsNote,
   plainCountsText,
   progressOf,
   progressTone,
@@ -26,6 +27,7 @@ import { CampaignsSubnav } from "./subnav";
 function CampaignCard({ c }: { c: CampaignSummary }) {
   const p = progressOf(c.counts);
   const plain = plainCounts(c.counts, c.breakdown);
+  const note = plainCountsNote(plain, fmtNumber);
   const reason = c.status === "paused" ? pauseReasonText(c.pauseReason) : null;
   return (
     <article className="um-enter rounded-xl border bg-card p-4 shadow-xs transition-shadow duration-150 hover:shadow-md">
@@ -62,6 +64,7 @@ function CampaignCard({ c }: { c: CampaignSummary }) {
             <p className="tabular text-[13px] text-muted-foreground">
               {plainCountsText(plain, fmtNumber)}
             </p>
+            {note && <p className="tabular text-[12px] text-muted-foreground">{note}</p>}
           </>
         ) : (
           <p className="text-[13px] text-muted-foreground">{t("campaign.progress.none")}</p>

@@ -99,7 +99,7 @@ describe("çıkış belirteci (demo)", () => {
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain(s.email);
   });
 
-  it("15.10-2: durma nedeni yazılır (TB-2); bitmiş dizi `completed` kalır (TB-10)", async () => {
+  it("15.10-2: durma nedeni yazılır (TB-2); bitmiş dizi `completed` kalır, neden yalnızca bağlantının dizisine (TB-10)", async () => {
     const s = await seedSent(db, campaignId);
     const done = await seedSent(db, await createCampaign(db, { status: "running" }), {
       email: s.email,
@@ -115,10 +115,15 @@ describe("çıkış belirteci (demo)", () => {
       status: "unsubscribed",
       stopReason: "unsubscribe",
     });
+    // Başka kampanyanın bitmiş dizisi: durumu ve nedeni değişmez (o kampanyanın sayaçlarına çıkış yazılmaz).
     expect(rows.find((r) => r.id === done.cl)).toMatchObject({
       status: "completed",
-      stopReason: "unsubscribe",
+      stopReason: null,
     });
+    // Bitmiş dizinin KENDİ bağlantısı: durum korunur, neden kaydedilir.
+    expect(await processUnsubscribe(db, createUnsubscribeToken(done.cl), NOW)).toBe("unsubscribed");
+    const [d] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, done.cl));
+    expect(d).toMatchObject({ status: "completed", stopReason: "unsubscribe" });
   });
 
   it("var olmayan kayıt, geçersiz belirteçle aynı yanıtı verir; canlı kapsam kampanyası reddedilir", async () => {

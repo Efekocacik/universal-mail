@@ -6,7 +6,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes } from "@/lib/db/schema";
 import { resolveMasterKey } from "@/lib/secrets/store";
-import { stopSequences } from "./inbound/stop";
+import { auditIds, stopSequences } from "./inbound/stop";
 
 /**
  * Bağlantıyla iletişimden çıkma çekirdeği (FR-CMP-08, Aşama 13) — YALNIZCA DEMO.
@@ -102,12 +102,14 @@ export async function processUnsubscribe(
       { email: cl.recipientEmail, reason: "unsubscribe", source: "link" },
       now,
     );
-    // 15.10-2: süren diziler durur (`stop_reason='unsubscribe'`); bitmiş diziler durumunu korur (TB-10).
+    // 15.10-2: alıcının süren dizileri durur (`stop_reason='unsubscribe'`). Bitmiş dizi durumunu korur ve nedeni
+    // yalnızca bağlantının ait olduğu dizide kaydedilir (TB-10).
     const stop = await stopSequences(
       tx,
       cl.recipientHash ? { recipientHash: cl.recipientHash } : { campaignLeadId: cl.id },
       "unsubscribe",
       now,
+      cl.id,
     );
     const changed = stop.stopped.length + stop.annotated.length;
     await audit(
@@ -115,7 +117,12 @@ export async function processUnsubscribe(
       "unsubscribe.link",
       "campaign_lead",
       cl.id,
-      { outcome: res.outcome, stopped: stop.stopped.length, annotated: stop.annotated.length },
+      {
+        outcome: res.outcome,
+        stopped: stop.stopped.length,
+        stoppedIds: auditIds(stop.stopped),
+        annotated: stop.annotated.length,
+      },
       now,
     );
     return res.outcome === "existing" && changed === 0 ? "already" : "unsubscribed";

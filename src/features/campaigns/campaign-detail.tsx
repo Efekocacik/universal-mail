@@ -22,6 +22,7 @@ import {
   dayLabel,
   pauseReasonText,
   plainCounts,
+  plainCountsNote,
   plainCountsText,
   progressOf,
   progressTone,
@@ -110,6 +111,7 @@ function Actions({ c }: { c: CampaignDetail }) {
 function Overview({ c }: { c: CampaignDetail }) {
   const p = progressOf(c.counts);
   const plain = plainCounts(c.counts, c.breakdown);
+  const note = plainCountsNote(plain, fmtNumber);
   const templates = useTemplates();
   const tplName = (id: number) => templates.data?.find((x) => x.id === id)?.name ?? `#${id}`;
   return (
@@ -117,6 +119,7 @@ function Overview({ c }: { c: CampaignDetail }) {
       <div className="space-y-1.5 rounded-lg border bg-card p-4">
         <Progress value={p.pct} tone={progressTone(c.status)} label={c.name} />
         <p className="tabular text-[14px] font-medium">{plainCountsText(plain, fmtNumber)}</p>
+        {note && <p className="tabular text-[13px] text-muted-foreground">{note}</p>}
         <p className="tabular text-[12px] text-muted-foreground">
           {t("campaign.progress", {
             done: fmtNumber(p.finished),
@@ -220,7 +223,10 @@ export function CampaignDetailPage({ id }: { id: number }) {
             <p className="mt-1 text-[13px] text-muted-foreground">
               {t("campaign.updated", { at: fmtDateTime(c.updatedAt) })}
               {" · "}
-              <span className="tabular">
+              <span
+                className="tabular"
+                title={plainCountsNote(plainCounts(c.counts, c.breakdown), fmtNumber) ?? undefined}
+              >
                 {plainCountsText(plainCounts(c.counts, c.breakdown), fmtNumber)}
               </span>
             </p>

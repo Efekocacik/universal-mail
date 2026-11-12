@@ -522,20 +522,21 @@ describe.skipIf(unsafeTmp)("0003: kayıpsız geri alma", () => {
     ).toMatch(/messages_classification_ck/);
   });
 
-  it("15.10-2 çift yazımı geri alınır: gerçek yazım yollarının ürettiği veri eski gösterime kayıpsız döner, yeniden yükseltme aynı anlamı kurar", async () => {
+  it("15.10-2 çift yazımı geri alınır: neden eski gösterimde korunur; bitmiş dizi `unsubscribed`'a katlanır ve yeniden yükseltmede de öyle kalır", async () => {
     const h = await build0002();
     await seed0002(h.client);
     process.env.UM_MIGRATIONS_DIR = MIGRATIONS;
     await runMigrations(h.db, h.client);
     const c = h.client;
     // Gerçek yazım çekirdeği (gelen ileti, çıkış bağlantısı, tek tık ve inceleme hepsi bunu kullanır)
-    const r4 = await stopSequences(h.db, { recipientHash: "h4" }, "complaint", T + 1); // TB-10: completed
+    // TB-10: completed (şikâyet bu dizinin iletisine; `about` = 4)
+    const r4 = await stopSequences(h.db, { recipientHash: "h4" }, "complaint", T + 1, 4);
     const r8 = await stopSequences(h.db, { recipientHash: "h8" }, "unsubscribe", T + 1); // scheduled
     const r6 = await stopBusinessSequences(h.db, { leadId: 6, recipientDomain: null }, T + 1); // TB-11(d)
     expect([r4, r8, r6]).toEqual([
       { stopped: [], annotated: [4] },
       { stopped: [8], annotated: [] },
-      [6],
+      { stopped: [6], businessDomain: null },
     ]);
     // Yeni sürümün gelen ARF satırları (sınıf + işaret)
     for (const [id, err] of [
@@ -581,6 +582,10 @@ describe.skipIf(unsafeTmp)("0003: kayıpsız geri alma", () => {
       { id: 4, s: "complaint" },
       { id: 6, s: "complaint" },
       { id: 8, s: "unsubscribe" },
+    ]);
+    // Bilinen kayıp (belgeli): "önce tamamlandı" bilgisi geri dönmez — dizi 4 `unsubscribed` kalır.
+    expect(await rows(c, "SELECT status FROM campaign_leads WHERE id = 4")).toEqual([
+      { status: "unsubscribed" },
     ]);
     expect(
       await num(

@@ -5,7 +5,7 @@ import { checkSuppression, suppressEmailInTx } from "@/lib/compliance/suppressio
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages } from "@/lib/db/schema";
-import { stopSequences } from "@/lib/mail/inbound/stop";
+import { auditIds, stopSequences } from "@/lib/mail/inbound/stop";
 import { getSetting, setSetting } from "@/lib/settings";
 import { loadPublicKeys, loadRevokedPublicKeys, recipientTag, tagsEqual } from "./keys";
 import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
@@ -266,8 +266,15 @@ export async function ingestUnsubscribeEvent(
         { email: cl.recipientEmail, reason: "unsubscribe", source: "link", messageId: inboundId },
         now,
       );
-      // 15.10-2: süren diziler durur (`stop_reason='unsubscribe'`); bitmiş diziler durumunu korur (TB-10).
-      const stop = await stopSequences(tx, { recipientHash: cl.recipientHash }, "unsubscribe", now);
+      // 15.10-2: alıcının süren dizileri durur (`stop_reason='unsubscribe'`). Bitmiş dizi durumunu korur ve nedeni
+      // yalnızca bağlantının ait olduğu dizide kaydedilir (TB-10; başka kampanyaların sayaçlarına yazılmaz).
+      const stop = await stopSequences(
+        tx,
+        { recipientHash: cl.recipientHash },
+        "unsubscribe",
+        now,
+        cl.id,
+      );
       const stopped = stop.stopped;
       await audit(
         tx,
@@ -277,7 +284,10 @@ export async function ingestUnsubscribeEvent(
         {
           suppression: res.outcome,
           stopped: stopped.length,
-          ...(stop.annotated.length > 0 ? { annotated: stop.annotated.length } : {}),
+          ...(stopped.length > 0 ? { stoppedIds: auditIds(stopped) } : {}),
+          ...(stop.annotated.length > 0
+            ? { annotated: stop.annotated.length, annotatedIds: auditIds(stop.annotated) }
+            : {}),
           via: event.via,
           kid: claims.k,
           ...(reclick ? { reclick: true } : {}),

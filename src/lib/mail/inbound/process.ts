@@ -25,7 +25,7 @@ import {
 } from "./evidence";
 import { parseInbound, type ParsedInbound } from "./parse";
 import { ARF_COMPLAINT_CODE } from "./complaint";
-import { stopBusinessSequences, stopSequences } from "./stop";
+import { auditIds, stopBusinessSequences, stopSequences } from "./stop";
 import { getSetting } from "@/lib/settings";
 
 /**
@@ -552,9 +552,16 @@ async function applyEffect(
       now,
     );
     effects.suppressed = true;
-    // 15.10-2 (TB-2/TB-10): süren diziler `unsubscribed` + `stop_reason='complaint'`; bitmiş (`completed`) diziler
-    // durumunu korur, yalnızca neden kaydedilir. `"arf_complaint"` işareti çift yazılır.
-    const res = await stopSequences(tx, { recipientHash: match.peerHash }, "complaint", now);
+    // 15.10-2 (TB-2/TB-10): alıcının süren dizileri (bütün kampanyalar) `unsubscribed` + `stop_reason='complaint'`.
+    // Durumu korunan satıra (TB-10 `completed`; önceden çıkışla durmuş) neden YALNIZCA şikâyet edilen iletinin
+    // dizisine yazılır — başka kampanyaların bitmiş/çıkmış dizileri "şikâyet" sayılmaz. `"arf_complaint"` çift yazılır.
+    const res = await stopSequences(
+      tx,
+      { recipientHash: match.peerHash },
+      "complaint",
+      now,
+      match.campaignLeadId,
+    );
     // TB-11(d): aynı işletmenin (aynı lead veya aynı işletme alan adı) diğer adreslerine süren diziler de durur.
     // Diğer adresler ENGELLENMEZ (suppression yok); yalnızca şu an süren gönderim kesilir.
     const business = await stopBusinessSequences(
@@ -562,7 +569,9 @@ async function applyEffect(
       { leadId: match.leadId, recipientDomain: email.slice(email.lastIndexOf("@") + 1) },
       now,
     );
-    effects.sequenceStopped = res.stopped.length + business.length > 0;
+    effects.sequenceStopped = res.stopped.length + business.stopped.length > 0;
+    // Denetim: hangi dizilerin durduğu izlenebilsin (sınırlı liste + tam sayı). TB-11(d) başka lead/kampanyalara
+    // uzandığından durdurulan kimlikler ve eşleşen işletme alan adı (adres değil) kaydedilir.
     await audit(
       tx,
       "inbound.complaint",
@@ -571,8 +580,12 @@ async function applyEffect(
       {
         ...detail,
         stopped: res.stopped.length,
+        stoppedIds: auditIds(res.stopped),
         annotated: res.annotated.length,
-        businessStopped: business.length,
+        annotatedIds: auditIds(res.annotated),
+        businessStopped: business.stopped.length,
+        businessStoppedIds: auditIds(business.stopped),
+        businessDomain: business.businessDomain,
       },
       now,
     );

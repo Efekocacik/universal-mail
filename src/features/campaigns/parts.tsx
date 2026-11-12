@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { CampaignLeadStatus, CampaignStatus } from "@/lib/client/campaigns";
 import { t } from "@/lib/i18n";
-import { reasonLabel, SEQUENCE_VARIANT, sequenceStatusLabel, STATUS_VARIANT } from "./model";
+import { reasonChips, SEQUENCE_VARIANT, sequenceStatusLabel, STATUS_VARIANT } from "./model";
 
 /** Renk tek başına anlam taşımaz: her duruma metnin yanında küçük bir simge de eklenir. */
 const STATUS_ICON: Record<CampaignStatus, LucideIcon> = {
@@ -68,15 +68,20 @@ export function DemoBadge() {
   );
 }
 
-/** Kod listesi → okunur gerekçeler (bilinmeyen kod olduğu gibi gösterilir). */
+/**
+ * Kod listesi → okunur gerekçeler (bilinmeyen kod olduğu gibi gösterilir). Kısa etiket rozette, uzun açıklama araç
+ * ipucunda; işletme şikâyetiyle durdurulan dizide bu adresin şikâyet etmediği belirsizleşmesin diye `arf_complaint`
+ * rozeti gizlenir (bkz. `reasonChips`).
+ */
 export function ReasonList({ codes }: { codes: readonly string[] }) {
-  if (codes.length === 0) return null;
+  const chips = reasonChips(codes);
+  if (chips.length === 0) return null;
   return (
     <ul className="flex flex-wrap gap-1">
-      {codes.map((c) => (
-        <li key={c}>
-          <Badge variant="outline" title={c}>
-            {reasonLabel(c)}
+      {chips.map((c) => (
+        <li key={c.code}>
+          <Badge variant="outline" title={c.hint}>
+            {c.label}
           </Badge>
         </li>
       ))}
