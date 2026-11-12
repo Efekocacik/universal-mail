@@ -29,16 +29,21 @@ export const dashboard = {
   "dash.stat.activeCampaigns.paused": "{n} paused",
   "dash.stat.sentToday": "Sent today",
   "dash.stat.sentToday.help":
-    "Campaign emails sent today. Daily limits count by UTC day, so they reset at 03:00 Turkey time.",
+    "Campaign emails sent today (your time, since midnight). Mailbox daily limits count by UTC day and reset at 03:00 Turkey time; if the two numbers differ, the limit count is shown below.",
+  "dash.stat.sentToday.limitDay": "{n} on the daily limit counter (as of {time})",
   "dash.stat.sentMonth": "Sent this month",
   "dash.stat.replies": "Replies (this month)",
   "dash.stat.replies.pending": "{n} waiting for review",
+  "dash.stat.replies.negative": "{n} not interested",
+  "dash.stat.replies.help":
+    "Real replies from businesses this month, including “not interested” answers. Auto-replies, bounced emails and unsubscribe requests are not counted.",
   "dash.queue.title": "Today's sending queue",
   "dash.queue.help":
     "Each mailbox's limit for today and its next send. There are at least 90 seconds between sends; limits count by UTC day.",
   "dash.queue.used": "{used} / {cap} sent",
   "dash.queue.waiting": "{n} people in the queue",
-  "dash.queue.state.due": "{n} people are due; sending continues within a few minutes.",
+  "dash.queue.state.due":
+    "{n} people are due; they are sent one by one while the sending window is open and the rules allow it.",
   "dash.queue.state.next": "Next send {when}.",
   "dash.queue.state.capReached": "Today's limit is reached; sending continues after {time}.",
   "dash.queue.state.capReachedNoTime": "Today's limit is reached; sending continues tomorrow.",
@@ -86,4 +91,6 @@ export const dashboard = {
   "dash.notif.empty":
     "No notifications yet. They appear here when a scan finishes or new businesses are found.",
   "dash.notif.open": "Open",
+  "dash.notif.unreadItem": "Unread",
+  "dash.notif.openLabel": "Open notification: {title}",
 } as const satisfies EnFragment<typeof TrDashboard>;

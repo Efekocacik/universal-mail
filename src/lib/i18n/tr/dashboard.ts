@@ -26,16 +26,21 @@ export const dashboard = {
   "dash.stat.activeCampaigns.paused": "{n} duraklatıldı",
   "dash.stat.sentToday": "Bugün gönderilen",
   "dash.stat.sentToday.help":
-    "Bugün gönderilen kampanya e-postaları. Günlük sınırlar UTC gününe göre sayılır; Türkiye saatiyle 03:00'te sıfırlanır.",
+    "Bugün (sizin saatinizle, gece yarısından beri) gönderilen kampanya e-postaları. Posta kutusu günlük sınırları ise UTC gününe göre sayılır ve Türkiye saatiyle 03:00'te sıfırlanır; iki sayı farklıysa altta gösterilir.",
+  "dash.stat.sentToday.limitDay": "Günlük sınır sayacında {n} ({time} itibarıyla)",
   "dash.stat.sentMonth": "Bu ay gönderilen",
   "dash.stat.replies": "Yanıtlar (bu ay)",
   "dash.stat.replies.pending": "{n} incelemede bekliyor",
+  "dash.stat.replies.negative": "{n} tanesi ilgilenmiyor",
+  "dash.stat.replies.help":
+    "Bu ay işletmelerden gelen gerçek yanıtlar; “ilgilenmiyorum” diyenler de dahildir. Otomatik yanıtlar, geri dönen e-postalar ve abonelikten çıkma istekleri sayılmaz.",
   "dash.queue.title": "Bugünkü gönderim sırası",
   "dash.queue.help":
     "Her posta kutusunun bugünkü sınırı ve sıradaki gönderimi. Gönderimler arasında en az 90 saniye beklenir; sınırlar UTC gününe göre sayılır.",
   "dash.queue.used": "{used} / {cap} gönderildi",
   "dash.queue.waiting": "{n} kişi sırada",
-  "dash.queue.state.due": "Sırası gelen {n} kişi var; gönderim birkaç dakika içinde sürer.",
+  "dash.queue.state.due":
+    "Sırası gelen {n} kişi var; gönderim penceresi açıkken ve kurallar uygunsa sırayla gönderilir.",
   "dash.queue.state.next": "Sonraki gönderim {when}.",
   "dash.queue.state.capReached": "Bugünkü sınır doldu; gönderim {time} sonrasında sürer.",
   "dash.queue.state.capReachedNoTime": "Bugünkü sınır doldu; gönderim yarın sürer.",
@@ -83,4 +88,6 @@ export const dashboard = {
   "dash.notif.empty":
     "Henüz bildirim yok. Tarama bittiğinde veya yeni işletme bulunduğunda burada görünür.",
   "dash.notif.open": "Aç",
+  "dash.notif.unreadItem": "Okunmamış",
+  "dash.notif.openLabel": "Bildirimi aç: {title}",
 } as const;

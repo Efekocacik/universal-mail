@@ -11,11 +11,13 @@ import {
   relativeTime,
   scheduleState,
   usagePct,
+  utcDayStart,
 } from "@/features/dashboard/model";
 import { recordUsage } from "@/lib/budget";
 import { dashboardUrl } from "@/lib/client/dashboard";
 import type { DashboardMailboxQueue } from "@/lib/client/dashboard";
 import {
+  dayStart,
   defaultTimeZone,
   getDashboard,
   isValidTimeZone,
@@ -137,6 +139,8 @@ async function outMessage(o: {
 }) {
   const h = await historySequence();
   const email = `info@m${++seq}.example`;
+  // Gönderim anı gün anahtarıyla tutarlı: bugünse NOW, değilse o günün öğlesi (UTC).
+  const at = o.at ?? (o.sendDay === "2026-11-12" ? NOW : Date.parse(`${o.sendDay}T12:00:00Z`));
   await db.insert(messages).values({
     direction: "out",
     purpose: "campaign",
@@ -149,14 +153,14 @@ async function outMessage(o: {
     peerDomain: `m${seq}.example`,
     sendDay: o.sendDay,
     status: o.status ?? "sent",
-    createdAt: o.at ?? NOW,
-    sentAt: o.at ?? NOW,
+    createdAt: at,
+    sentAt: at,
   });
 }
 
 async function inMessage(o: {
   status: "received" | "matched";
-  classification?: "reply";
+  classification?: "reply" | "negative" | "auto_reply";
   at: number;
 }) {
   await db.insert(messages).values({
@@ -221,8 +225,10 @@ describe("getDashboard: sayaçlar", () => {
       activeCampaigns: 0,
       pausedCampaigns: 0,
       sentToday: 0,
+      sentTodayLimitDay: 0,
       sentThisMonth: 0,
       repliesThisMonth: 0,
+      repliesNegative: 0,
       repliesPendingReview: 0,
     });
     expect(d.newThisWeek).toEqual({ items: [], total: 0 });
@@ -251,6 +257,8 @@ describe("getDashboard: sayaçlar", () => {
     await outMessage({ sendDay: "2026-10-31" }); // geçen ay
 
     await inMessage({ status: "matched", classification: "reply", at: NOW - DAY });
+    await inMessage({ status: "matched", classification: "negative", at: NOW - HOUR });
+    await inMessage({ status: "matched", classification: "auto_reply", at: NOW - HOUR }); // insan değil
     await inMessage({ status: "matched", classification: "reply", at: Date.UTC(2026, 9, 20) });
     await inMessage({ status: "received", at: Date.UTC(2026, 9, 25) });
 
@@ -264,10 +272,40 @@ describe("getDashboard: sayaçlar", () => {
       activeCampaigns: 1,
       pausedCampaigns: 1,
       sentToday: 2,
+      sentTodayLimitDay: 2,
       sentThisMonth: 3,
-      repliesThisMonth: 1,
+      repliesThisMonth: 2,
+      repliesNegative: 1,
       repliesPendingReview: 1,
     });
+  });
+});
+
+describe("getDashboard: bugün gönderilen (yerel gün ve sınır günü)", () => {
+  it("TSİ 01:00'de: yerel gün dünkü UTC 21:00'den başlar; sınır sayacı UTC gününe göredir", async () => {
+    // 12 Kasım 01:00 TSİ = 11 Kasım 22:00 UTC.
+    const now = Date.UTC(2026, 10, 11, 22, 0, 0);
+    await outMessage({ sendDay: "2026-11-11", at: Date.UTC(2026, 10, 11, 21, 30) }); // TSİ 00:30, bugün
+    await outMessage({ sendDay: "2026-11-11", at: Date.UTC(2026, 10, 11, 20, 0) }); // TSİ dün 23:00
+    await outMessage({ sendDay: "2026-11-11", at: Date.UTC(2026, 10, 11, 9, 0) });
+    const d = await getDashboard(db, { now, timeZone: "Europe/Istanbul" });
+    expect(d.counters).toMatchObject({ sentToday: 1, sentTodayLimitDay: 3, sentThisMonth: 3 });
+  });
+
+  it("ayın ilk günü TSİ 03:30: yerel gün önceki UTC ayında başlar, aylık sayı yeni aydır", async () => {
+    // 1 Aralık 03:30 TSİ = 1 Aralık 00:30 UTC; yerel gün 30 Kasım 21:00 UTC'de başladı.
+    const now = Date.UTC(2026, 11, 1, 0, 30, 0);
+    await outMessage({ sendDay: "2026-11-30", at: Date.UTC(2026, 10, 30, 21, 30) }); // TSİ 1 Ara 00:30
+    await outMessage({ sendDay: "2026-11-30", at: Date.UTC(2026, 10, 30, 12, 0) }); // TSİ dün
+    await outMessage({ sendDay: "2026-12-01", at: Date.UTC(2026, 11, 1, 0, 10) });
+    const d = await getDashboard(db, { now, timeZone: "Europe/Istanbul" });
+    expect(d.counters).toMatchObject({ sentToday: 2, sentTodayLimitDay: 1, sentThisMonth: 1 });
+  });
+
+  it("dayStart: kullanıcının saat dilimindeki gece yarısı", () => {
+    expect(dayStart(NOW, "Europe/Istanbul")).toBe(Date.UTC(2026, 10, 11, 21));
+    expect(dayStart(NOW, "UTC")).toBe(Date.UTC(2026, 10, 12));
+    expect(dayStart(Date.UTC(2026, 10, 12, 2), "America/New_York")).toBe(Date.UTC(2026, 10, 11, 5));
   });
 });
 
@@ -603,6 +641,7 @@ describe("gösterge paneli görünüm mantığı", () => {
     expect(relativeTime(NOW + 10_000, NOW, "en")).toBe("this minute");
     expect(relativeTime(NOW + 5 * 60_000, NOW, "tr")).toMatch(/5 dakika/);
     expect(clockTime(NOW, "tr")).toMatch(/^\d{2}:\d{2}$/);
+    expect(utcDayStart(NOW)).toBe(Date.UTC(2026, 10, 12));
     expect(formatCount(12345, "tr")).toBe("12.345");
     expect(formatUsd(3.5, "en")).toBe("US$3.50");
   });

@@ -24,7 +24,9 @@ export const outreach = {
   "mbx.limits.consumerWarning":
     "Kişisel Gmail'de günde {risk} üstü gönderim hesabın Google tarafından kısıtlanma riskini artırır. En çok {max} girilebilir.",
   "mbx.limits.rules":
-    "Sınırlar her e-postadan önce yeniden denetlenir: iki e-posta arasında en az 90 saniye beklenir ve hiçbir kutu günde {max} e-postayı geçmez. Günler UTC'ye göre (TSİ 03:00) yenilenir.",
+    "Sınırlar her e-postadan önce yeniden denetlenir: iki e-posta arasında en az 90 saniye beklenir ve bu kutu günde {max} e-postayı geçmez. Günler UTC'ye göre (TSİ 03:00) yenilenir.",
+  "mbx.limits.rampContinues":
+    "Kutu bugün en çok {today} e-posta gönderebiliyor. Yeni sınıra birden atlanmaz: artış buradan başlayıp her hafta eklenir, böylece ısınma korunur.",
   "mbx.limits.save": "Kaydet",
   "mbx.limits.saved": "Günlük sınır kaydedildi.",
   "mbx.limits.conflict":
@@ -39,7 +41,7 @@ export const outreach = {
   "wizard.draft.offer":
     "Bu kampanyada kaydedilmemiş değişiklikleriniz bulundu ({at}). Geri yüklemek ister misiniz?",
   "wizard.draft.restore": "Geri yükle",
-  "wizard.draft.discard": "Sil",
+  "wizard.draft.discard": "Taslağı sil",
   "wizard.draft.restored":
     "Kaydedilmemiş değişiklikler geri yüklendi. Saklamak için “Kaydet”e basın.",
   "wizard.steps.noFollowupV2":

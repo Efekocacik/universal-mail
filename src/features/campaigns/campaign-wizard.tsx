@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Check, Compass, History, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,6 +38,7 @@ import { useSafeMutation } from "./use-safe-mutation";
 import {
   basicsDirty,
   GUARD_BACK_STEPS,
+  guardBackAction,
   guardState,
   isGuardState,
   leavingHref,
@@ -331,7 +332,7 @@ function BasicsStep({
           />
           {!capOk && <FieldError>{t("wizard.err.cap")}</FieldError>}
           {capOk && capHint && (
-            <p className="text-[12px] text-[#8a6700]" data-testid="wizard-cap-hint">
+            <p className="text-[12px] text-warning" data-testid="wizard-cap-hint">
               {t(capHint.kind === "max" ? "wizard.capAboveMailboxMax" : "wizard.capAboveMailbox", {
                 n: capHint.n,
               })}
@@ -644,7 +645,7 @@ function WizardSummary({ campaign }: { campaign: CampaignDetail }) {
   const emailCount = campaign.steps.length
     ? Math.max(...campaign.steps.map((x) => x.stepIndex)) + 1
     : 0;
-  const missing = (v: string) => <span className="text-[#8a6700]">{v}</span>;
+  const missing = (v: string) => <span className="text-warning">{v}</span>;
   const rows: [string, React.ReactNode][] = [
     [
       t("wizard.summary.recipients"),
@@ -743,6 +744,29 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
   const [leaveTo, setLeaveTo] = useState<{ step: Step } | { href: string } | { back: true } | null>(
     null,
   );
+  /** Nöbetçi kayıt şu an tarafımızdan geri alınıyor (o popstate kullanıcının "geri"si değildir). */
+  const unwindingGuard = useRef(false);
+  /** Sihirbazdan bilerek ayrılınıyor: nöbetçi kaldırılmaz, gezinme ona göre yapılır. */
+  const leaving = useRef(false);
+  /**
+   * Geçmişte nöbetçi kayıt varsa önce onu kaldırır (`history.back()`), geri dönüş tamamlanınca `then` çalışır. Böylece
+   * kayıttan sonraki `router.replace` nöbetçinin değil asıl kaydın yerine geçer ve ölü "geri" kaydı kalmaz.
+   */
+  const dropGuardThen = useCallback((then: () => void) => {
+    if (unwindingGuard.current || !isGuardState(window.history.state)) {
+      then();
+      return;
+    }
+    unwindingGuard.current = true;
+    const done = () =>
+      // Aynı popstate'i dinleyen nöbetçi işleyicisi bayrağı görebilsin diye bir sonraki tura bırakılır.
+      window.setTimeout(() => {
+        unwindingGuard.current = false;
+        then();
+      }, 0);
+    window.addEventListener("popstate", done, { once: true });
+    window.history.back();
+  }, []);
 
   // Yerel taslak: açılışta bir kez okunur; geri yükleme sorusu yanıtlanana kadar otomatik kayıt kapalıdır.
   const dKey = draftKey(id);
@@ -809,6 +833,8 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
       window.history.pushState(guardState(window.history.state), "", window.location.href);
     }
     const onPop = () => {
+      // Nöbetçinin kendimiz tarafından kaldırılması (`dropGuardThen`) bir kullanıcı "geri"si değildir.
+      if (unwindingGuard.current) return;
       window.history.pushState(guardState(window.history.state), "", window.location.href);
       setLeaveTo({ back: true });
     };
@@ -821,6 +847,17 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
       document.removeEventListener("click", onClick, true);
     };
   }, [dirty]);
+
+  // Değişiklikler kaydedilir/bırakılır ya da elle geri alınırsa nöbetçi kayıt da geçmişten kaldırılır; yoksa sonraki
+  // "geri" aynı adrese gider ve hiçbir şey olmamış gibi görünür. Sayfadan ayrılırken (`leaving`) yapılmaz.
+  // Yalnızca "değişiklik var → yok" geçişinde (açılışta değil).
+  const wasDirty = useRef(false);
+  useEffect(() => {
+    const was = wasDirty.current;
+    wasDirty.current = dirty;
+    if (dirty || !was || leaving.current) return;
+    dropGuardThen(() => {});
+  }, [dirty, dropGuardThen]);
 
   if (enabled && q.isLoading) {
     return (
@@ -843,7 +880,7 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
   /** Adıma koşulsuz geçer (kayıttan sonra veya değişiklikler bilerek bırakıldığında). */
   const proceed = (s: Step) => {
     setStep(s);
-    if (campaign) router.replace(`/campaigns/${campaign.id}/edit?step=${s}`);
+    if (campaign) dropGuardThen(() => router.replace(`/campaigns/${campaign.id}/edit?step=${s}`));
   };
   /** Kullanıcının adım değiştirmesi: kaydedilmemiş değişiklik varsa önce sorulur. */
   const go = (s: Step) => {
@@ -986,8 +1023,9 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
                   draftCtx={draftCtx(campaign?.updatedAt ?? null)}
                   onDirtyChange={setDirty}
                   onCreated={(newId) => {
-                    if (!campaign) router.replace(`/campaigns/${newId}/edit?step=steps`);
-                    else proceed("steps");
+                    if (!campaign) {
+                      dropGuardThen(() => router.replace(`/campaigns/${newId}/edit?step=steps`));
+                    } else proceed("steps");
                   }}
                 />
               )}
@@ -1045,9 +1083,17 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
           // Bilerek bırakılan değişikliklerin yerel taslağı da silinir.
           clearDraft(browserDraftStore(), dKey);
           if (!target) return;
-          if ("step" in target) proceed(target.step);
-          else if ("back" in target) window.history.go(GUARD_BACK_STEPS);
-          else router.push(target.href);
+          if ("step" in target) {
+            proceed(target.step);
+            return;
+          }
+          leaving.current = true;
+          if ("href" in target) router.push(target.href);
+          else if (guardBackAction(window.history.length) === "history") {
+            window.history.go(GUARD_BACK_STEPS);
+          } else {
+            router.replace(campaign ? `/campaigns/${campaign.id}` : "/campaigns");
+          }
         }}
       />
     </div>

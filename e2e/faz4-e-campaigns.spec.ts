@@ -29,7 +29,8 @@ test.describe("posta kutusu günlük sınırı", () => {
       id: number;
       provider: string;
       address: string;
-      updatedAt: number;
+      dailyCap: number;
+      warmupStep: number;
     }[];
     const gmail = items.find((m) => m.address === "e2e.satis@gmail.com")!;
     const demo = items.find((m) => m.provider === "demo")!;
@@ -37,7 +38,10 @@ test.describe("posta kutusu günlük sınırı", () => {
     // API: profil üst sınırı açık hata kodu ile reddedilir.
     const over = await page.request.patch(`/api/mailboxes/${gmail.id}/limits`, {
       headers,
-      data: { dailyCap: 51, expectedUpdatedAt: gmail.updatedAt },
+      data: {
+        dailyCap: 51,
+        expected: { dailyCap: gmail.dailyCap, warmupStep: gmail.warmupStep },
+      },
     });
     expect(over.status()).toBe(400);
     expect(await over.json()).toMatchObject({ code: "CAP_ABOVE_PROVIDER_MAX", max: 50 });
@@ -62,22 +66,38 @@ test.describe("posta kutusu günlük sınırı", () => {
 });
 
 test.describe("kampanya sihirbazı yerel taslağı", () => {
-  test("kaydedilmemiş ad yeniden açılışta geri yükleme olarak önerilir", async ({ page }) => {
+  test("kaydedilmemiş ad geri yüklenir; “Taslağı sil” taslağı kaldırır", async ({ page }) => {
+    // Değişiklik varken sayfa `beforeunload` ile ayrılmayı sorar; Playwright varsayılanda iletişim kutularını
+    // REDDEDER (yenileme iptal olur). Yenilemenin sürmesi için kabul edilir.
+    page.on("dialog", (d) => void d.accept());
+    const draftValue = () =>
+      page.evaluate(() => window.localStorage.getItem("um.wizardDraft.new") ?? "");
+
     await page.goto("/campaigns/new");
     await expect(page.getByRole("heading", { name: "Yeni kampanya" })).toBeVisible();
     await page.getByLabel("Kampanya adı").fill("Taslak E2E");
     // Otomatik kayıt 1 sn gecikmelidir.
-    await expect
-      .poll(() => page.evaluate(() => window.localStorage.getItem("um.wizardDraft.new") ?? ""))
-      .toContain("Taslak E2E");
+    await expect.poll(draftValue).toContain("Taslak E2E");
+
+    // 1) Geri yükle.
     await page.reload();
     const offer = page.getByTestId("wizard-draft-offer");
     await expect(offer).toBeVisible();
     await offer.getByRole("button", { name: "Geri yükle" }).click();
     await expect(page.getByLabel("Kampanya adı")).toHaveValue("Taslak E2E");
-    // Sil: taslak kaldırılır, yeniden açılışta öneri yok.
-    await page.evaluate(() => window.localStorage.removeItem("um.wizardDraft.new"));
+    // Geri yüklenen form hâlâ kaydedilmemiştir: taslak yerinde kalır.
+    await expect.poll(draftValue).toContain("Taslak E2E");
+
+    // 2) Taslağı sil: gerçek düğme; anahtar kaldırılır ve yeniden açılışta öneri gelmez.
     await page.reload();
+    await expect(offer).toBeVisible();
+    await offer.getByRole("button", { name: "Taslağı sil" }).click();
+    await expect(offer).toHaveCount(0);
+    await expect(page.getByLabel("Kampanya adı")).toHaveValue("");
+    await expect.poll(draftValue).toBe("");
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "Yeni kampanya" })).toBeVisible();
     await expect(page.getByTestId("wizard-draft-offer")).toHaveCount(0);
+    expect(await draftValue()).toBe("");
   });
 });

@@ -85,6 +85,12 @@ export function weekStart(now: number, timeZone: string): number {
   );
 }
 
+/** Saat dilimindeki bugünün 00:00 anı (UTC ms). */
+export function dayStart(now: number, timeZone: string): number {
+  const w = wallClock(now, timeZone);
+  return zonedToUtc(w.year, w.month, w.day, timeZone);
+}
+
 /** UTC ay başlangıcı ve ayın gün sayısı (bütçe ayı `monthKey` ile aynıdır: UTC). */
 export function utcMonth(now: number): { start: number; end: number; days: number; key: string } {
   const d = new Date(now);

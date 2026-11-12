@@ -151,6 +151,70 @@ export function warmupPreview(
   return { today, nextWeek, weeksToCap: Math.max(1, weeksTotal - elapsed), target };
 }
 
+export interface LimitsChangePlan {
+  /** Kaydedilecek ısınma başlangıcı (değişmediyse mevcut değer). */
+  warmupStartedAt: number | null;
+  /** Isınma başlangıcı ileri alındı mı (rampa atlanmasın diye). */
+  rebased: boolean;
+  /** Değişiklikten önceki bugünkü geçerli tavan. */
+  beforeCap: number;
+  /** Değişiklikten sonraki bugünkü geçerli tavan. */
+  todayCap: number;
+}
+
+/**
+ * Sınır değişikliğinin ısınmaya etkisi (saf; sunucu ve pencere önizlemesi aynı kuralı kullanır).
+ *
+ * Isınma tavanı `taban + artış × geçen tam hafta` olduğundan yeni bir artış (veya daha yüksek kutu tavanı) GERİYE
+ * DÖNÜK uygulanırsa rampa atlanır: 6 haftadır artışı 0 olan kişisel Gmail kutusu (günde 10) artış 5 yapılınca bir
+ * gecede 40'a çıkardı. Bunu önlemek için bugünkü tavan yükselecekse ısınma başlangıcı, rampa BUGÜNKÜ geçerli tavandan
+ * devam edecek şekilde yeniden hesaplanır: yeni tavan bugün en çok `önceki tavan + bir artış − 1` olur, sonra her
+ * hafta bir artış eklenir. Tavan düşüyor ya da aynı kalıyorsa ve ısınma henüz başlamadıysa (ilk gönderimde başlar)
+ * hiçbir şey değişmez.
+ */
+export function planLimitsChange(
+  current: {
+    dailyCap: number;
+    warmupStep: number;
+    warmupStartedAt: number | null;
+    address?: string | null;
+  },
+  next: { dailyCap: number; warmupStep: number },
+  now: number,
+): LimitsChangePlan {
+  const beforeCap = effectiveMailboxCap(current, now);
+  const naive = { ...current, ...next };
+  const naiveCap = effectiveMailboxCap(naive, now);
+  if (current.warmupStartedAt === null || naiveCap <= beforeCap) {
+    return {
+      warmupStartedAt: current.warmupStartedAt,
+      rebased: false,
+      beforeCap,
+      todayCap: naiveCap,
+    };
+  }
+  const profile = mailboxLimitProfile(current);
+  const step = Math.min(Math.max(Math.trunc(next.warmupStep), 0), profile.maxWarmupStep);
+  // Bugünkü tavanı karşılayan en az hafta sayısı; adım 0 ise rampa tabanda durur.
+  const weeks = step > 0 ? Math.max(0, Math.ceil((beforeCap - profile.warmupBase) / step)) : 0;
+  const rebasedStart = now - weeks * WEEK_MS;
+  // Başlangıç yalnızca İLERİ alınır (daha eski bir başlangıç tavanı yükseltirdi).
+  if (rebasedStart <= current.warmupStartedAt) {
+    return {
+      warmupStartedAt: current.warmupStartedAt,
+      rebased: false,
+      beforeCap,
+      todayCap: naiveCap,
+    };
+  }
+  return {
+    warmupStartedAt: rebasedStart,
+    rebased: true,
+    beforeCap,
+    todayCap: effectiveMailboxCap({ ...naive, warmupStartedAt: rebasedStart }, now),
+  };
+}
+
 /** Sonraki UTC gününün başlangıcı (günlük sınırlar UTC gününe göredir). */
 export function nextUtcDayStart(now: number): number {
   return (Math.floor(now / DAY_MS) + 1) * DAY_MS;

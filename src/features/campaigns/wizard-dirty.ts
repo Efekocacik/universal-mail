@@ -141,6 +141,15 @@ export function guardState(current: unknown): Record<string, unknown> {
 /** "Değişiklikleri at" sonrası geri gidilecek adım sayısı: nöbetçi ve sihirbaz sayfası. */
 export const GUARD_BACK_STEPS = -2;
 
+/**
+ * "Değişiklikleri at" sonrası geri hareketi nasıl yapılır: geçmişte nöbetçi + sihirbazdan önce en az bir kayıt varsa
+ * iki kayıt geri gidilir; sihirbaz geçmişin İLK kaydıysa (`history.length <= 2`) `go(-2)` hiçbir şey yapmazdı, bu
+ * yüzden kampanyalar listesine yönlendirilir.
+ */
+export function guardBackAction(historyLength: number): "history" | "fallback" {
+  return Number.isFinite(historyLength) && historyLength > 2 ? "history" : "fallback";
+}
+
 /* Posta kutusu tavanı ipucu ----------------------------------------------------------------------------------------- */
 
 export interface MailboxCapInfo {

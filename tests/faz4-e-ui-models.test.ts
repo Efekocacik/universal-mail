@@ -18,6 +18,7 @@ import {
 } from "@/features/campaigns/wizard-draft";
 import {
   GUARD_BACK_STEPS,
+  guardBackAction,
   guardState,
   HISTORY_GUARD,
   isGuardState,
@@ -145,6 +146,15 @@ describe("geri tuşu koruması", () => {
     expect(isGuardState({ __NA: true })).toBe(false);
     expect(isGuardState(null)).toBe(false);
     expect(GUARD_BACK_STEPS).toBe(-2);
+  });
+
+  it("“Değişiklikleri at” sonrası geri: sihirbaz ilk kayıtsa listeye yönlendirilir", () => {
+    expect(guardBackAction(5)).toBe("history");
+    expect(guardBackAction(3)).toBe("history");
+    // [sihirbaz, nöbetçi]: go(-2) hiçbir şey yapmazdı.
+    expect(guardBackAction(2)).toBe("fallback");
+    expect(guardBackAction(1)).toBe("fallback");
+    expect(guardBackAction(Number.NaN)).toBe("fallback");
   });
 });
 

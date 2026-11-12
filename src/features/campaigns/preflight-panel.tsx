@@ -35,7 +35,7 @@ type CheckTone = "ok" | "warn" | "block";
 
 const CHECK_STYLE: Record<CheckTone, { icon: LucideIcon; cls: string }> = {
   ok: { icon: CheckCircle2, cls: "text-success" },
-  warn: { icon: AlertTriangle, cls: "text-[#8a6700]" },
+  warn: { icon: AlertTriangle, cls: "text-warning" },
   block: { icon: XCircle, cls: "text-destructive" },
 };
 

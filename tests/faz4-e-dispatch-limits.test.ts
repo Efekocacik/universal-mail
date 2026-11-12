@@ -25,6 +25,7 @@ import {
   effectiveMailboxCap,
   mailboxLimitBounds,
   nextUtcDayStart,
+  planLimitsChange,
   WEEK_MS,
   warmupPreview,
 } from "@/lib/mail/scheduler/limits";
@@ -50,6 +51,7 @@ const ORIGIN = "http://127.0.0.1:3000";
 const HANDLE = "__umDbHandle";
 const ON = { FAZ3_DEMO_SCHEDULER_ENABLED: "1" };
 const MIN = 60_000;
+const EXP = { dailyCap: 20, warmupStep: 5 };
 let client: Client;
 let db: Db;
 
@@ -285,6 +287,49 @@ describe("limits.ts: saf yardımcılar", () => {
     expect(warmupPreview({ ...gmail, dailyCap: 80 }, T0).target).toBe(50);
   });
 
+  it("planLimitsChange: tavan düşerken veya ısınma başlamamışken başlangıç değişmez", () => {
+    const gmail = { dailyCap: 30, warmupStep: 5, address: "a@gmail.com" };
+    expect(
+      planLimitsChange({ ...gmail, warmupStartedAt: null }, { dailyCap: 50, warmupStep: 5 }, T0),
+    ).toEqual({ warmupStartedAt: null, rebased: false, beforeCap: 10, todayCap: 10 });
+    const started = T0 - 3 * WEEK_MS; // ısınma tavanı bugün 25
+    expect(
+      planLimitsChange({ ...gmail, warmupStartedAt: started }, { dailyCap: 20, warmupStep: 5 }, T0),
+    ).toEqual({ warmupStartedAt: started, rebased: false, beforeCap: 25, todayCap: 20 });
+    // Artış 0'a indirilirse rampa tabanda durur (düşüş; yeniden başlatma yok).
+    expect(
+      planLimitsChange({ ...gmail, warmupStartedAt: started }, { dailyCap: 30, warmupStep: 0 }, T0),
+    ).toMatchObject({ rebased: false, todayCap: 10 });
+    // Kutu tavanı yükselse de ısınma tavanı (25) aşılmıyorsa olduğu gibi kalır.
+    expect(
+      planLimitsChange(
+        { ...gmail, dailyCap: 25, warmupStartedAt: started },
+        { dailyCap: 50, warmupStep: 5 },
+        T0,
+      ),
+    ).toEqual({ warmupStartedAt: started, rebased: false, beforeCap: 25, todayCap: 25 });
+  });
+
+  it("planLimitsChange: yükselişte bugün en çok bir haftalık artıştan az fazlası", () => {
+    for (const [cap, step, weeks] of [
+      [12, 5, 9],
+      [20, 3, 7],
+      [37, 5, 10],
+    ] as const) {
+      const cur = {
+        dailyCap: cap,
+        warmupStep: step,
+        warmupStartedAt: T0 - weeks * WEEK_MS,
+        address: "a@gmail.com",
+      };
+      const p = planLimitsChange(cur, { dailyCap: 50, warmupStep: 5 }, T0);
+      expect(p.rebased).toBe(true);
+      expect(p.beforeCap).toBe(cap);
+      expect(p.todayCap).toBeGreaterThanOrEqual(cap);
+      expect(p.todayCap).toBeLessThan(cap + 5);
+    }
+  });
+
   it("form doğrulaması: tam sayı ve profil sınırları", () => {
     const b = { maxDailyCap: 50, maxWarmupStep: 5 };
     expect(checkLimitsDraft({ dailyCap: " 25 ", warmupStep: "5" }, b)).toEqual({
@@ -309,41 +354,117 @@ describe("posta kutusu günlük sınırı (servis)", () => {
     const r = await updateMailboxLimits(
       db,
       mb.id,
-      { dailyCap: 50, expectedUpdatedAt: mb.updatedAt },
+      { dailyCap: 50, expected: { dailyCap: 20, warmupStep: 5 } },
       { now: T0 + 1000, env: ON },
     );
-    expect(r).toMatchObject({ dailyCap: 50, warmupStep: 5, unchanged: false, todayCap: 10 });
+    expect(r).toMatchObject({
+      dailyCap: 50,
+      warmupStep: 5,
+      unchanged: false,
+      todayCap: 10,
+      warmupRebased: false,
+    });
+    const exp = { dailyCap: 50, warmupStep: 5 };
     await expect(
-      updateMailboxLimits(db, mb.id, { dailyCap: 51, expectedUpdatedAt: r.updatedAt }),
+      updateMailboxLimits(db, mb.id, { dailyCap: 51, expected: exp }),
     ).rejects.toMatchObject({ kind: "cap_above_provider_max", detail: { max: 50 } });
     await expect(
-      updateMailboxLimits(db, mb.id, { warmupStep: 6, expectedUpdatedAt: r.updatedAt }),
+      updateMailboxLimits(db, mb.id, { warmupStep: 6, expected: exp }),
     ).rejects.toMatchObject({ kind: "warmup_step_above_max", detail: { max: 5 } });
   });
 
-  it("aynı değerler: yazma ve sürüm denetimi yok; eski sürüm: çakışma", async () => {
+  it("aynı değerler: yazma ve sürüm denetimi yok; başkasının değiştirdiği sınır: çakışma", async () => {
     const mb = await addMailbox("sales@firma.example");
     const same = await updateMailboxLimits(db, mb.id, {
       dailyCap: 20,
       warmupStep: 5,
-      expectedUpdatedAt: 1,
+      expected: { dailyCap: 1, warmupStep: 0 },
     });
     expect(same).toMatchObject({ unchanged: true, wake: null, updatedAt: T0 });
     await expect(
-      updateMailboxLimits(db, mb.id, { dailyCap: 30, expectedUpdatedAt: T0 - 1 }),
+      updateMailboxLimits(db, mb.id, {
+        dailyCap: 30,
+        expected: { dailyCap: 25, warmupStep: 5 },
+      }),
     ).rejects.toMatchObject({ kind: "conflict" });
     const [row] = await db.select().from(mailboxes).where(eq(mailboxes.id, mb.id));
     expect(row!.dailyCap).toBe(20);
   });
 
+  it("gelen kutusu eşitlemesi updated_at'i ilerletse de açık pencere çakışma almaz", async () => {
+    const mb = await addMailbox("sales@firma.example");
+    // Eşitleme imleci ilerledi: yalnızca updated_at değişir (sınırlar aynı).
+    await db
+      .update(mailboxes)
+      .set({ updatedAt: T0 + 5 * MIN })
+      .where(eq(mailboxes.id, mb.id));
+    const r = await updateMailboxLimits(
+      db,
+      mb.id,
+      { dailyCap: 30, expected: { dailyCap: 20, warmupStep: 5 } },
+      { now: T0 + 6 * MIN },
+    );
+    expect(r).toMatchObject({ dailyCap: 30, unchanged: false });
+  });
+
+  it("ısınma rampası atlanamaz: artış sonradan açılınca tavan bugünkü değerden devam eder", async () => {
+    // 6 haftadır artışı 0 olan kişisel Gmail kutusu: bugün 10.
+    const mb = await addMailbox("satis@gmail.com", { dailyCap: 50, warmupStep: 0 });
+    await db
+      .update(mailboxes)
+      .set({ warmupStartedAt: T0 - 6 * WEEK_MS })
+      .where(eq(mailboxes.id, mb.id));
+    const now = T0 + MIN;
+    const r = await updateMailboxLimits(
+      db,
+      mb.id,
+      { warmupStep: 5, expected: { dailyCap: 50, warmupStep: 0 } },
+      { now, env: ON },
+    );
+    // Eski formülle bir gecede 40 olurdu; artık bugün 10, bir hafta sonra 15.
+    expect(r).toMatchObject({ todayCap: 10, warmupRebased: true });
+    const [row] = await db.select().from(mailboxes).where(eq(mailboxes.id, mb.id));
+    expect(row!.warmupStartedAt).toBe(now);
+    expect(effectiveMailboxCap(row!, now + WEEK_MS)).toBe(15);
+    const [a] = await db
+      .select()
+      .from(auditLog)
+      .where(
+        and(eq(auditLog.action, "mailbox.limits_updated"), eq(auditLog.entityId, String(mb.id))),
+      );
+    expect(a!.detail).toMatchObject({
+      todayCap: { from: 10, to: 10 },
+      warmupStartedAt: { from: T0 - 6 * WEEK_MS, to: now },
+    });
+  });
+
+  it("eski kutuda tavan yükseltilince bugün en çok bir haftalık artış kadar yükselir", async () => {
+    // 8 haftalık kişisel Gmail: ısınma tavanı 50, ama kutu tavanı 20.
+    const mb = await addMailbox("satis@gmail.com", { dailyCap: 20, warmupStep: 5 });
+    await db
+      .update(mailboxes)
+      .set({ warmupStartedAt: T0 - 8 * WEEK_MS })
+      .where(eq(mailboxes.id, mb.id));
+    const r = await updateMailboxLimits(
+      db,
+      mb.id,
+      { dailyCap: 50, expected: { dailyCap: 20, warmupStep: 5 } },
+      { now: T0, env: ON },
+    );
+    expect(r).toMatchObject({ todayCap: 20, warmupRebased: true });
+    const [row] = await db.select().from(mailboxes).where(eq(mailboxes.id, mb.id));
+    expect(effectiveMailboxCap(row!, T0 + WEEK_MS)).toBe(25);
+    expect(effectiveMailboxCap(row!, T0 + 6 * WEEK_MS)).toBe(50);
+  });
+
   it("demo kutusu değiştirilemez; olmayan kutu 404; boş yama reddedilir", async () => {
     await expect(
-      updateMailboxLimits(db, DEMO_MAILBOX, { dailyCap: 10, expectedUpdatedAt: T0 }),
+      updateMailboxLimits(db, DEMO_MAILBOX, { dailyCap: 10, expected: EXP }),
     ).rejects.toMatchObject({ kind: "not_editable" });
     await expect(
-      updateMailboxLimits(db, 999, { dailyCap: 10, expectedUpdatedAt: T0 }),
+      updateMailboxLimits(db, 999, { dailyCap: 10, expected: EXP }),
     ).rejects.toMatchObject({ kind: "not_found" });
-    await expect(updateMailboxLimits(db, 999, { expectedUpdatedAt: T0 })).rejects.toBeInstanceOf(
+    await expect(updateMailboxLimits(db, 999, { expected: EXP })).rejects.toBeInstanceOf(
       MailboxLimitsError,
     );
   });
@@ -358,10 +479,11 @@ describe("posta kutusu günlük sınırı (servis)", () => {
     const r = await updateMailboxLimits(
       db,
       mb.id,
-      { dailyCap: 40, expectedUpdatedAt: T0 },
+      { dailyCap: 40, expected: { dailyCap: 10, warmupStep: 5 } },
       { now: T0 + MIN, env: ON },
     );
-    expect(r).toMatchObject({ todayCap: 35, wake: "pulled" });
+    // Rampa bugünkü tavandan (10) devam eder: ilk hafta tabanı 20 (eski formül 35 verirdi).
+    expect(r).toMatchObject({ todayCap: 20, wake: "pulled", warmupRebased: true });
     expect((await mailJobs())[0]!.runAt).toBe(T0 + MIN);
     const [a] = await db
       .select()
@@ -372,7 +494,8 @@ describe("posta kutusu günlük sınırı (servis)", () => {
     expect(a!.detail).toEqual({
       from: { dailyCap: 10, warmupStep: 5 },
       to: { dailyCap: 40, warmupStep: 5 },
-      todayCap: { from: 10, to: 35 },
+      todayCap: { from: 10, to: 20 },
+      warmupStartedAt: { from: T0 - 3 * WEEK_MS, to: T0 + MIN },
     });
     expect(JSON.stringify(a)).not.toContain("firma.example");
 
@@ -380,7 +503,7 @@ describe("posta kutusu günlük sınırı (servis)", () => {
     const down = await updateMailboxLimits(
       db,
       mb.id,
-      { dailyCap: 15, expectedUpdatedAt: r.updatedAt },
+      { dailyCap: 15, expected: { dailyCap: 40, warmupStep: 5 } },
       { now: T0 + 2 * MIN, env: ON },
     );
     expect(down).toMatchObject({ todayCap: 15, wake: null });
@@ -405,30 +528,35 @@ describe("PATCH /api/mailboxes/[id]/limits ve GET /api/mailboxes", () => {
 
   it("başarılı güncelleme ve hata kodları", async () => {
     const mb = await addMailbox("satis@gmail.com");
-    const ok = await call(patch(mb.id, { dailyCap: 30, expectedUpdatedAt: mb.updatedAt }));
+    const exp = { dailyCap: mb.dailyCap, warmupStep: mb.warmupStep };
+    const ok = await call(patch(mb.id, { dailyCap: 30, expected: exp }));
     expect(ok.status).toBe(200);
     expect(ok.body).toMatchObject({ id: mb.id, dailyCap: 30, warmupStep: 5 });
 
-    const over = await call(patch(mb.id, { dailyCap: 51, expectedUpdatedAt: ok.body.updatedAt }));
+    const over = await call(
+      patch(mb.id, { dailyCap: 51, expected: { dailyCap: 30, warmupStep: 5 } }),
+    );
     expect(over).toMatchObject({ status: 400, body: { code: "CAP_ABOVE_PROVIDER_MAX", max: 50 } });
 
-    const stale = await call(patch(mb.id, { dailyCap: 40, expectedUpdatedAt: mb.updatedAt }));
+    const stale = await call(patch(mb.id, { dailyCap: 40, expected: exp }));
     expect(stale).toMatchObject({ status: 409, body: { code: "CONFLICT" } });
 
-    const demo = await call(patch(DEMO_MAILBOX, { dailyCap: 5, expectedUpdatedAt: T0 }));
+    const demo = await call(patch(DEMO_MAILBOX, { dailyCap: 5, expected: exp }));
     expect(demo).toMatchObject({ status: 409, body: { code: "NOT_EDITABLE" } });
 
-    expect((await call(patch(999, { dailyCap: 5, expectedUpdatedAt: T0 }))).status).toBe(404);
+    expect((await call(patch(999, { dailyCap: 5, expected: exp }))).status).toBe(404);
   });
 
   it("gövde katı doğrulanır: bilinmeyen alan, boş yama, aralık dışı", async () => {
     const mb = await addMailbox("sales@firma.example");
     for (const bad of [
-      { dailyCap: 30, expectedUpdatedAt: mb.updatedAt, address: "x@y.example" },
-      { expectedUpdatedAt: mb.updatedAt },
-      { dailyCap: 81, expectedUpdatedAt: mb.updatedAt },
-      { warmupStep: 11, expectedUpdatedAt: mb.updatedAt },
+      { dailyCap: 30, expected: EXP, address: "x@y.example" },
+      { expected: EXP },
+      { dailyCap: 81, expected: EXP },
+      { warmupStep: 11, expected: EXP },
       { dailyCap: 30 },
+      { dailyCap: 30, expectedUpdatedAt: mb.updatedAt },
+      { dailyCap: 30, expected: { ...EXP, updatedAt: 1 } },
     ]) {
       expect((await patch(mb.id, bad)).status).toBe(400);
     }

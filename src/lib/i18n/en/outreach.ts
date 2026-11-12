@@ -23,7 +23,9 @@ export const outreach = {
   "mbx.limits.consumerWarning":
     "On personal Gmail, sending more than {risk} per day raises the risk of Google restricting the account. The maximum is {max}.",
   "mbx.limits.rules":
-    "Limits are checked again before every email: at least 90 seconds pass between two emails and no mailbox sends more than {max} per day. Days reset on UTC (03:00 Turkey time).",
+    "Limits are checked again before every email: at least 90 seconds pass between two emails and this mailbox never sends more than {max} per day. Days reset on UTC (03:00 Turkey time).",
+  "mbx.limits.rampContinues":
+    "This mailbox can send at most {today} emails today. It does not jump straight to the new limit: the increase starts from here and is added every week, so the warm-up is kept.",
   "mbx.limits.save": "Save",
   "mbx.limits.saved": "Daily limit saved.",
   "mbx.limits.conflict":
@@ -38,7 +40,7 @@ export const outreach = {
   "wizard.draft.offer":
     "Unsaved changes were found for this campaign ({at}). Do you want to restore them?",
   "wizard.draft.restore": "Restore",
-  "wizard.draft.discard": "Delete",
+  "wizard.draft.discard": "Discard draft",
   "wizard.draft.restored": "Unsaved changes restored. Press “Save” to keep them.",
   "wizard.steps.noFollowupV2":
     "There are no follow-up templates yet, so the campaign sends a single email. You can add a follow-up template on the Templates page.",

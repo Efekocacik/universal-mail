@@ -44,6 +44,8 @@ test("sayaçlardan Keşif'e süzgeçli bağlantı (lifecycle + detectedSince)", 
   await page.goto("/dashboard");
   const link = page.getByTestId("dash-stat-openedThisWeek").getByRole("link");
   await expect(link).toHaveAttribute("href", /^\/\?lifecycle=opened&detectedSince=\d+$/);
+  // Ekran okuyucu yalnızca sayıyı değil, sayacın adını da duyar.
+  await expect(link).toHaveAccessibleName(/^Bu hafta açılan: [\d.,]+$/);
   const newLink = page.getByTestId("dash-stat-newThisWeek").getByRole("link");
   await expect(newLink).toHaveAttribute("href", /^\/\?lifecycle=new&detectedSince=\d+$/);
   await newLink.click();

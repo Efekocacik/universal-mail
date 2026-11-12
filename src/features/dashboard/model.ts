@@ -71,6 +71,11 @@ export function relativeTime(at: number, now: number, locale: Locale): string {
 }
 
 /** Kısa saat ("09:30") — sınırın sıfırlanma saatini kullanıcının saatinde göstermek için. */
+/** UTC gününün başlangıcı (posta kutusu günlük sınır sayacının sıfırlandığı an). */
+export function utcDayStart(now: number): number {
+  return Math.floor(now / 86_400_000) * 86_400_000;
+}
+
 export function clockTime(at: number, locale: Locale): string {
   return new Intl.DateTimeFormat(intlLocale(locale), { hour: "2-digit", minute: "2-digit" }).format(
     new Date(at),

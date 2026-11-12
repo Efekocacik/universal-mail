@@ -38,6 +38,7 @@ import {
   relativeTime,
   scheduleState,
   usagePct,
+  utcDayStart,
 } from "./model";
 
 /**
@@ -85,7 +86,12 @@ function DashboardBody({ data, locale }: { data: DashboardResponse; locale: Loca
       </p>
       <Section name="counters" data={data}>
         {data.counters && (
-          <CounterGrid c={data.counters} weekStart={data.weekStart} locale={locale} />
+          <CounterGrid
+            c={data.counters}
+            weekStart={data.weekStart}
+            generatedAt={now}
+            locale={locale}
+          />
         )}
       </Section>
       <div className="grid gap-4 lg:grid-cols-2">
@@ -174,8 +180,9 @@ function Section({
 }) {
   if (data.errors.includes(name)) {
     return (
+      // `status` (kibar): 60 sn'lik yenilemede aynı hata yeniden "uyarı" olarak okunmaz.
       <p
-        role="alert"
+        role="status"
         className="rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground"
         data-testid={`dash-section-error-${name}`}
       >
@@ -275,10 +282,12 @@ function DashboardLoadError({ onRetry }: { onRetry: () => void }) {
 function CounterGrid({
   c,
   weekStart,
+  generatedAt,
   locale,
 }: {
   c: DashboardCounters;
   weekStart: number;
+  generatedAt: number;
   locale: Locale;
 }) {
   const n = (v: number) => formatCount(v, locale);
@@ -329,6 +338,14 @@ function CounterGrid({
         value={n(c.sentToday)}
         href="/mail-log"
         help={t("dash.stat.sentToday.help")}
+        sub={
+          c.sentTodayLimitDay !== c.sentToday
+            ? t("dash.stat.sentToday.limitDay", {
+                n: n(c.sentTodayLimitDay),
+                time: clockTime(utcDayStart(generatedAt), locale),
+              })
+            : undefined
+        }
       />
       <StatTile
         id="sentMonth"
@@ -341,12 +358,17 @@ function CounterGrid({
         label={t("dash.stat.replies")}
         value={n(c.repliesThisMonth)}
         href="/mail-log?tab=review"
+        help={t("dash.stat.replies.help")}
         sub={
+          c.repliesNegative > 0
+            ? t("dash.stat.replies.negative", { n: n(c.repliesNegative) })
+            : undefined
+        }
+        warn={
           c.repliesPendingReview > 0
             ? t("dash.stat.replies.pending", { n: n(c.repliesPendingReview) })
             : undefined
         }
-        subTone="warning"
       />
     </ul>
   );
@@ -359,7 +381,7 @@ function StatTile({
   href,
   help,
   sub,
-  subTone,
+  warn,
 }: {
   id: string;
   label: string;
@@ -367,7 +389,8 @@ function StatTile({
   href: string;
   help?: string;
   sub?: string;
-  subTone?: "warning";
+  /** Dikkat isteyen ek satır (ör. incelemede bekleyen yanıtlar). */
+  warn?: string;
 }) {
   return (
     <li
@@ -380,17 +403,13 @@ function StatTile({
       </div>
       <Link
         href={href}
+        aria-label={`${label}: ${value}`}
         className="tabular mt-1 block text-2xl font-semibold after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:outline-2"
       >
         {value}
       </Link>
-      {sub && (
-        <p
-          className={`mt-0.5 text-[12px] ${subTone === "warning" ? "text-[#8a6700]" : "text-muted-foreground"}`}
-        >
-          {sub}
-        </p>
-      )}
+      {sub && <p className="mt-0.5 text-[12px] text-muted-foreground">{sub}</p>}
+      {warn && <p className="mt-0.5 text-[12px] text-warning">{warn}</p>}
     </li>
   );
 }
@@ -499,7 +518,7 @@ function BudgetView({ b, locale }: { b: DashboardBudget; locale: Locale }) {
         </p>
       )}
       {b.level === "warning" && (
-        <p className="text-[13px] text-[#8a6700]">{t("dash.budget.warning")}</p>
+        <p className="text-[13px] text-warning">{t("dash.budget.warning")}</p>
       )}
       {b.level !== "blocked" && b.projectionReliable && (
         <p className="text-[12px] text-muted-foreground" data-testid="dash-budget-projection">
@@ -645,7 +664,7 @@ function ScanList({
                   </span>
                 </div>
                 {state === "overdue" && (
-                  <p className="text-[12px] text-[#8a6700]">{t("dash.scans.overdue")}</p>
+                  <p className="text-[12px] text-warning">{t("dash.scans.overdue")}</p>
                 )}
                 {state === "skipped" && (
                   <p className="text-[12px] text-muted-foreground">{t("dash.scans.skipped")}</p>
@@ -682,13 +701,20 @@ function NotificationList({
             className={`mt-1.5 size-2 shrink-0 rounded-full ${n.readAt === null ? "bg-primary" : "bg-transparent"}`}
           />
           <div className="min-w-0 flex-1">
-            <p className="text-[13px] font-medium">{n.title}</p>
+            <p className="text-[13px] font-medium">
+              {n.readAt === null && <span className="sr-only">{t("dash.notif.unreadItem")}: </span>}
+              {n.title}
+            </p>
             <p className="text-[12px] text-muted-foreground">{n.body}</p>
           </div>
           <span className="shrink-0 text-[12px] text-muted-foreground">
             {relativeTime(n.createdAt, now, locale)}
           </span>
-          <Link href={n.url} className="shrink-0 text-[12px] text-primary hover:underline">
+          <Link
+            href={n.url}
+            aria-label={t("dash.notif.openLabel", { title: n.title })}
+            className="shrink-0 text-[12px] text-primary hover:underline"
+          >
             {t("dash.notif.open")}
           </Link>
         </li>

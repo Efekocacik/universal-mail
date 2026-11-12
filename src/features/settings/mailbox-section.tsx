@@ -28,9 +28,9 @@ import { t } from "@/lib/i18n";
 import { oauthResultText, type OAuthResultLike } from "@/lib/mail/gmail/oauth-messages";
 import {
   CONSUMER_GMAIL_MAX_DAILY,
-  MAX_DAILY_PER_MAILBOX,
   checkLimitsDraft,
   mailboxLimitBounds,
+  planLimitsChange,
   warmupPreview,
   type LimitsDraftIssue,
 } from "@/lib/mail/scheduler/limits";
@@ -332,18 +332,28 @@ function MailboxLimitsDialog({
   const changed =
     check.value !== null &&
     (check.value.dailyCap !== m.dailyCap || check.value.warmupStep !== (m.warmupStep ?? 0));
-  const preview = check.value
-    ? warmupPreview(
-        { ...check.value, warmupStartedAt: m.warmupStartedAt ?? null, address: m.address },
-        Date.now(),
-      )
-    : null;
+  // Önizleme sunucuyla aynı kuralı kullanır: tavan yükselirse ısınma bugünkü tavandan devam eder (rampa atlanmaz).
+  const nowMs = Date.now();
+  const current = {
+    dailyCap: m.dailyCap,
+    warmupStep: m.warmupStep ?? 0,
+    warmupStartedAt: m.warmupStartedAt ?? null,
+    address: m.address,
+  };
+  const plan = check.value ? planLimitsChange(current, check.value, nowMs) : null;
+  const preview =
+    check.value && plan
+      ? warmupPreview(
+          { ...check.value, warmupStartedAt: plan.warmupStartedAt, address: m.address },
+          nowMs,
+        )
+      : null;
   const save = useSafeMutation(
     () =>
       mailboxApi.updateLimits(m.id, {
         dailyCap: check.value!.dailyCap,
         warmupStep: check.value!.warmupStep,
-        expectedUpdatedAt: m.updatedAt ?? 0,
+        expected: { dailyCap: m.dailyCap, warmupStep: m.warmupStep ?? 0 },
       }),
     {
       invalidate: INVALIDATE,
@@ -376,7 +386,9 @@ function MailboxLimitsDialog({
               inputMode="numeric"
               value={dailyCap}
               aria-invalid={capIssue ? true : undefined}
-              aria-describedby={`mbx-cap-hint-${m.id}`}
+              aria-describedby={
+                capIssue ? `mbx-cap-hint-${m.id} mbx-cap-err-${m.id}` : `mbx-cap-hint-${m.id}`
+              }
               onChange={(e) => setDailyCap(e.target.value)}
             />
             <FieldHint id={`mbx-cap-hint-${m.id}`}>
@@ -387,7 +399,7 @@ function MailboxLimitsDialog({
                 },
               )}
             </FieldHint>
-            {capIssue && <FieldError>{issueText(capIssue)}</FieldError>}
+            {capIssue && <FieldError id={`mbx-cap-err-${m.id}`}>{issueText(capIssue)}</FieldError>}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`mbx-step-${m.id}`}>{t("mbx.limits.warmupStep")}</Label>
@@ -396,7 +408,9 @@ function MailboxLimitsDialog({
               inputMode="numeric"
               value={warmupStep}
               aria-invalid={stepIssue ? true : undefined}
-              aria-describedby={`mbx-step-hint-${m.id}`}
+              aria-describedby={
+                stepIssue ? `mbx-step-hint-${m.id} mbx-step-err-${m.id}` : `mbx-step-hint-${m.id}`
+              }
               onChange={(e) => setWarmupStep(e.target.value)}
             />
             <FieldHint id={`mbx-step-hint-${m.id}`}>
@@ -405,7 +419,9 @@ function MailboxLimitsDialog({
                 max: bounds.maxWarmupStep,
               })}
             </FieldHint>
-            {stepIssue && <FieldError>{issueText(stepIssue)}</FieldError>}
+            {stepIssue && (
+              <FieldError id={`mbx-step-err-${m.id}`}>{issueText(stepIssue)}</FieldError>
+            )}
           </div>
           {preview && (
             <p
@@ -424,6 +440,11 @@ function MailboxLimitsDialog({
                     })}
             </p>
           )}
+          {changed && plan?.rebased && (
+            <p className="text-[12px] text-muted-foreground" data-testid="mbx-limits-rebased">
+              {t("mbx.limits.rampContinues", { today: plan.beforeCap })}
+            </p>
+          )}
           {m.consumerGmail && Number.isFinite(capNum) && capNum > CONSUMER_RISK_ABOVE && (
             <Notice tone="warning">
               {t("mbx.limits.consumerWarning", {
@@ -433,7 +454,7 @@ function MailboxLimitsDialog({
             </Notice>
           )}
           <p className="text-[12px] text-muted-foreground">
-            {t("mbx.limits.rules", { max: MAX_DAILY_PER_MAILBOX })}
+            {t("mbx.limits.rules", { max: bounds.maxDailyCap })}
           </p>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

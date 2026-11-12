@@ -11,9 +11,10 @@ import { mailboxDailyLimitsSchema } from "../../../mail/schema";
 export const dynamic = "force-dynamic";
 
 /**
- * Posta kutusunun günlük tavanı ve haftalık ısınma artışı. Gövde: `{dailyCap?, warmupStep?, expectedUpdatedAt}`.
+ * Posta kutusunun günlük tavanı ve haftalık ısınma artışı. Gövde: `{dailyCap?, warmupStep?, expected: {dailyCap, warmupStep}}`.
  * Hatalar: 400 `CAP_ABOVE_PROVIDER_MAX` / `WARMUP_STEP_ABOVE_MAX` (`max` alanıyla), 404 `NOT_FOUND`, 409
- * `NOT_EDITABLE` (demo), 409 `CONFLICT` (eski `expectedUpdatedAt`). Bu uç HİÇBİR ŞEY GÖNDERMEZ; tavan yükselirse
+ * `NOT_EDITABLE` (demo), 409 `CONFLICT` (`expected` artık güncel değil). Yanıt
+ * `warmupRebased: true` ise ısınma rampası bugünkü tavandan devam edecek şekilde yeniden başlatılmıştır. Bu uç HİÇBİR ŞEY GÖNDERMEZ; tavan yükselirse
  * yalnızca dağıtıcıyı uyandırır, kurallar gönderim anında yeniden uygulanır.
  */
 export const PATCH = domainRoute(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {

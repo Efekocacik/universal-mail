@@ -51,7 +51,13 @@ export const mailboxDailyLimitsSchema = z
   .object({
     dailyCap: z.number().int().min(1).max(80).optional(),
     warmupStep: z.number().int().min(0).max(10).optional(),
-    expectedUpdatedAt: z.number().int().min(0),
+    /** İstemcinin okuduğu sınır değerleri (iyimser eşzamanlılık; `updated_at` değil). */
+    expected: z
+      .object({
+        dailyCap: z.number().int().min(1).max(80),
+        warmupStep: z.number().int().min(0).max(10),
+      })
+      .strict(),
   })
   .strict()
   .refine((v) => v.dailyCap !== undefined || v.warmupStep !== undefined, {

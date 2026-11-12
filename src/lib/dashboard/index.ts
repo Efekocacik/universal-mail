@@ -23,9 +23,16 @@ import { CONTACTED } from "@/lib/mail/send-service";
 import { listNotifications, renderNotification, unreadCount } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
 import { dayKey } from "@/lib/util";
-import { projectMonthSpend, utcMonth, weekStart } from "./time";
+import { dayStart, projectMonthSpend, utcMonth, weekStart } from "./time";
 
-export { defaultTimeZone, isValidTimeZone, projectMonthSpend, utcMonth, weekStart } from "./time";
+export {
+  dayStart,
+  defaultTimeZone,
+  isValidTimeZone,
+  projectMonthSpend,
+  utcMonth,
+  weekStart,
+} from "./time";
 
 /**
  * GÖSTERGE PANELİ okuma modeli (Faz 4, Paket E). Yalnızca OKUR; hiçbir şey yazmaz, Google'a veya posta sağlayıcısına
@@ -38,7 +45,10 @@ export { defaultTimeZone, isValidTimeZone, projectMonthSpend, utcMonth, weekStar
  *
  * Zaman tanımları:
  *  - "Bu hafta": kullanıcının saat dilimindeki Pazartesi 00:00'dan bu yana (`weekStart`).
- *  - "Bugün gönderilen": UTC günü; posta kutusu günlük sınırları da UTC gününe göre sayılır (Türkiye'de 03:00).
+ *  - "Bugün gönderilen": kullanıcının saat dilimindeki gece yarısından bu yana (`sentAt`). Posta kutusu günlük
+ *    sınırları ise UTC gününe göre sayılır (Türkiye'de 03:00); o sayı `sentTodayLimitDay` olarak ayrıca döner.
+ *  - "Yanıtlar": insan yanıtları, yani `reply` ve `negative` sınıfları (otomatik yanıt, geri dönme, abonelikten
+ *    çıkma sayılmaz). Sınıflandırılmamış (`received`) iletiler yalnızca "incelemede" sayacına girer.
  *  - "Bu ay": UTC ayı (bütçe ayı ile aynı).
  *
  * Gizlilik: işletme adları yalnızca oturum önbelleğinden (`place_cache`) okunur ve bu yanıtta yalnızca bu bilgisayardaki
@@ -70,9 +80,15 @@ export interface DashboardCounters {
   openedThisWeek: number;
   activeCampaigns: number;
   pausedCampaigns: number;
+  /** Bugün (kullanıcının saat diliminde gece yarısından beri) gönderilen kampanya iletisi. */
   sentToday: number;
+  /** Günlük sınır sayacı: UTC gününde gönderilen (posta kutusu tavanları bu sayıyla karşılaştırılır). */
+  sentTodayLimitDay: number;
   sentThisMonth: number;
+  /** Bu ay gelen insan yanıtları: olumlu/olası (`reply`) ve olumsuz (`negative`). */
   repliesThisMonth: number;
+  /** `repliesThisMonth` içindeki olumsuz ("ilgilenmiyorum") yanıtlar. */
+  repliesNegative: number;
   /** Alıcıdan gelen ve kullanıcının kararını bekleyen ileti (takipler bu sürede bekler). */
   repliesPendingReview: number;
 }
@@ -171,6 +187,8 @@ interface Ctx {
   db: Db;
   now: number;
   weekStart: number;
+  /** Kullanıcının saat dilimindeki bugünün başlangıcı. */
+  localDayStart: number;
   today: string;
   month: ReturnType<typeof utcMonth>;
   locale: Locale;
@@ -211,16 +229,21 @@ async function counters(c: Ctx): Promise<DashboardCounters> {
     eq(messages.purpose, "campaign"),
     inArray(messages.status, [...CONTACTED]),
   );
+  // Yerel gün ay başından önce başlayabilir (ör. 1'inde TSİ 00:00–03:00): alt sınır ikisinin küçüğüdür.
+  const localFirstKey = dayKey(c.localDayStart);
+  const fromKey = localFirstKey < monthFirst ? localFirstKey : monthFirst;
   const [sent] = await db
     .select({
-      today: sql<number>`coalesce(sum(CASE WHEN ${messages.sendDay} = ${c.today} THEN 1 ELSE 0 END), 0)`,
-      month: count(),
+      today: sql<number>`coalesce(sum(CASE WHEN ${messages.sentAt} >= ${c.localDayStart} THEN 1 ELSE 0 END), 0)`,
+      limitDay: sql<number>`coalesce(sum(CASE WHEN ${messages.sendDay} = ${c.today} THEN 1 ELSE 0 END), 0)`,
+      month: sql<number>`coalesce(sum(CASE WHEN ${messages.sendDay} >= ${monthFirst} THEN 1 ELSE 0 END), 0)`,
     })
     .from(messages)
-    .where(and(outBase, gte(messages.sendDay, monthFirst), lt(messages.sendDay, nextMonthFirst)));
+    .where(and(outBase, gte(messages.sendDay, fromKey), lt(messages.sendDay, nextMonthFirst)));
   const [inbound] = await db
     .select({
-      replies: sql<number>`coalesce(sum(CASE WHEN ${messages.classification} = 'reply' AND ${messages.receivedAt} >= ${c.month.start} THEN 1 ELSE 0 END), 0)`,
+      replies: sql<number>`coalesce(sum(CASE WHEN ${messages.classification} IN ('reply', 'negative') AND ${messages.receivedAt} >= ${c.month.start} THEN 1 ELSE 0 END), 0)`,
+      negative: sql<number>`coalesce(sum(CASE WHEN ${messages.classification} = 'negative' AND ${messages.receivedAt} >= ${c.month.start} THEN 1 ELSE 0 END), 0)`,
       pending: sql<number>`coalesce(sum(CASE WHEN ${messages.status} = 'received' THEN 1 ELSE 0 END), 0)`,
     })
     .from(messages)
@@ -239,8 +262,10 @@ async function counters(c: Ctx): Promise<DashboardCounters> {
     activeCampaigns: byStatus.get("running") ?? 0,
     pausedCampaigns: byStatus.get("paused") ?? 0,
     sentToday: num(sent?.today),
+    sentTodayLimitDay: num(sent?.limitDay),
     sentThisMonth: num(sent?.month),
     repliesThisMonth: num(inbound?.replies),
+    repliesNegative: num(inbound?.negative),
     repliesPendingReview: num(inbound?.pending),
   };
 }
@@ -435,6 +460,7 @@ export async function getDashboard(db: Db, opts: DashboardOptions = {}): Promise
     db,
     now,
     weekStart: weekStart(now, timeZone),
+    localDayStart: dayStart(now, timeZone),
     today: dayKey(now),
     month: utcMonth(now),
     locale: opts.locale ?? "tr",

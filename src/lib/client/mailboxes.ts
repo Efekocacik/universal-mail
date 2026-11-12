@@ -49,12 +49,20 @@ export const mailboxApi = {
     api<{ ok: true }>(`/api/mailboxes/${id}`, { method: "PATCH", json: patch }),
   updateLimits: (
     id: number,
-    patch: { dailyCap?: number; warmupStep?: number; expectedUpdatedAt: number },
+    patch: {
+      dailyCap?: number;
+      warmupStep?: number;
+      expected: { dailyCap: number; warmupStep: number };
+    },
   ) =>
-    api<{ id: number; dailyCap: number; warmupStep: number; todayCap: number; updatedAt: number }>(
-      `/api/mailboxes/${id}/limits`,
-      { method: "PATCH", json: patch },
-    ),
+    api<{
+      id: number;
+      dailyCap: number;
+      warmupStep: number;
+      todayCap: number;
+      warmupRebased: boolean;
+      updatedAt: number;
+    }>(`/api/mailboxes/${id}/limits`, { method: "PATCH", json: patch }),
   remove: (id: number) => api<{ ok: true }>(`/api/mailboxes/${id}`, { method: "DELETE" }),
   setClient: (input: { clientId: string; clientSecret?: string }) =>
     api<GmailClientStatus>("/api/mailboxes/gmail-client", { method: "PUT", json: input }),
