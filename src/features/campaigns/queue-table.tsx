@@ -153,7 +153,11 @@ export function QueueTable({
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="space-y-1">
-                        <SequenceStatusBadge status={r.status} reasons={r.exclusionReasons} />
+                        <SequenceStatusBadge
+                          status={r.status}
+                          reasons={r.exclusionReasons}
+                          stopReason={r.stopReason}
+                        />
                         {r.exclusionReasons.length > 0 && <ReasonList codes={r.exclusionReasons} />}
                         {r.lastError && (
                           <p className="text-[12px] text-destructive">

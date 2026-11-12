@@ -10,7 +10,9 @@ import {
   leadEmails,
   leads,
   type CampaignLeadStatus,
+  type SequenceStopReason,
 } from "@/lib/db/schema";
+import { effectiveStopReason } from "@/lib/mail/inbound/complaint";
 import { suggestLanguage } from "@/lib/mail/language";
 import { bumpUpdatedAt, CampaignError } from "./errors";
 
@@ -412,6 +414,8 @@ export interface QueueItem {
   attempts: number;
   lastError: string | null;
   exclusionReasons: string[];
+  /** 15.10-2: etkin durma nedeni (sütun; eski satırda işaret). `completed` dizide de olabilir (TB-10). */
+  stopReason: SequenceStopReason | null;
 }
 
 /** Kuyruk görünümü (FR-CMP-05): sayfalı; alıcı adresi maskelenir. */
@@ -461,6 +465,7 @@ export async function listCampaignQueue(
         attempts: r.attempts,
         lastError: r.lastError,
         exclusionReasons: r.exclusionReasons,
+        stopReason: effectiveStopReason(r.status, r.stopReason, r.exclusionReasons),
       };
     }),
   };

@@ -2,6 +2,7 @@ import type { BadgeProps } from "@/components/ui/badge";
 import type { CampaignLeadStatus, CampaignStatus, SendWindow } from "@/lib/client/campaigns";
 import { t, type TrKey } from "@/lib/i18n";
 import { tr } from "@/lib/i18n/tr";
+import { effectiveStopReason } from "@/lib/mail/inbound/complaint";
 
 /**
  * Kampanya ekranlarının saf görünüm mantığı (DOM'suz; node testleriyle doğrulanır). Sunucu kurallarının yerine GEÇMEZ:
@@ -146,21 +147,108 @@ export function progressOf(counts: Partial<Record<CampaignLeadStatus, number>>):
   };
 }
 
-export interface PlainCounts {
-  sent: number;
-  queued: number;
-  failed: number;
+/** Sunucunun ayrıntılı sayım satırı (`CampaignSummary.breakdown`). */
+export interface BreakdownRow {
+  status: CampaignLeadStatus;
+  contacted: boolean;
+  stopReason: "unsubscribe" | "complaint" | null;
+  n: number;
 }
 
-/** Düz dille ilerleme: gönderilen / sırada bekleyen / hatalı. Hariç tutulanlar ve çıkarılanlar sayılmaz. */
-export function plainCounts(counts: Partial<Record<CampaignLeadStatus, number>>): PlainCounts {
+export interface PlainCounts {
+  /** En az bir kampanya iletisi KABUL EDİLMİŞ kişi (teslim edilemeyenler hariç). İleti değil kişi sayısıdır. */
+  sent: number;
+  /** Henüz hiç ileti almamış, sırada bekleyen kişi. */
+  queued: number;
+  /** Teslim edilemedi (bounce) veya hiç gönderilemeden başarısız. */
+  failed: number;
+  /** Hiç ileti almadan duran kişi (çıkış, şikâyet, başka kampanyadaki yanıt, çıkarma, iptal). */
+  stoppedBeforeSend: number;
+  /** Listeden çıkan kişi (gönderimden önce veya sonra; şikâyet edenler hariç). */
+  optedOut: number;
+  /** Şikâyet eden (ARF) veya işletmesinin başka adresi şikâyet ettiği için durdurulan kişi. */
+  complained: number;
+}
+
+const STOPPED_STATUSES: ReadonlySet<CampaignLeadStatus> = new Set([
+  "replied",
+  "unsubscribed",
+  "removed",
+  "cancelled",
+]);
+const QUEUED_STATUSES: ReadonlySet<CampaignLeadStatus> = new Set([
+  "pending",
+  "scheduled",
+  "in_flight",
+]);
+
+/**
+ * Düz dille ilerleme (Faz 4 "hata a" + 15.10-2 TB-2). Kovalar AYRIKTIR; her dizi en çok birine girer:
+ *  - `sent`: en az bir ileti kabul edilmiş (`contacted`) ve teslim edilemedi olmayan;
+ *  - `failed`: teslim edilemedi (bounce) + hiç gönderilemeden başarısız;
+ *  - `queued`: hiç ileti almamış bekleyen/planlanan/gönderilmekte olan;
+ *  - `stoppedBeforeSend`: hiç ileti almadan duran (çıkış, şikâyet, yanıt, çıkarma, iptal).
+ * Bir kişi hiç ileti almadıysa ASLA "gönderildi" sayılmaz. Hariç tutulanlar sayılmaz.
+ * `optedOut` / `complained` bilgi amaçlıdır (kovalarla örtüşür): durma nedeni sütunundan, eski satırlarda işaretten.
+ *
+ * `breakdown` yoksa (eski önbellek yanıtı) temkinli yedek: yalnızca kesin gönderim almış durumlar
+ * (`completed`, `waiting_next`) "gönderildi" sayılır; asla fazla göstermez.
+ */
+export function plainCounts(
+  counts: Partial<Record<CampaignLeadStatus, number>>,
+  breakdown?: readonly BreakdownRow[],
+): PlainCounts {
   const sum = (keys: readonly CampaignLeadStatus[]) =>
     keys.reduce((a, k) => a + (counts[k] ?? 0), 0);
-  return {
-    sent: sum(["completed", "replied", "waiting_next", "unsubscribed"]),
-    queued: sum(["pending", "scheduled", "in_flight"]),
-    failed: sum(["failed", "bounced"]),
+  if (!breakdown) {
+    return {
+      sent: sum(["completed", "waiting_next"]),
+      queued: sum(["pending", "scheduled", "in_flight"]),
+      failed: sum(["failed", "bounced"]),
+      stoppedBeforeSend: 0,
+      optedOut: 0,
+      complained: 0,
+    };
+  }
+  const out: PlainCounts = {
+    sent: 0,
+    queued: 0,
+    failed: 0,
+    stoppedBeforeSend: 0,
+    optedOut: 0,
+    complained: 0,
   };
+  for (const r of breakdown) {
+    if (r.stopReason === "complaint") out.complained += r.n;
+    else if (r.stopReason === "unsubscribe") out.optedOut += r.n;
+    if (r.status === "excluded") continue;
+    if (r.status === "bounced") out.failed += r.n;
+    else if (r.contacted) out.sent += r.n;
+    else if (r.status === "failed") out.failed += r.n;
+    else if (QUEUED_STATUSES.has(r.status)) out.queued += r.n;
+    else if (STOPPED_STATUSES.has(r.status)) out.stoppedBeforeSend += r.n;
+    // Gönderimsiz `completed`/`waiting_next` normalde oluşmaz; oluşursa "gönderildi" sayılmaz.
+  }
+  return out;
+}
+
+/** Kampanya kartı ve ayrıntı başlığı için tek satırlık düz özet (sıfır olan ek parçalar gösterilmez). */
+export function plainCountsText(
+  p: PlainCounts,
+  fmt: (n: number) => string = (n) => String(n),
+): string {
+  const parts = [
+    t("campaign.progress.plain", {
+      sent: fmt(p.sent),
+      queued: fmt(p.queued),
+      failed: fmt(p.failed),
+    }),
+  ];
+  if (p.stoppedBeforeSend > 0)
+    parts.push(t("campaign.progress.stoppedBeforeSend", { n: fmt(p.stoppedBeforeSend) }));
+  if (p.optedOut > 0) parts.push(t("campaign.progress.optedOut", { n: fmt(p.optedOut) }));
+  if (p.complained > 0) parts.push(t("campaign.progress.complained", { n: fmt(p.complained) }));
+  return parts.join(" · ");
 }
 
 /* Gönderim penceresi: yalnızca varsayılan (hafta içi 09.00–17.00) daraltılabilir. ----------------- */
@@ -187,16 +275,63 @@ function has(key: string): key is TrKey {
 }
 
 /**
- * Dizi durumu etiketi. `unsubscribed` hem çıkış talebi hem ARF şikâyeti için ortak geçici durumdur (migrasyon 15.10'da);
- * şikâyetle durdurulan dizi `arf_complaint` gerekçe işaretiyle ayrı etiketlenir.
+ * Dizi durumu etiketi (15.10-2, TB-2/TB-10). `unsubscribed` durumunda neden ayrılır: "Listeden çıktı" / "Şikâyet
+ * nedeniyle durdu". `completed` dizi sonradan çıkış/şikâyet görürse durumu korunur, nedeni eklenir. `stopReason`
+ * verilmezse (eski yanıt) `"arf_complaint"` gerekçe işaretine düşülür.
  */
 export function sequenceStatusLabel(
   status: CampaignLeadStatus,
   reasons?: readonly string[],
+  stopReason?: "unsubscribe" | "complaint" | null,
 ): string {
-  return status === "unsubscribed" && reasons?.includes("arf_complaint")
-    ? t("sequenceStatus.complaint")
-    : t(`sequenceStatus.${status}`);
+  const reason = effectiveStopReason(status, stopReason, reasons);
+  if (status === "unsubscribed")
+    return t(reason === "complaint" ? "sequenceStop.complaint" : "sequenceStop.unsubscribe");
+  if (status === "completed" && reason)
+    return t(
+      reason === "complaint"
+        ? "sequenceStop.completedThenComplaint"
+        : "sequenceStop.completedThenUnsubscribe",
+    );
+  return t(`sequenceStatus.${status}`);
+}
+
+/** Sayaç kutusu etiketi: `unsubscribed` durumu iki kutuya ayrılır (bkz. `statusStats`). */
+export interface StatusStat {
+  key: string;
+  label: string;
+  value: number;
+}
+
+/**
+ * Ayrıntı ekranındaki durum kutuları. `breakdown` varsa `unsubscribed` tek kutu yerine "Listeden çıktı" ve "Şikâyet
+ * nedeniyle durdu" olarak ayrılır; diğer durumlar olduğu gibi. Sıfır olan kutu gösterilmez.
+ */
+export function statusStats(
+  counts: Partial<Record<CampaignLeadStatus, number>>,
+  breakdown?: readonly BreakdownRow[],
+): StatusStat[] {
+  const out: StatusStat[] = [];
+  for (const s of SEQUENCE_STATUSES) {
+    const n = counts[s] ?? 0;
+    if (n <= 0) continue;
+    if (s === "unsubscribed" && breakdown) {
+      let complaint = 0;
+      for (const r of breakdown)
+        if (r.status === "unsubscribed" && r.stopReason === "complaint") complaint += r.n;
+      if (n - complaint > 0)
+        out.push({
+          key: "unsubscribed",
+          label: t("sequenceStop.unsubscribe"),
+          value: n - complaint,
+        });
+      if (complaint > 0)
+        out.push({ key: "complaint", label: t("sequenceStop.complaint"), value: complaint });
+      continue;
+    }
+    out.push({ key: s, label: t(`sequenceStatus.${s}`), value: n });
+  }
+  return out;
 }
 
 /** Uygunluk, engel ve hata kodlarının okunur karşılığı; sözlükte yoksa kodun kendisi. */

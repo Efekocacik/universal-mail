@@ -41,17 +41,23 @@ export function CampaignStatusBadge({ status }: { status: CampaignStatus }) {
 }
 
 /**
- * `reasons`: dizinin gerekçe kodları. `unsubscribed` durumu çıkış talebi VE ARF şikâyeti için ortak geçici durumdur
- * (migrasyon yok); şikâyetle durdurulan dizi `arf_complaint` işaretiyle ayrı etiketlenir.
+ * `reasons`: dizinin gerekçe kodları; `stopReason`: etkin durma nedeni (15.10-2). Çıkış ve şikâyet ayrı etiketlenir;
+ * `stopReason` yoksa eski `arf_complaint` işaretine düşülür.
  */
 export function SequenceStatusBadge({
   status,
   reasons,
+  stopReason,
 }: {
   status: CampaignLeadStatus;
   reasons?: readonly string[];
+  stopReason?: "unsubscribe" | "complaint" | null;
 }) {
-  return <Badge variant={SEQUENCE_VARIANT[status]}>{sequenceStatusLabel(status, reasons)}</Badge>;
+  return (
+    <Badge variant={SEQUENCE_VARIANT[status]}>
+      {sequenceStatusLabel(status, reasons, stopReason)}
+    </Badge>
+  );
 }
 
 export function DemoBadge() {

@@ -5,7 +5,9 @@ import {
   campaigns,
   type CampaignLeadStatus,
   type CampaignStatus,
+  type SequenceStopReason,
 } from "@/lib/db/schema";
+import { effectiveStopReason } from "@/lib/mail/inbound/complaint";
 
 /**
  * Bir lead'in kampanyalardaki durumu ve hariç tutulma gerekçeleri (SRS Bölüm 13, madde 12: "hariç tutulma gerekçesi
@@ -18,6 +20,8 @@ export interface LeadCampaignItem {
   sequenceId: number;
   sequenceStatus: CampaignLeadStatus;
   exclusionReasons: string[];
+  /** 15.10-2: etkin durma nedeni (çıkış / şikâyet); yoksa null. */
+  stopReason: SequenceStopReason | null;
   lastError: string | null;
   addedAt: number;
 }
@@ -34,6 +38,7 @@ export async function listLeadCampaigns(
       sequenceId: campaignLeads.id,
       sequenceStatus: campaignLeads.status,
       exclusionReasons: campaignLeads.exclusionReasons,
+      stopReasonRaw: campaignLeads.stopReason,
       lastError: campaignLeads.lastError,
       addedAt: campaignLeads.addedAt,
     })
@@ -42,5 +47,8 @@ export async function listLeadCampaigns(
     .where(eq(campaignLeads.leadId, leadId))
     .orderBy(desc(campaignLeads.id))
     .limit(50);
-  return rows;
+  return rows.map(({ stopReasonRaw, ...r }) => ({
+    ...r,
+    stopReason: effectiveStopReason(r.sequenceStatus, stopReasonRaw, r.exclusionReasons),
+  }));
 }
