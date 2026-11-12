@@ -55,6 +55,8 @@ export interface AppStatus {
   budget: BudgetStatus;
   scans: StatusScan[];
   pendingJobs: number;
+  /** Faz 4: okunmamış bildirim sayısı (zil rozeti). */
+  unreadNotifications: number;
 }
 
 export interface CityResult {
