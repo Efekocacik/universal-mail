@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { NoveltyBadge } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/misc";
@@ -116,6 +117,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
   const [displayName, setDisplayName] = useState(lead.displayName ?? "");
   const [tag, setTag] = useState("");
   const [saved, setSaved] = useState(false);
+  // Faz 4 (paket C): "İletişime geçme" işaretini kaldırmak açık onay ister (sunucu `confirmUnblock` olmadan 409 verir).
+  const [unblockTo, setUnblockTo] = useState<string | null>(null);
 
   useEffect(() => {
     setNotes(lead.notes ?? "");
@@ -336,7 +339,11 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             <Select
               id="lead-status"
               value={lead.status}
-              onChange={(e) => save({ status: e.target.value })}
+              onChange={(e) =>
+                lead.status === "do_not_contact" && e.target.value !== "do_not_contact"
+                  ? setUnblockTo(e.target.value)
+                  : save({ status: e.target.value })
+              }
             >
               {LEAD_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -345,6 +352,18 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               ))}
             </Select>
           </div>
+          <ConfirmDialog
+            open={unblockTo !== null}
+            onOpenChange={(v) => !v && setUnblockTo(null)}
+            tone="warning"
+            title={t("detail.unblock.title")}
+            description={t("detail.unblock.body")}
+            confirmLabel={t("detail.unblock.confirm")}
+            onConfirm={() => {
+              if (unblockTo)
+                save({ status: unblockTo, confirmUnblock: true } as Parameters<typeof save>[0]);
+            }}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="lead-tag">{t("detail.tags")}</Label>
             <div className="flex flex-wrap gap-1.5">
