@@ -1,14 +1,16 @@
 "use client";
 
-import { CalendarClock, Play, Trash2 } from "lucide-react";
+import { CalendarClock, CircleAlert, Play, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Label, Select } from "@/components/ui/input";
+import { EmptyState } from "@/components/ui/page";
 import { Switch } from "@/components/ui/switch";
-import { ApiError } from "@/lib/client/api";
+import { HelpTip } from "@/components/ui/tooltip";
+import { ApiError, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtUsd } from "@/lib/client/format";
 import {
   INTERVALS,
@@ -43,7 +45,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
       { id: s.id, ...p },
       {
         onSuccess: () => toast.success(t("schedules.updated")),
-        onError: (e: Error) => toast.error(e.message),
+        onError: (e: Error) => toast.error(errorText(e)),
       },
     );
   const start = async (acknowledgeRisk: boolean) => {
@@ -53,7 +55,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
       setAck(null);
     } catch (e) {
       if (e instanceof ApiError && e.code === "NEEDS_ACK") setAck(e.message);
-      else toast.error((e as Error).message);
+      else toast.error(errorText(e));
       if (acknowledgeRisk) throw e;
     }
   };
@@ -153,7 +155,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
             await del.mutateAsync(s.id);
             toast.success(t("schedules.deleted"));
           } catch (e) {
-            toast.error((e as Error).message);
+            toast.error(errorText(e));
             throw e;
           }
         }}
@@ -171,9 +173,12 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
   );
 }
 
-/** Taramalar sayfasının üstündeki "Düzenli taramalar" bölümü. Zamanlama yoksa yalnızca kısa bir açıklama gösterilir. */
+/**
+ * Taramalar sayfasının üstündeki "Düzenli taramalar" bölümü. Zamanlama yoksa yalnızca kısa bir açıklama gösterilir;
+ * liste yüklenemezse boş liste gibi davranmaz ("henüz yok" demek yanıltıcı olur), hata ve "Yeniden dene" gösterilir.
+ */
 export function SchedulesSection() {
-  const { data, isLoading } = useSchedules();
+  const { data, isLoading, isError, refetch, isFetching } = useSchedules();
   if (isLoading) return null;
   const list = data ?? [];
   return (
@@ -181,20 +186,37 @@ export function SchedulesSection() {
       <div className="flex items-start gap-2">
         <CalendarClock className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
         <div className="min-w-0 flex-1">
-          <h2 id="schedules-title" className="text-sm font-semibold">
+          <h2 id="schedules-title" className="flex items-center gap-1.5 text-sm font-semibold">
             {t("schedules.title")}
+            <HelpTip>{t("help.schedules")}</HelpTip>
           </h2>
-          <p className="text-[13px] text-muted-foreground">
-            {list.length === 0 ? t("schedules.empty") : t("schedules.whileOpen")}
-          </p>
+          {!isError && (
+            <p className="text-[13px] text-muted-foreground">
+              {list.length === 0 ? t("schedules.empty") : t("schedules.whileOpen")}
+            </p>
+          )}
         </div>
       </div>
-      {list.length > 0 && (
-        <ul className="mt-3 space-y-2">
-          {list.map((s) => (
-            <ScheduleRow key={s.id} s={s} />
-          ))}
-        </ul>
+      {isError && !data ? (
+        <EmptyState
+          compact
+          icon={CircleAlert}
+          title={t("schedules.loadError")}
+          testId="schedules-error"
+          action={
+            <Button size="sm" variant="outline" loading={isFetching} onClick={() => void refetch()}>
+              {!isFetching && <RefreshCw />} {t("error.retry")}
+            </Button>
+          }
+        />
+      ) : (
+        list.length > 0 && (
+          <ul className="mt-3 space-y-2">
+            {list.map((s) => (
+              <ScheduleRow key={s.id} s={s} />
+            ))}
+          </ul>
+        )
       )}
     </section>
   );

@@ -6,6 +6,9 @@ export const scan = {
   // Taramalar sayfası ve zamanlamalar
   "scans.origin.schedule": "Zamanlanmış",
   "schedules.title": "Düzenli taramalar",
+  "help.schedules":
+    "Seçtiğiniz bölgeyi belirlediğiniz aralıkla kendiliğinden yeniden tarar. Bir çalışma onayladığınız tutarı aşamaz; aşacaksa durur ve size sorar.",
+  "schedules.loadError": "Düzenli taramalar yüklenemedi.",
   "schedules.empty":
     'Henüz düzenli tarama yok. Tamamlanan bir taramada "Düzenli tekrarla"ya basarak aynı bölgeyi her hafta, iki haftada bir ya da ayda bir kendiliğinden taratabilirsiniz.',
   "schedules.whileOpen":

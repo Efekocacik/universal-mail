@@ -68,6 +68,8 @@ export const dashboard = {
   "dash.budget.mock": "Demo data is in use; there is no Google charge.",
   "dash.budget.edit": "Change the budget",
   "dash.new.title": "Newly opened this week",
+  "dash.new.help":
+    "“New”: a business found for the first time in a scan. “Opened”: a business shown as “opening soon” that was later found open. The week starts on Monday.",
   "dash.new.desc": "Businesses seen opening or found for the first time since Monday.",
   "dash.new.kind.opened": "Opened",
   "dash.new.kind.new": "New",
@@ -88,6 +90,8 @@ export const dashboard = {
   "dash.scans.cta": "Go to Scans",
   "dash.notif.title": "Recent notifications",
   "dash.notif.unread": "{n} unread",
+  "dash.notif.help":
+    "Scan results, new openings and skipped recurring scans are collected here. Turn desktop notifications on or off in Settings > Appearance & language.",
   "dash.notif.empty":
     "No notifications yet. They appear here when a scan finishes or new businesses are found.",
   "dash.notif.open": "Open",

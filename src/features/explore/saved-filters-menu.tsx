@@ -1,9 +1,11 @@
 "use client";
 
-import { Bookmark, MapPin, Pencil, Trash2 } from "lucide-react";
+import { Bookmark, CircleAlert, MapPin, Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
@@ -17,7 +19,7 @@ import {
 import { FieldError, FieldHint, Input, Label } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ApiError } from "@/lib/client/api";
+import { ApiError, errorText } from "@/lib/client/api";
 import { useCategories } from "@/lib/client/queries";
 import {
   savedFiltersApi,
@@ -202,7 +204,7 @@ export function SavedFiltersMenu() {
       ex.setActiveSaved({ id: r.item.id, name: r.item.name, snapshot: ex.filters });
       toast.success(t("savedFilters.updated", { name: r.item.name }));
     } catch (e) {
-      toast.error((e as Error).message || t("common.error"));
+      toast.error(errorText(e));
     }
   };
 
@@ -237,14 +239,33 @@ export function SavedFiltersMenu() {
           </Button>
         </PopoverTrigger>
         <PopoverContent align="end" className="w-80 p-2">
-          <h3 className="px-2 pb-1 text-[12px] font-semibold text-muted-foreground">
+          <h3 className="flex items-center gap-1 px-2 pb-1 text-[12px] font-semibold text-muted-foreground">
             {t("savedFilters.title")}
+            <HelpTip>{t("help.savedFilters")}</HelpTip>
           </h3>
           {list.isLoading ? (
             <div className="space-y-1.5 p-1">
               <Skeleton className="h-8" />
               <Skeleton className="h-8" />
             </div>
+          ) : list.isError && !list.data ? (
+            <EmptyState
+              compact
+              className="px-2"
+              icon={CircleAlert}
+              title={t("savedFilters.loadError")}
+              testId="saved-filters-error"
+              action={
+                <Button
+                  size="sm"
+                  variant="outline"
+                  loading={list.isFetching}
+                  onClick={() => void list.refetch()}
+                >
+                  {t("error.retry")}
+                </Button>
+              }
+            />
           ) : items.length === 0 ? (
             <p className="px-2 py-3 text-[13px] text-muted-foreground">{t("savedFilters.empty")}</p>
           ) : (
@@ -384,7 +405,7 @@ export function SavedFiltersMenu() {
             if (active?.id === deleting.id) ex.setActiveSaved(null);
             toast.success(t("savedFilters.deleted", { name: deleting.name }));
           } catch (e) {
-            toast.error((e as Error).message || t("common.error"));
+            toast.error(errorText(e));
             throw e;
           }
         }}

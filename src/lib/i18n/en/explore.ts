@@ -29,6 +29,8 @@ export const explore = {
   "list.row.select": "Select: {name}",
 
   "bulk.toolbar": "Actions for the selected businesses",
+  "help.bulk":
+    "The action applies to all selected businesses. You first see how many will change; archiving can be undone afterwards.",
   "bulk.more": "More actions",
   "bulk.archive": "Archive",
   "bulk.unarchive": "Restore from archive",
@@ -82,6 +84,9 @@ export const explore = {
 
   "savedFilters.button": "Saved filters",
   "savedFilters.title": "Saved filters",
+  "help.savedFilters":
+    "Keeps the filters you chose (and the map area if you want), not the selected businesses. When applied, the list is rebuilt from current data.",
+  "savedFilters.loadError": "Saved filters could not be loaded.",
   "savedFilters.empty":
     "No saved filters yet. Choose some filters and press “Save these filters”; then bring them back with one click.",
   "savedFilters.save": "Save these filters…",

@@ -4,6 +4,8 @@ import { Archive, ArchiveRestore, Ban, Mail, MoreHorizontal, Send, X } from "luc
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { HelpTip } from "@/components/ui/tooltip";
+import { errorText } from "@/lib/client/api";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Skeleton } from "@/components/ui/misc";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -112,12 +114,12 @@ function BulkConfirm({ action, onClose }: { action: BulkAction | null; onClose: 
                           selection: { leadIds: r.changedIds },
                         })
                         .then(() => toast.success(t("bulk.undone")))
-                        .catch((e: Error) => toast.error(e.message)),
+                        .catch((e: Error) => toast.error(errorText(e))),
                   }
                 : undefined,
           });
         } catch (e) {
-          toast.error((e as Error).message || t("common.error"));
+          toast.error(errorText(e));
           throw e;
         }
       }}
@@ -221,6 +223,8 @@ export function BulkBar({ visibleIds }: { visibleIds: ReadonlySet<number> }) {
             </span>
           )}
         </p>
+        {/* Canlı bölgenin DIŞINDA: balonun kendi duyurusu seçim sayısıyla karışmaz. */}
+        <HelpTip>{t("help.bulk")}</HelpTip>
         <Button
           size="sm"
           variant="ghost"

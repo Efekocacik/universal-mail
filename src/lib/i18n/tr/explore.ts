@@ -32,6 +32,8 @@ export const explore = {
 
   // Toplu işlemler
   "bulk.toolbar": "Seçili işletmeler için işlemler",
+  "help.bulk":
+    "İşlem seçili işletmelerin tümüne uygulanır. Önce kaç işletmenin değişeceğini görürsünüz; arşivleme sonradan geri alınabilir.",
   "bulk.more": "Diğer işlemler",
   "bulk.archive": "Arşivle",
   "bulk.unarchive": "Arşivden çıkar",
@@ -88,6 +90,9 @@ export const explore = {
   // Kayıtlı süzgeçler
   "savedFilters.button": "Kayıtlı süzgeçler",
   "savedFilters.title": "Kayıtlı süzgeçler",
+  "help.savedFilters":
+    "Seçtiğiniz süzgeçleri (isterseniz harita alanını da) saklar; seçili işletmeleri saklamaz. Uygulandığında liste o anki verilerle yeniden oluşur.",
+  "savedFilters.loadError": "Kayıtlı süzgeçler yüklenemedi.",
   "savedFilters.empty":
     "Henüz kayıtlı süzgeç yok. Süzgeçleri seçip “Bu süzgeci kaydet”e basın; sonra tek tıkla geri getirin.",
   "savedFilters.save": "Bu süzgeci kaydet…",

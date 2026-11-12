@@ -16,7 +16,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress, Skeleton } from "@/components/ui/misc";
-import { PageHeader } from "@/components/ui/page";
+import { EmptyState, PageHeader } from "@/components/ui/page";
 import { HelpTip } from "@/components/ui/tooltip";
 import { countryLabel, typeLabel } from "@/lib/client/format";
 import {
@@ -119,6 +119,7 @@ function DashboardBody({ data, locale }: { data: DashboardResponse; locale: Loca
           icon={Sparkles}
           title={t("dash.new.title")}
           description={t("dash.new.desc")}
+          help={t("dash.new.help")}
           testId="dash-new"
         >
           <Section name="newThisWeek" data={data}>
@@ -146,6 +147,7 @@ function DashboardBody({ data, locale }: { data: DashboardResponse; locale: Loca
         <Panel
           icon={Bell}
           title={t("dash.notif.title")}
+          help={t("dash.notif.help")}
           testId="dash-notif"
           badge={
             data.notifications && data.notifications.unread > 0 ? (
@@ -237,12 +239,8 @@ function Empty({
   action?: React.ReactNode;
   testId: string;
 }) {
-  return (
-    <div className="flex flex-col items-start gap-2 py-2" data-testid={testId}>
-      <p className="text-[13px] text-muted-foreground">{children}</p>
-      {action}
-    </div>
-  );
+  // Ortak boş durum bileşeninin kart içi biçimi (tasarım sistemi; metin tek cümle, varsa tek eylem).
+  return <EmptyState compact body={children} action={action} testId={testId} />;
 }
 
 function DashboardSkeleton() {

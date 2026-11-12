@@ -65,6 +65,8 @@ export const dashboard = {
   "dash.budget.mock": "Demo veri kullanılıyor; Google ücreti oluşmaz.",
   "dash.budget.edit": "Bütçeyi değiştir",
   "dash.new.title": "Bu hafta yeni açılanlar",
+  "dash.new.help":
+    "“Yeni”: bir taramada ilk kez bulunan işletme. “Açıldı”: önce “yakında açılacak” görünüp sonra açık bulunan işletme. Hafta pazartesi başlar.",
   "dash.new.desc": "Pazartesiden bu yana açıldığı görülen veya ilk kez bulunan işletmeler.",
   "dash.new.kind.opened": "Açıldı",
   "dash.new.kind.new": "Yeni",
@@ -85,6 +87,8 @@ export const dashboard = {
   "dash.scans.cta": "Taramalara git",
   "dash.notif.title": "Son bildirimler",
   "dash.notif.unread": "{n} okunmamış",
+  "dash.notif.help":
+    "Tarama sonuçları, yeni açılışlar ve atlanan düzenli taramalar burada toplanır. Masaüstü bildirimlerini Ayarlar > Görünüm ve dil'den açıp kapatabilirsiniz.",
   "dash.notif.empty":
     "Henüz bildirim yok. Tarama bittiğinde veya yeni işletme bulunduğunda burada görünür.",
   "dash.notif.open": "Aç",

@@ -5,6 +5,9 @@ import type { EnFragment } from "../types";
 export const scan = {
   "scans.origin.schedule": "Scheduled",
   "schedules.title": "Recurring scans",
+  "help.schedules":
+    "Rescans the chosen area automatically at the interval you set. A run can never cost more than the amount you approved; if it would, it pauses and asks you.",
+  "schedules.loadError": "Recurring scans could not be loaded.",
   "schedules.empty":
     'No recurring scans yet. Press "Repeat regularly" on a finished scan to have the same area scanned automatically every week, every two weeks or every month.',
   "schedules.whileOpen":
