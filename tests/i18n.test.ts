@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -105,6 +106,18 @@ describe("i18n", () => {
 });
 
 describe("i18n: parça düzeni (Faz 4)", () => {
+  it("tr/base.ts DONDURULDU: Faz 4 öncesi tr.ts (5475f05) ile bire bir aynı anahtar ve değerler", () => {
+    // Özet, bölmeden önceki `git show 5475f05:src/lib/i18n/tr.ts` sözlüğünün aynı yöntemle hesaplanmış özetidir. Faz 4
+    // anahtarları paketin kendi parçasına eklenir; base.ts'te bir metni bilerek düzeltirseniz bu özeti de güncelleyin.
+    const entries = Object.entries(TR_FRAGMENTS.base as Record<string, string>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    expect(entries).toHaveLength(1673);
+    expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
+      "7fdc70c92b37eba6fc68f934688a032da3cc756dfc12ba1e725fff742a60fe34",
+    );
+  });
+
   it("bir anahtar yalnızca bir Türkçe parçada bulunur (paketler birbirinin anahtarını ezmez)", () => {
     const seen = new Map<string, string>();
     const dupes: string[] = [];

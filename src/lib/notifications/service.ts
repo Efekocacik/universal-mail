@@ -19,6 +19,9 @@ export { NOTIFICATION_KINDS, type NotificationKind, type NotificationParams };
  * DEĞİŞMEZLER (veritabanı ve burada):
  * - İdempotent: aynı `dedupeKey` ikinci kez bir şey eklemez (UNIQUE). Anahtarı olaya göre seçin, ör. `scan.done:<scanId>`,
  *   `place.opened:watch:<yyyy-mm-dd>`, `schedule.skipped:<scheduleId>:<code>:<yyyy-mm-dd>`.
+ * - Bağlam: bir taramaya ait bildirim `entity: "scan", entityId: <scanId>`, bir zamanlamaya ait bildirim
+ *   `entity: "schedule", entityId: <scheduleId>` ile yazılır; demo temizliği ve zamanlama silme bağlı bildirimleri
+ *   `deleteNotificationsFor` ile bu alanlardan bulur (yalnızca `dedupeKey` biçimine güvenilmez).
  * - Parametrelerde Google içeriği (işletme adı, adres, telefon, web sitesi) OLMAZ: yalnızca sayılar, kimlikler, kullanıcının
  *   verdiği bölge adı (`region`), kategori anahtarları ve UPPER_SNAKE kodlar (`code`). Metin okunurken dile göre üretilir.
  * - `url` yalnızca uygulama içi yoldur (`/` ile başlar, `//` değil, sınırlı karakter kümesi); dış adres asla.
@@ -26,8 +29,14 @@ export { NOTIFICATION_KINDS, type NotificationKind, type NotificationParams };
  * Zaman `now` ile verilebilir (testlerde saat enjeksiyonu, M1).
  */
 
-/** Uygulama içi yol: Electron tarafındaki `sanitizeNotificationUrl` aynı kuralı kullanmalıdır. */
-export const NOTIFICATION_URL_RE = /^\/(?!\/)[A-Za-z0-9/_\-?=&.%]*$/;
+/**
+ * Uygulama içi yol: `/` ile başlar; yalnızca harf, rakam ve `/_-?=&.%` (ters bölü yok). Yol kısmında (`?` öncesi) `//`,
+ * `.` veya `..` bölümü ve kodlanmış eğik çizgi/ters bölü/nokta (`%2F`, `%5C`, `%2E`) YOK; böylece `/.//host`,
+ * `/%2F%2Fhost`, `/a/../b` gibi değerler reddedilir.
+ * Electron poller'ı (henüz yok) bunu yeniden kullanmalı VE `new URL(url, origin).origin === origin` denetlemelidir.
+ */
+export const NOTIFICATION_URL_RE =
+  /^\/(?!\/)(?![^?]*\/\/)(?!(?:[^?]*\/)?\.{1,2}(?:[/?]|$))(?![^?]*%(?:2[fFeE]|5[cC]))[A-Za-z0-9/_\-?=&.%]*$/;
 
 const DAY = 86_400_000;
 
@@ -196,4 +205,47 @@ export async function pruneNotifications(
     )
     .returning({ id: notifications.id });
   return r.length;
+}
+
+/**
+ * Silinen taramalara/zamanlamalara bağlı bildirimleri siler (demo temizliği, zamanlama silme). Bağ `entity`/`entityId`
+ * sözleşmesinden ve tarama türlerinin bilinen tekilleştirme anahtarlarından (`scan.done:<id>`, `scan.failed:<id>`,
+ * `scan.paused:<id>`, `place.opened:scan:<id>`) bulunur. Silinen satır sayısını döndürür.
+ */
+export async function deleteNotificationsFor(
+  db: DbExecutor,
+  target: { scanIds?: number[]; scheduleIds?: number[] },
+): Promise<number> {
+  const scanIds = [...new Set(target.scanIds ?? [])];
+  const scheduleIds = [...new Set(target.scheduleIds ?? [])];
+  let deleted = 0;
+  const CHUNK = 200;
+  for (let i = 0; i < scanIds.length; i += CHUNK) {
+    const ids = scanIds.slice(i, i + CHUNK).map(String);
+    const keys = ids.flatMap((id) => [
+      `scan.done:${id}`,
+      `scan.failed:${id}`,
+      `scan.paused:${id}`,
+      `place.opened:scan:${id}`,
+    ]);
+    const r = await db
+      .delete(notifications)
+      .where(
+        or(
+          and(eq(notifications.entity, "scan"), inArray(notifications.entityId, ids)),
+          inArray(notifications.dedupeKey, keys),
+        ),
+      )
+      .returning({ id: notifications.id });
+    deleted += r.length;
+  }
+  for (let i = 0; i < scheduleIds.length; i += CHUNK) {
+    const ids = scheduleIds.slice(i, i + CHUNK).map(String);
+    const r = await db
+      .delete(notifications)
+      .where(and(eq(notifications.entity, "schedule"), inArray(notifications.entityId, ids)))
+      .returning({ id: notifications.id });
+    deleted += r.length;
+  }
+  return deleted;
 }

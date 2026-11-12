@@ -1604,7 +1604,8 @@
           "columns": [
             "archived_at"
           ],
-          "isUnique": false
+          "isUnique": false,
+          "where": "\"leads\".\"archived_at\" IS NOT NULL"
         },
         "leads_last_contacted_idx": {
           "name": "leads_last_contacted_idx",
@@ -2356,7 +2357,7 @@
       "checkConstraints": {
         "notifications_kind_ck": {
           "name": "notifications_kind_ck",
-          "value": "kind IN ('scan.done', 'scan.failed', 'scan.paused', 'place.opened', 'schedule.skipped', 'background.skipped')"
+          "value": "length(kind) BETWEEN 3 AND 40 AND kind GLOB '[a-z]*.[a-z]*' AND kind NOT GLOB '*[^a-z._]*'"
         },
         "notifications_dedupe_ck": {
           "name": "notifications_dedupe_ck",
@@ -3452,7 +3453,7 @@
         },
         "scans_schedule_slot_ck": {
           "name": "scans_schedule_slot_ck",
-          "value": "schedule_id IS NULL OR schedule_slot IS NOT NULL"
+          "value": "(origin = 'manual' AND schedule_id IS NULL AND schedule_slot IS NULL) OR (origin = 'schedule' AND schedule_slot IS NOT NULL)"
         },
         "scans_pause_code_ck": {
           "name": "scans_pause_code_ck",

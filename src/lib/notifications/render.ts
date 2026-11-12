@@ -9,7 +9,7 @@ import type { NotificationKind, NotificationParams } from "@/lib/db/schema";
  *   n       sayı (yeni/açılan işletme, duraklatılan tarama…)
  *   region  kullanıcının bölge adı (Google içeriği değil)
  *   code    UPPER_SNAKE atlama kodu (BUDGET_BLOCKED, NEEDS_ACK, PLACES_KEY_MISSING, SETUP_REQUIRED,
- *           COUNTRY_NOT_TARGETED, ACTIVE_SCAN, CONSENT_REQUIRED)
+ *           COUNTRY_NOT_TARGETED, ACTIVE_SCAN, CATEGORY_SET_MISSING, CONSENT_REQUIRED)
  *   scanId, scheduleId  kimlikler (bağlantı ve tekilleştirme için; metinde kullanılmaz)
  */
 export interface RenderedNotification {
@@ -24,6 +24,7 @@ const SKIP_CODES = new Set([
   "SETUP_REQUIRED",
   "COUNTRY_NOT_TARGETED",
   "ACTIVE_SCAN",
+  "CATEGORY_SET_MISSING",
 ]);
 const BACKGROUND_CODES = new Set(["PLACES_KEY_MISSING", "BUDGET_BLOCKED", "CONSENT_REQUIRED"]);
 

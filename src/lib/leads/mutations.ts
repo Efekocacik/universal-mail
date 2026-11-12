@@ -1,10 +1,11 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, exists, inArray, ne, notExists, sql } from "drizzle-orm";
 import { z } from "zod";
 import { purgeDemoCampaignData } from "@/lib/campaigns/purge";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import { placeCache } from "@/lib/db/cache-schema";
-import { apiUsage, leads, placeSnapshots, places, scans } from "@/lib/db/schema";
+import { apiUsage, leads, placeSnapshots, places, scanSchedules, scans } from "@/lib/db/schema";
+import { deleteNotificationsFor } from "@/lib/notifications/service";
 
 export const leadPatchSchema = z.object({
   status: z
@@ -54,16 +55,23 @@ export async function patchLead(db: Db, leadId: number, patch: LeadPatch): Promi
 }
 
 /**
- * Demo verilerini siler: demo işletmeler, bunlara ait lead'ler, demo sağlayıcıyla yapılmış taramalar ve
- * demo kullanım kayıtları. Gerçek (Google) kayıtlara dokunulmaz.
+ * Demo verilerini temizler: demo işletmeler, bunlara ait lead'ler, demo sağlayıcıyla (`mock`) yapılmış taramalar, demo
+ * kullanım kayıtları; Faz 4'te ayrıca
+ * - çalışmalarının HEPSİ demo olan zamanlamalar (hiç çalışmamış zamanlama kullanıcı ayarıdır, KALIR),
+ * - silinen taramalara/zamanlamalara bağlı bildirimler (`deleteNotificationsFor`).
+ * Bölge yalnızca ne taraması ne zamanlaması kalmadıysa silinir (zamanlama bölgeye CASCADE ile bağlıdır; aksi halde
+ * kullanıcının henüz çalışmamış zamanlaması sessizce silinirdi). Gerçek (Google) kayıtlara dokunulmaz.
+ *
+ * Önce demo kampanyaları (yalnızca demo posta kutulu) tek işlemde temizlenir; demo ve gerçek kayıtlar birbirine bağlıysa
+ * HİÇBİR ŞEY silinmeden `conflict` hatası verilir (bkz. campaigns/purge.ts).
  */
-/**
- * Demo verilerini temizler. Önce demo kampanyaları (yalnızca demo posta kutulu) tek işlemde temizlenir; demo ve gerçek
- * kayıtlar birbirine bağlıysa HİÇBİR ŞEY silinmeden `conflict` hatası verilir (bkz. campaigns/purge.ts).
- */
-export async function purgeDemoData(
-  db: Db,
-): Promise<{ places: number; scans: number; campaigns: number }> {
+export async function purgeDemoData(db: Db): Promise<{
+  places: number;
+  scans: number;
+  campaigns: number;
+  schedules: number;
+  notifications: number;
+}> {
   const demoCampaigns = await purgeDemoCampaignData(db);
   const demoPlaces = await db
     .select({ id: places.placeId })
@@ -71,6 +79,32 @@ export async function purgeDemoData(
     .where(eq(places.source, "demo"));
   const demoScans = await db.select({ id: scans.id }).from(scans).where(eq(scans.provider, "mock"));
   const scanIds = demoScans.map((s) => s.id);
+  // Taramalar silinmeden ÖNCE: en az bir çalışması olan ve gerçek sağlayıcıyla hiç çalışmamış zamanlamalar demo sayılır.
+  const demoSchedules = await db
+    .select({ id: scanSchedules.id })
+    .from(scanSchedules)
+    .where(
+      and(
+        exists(
+          db
+            .select({ one: sql`1` })
+            .from(scans)
+            .where(eq(scans.scheduleId, scanSchedules.id)),
+        ),
+        notExists(
+          db
+            .select({ one: sql`1` })
+            .from(scans)
+            .where(and(eq(scans.scheduleId, scanSchedules.id), ne(scans.provider, "mock"))),
+        ),
+      ),
+    );
+  const scheduleIds = demoSchedules.map((s) => s.id);
+  const notificationsDeleted = await deleteNotificationsFor(db, { scanIds, scheduleIds });
+  if (scheduleIds.length) {
+    // scans.schedule_id ON DELETE SET NULL; taramaların kendisi aşağıda silinir.
+    await db.delete(scanSchedules).where(inArray(scanSchedules.id, scheduleIds));
+  }
 
   if (scanIds.length) {
     await db.delete(placeSnapshots).where(inArray(placeSnapshots.scanId, scanIds));
@@ -89,12 +123,23 @@ export async function purgeDemoData(
   }
   await db.delete(places).where(eq(places.source, "demo"));
   await db.delete(apiUsage).where(eq(apiUsage.provider, "mock"));
-  await db.run(sql`DELETE FROM regions WHERE id NOT IN (SELECT region_id FROM scans)`);
+  // Kalan zamanlaması olan bölge silinmez (scan_schedules.region_id ON DELETE CASCADE zamanlamayı da silerdi).
+  await db.run(
+    sql`DELETE FROM regions WHERE id NOT IN (SELECT region_id FROM scans) AND id NOT IN (SELECT region_id FROM scan_schedules)`,
+  );
   await audit(db, "demo.purged", undefined, undefined, {
     places: demoPlaces.length,
     scans: scanIds.length,
     campaigns: demoCampaigns.campaigns,
     messages: demoCampaigns.messages,
+    schedules: scheduleIds.length,
+    notifications: notificationsDeleted,
   });
-  return { places: demoPlaces.length, scans: scanIds.length, campaigns: demoCampaigns.campaigns };
+  return {
+    places: demoPlaces.length,
+    scans: scanIds.length,
+    campaigns: demoCampaigns.campaigns,
+    schedules: scheduleIds.length,
+    notifications: notificationsDeleted,
+  };
 }

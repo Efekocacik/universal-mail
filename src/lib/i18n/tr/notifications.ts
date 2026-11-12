@@ -35,6 +35,8 @@ export const notifications = {
     "Bölgenin ülkesi artık hedef ülkeleriniz arasında değil.",
   "notif.scheduleSkipped.body.ACTIVE_SCAN":
     "Aynı bölge ve kategoriler için başka bir tarama sürüyor; bir saat sonra yeniden denenecek.",
+  "notif.scheduleSkipped.body.CATEGORY_SET_MISSING":
+    "Zamanlamanın kullandığı bir kategori artık yok. Zamanlamayı Taramalar sayfasından düzenleyin.",
   "notif.scheduleSkipped.body.other": "Tarama bu kez çalıştırılamadı; yeniden denenecek.",
   "notif.backgroundSkipped.title": "Arka plan denetimi atlandı",
   "notif.backgroundSkipped.body.PLACES_KEY_MISSING":

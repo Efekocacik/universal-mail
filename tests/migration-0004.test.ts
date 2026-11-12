@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -242,6 +242,58 @@ describe.skipIf(unsafeTmp)("0004: veri korunur, varsayılanlar, şema", () => {
     for (const t of FAZ4_TABLES) expect(Object.keys(snap.tables)).toContain(t);
   });
 
+  it("yarıda kalan 0004 hiçbir iz bırakmaz (tek işlem); engel kalkınca yeniden uygulanır", async () => {
+    const h = await build0003();
+    await seed0003(h.client);
+    // Son ifadelerden birini bozacak çakışma: 0004'ün eklediği sütun önceden var
+    await h.client.execute("ALTER TABLE `templates` ADD `followup_reuse_subject` integer");
+    const before = await schema(h.client);
+    const dBefore = await dump(h.client);
+    await expect(upgrade(h)).rejects.toThrow(/duplicate column|followup_reuse_subject/i);
+    expect(await schema(h.client)).toEqual(before); // yeni tablo, sütun, indeks yok
+    expect(await dump(h.client)).toEqual(dBefore);
+    expect(await num(h.client, "SELECT COUNT(*) FROM __drizzle_migrations")).toBe(4);
+    await h.client.execute("ALTER TABLE `templates` DROP COLUMN `followup_reuse_subject`");
+    expect((await upgrade(h)).pending).toBe(1);
+    expect(await num(h.client, "SELECT COUNT(*) FROM __drizzle_migrations")).toBe(5);
+    for (const tbl of FAZ4_TABLES)
+      expect(await num(h.client, `SELECT COUNT(*) FROM sqlite_master WHERE name = '${tbl}'`)).toBe(
+        1,
+      );
+  });
+
+  it("şema (schema.ts) ile 0004 anlık görüntüsü aynı: drizzle-kit generate yeni migrasyon üretmez", () => {
+    // Elle yazılmış 0004'ün schema.ts ile kaymadığının kanıtı. Kopya klasörde çalışır; depodaki drizzle/ değişmez.
+    const work = fs.mkdtempSync(path.join(tmpBase, "um-dk-"));
+    try {
+      fs.cpSync(MIGRATIONS, path.join(work, "drizzle"), { recursive: true });
+      // drizzle-kit --out değerini çalışma klasörüne göre yorumlar: göreli yol verilir
+      const out = path.relative(REPO, path.join(work, "drizzle"));
+      const r = spawnSync(
+        process.execPath,
+        [
+          path.join(REPO, "node_modules", "drizzle-kit", "bin.cjs"),
+          "generate",
+          "--dialect",
+          "sqlite",
+          "--schema",
+          "./src/lib/db/schema.ts",
+          "--out",
+          out,
+        ],
+        { cwd: REPO, encoding: "utf8", timeout: 60_000 },
+      );
+      const output = `${r.stdout}\n${r.stderr}`;
+      expect(r.status, output).toBe(0);
+      expect(output).toMatch(/No schema changes/);
+      expect(fs.readdirSync(path.join(work, "drizzle")).filter((f) => f.endsWith(".sql"))).toEqual(
+        fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")),
+      );
+    } finally {
+      fs.rmSync(work, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   it("boş veritabanında ve ikinci çalıştırmada etkisiz", async () => {
     const h = await handle();
     process.env.UM_MIGRATIONS_DIR = MIGRATIONS;
@@ -291,11 +343,22 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
     expect(
       await num(c, "SELECT COUNT(*) FROM scan_schedules WHERE id = 1 AND last_scan_id IS NULL"),
     ).toBe(1);
-    // Demo temizliği kalıbı: taraması olmayan bölge silinir, zamanlaması CASCADE ile gider
+    // Demo temizliği kalıbı (leads/mutations.ts): taraması OLMAYAN ama zamanlaması olan bölge KALIR (CASCADE zamanlamayı
+    // sessizce silerdi); ne taraması ne zamanlaması olan bölge silinir. Bölge silinirse zamanlaması CASCADE ile gider.
     await c.execute(
       `INSERT INTO scan_schedules(id,region_id,scan_key,category_set_ids,strategy,field_profile,interval_days,next_run_at,created_at,updated_at) VALUES (9,2,'k9','[1]','text','discovery',30,${T},${T},${T})`,
     );
-    await c.execute("DELETE FROM regions WHERE id NOT IN (SELECT region_id FROM scans)");
+    await c.execute(
+      `INSERT INTO regions(id,name,kind,geometry,created_at) SELECT 3,'Boş 2',kind,geometry,created_at FROM regions WHERE id = 2`,
+    );
+    await c.execute(
+      "DELETE FROM regions WHERE id NOT IN (SELECT region_id FROM scans) AND id NOT IN (SELECT region_id FROM scan_schedules)",
+    );
+    expect(await num(c, "SELECT COUNT(*) FROM scan_schedules WHERE id = 9")).toBe(1);
+    expect((await rows(c, "SELECT id FROM regions ORDER BY id")).map((r) => Number(r.id))).toEqual([
+      1, 2,
+    ]);
+    await c.execute("DELETE FROM regions WHERE id = 2");
     expect(await num(c, "SELECT COUNT(*) FROM scan_schedules WHERE id = 9")).toBe(0);
     expect(await rows(c, "PRAGMA foreign_key_check")).toEqual([]);
   });
@@ -309,6 +372,15 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
     expect(await tryx(c, scan(10, ",origin,schedule_id", ",'schedule',1"))).toMatch(
       /scans_schedule_slot_ck/,
     );
+    // origin ile zamanlama alanları tutarlı: manual taramada zamanlama/an olamaz; schedule taramasında an zorunlu
+    expect(await tryx(c, scan(10, ",schedule_id,schedule_slot", `,1,${T}`))).toMatch(
+      /scans_schedule_slot_ck/,
+    );
+    expect(await tryx(c, scan(10, ",schedule_slot", `,${T}`))).toMatch(/scans_schedule_slot_ck/);
+    expect(await tryx(c, scan(10, ",origin", ",'schedule'"))).toMatch(/scans_schedule_slot_ck/);
+    // Zamanlaması silinmiş geçmiş taramanın durumu (ON DELETE SET NULL sonucu) doğrudan da geçerlidir
+    expect(await tryx(c, scan(13, ",origin,schedule_slot", `,'schedule',${T}`))).toBe("OK");
+    await c.execute("DELETE FROM scans WHERE id = 13");
     expect(await tryx(c, scan(10, ",origin,schedule_id,schedule_slot", `,'schedule',1,${T}`))).toBe(
       "OK",
     );
@@ -318,16 +390,22 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
     expect(
       await tryx(c, scan(11, ",origin,schedule_id,schedule_slot", `,'schedule',1,${T + 1}`)),
     ).toBe("OK");
-    expect(await tryx(c, scan(12, ",schedule_id,schedule_slot", `,99,${T}`))).toMatch(
-      /FOREIGN KEY/,
-    );
+    expect(
+      await tryx(c, scan(12, ",origin,schedule_id,schedule_slot", `,'schedule',99,${T}`)),
+    ).toMatch(/FOREIGN KEY/);
     expect(await tryx(c, scan(12, ",pause_code", ",'budget blocked'"))).toMatch(
       /scans_pause_code_ck/,
     );
     expect(await tryx(c, scan(12, ",pause_code", ",'BUDGET_BLOCKED'"))).toBe("OK");
     await c.execute("DELETE FROM scan_schedules WHERE id = 1");
     expect(await num(c, "SELECT COUNT(*) FROM scans WHERE schedule_id IS NOT NULL")).toBe(0);
-    expect(await num(c, "SELECT COUNT(*) FROM scans WHERE origin = 'schedule'")).toBe(2);
+    // SET NULL sonrası: origin ve an korunur (bilinçli geçmiş durumu), satır kısmi tekil indeksin dışına çıkar
+    expect(
+      await num(
+        c,
+        "SELECT COUNT(*) FROM scans WHERE origin = 'schedule' AND schedule_id IS NULL AND schedule_slot IS NOT NULL",
+      ),
+    ).toBe(2);
   });
 
   it("notifications: tür, yinelenmeyen anahtar, nesne parametre, yalnızca uygulama içi yol", async () => {
@@ -336,7 +414,16 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
       `INSERT INTO notifications(kind,dedupe_key,params,url,created_at) VALUES ('${kind}','${key}',${params},'${url}',${T})`;
     expect(await tryx(c, n("a"))).toBe("OK");
     expect(await tryx(c, n("a"))).toMatch(/UNIQUE/);
-    expect(await tryx(c, n("b", "spam"))).toMatch(/notifications_kind_ck/);
+    // Tür yalnızca BİÇİMCE denetlenir (izinli liste kodda): biçimsiz reddedilir, biçime uyan gelecekteki tür girer
+    for (const [i, bad] of [
+      "spam",
+      "Scan.Done",
+      "scan done",
+      "scan.",
+      "x".repeat(41) + ".y",
+    ].entries())
+      expect(await tryx(c, n(`b${i}`, bad)), bad).toMatch(/notifications_kind_ck/);
+    expect(await tryx(c, n("future", "campaign.finished"))).toBe("OK");
     for (const kind of [
       "scan.failed",
       "scan.paused",
@@ -414,6 +501,12 @@ describe.skipIf(unsafeTmp)("0004: kısıtlar veritabanı düzeyinde", () => {
     expect(await plan("SELECT id FROM notifications WHERE os_claimed_at IS NULL")).toContain(
       "notifications_os_pending_idx",
     );
+    // Arşiv indeksi kısmi: yalnızca arşivlenmiş satırları tutar ve arşiv görünümünde kullanılır
+    expect(await plan("SELECT id FROM leads WHERE archived_at IS NOT NULL")).toContain(
+      "leads_archived_idx",
+    );
+    const idx = await rows(c, "SELECT sql FROM sqlite_master WHERE name = 'leads_archived_idx'");
+    expect(norm(idx[0]?.sql)).toMatch(/WHERE leads\.archived_at IS NOT NULL$/);
   });
 });
 

@@ -3,6 +3,12 @@
 -- tablolar yalnızca `ALTER TABLE … ADD` ile sütun alır (CHECK sütun tanımında, satır içi), yeni tablo ve indeksler
 -- `IF NOT EXISTS` ile kurulur. Hiçbir satır yeniden yazılmaz, silinmez veya taşınmaz; eski sürüm yeni sütunları okumaz.
 -- Geri alma: scripts/rollback-0004.ts (src/lib/db/rollback-0004.ts). Şema sözleşmesi: src/lib/db/schema.ts.
+-- Kısıt notları (ayrıntı schema.ts'te): `notifications.kind` yalnızca BİÇİM denetler (küçük harf `alan.olay`); izinli
+-- türlerin listesi kodda (NOTIFICATION_KINDS + zod), çünkü SQLite CHECK'i değiştirmek tablo yeniden kurmayı gerektirir.
+-- `scans_schedule_slot_ck`: manual ⇔ zamanlama alanları boş; schedule ⇒ schedule_slot dolu. Zamanlama silinince
+-- (ON DELETE SET NULL) `origin='schedule', schedule_id=NULL, schedule_slot=dolu` kalır: BİLİNÇLİ geçmiş durumu; satır
+-- kısmi tekil indeksin dışına çıkar (yeniden çalıştırılacak zamanlama yoktur). `leads.archived_at` geri alınabilir
+-- arşivdir (kampanya/ileti RESTRICT FK'leri korunur); indeks kısmidir çünkü satırların neredeyse hepsi NULL'dır.
 CREATE TABLE IF NOT EXISTS `scan_schedules` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`region_id` integer NOT NULL,
@@ -57,7 +63,7 @@ CREATE TABLE IF NOT EXISTS `notifications` (
 	`created_at` integer NOT NULL,
 	`read_at` integer,
 	`os_claimed_at` integer,
-	CONSTRAINT "notifications_kind_ck" CHECK(kind IN ('scan.done', 'scan.failed', 'scan.paused', 'place.opened', 'schedule.skipped', 'background.skipped')),
+	CONSTRAINT "notifications_kind_ck" CHECK(length(kind) BETWEEN 3 AND 40 AND kind GLOB '[a-z]*.[a-z]*' AND kind NOT GLOB '*[^a-z._]*'),
 	CONSTRAINT "notifications_dedupe_ck" CHECK(length(dedupe_key) BETWEEN 1 AND 200),
 	CONSTRAINT "notifications_params_ck" CHECK(json_valid(params) AND json_type(params) = 'object' AND length(params) <= 2000),
 	CONSTRAINT "notifications_url_ck" CHECK(length(url) BETWEEN 1 AND 500 AND substr(url, 1, 1) = '/' AND substr(url, 1, 2) <> '//')
@@ -112,7 +118,7 @@ ALTER TABLE `scans` ADD `origin` text DEFAULT 'manual' NOT NULL CONSTRAINT "scan
 --> statement-breakpoint
 ALTER TABLE `scans` ADD `schedule_id` integer REFERENCES `scan_schedules`(`id`) ON UPDATE no action ON DELETE set null
 --> statement-breakpoint
-ALTER TABLE `scans` ADD `schedule_slot` integer CONSTRAINT "scans_schedule_slot_ck" CHECK(schedule_id IS NULL OR schedule_slot IS NOT NULL)
+ALTER TABLE `scans` ADD `schedule_slot` integer CONSTRAINT "scans_schedule_slot_ck" CHECK((origin = 'manual' AND schedule_id IS NULL AND schedule_slot IS NULL) OR (origin = 'schedule' AND schedule_slot IS NOT NULL))
 --> statement-breakpoint
 ALTER TABLE `scans` ADD `pause_code` text CONSTRAINT "scans_pause_code_ck" CHECK(pause_code IS NULL OR (length(pause_code) BETWEEN 1 AND 40 AND pause_code NOT GLOB '*[^A-Z0-9_]*'))
 --> statement-breakpoint
@@ -136,7 +142,7 @@ CREATE INDEX IF NOT EXISTS `places_id_checked_idx` ON `places` (`place_id_checke
 --> statement-breakpoint
 ALTER TABLE `leads` ADD `archived_at` integer
 --> statement-breakpoint
-CREATE INDEX IF NOT EXISTS `leads_archived_idx` ON `leads` (`archived_at`)
+CREATE INDEX IF NOT EXISTS `leads_archived_idx` ON `leads` (`archived_at`) WHERE "leads"."archived_at" IS NOT NULL
 --> statement-breakpoint
 ALTER TABLE `lead_enrichment` ADD `site_domain` text CONSTRAINT "lead_enrichment_site_domain_ck" CHECK(site_domain IS NULL OR (length(site_domain) BETWEEN 3 AND 253 AND site_domain = lower(site_domain)))
 --> statement-breakpoint

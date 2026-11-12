@@ -5,6 +5,7 @@ import { notifications } from "@/lib/db/schema";
 import { NOTIFICATION_KINDS } from "@/lib/db/schema";
 import {
   claimForOs,
+  deleteNotificationsFor,
   listNotifications,
   markRead,
   notify,
@@ -90,6 +91,62 @@ describe("notify", () => {
     expect(NOTIFICATION_URL_RE.test("/?lifecycle=opened&scan=12")).toBe(true);
   });
 
+  it("yol karışıklığı reddedilir: `//`, nokta bölümleri, kodlanmış eğik çizgi/ters bölü/nokta, ters bölü", () => {
+    for (const ok of [
+      "/",
+      "/scans",
+      "/?scan=12",
+      "/leads/12",
+      "/a.b/c",
+      "/x%20y",
+      "/?next=%2Fscans",
+    ])
+      expect(NOTIFICATION_URL_RE.test(ok), ok).toBe(true);
+    for (const bad of [
+      "/.//host",
+      "/a//b",
+      "/%2F%2Fhost",
+      "/%2f%2fhost",
+      "/%5Cevil",
+      "/%2e%2e/x",
+      "/a/../b",
+      "/..",
+      "/.",
+      "/./x",
+      "/a/..",
+      "/a\\b",
+    ])
+      expect(NOTIFICATION_URL_RE.test(bad), bad).toBe(false);
+  });
+
+  it("veritabanı türü yalnızca biçim denetler; izinli liste kodda (yeni tür migrasyonsuz eklenir)", async () => {
+    // zod: listede olmayan tür reddedilir
+    await expect(
+      notify(db, { kind: "campaign.finished" as never, dedupeKey: "z", url: "/" }),
+    ).rejects.toBeInstanceOf(ZodError);
+    // veritabanı: biçime uyan gelecekteki tür kabul edilir, biçimsiz olan reddedilir
+    await db.insert(notifications).values({
+      kind: "campaign.finished" as never,
+      dedupeKey: "fmt-ok",
+      url: "/",
+      createdAt: NOW,
+    });
+    for (const kind of [
+      "spam",
+      "Scan.Done",
+      "scan done",
+      "scan.d0ne!",
+      "a.",
+      "x".repeat(41) + ".y",
+    ])
+      await expect(
+        db
+          .insert(notifications)
+          .values({ kind: kind as never, dedupeKey: `fmt-${kind}`, url: "/", createdAt: NOW }),
+        kind,
+      ).rejects.toThrow();
+  });
+
   it("varsayılanlar: parametre {} ve varlık boş; şimdiki zaman kullanılır", async () => {
     const before = Date.now();
     const r = await notify(db, { kind: "scan.paused", dedupeKey: "p:1", url: "/scans" });
@@ -159,6 +216,45 @@ describe("claimForOs (atomik, en çok bir kez)", () => {
   });
 });
 
+describe("deleteNotificationsFor (demo temizliği / zamanlama silme)", () => {
+  it("taramaya ve zamanlamaya bağlı bildirimleri entity veya tekilleştirme anahtarından bulur; diğerlerine dokunmaz", async () => {
+    await scanDone(1);
+    await scanDone(2);
+    // entity yazılmamış ama anahtarı taramaya ait (eski/eksik üretici)
+    await notify(db, { kind: "place.opened", dedupeKey: "place.opened:scan:1", url: "/" });
+    await notify(db, { kind: "scan.failed", dedupeKey: "scan.failed:1", url: "/scans" });
+    const sched = (id: number, day: string) =>
+      notify(db, {
+        kind: "schedule.skipped",
+        dedupeKey: `schedule.skipped:${id}:NEEDS_ACK:${day}`,
+        params: { code: "NEEDS_ACK" },
+        url: "/scans",
+        entity: "schedule",
+        entityId: id,
+      });
+    await sched(7, "2026-11-01");
+    await sched(7, "2026-11-02");
+    await sched(8, "2026-11-01");
+    // başka varlık türü aynı kimlikle: dokunulmaz
+    await notify(db, {
+      kind: "place.opened",
+      dedupeKey: "place.opened:watch:2026-11-01",
+      url: "/",
+      entity: "watch",
+      entityId: 1,
+    });
+
+    expect(await deleteNotificationsFor(db, {})).toBe(0);
+    expect(await deleteNotificationsFor(db, { scanIds: [1, 1, 99], scheduleIds: [7] })).toBe(5);
+    const left = (await db.select().from(notifications)).map((r) => r.dedupeKey).sort();
+    expect(left).toEqual([
+      "place.opened:watch:2026-11-01",
+      "scan.done:2",
+      "schedule.skipped:8:NEEDS_ACK:2026-11-01",
+    ]);
+  });
+});
+
 describe("pruneNotifications", () => {
   it("90 günden eski okunmuşları ve 180 günden eski hepsini siler; yenilere dokunmaz", async () => {
     const oldRead = await scanDone(1, 1, NOW - 100 * DAY);
@@ -210,6 +306,8 @@ describe("renderNotification / toOsToasts", () => {
     expect(r("scan.failed", { region: "Paris" }).tr.body).toContain("Paris");
     expect(r("scan.paused", { n: 2 }).tr.body).toContain("2 tarama");
     expect(r("schedule.skipped", { code: "BUDGET_BLOCKED" }).tr.body).toContain("bütçe");
+    expect(r("schedule.skipped", { code: "CATEGORY_SET_MISSING" }).tr.body).toContain("kategori");
+    expect(r("schedule.skipped", { code: "CATEGORY_SET_MISSING" }).en.body).toContain("category");
     expect(r("schedule.skipped", { code: "nope" }).en.body).toBe(
       "The scan could not run this time; it will be retried.",
     );

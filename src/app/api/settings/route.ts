@@ -79,6 +79,8 @@ export const PUT = route(async (req: Request) => {
       );
   }
   const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
+  // Boş gövde (`{}`): yazılacak bir şey yok; denetim kaydı da yazılmaz (anlamsız `settings.updated` satırı olmasın).
+  if (entries.length === 0) return json({ ok: true, setup: await getSetupState(db) });
   // Hepsi ya da hiçbiri: birden çok anahtar tek işlemde yazılır (yarım kalan güncelleme olmaz).
   await db.transaction(async (tx) => {
     for (const [key, value] of entries) {
@@ -90,7 +92,9 @@ export const PUT = route(async (req: Request) => {
             : value;
       await setSetting(tx, key as UserSettingKey, normalized as never);
     }
-    await audit(tx, "settings.updated", "settings", undefined, { keys: Object.keys(patch) });
+    await audit(tx, "settings.updated", "settings", undefined, {
+      keys: entries.map(([k]) => k),
+    });
   });
   return json({ ok: true, setup: await getSetupState(db) });
 });

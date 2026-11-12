@@ -35,6 +35,8 @@ export const notifications = {
     "The region's country is no longer one of your target countries.",
   "notif.scheduleSkipped.body.ACTIVE_SCAN":
     "Another scan for the same region and categories is running; it will be retried in an hour.",
+  "notif.scheduleSkipped.body.CATEGORY_SET_MISSING":
+    "A category this schedule uses no longer exists. Edit the schedule on the Scans page.",
   "notif.scheduleSkipped.body.other": "The scan could not run this time; it will be retried.",
   "notif.backgroundSkipped.title": "Background check skipped",
   "notif.backgroundSkipped.body.PLACES_KEY_MISSING":

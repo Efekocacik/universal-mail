@@ -33,7 +33,18 @@ export interface LeadFilters {
   emailStatus?: string[];
   /** "Son taramada bulunamadı" işaretlileri göster (true) veya gizle (false). */
   notFound?: boolean;
+  /**
+   * Faz 4: arşiv görünümü. Varsayılan (undefined/false) arşivlenmiş lead'leri GİZLER (`LEAD_NOT_ARCHIVED`); `true`
+   * YALNIZCA arşivlenmişleri gösterir. Arşiv yumuşak silmedir; bkz. schema.ts `leads.archivedAt`.
+   */
+  archived?: boolean;
 }
+
+/**
+ * Arşivlenmemiş lead koşulu. `buildWhere` bunu varsayılan olarak ekler; lead listesini/sayısını/dışa aktarımını
+ * `buildWhere` DIŞINDA kendi sorgusuyla okuyan kod bu koşulu açıkça eklemelidir (arşiv yumuşak silmedir).
+ */
+export const LEAD_NOT_ARCHIVED = sql`${leads.archivedAt} IS NULL`;
 
 export type LeadSort = "novelty" | "name" | "recent";
 
@@ -139,7 +150,9 @@ function escapeLike(s: string): string {
  * ülke, şehir, kategori, durum ve yenilik süzgeçleri kalıcı kayıtlara dayanır ve her zaman çalışır.
  */
 export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefined> {
-  const conds: (SQL | undefined)[] = [];
+  const conds: (SQL | undefined)[] = [
+    f.archived === true ? sql`${leads.archivedAt} IS NOT NULL` : LEAD_NOT_ARCHIVED,
+  ];
   if (f.q?.trim()) {
     const pattern = `%${escapeLike(f.q.trim())}%`;
     conds.push(

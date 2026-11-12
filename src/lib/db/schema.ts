@@ -123,7 +123,15 @@ export const scans = sqliteTable(
       .on(t.scheduleId, t.scheduleSlot)
       .where(sql`${t.scheduleId} IS NOT NULL`),
     check("scans_origin_ck", sql`origin IN ('manual', 'schedule')`),
-    check("scans_schedule_slot_ck", sql`schedule_id IS NULL OR schedule_slot IS NOT NULL`),
+    /**
+     * `manual` ⇔ zamanlama alanları boş; `schedule` ⇒ `schedule_slot` dolu (ve `schedule_id` doluysa anı da doludur).
+     * Zamanlama silinince (ON DELETE SET NULL) `origin='schedule', schedule_id=NULL, schedule_slot=dolu` kalır: BİLİNÇLİ
+     * geçmiş durumu; satır kısmi tekil indeksin dışına çıkar, çünkü o zamanlama artık çalışmaz.
+     */
+    check(
+      "scans_schedule_slot_ck",
+      sql`(origin = 'manual' AND schedule_id IS NULL AND schedule_slot IS NULL) OR (origin = 'schedule' AND schedule_slot IS NOT NULL)`,
+    ),
     check(
       "scans_pause_code_ck",
       sql`pause_code IS NULL OR (length(pause_code) BETWEEN 1 AND 40 AND pause_code NOT GLOB '*[^A-Z0-9_]*')`,
@@ -275,14 +283,19 @@ export const leads = sqliteTable(
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
     /**
-     * Faz 4 (0004): toplu "sil" işlemi lead'i ARŞİVLER (kalıcı silme yalnızca uyum/silme talebi akışındadır). Gönderim
-     * geçmişi lead'e RESTRICT ile bağlıdır ve tarama aynı place_id'yi yeniden ekleyeceği için satır silinmez.
+     * Faz 4 (0004): toplu "sil" işlemi lead'i ARŞİVLER (kalıcı silme yalnızca uyum/silme talebi akışındadır). Gerekçe:
+     * geri alınabilir ("Geri al"), gönderim geçmişi (campaign_leads/messages) lead'e RESTRICT ile bağlı kalır ve tarama aynı
+     * place_id'yi yeniden eklediğinde arşivlenmiş satır "dirilmez" (upsert bu sütuna dokunmaz). Bu bir yumuşak silmedir:
+     * lead LİSTESİ okumaları `src/lib/leads/query.ts` (`buildWhere` / `LEAD_NOT_ARCHIVED`) üzerinden geçmelidir; listeyi
+     * kendi sorgusuyla okuyan yeni kod `LEAD_NOT_ARCHIVED` koşulunu eklemek zorundadır. İndeks kısmidir (çoğu satır NULL).
      */
     archivedAt: integer("archived_at"),
   },
   (t) => [
     uniqueIndex("leads_place_uq").on(t.placeId),
-    index("leads_archived_idx").on(t.archivedAt),
+    index("leads_archived_idx")
+      .on(t.archivedAt)
+      .where(sql`${t.archivedAt} IS NOT NULL`),
     index("leads_last_contacted_idx").on(t.lastContactedAt),
     index("leads_novelty_idx").on(t.noveltyScore),
     index("leads_status_idx").on(t.status),
@@ -1022,9 +1035,14 @@ export const notifications = sqliteTable(
     index("notifications_os_pending_idx")
       .on(t.id)
       .where(sql`${t.osClaimedAt} IS NULL`),
+    /**
+     * Yalnızca BİÇİM (küçük harf `alan.olay`, en çok 40): izinli türlerin listesi `NOTIFICATION_KINDS` + `notify()` zod
+     * şemasıdır. SQLite'ta CHECK değiştirmek tablo yeniden kurmayı gerektirdiğinden liste veritabanına gömülmez; yeni tür
+     * yalnızca `NOTIFICATION_KINDS`, render.ts ve i18n `notif.*` anahtarlarıyla eklenir (migrasyon gerekmez).
+     */
     check(
       "notifications_kind_ck",
-      sql`kind IN ('scan.done', 'scan.failed', 'scan.paused', 'place.opened', 'schedule.skipped', 'background.skipped')`,
+      sql`length(kind) BETWEEN 3 AND 40 AND kind GLOB '[a-z]*.[a-z]*' AND kind NOT GLOB '*[^a-z._]*'`,
     ),
     check("notifications_dedupe_ck", sql`length(dedupe_key) BETWEEN 1 AND 200`),
     check(

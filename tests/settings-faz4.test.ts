@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { settings as settingsTable } from "@/lib/db/schema";
+import { auditLog, settings as settingsTable } from "@/lib/db/schema";
 import {
   getSetting,
   getSettings,
@@ -213,5 +213,18 @@ describe("ayarlar API'si (Faz 4)", () => {
     expect((await put({ "budget.monthlyUsd": 55, "ui.theme": "light" })).status).toBe(200);
     expect(await getSetting(db, "budget.monthlyUsd")).toBe(55);
     expect(await getSetting(db, "ui.theme")).toBe("light");
+    const audits = (await db.select().from(auditLog)).filter(
+      (a) => a.action === "settings.updated",
+    );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]!.detail).toEqual({ keys: ["budget.monthlyUsd", "ui.theme"] });
+  });
+
+  it("boş gövde ({}) hiçbir şey yazmaz ve denetim kaydı oluşturmaz", async () => {
+    const before = (await db.select().from(auditLog)).length;
+    const res = await put({});
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true });
+    expect((await db.select().from(auditLog)).length).toBe(before);
   });
 });
