@@ -32,7 +32,13 @@ const LEAD_STATUS = [
   "do_not_contact",
 ] as const satisfies readonly LeadStatus[];
 const BUSINESS_STATUS = ["OPERATIONAL", "FUTURE_OPENING", "CLOSED_PERMANENTLY"] as const;
-const LIFECYCLE = ["opened", "future", "new"] as const satisfies readonly LeadLifecycle[];
+/** Yaşam döngüsü seçenekleri (isomorfik kopya; sunucudaki `LEAD_LIFECYCLES` ile aynı). */
+export const LIFECYCLE_OPTIONS = [
+  "opened",
+  "future",
+  "new",
+] as const satisfies readonly LeadLifecycle[];
+const LIFECYCLE = LIFECYCLE_OPTIONS;
 const SORTS = ["novelty", "name", "recent"] as const;
 
 const text = z.string().max(200);
