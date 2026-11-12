@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { suppressEmailInTx } from "@/lib/compliance/suppression";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, mailboxes } from "@/lib/db/schema";
 import { resolveMasterKey } from "@/lib/secrets/store";
-import { LINKABLE_FROM } from "./inbound/process";
+import { auditIds, stopSequences } from "./inbound/stop";
 
 /**
  * Bağlantıyla iletişimden çıkma çekirdeği (FR-CMP-08, Aşama 13) — YALNIZCA DEMO.
@@ -102,24 +102,29 @@ export async function processUnsubscribe(
       { email: cl.recipientEmail, reason: "unsubscribe", source: "link" },
       now,
     );
-    const changed = await tx
-      .update(campaignLeads)
-      .set({ status: "unsubscribed", nextSendAt: null, updatedAt: now })
-      .where(
-        and(
-          eq(campaignLeads.recipientHash, cl.recipientHash ?? "-"),
-          inArray(campaignLeads.status, [...LINKABLE_FROM]),
-        ),
-      )
-      .returning({ id: campaignLeads.id });
+    // 15.10-2: alıcının süren dizileri durur (`stop_reason='unsubscribe'`). Bitmiş dizi durumunu korur ve nedeni
+    // yalnızca bağlantının ait olduğu dizide kaydedilir (TB-10).
+    const stop = await stopSequences(
+      tx,
+      cl.recipientHash ? { recipientHash: cl.recipientHash } : { campaignLeadId: cl.id },
+      "unsubscribe",
+      now,
+      cl.id,
+    );
+    const changed = stop.stopped.length + stop.annotated.length;
     await audit(
       tx,
       "unsubscribe.link",
       "campaign_lead",
       cl.id,
-      { outcome: res.outcome, stopped: changed.length },
+      {
+        outcome: res.outcome,
+        stopped: stop.stopped.length,
+        stoppedIds: auditIds(stop.stopped),
+        annotated: stop.annotated.length,
+      },
       now,
     );
-    return res.outcome === "existing" && changed.length === 0 ? "already" : "unsubscribed";
+    return res.outcome === "existing" && changed === 0 ? "already" : "unsubscribed";
   });
 }

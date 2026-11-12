@@ -23,6 +23,7 @@ import {
   rollbackFaz3ArfComplaint,
   RollbackError,
 } from "@/lib/db/rollback-0003";
+import { stopBusinessSequences, stopSequences } from "@/lib/mail/inbound/stop";
 import { withFileLock } from "@/lib/util/file-lock";
 
 /**
@@ -521,6 +522,79 @@ describe.skipIf(unsafeTmp)("0003: kayıpsız geri alma", () => {
     ).toMatch(/messages_classification_ck/);
   });
 
+  it("15.10-2 çift yazımı geri alınır: neden eski gösterimde korunur; bitmiş dizi `unsubscribed`'a katlanır ve yeniden yükseltmede de öyle kalır", async () => {
+    const h = await build0002();
+    await seed0002(h.client);
+    process.env.UM_MIGRATIONS_DIR = MIGRATIONS;
+    await runMigrations(h.db, h.client);
+    const c = h.client;
+    // Gerçek yazım çekirdeği (gelen ileti, çıkış bağlantısı, tek tık ve inceleme hepsi bunu kullanır)
+    // TB-10: completed (şikâyet bu dizinin iletisine; `about` = 4)
+    const r4 = await stopSequences(h.db, { recipientHash: "h4" }, "complaint", T + 1, 4);
+    const r8 = await stopSequences(h.db, { recipientHash: "h8" }, "unsubscribe", T + 1); // scheduled
+    const r6 = await stopBusinessSequences(h.db, { leadId: 6, recipientDomain: null }, T + 1); // TB-11(d)
+    expect([r4, r8, r6]).toEqual([
+      { stopped: [], annotated: [4] },
+      { stopped: [8], annotated: [] },
+      { stopped: [6], businessDomain: null },
+    ]);
+    // Yeni sürümün gelen ARF satırları (sınıf + işaret)
+    for (const [id, err] of [
+      ["<d1@t>", "arf_complaint"],
+      ["<d2@t>", "arf_complaint:reporter_untrusted"],
+    ])
+      await c.execute({
+        sql: `INSERT INTO messages(direction,purpose,mailbox_id,rfc_message_id,peer_hash,peer_domain,status,classification,error_code,created_at) VALUES('in','inbound',1,?,'h','d.test','matched','complaint',?,1)`,
+        args: [id, err],
+      });
+    const plan = await planRollback(file, { migrationsFolder: MIGRATIONS });
+    expect(plan.counts).toMatchObject({ stoppedAfterCompletion: 1 });
+    const r = await rb(c);
+    expect(r.stoppedAfterCompletionFolded).toBe(1);
+    // Eski gösterim: bitmiş+neden → unsubscribed (eski sürüm böyle yazardı); şikâyet işareti korunur
+    expect(
+      await rows(
+        c,
+        "SELECT id, status, exclusion_reasons x FROM campaign_leads WHERE id IN (4, 6, 8) ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 4, status: "unsubscribed", x: '["arf_complaint"]' },
+      { id: 6, status: "unsubscribed", x: '["arf_complaint","business_complaint"]' },
+      { id: 8, status: "unsubscribed", x: "[]" },
+    ]);
+    expect(
+      await rows(
+        c,
+        "SELECT classification c, error_code e FROM messages WHERE rfc_message_id IN ('<d1@t>','<d2@t>') ORDER BY rfc_message_id",
+      ),
+    ).toEqual([
+      { c: "other", e: "arf_complaint" },
+      { c: "other", e: "arf_complaint:reporter_untrusted" },
+    ]);
+    // Yeniden yükseltme: geri doldurma aynı nedenleri kurar
+    expect((await runMigrations(h.db, h.client)).pending).toBe(1);
+    expect(
+      await rows(
+        c,
+        "SELECT id, stop_reason s FROM campaign_leads WHERE id IN (4, 6, 8) ORDER BY id",
+      ),
+    ).toEqual([
+      { id: 4, s: "complaint" },
+      { id: 6, s: "complaint" },
+      { id: 8, s: "unsubscribe" },
+    ]);
+    // Bilinen kayıp (belgeli): "önce tamamlandı" bilgisi geri dönmez — dizi 4 `unsubscribed` kalır.
+    expect(await rows(c, "SELECT status FROM campaign_leads WHERE id = 4")).toEqual([
+      { status: "unsubscribed" },
+    ]);
+    expect(
+      await num(
+        c,
+        "SELECT COUNT(*) FROM messages WHERE rfc_message_id IN ('<d1@t>','<d2@t>') AND classification = 'complaint'",
+      ),
+    ).toBe(2);
+  });
+
   it("0003 uygulanmamışsa veya son geçiş değilse geri alma reddedilir; başka yazıcı varsa başlamaz", async () => {
     const h = await build0002();
     await expect(rb(h.client)).rejects.toBeInstanceOf(RollbackError);
@@ -953,6 +1027,7 @@ describe.skipIf(unsafeTmp)(
         messages: messagesBefore,
         complaintMessagesDowngraded: 2,
         complaintSequencesMarked: 2,
+        stoppedAfterCompletionFolded: 0,
         live: false,
       });
       expect(JSON.stringify(row)).not.toContain(dir); // dosya yolu / kullanıcı adı sızmaz

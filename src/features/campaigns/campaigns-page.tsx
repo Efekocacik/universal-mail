@@ -12,13 +12,22 @@ import { MailboxReauthBanner } from "./mailbox-reauth-banner";
 import { useCampaignList, type CampaignStatus, type CampaignSummary } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
-import { CAMPAIGN_STATUSES, pauseReasonText, plainCounts, progressOf, progressTone } from "./model";
+import {
+  CAMPAIGN_STATUSES,
+  pauseReasonText,
+  plainCounts,
+  plainCountsNote,
+  plainCountsText,
+  progressOf,
+  progressTone,
+} from "./model";
 import { CampaignStatusBadge, LoadError, Notice } from "./parts";
 import { CampaignsSubnav } from "./subnav";
 
 function CampaignCard({ c }: { c: CampaignSummary }) {
   const p = progressOf(c.counts);
-  const plain = plainCounts(c.counts);
+  const plain = plainCounts(c.counts, c.breakdown);
+  const note = plainCountsNote(plain, fmtNumber);
   const reason = c.status === "paused" ? pauseReasonText(c.pauseReason) : null;
   return (
     <article className="um-enter rounded-xl border bg-card p-4 shadow-xs transition-shadow duration-150 hover:shadow-md">
@@ -53,12 +62,9 @@ function CampaignCard({ c }: { c: CampaignSummary }) {
           <>
             <Progress value={p.pct} tone={progressTone(c.status)} label={c.name} />
             <p className="tabular text-[13px] text-muted-foreground">
-              {t("campaign.progress.plain", {
-                sent: fmtNumber(plain.sent),
-                queued: fmtNumber(plain.queued),
-                failed: fmtNumber(plain.failed),
-              })}
+              {plainCountsText(plain, fmtNumber)}
             </p>
+            {note && <p className="tabular text-[12px] text-muted-foreground">{note}</p>}
           </>
         ) : (
           <p className="text-[13px] text-muted-foreground">{t("campaign.progress.none")}</p>

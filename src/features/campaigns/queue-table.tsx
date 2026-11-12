@@ -19,7 +19,7 @@ import {
 } from "@/lib/client/campaigns";
 import { countryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
-import { reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
+import { queueFilterLabel, reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
 import { LoadError, ReasonList, SequenceStatusBadge } from "./parts";
 import { useSafeMutation } from "./use-safe-mutation";
 
@@ -81,7 +81,7 @@ export function QueueTable({
           <option value="">{t("queue.filter.all")}</option>
           {SEQUENCE_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {t(`sequenceStatus.${s}`)}
+              {queueFilterLabel(s)}
             </option>
           ))}
         </Select>
@@ -153,7 +153,11 @@ export function QueueTable({
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="space-y-1">
-                        <SequenceStatusBadge status={r.status} reasons={r.exclusionReasons} />
+                        <SequenceStatusBadge
+                          status={r.status}
+                          reasons={r.exclusionReasons}
+                          stopReason={r.stopReason}
+                        />
                         {r.exclusionReasons.length > 0 && <ReasonList codes={r.exclusionReasons} />}
                         {r.lastError && (
                           <p className="text-[12px] text-destructive">

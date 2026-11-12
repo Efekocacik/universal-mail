@@ -194,7 +194,7 @@ describe("sınıflandırma", () => {
 /* ---------------------------------------------------------------------------------------------- */
 
 describe("doğrulanmış şikâyet: suppression + dizi durdurma", () => {
-  it("tüm katmanlar geçerse: korumalı 'complaint' engeli, dizi durur, denetim yazılır; sütun CHECK'i bozulmaz (other)", async () => {
+  it("tüm katmanlar geçerse: korumalı 'complaint' engeli, dizi durur, denetim yazılır; sınıf 'complaint' + eski işaret (çift yazım)", async () => {
     const r = await feed(arf(a));
     expect(r).toMatchObject({ outcome: "processed", kind: "complaint", status: "matched" });
     const [sup] = await supp();
@@ -203,14 +203,17 @@ describe("doğrulanmış şikâyet: suppression + dizi durdurma", () => {
     expect(await status(b)).toBe("waiting_next"); // başka alıcı etkilenmez
     const [row] = await inbound();
     expect(row).toMatchObject({
-      classification: "other",
+      classification: "complaint",
       errorCode: "arf_complaint",
       status: "matched",
       campaignLeadId: a.cl,
       inReplyTo: a.rfc,
     });
+    // TB-2: durma nedeni sütunu + eski gerekçe işareti (geri alma sözleşmesi)
+    const [cl] = await db.select().from(campaignLeads).where(eq(campaignLeads.id, a.cl));
+    expect(cl).toMatchObject({ stopReason: "complaint", exclusionReasons: ["arf_complaint"] });
     const [au] = await audits("inbound.complaint");
-    expect(au!.detail).toMatchObject({ stopped: 1 });
+    expect(au!.detail).toMatchObject({ stopped: 1, annotated: 0, businessStopped: 0 });
     const dump = JSON.stringify([await db.select().from(auditLog), await inbound(), await supp()]);
     expect(dump).not.toContain(RCPT);
     expect(dump).not.toContain("Orijinal iletinin gövdesi");
@@ -461,7 +464,7 @@ describe("doğrulanmamış şikâyet ASLA otomatik etki üretmez", () => {
     expect(await supp()).toHaveLength(1); // bu yine de tam doğrulanmış bir şikâyettir (bounce değil)
     expect(await supp().then((x) => x[0]!.reason)).toBe("complaint");
     const [row] = await inbound();
-    expect(row!.classification).toBe("other");
+    expect(row!.classification).toBe("complaint");
   });
 });
 
@@ -529,7 +532,7 @@ describe("inceleme kuyruğu ve etiketler", () => {
     const q = await listReviewQueue(db);
     expect(q).toHaveLength(1);
     expect(q[0]).toMatchObject({
-      classification: "other",
+      classification: "complaint",
       reason: "arf_complaint:no_attestation",
       applicable: false,
     });
@@ -545,6 +548,8 @@ describe("inceleme kuyruğu ve etiketler", () => {
   it("arayüz etiketleri: işaretli satır 'Şikâyet raporu (ARF)'; neden etiketi ayrıştırılır; bilinmeyen kod genel metne düşer", () => {
     expect(classLabel("other", "arf_complaint")).toMatch(/ARF/);
     expect(classLabel("other", "arf_complaint:no_attestation")).toMatch(/ARF/);
+    expect(classLabel("complaint", "arf_complaint")).toMatch(/ARF/);
+    expect(classLabel("complaint", null)).toMatch(/ARF/);
     expect(classLabel("other", null)).toBe("Diğer");
     expect(reviewReasonLabel("arf_complaint:reporter_untrusted")).toMatch(/güvenilir/);
     expect(reviewReasonLabel("arf_complaint:bilinmeyen_kod_x")).toMatch(/Şikâyet raporu/);

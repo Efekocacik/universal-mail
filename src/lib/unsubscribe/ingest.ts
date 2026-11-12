@@ -1,11 +1,11 @@
 import crypto from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { checkSuppression, suppressEmailInTx } from "@/lib/compliance/suppression";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages } from "@/lib/db/schema";
-import { LINKABLE_FROM } from "@/lib/mail/inbound/process";
+import { auditIds, stopSequences } from "@/lib/mail/inbound/stop";
 import { getSetting, setSetting } from "@/lib/settings";
 import { loadPublicKeys, loadRevokedPublicKeys, recipientTag, tagsEqual } from "./keys";
 import { MAX_TOKEN_LENGTH, MAX_TTL_MS, verifyToken } from "./token";
@@ -266,16 +266,16 @@ export async function ingestUnsubscribeEvent(
         { email: cl.recipientEmail, reason: "unsubscribe", source: "link", messageId: inboundId },
         now,
       );
-      const stopped = await tx
-        .update(campaignLeads)
-        .set({ status: "unsubscribed", nextSendAt: null, updatedAt: now })
-        .where(
-          and(
-            eq(campaignLeads.recipientHash, cl.recipientHash),
-            inArray(campaignLeads.status, [...LINKABLE_FROM]),
-          ),
-        )
-        .returning({ id: campaignLeads.id });
+      // 15.10-2: alıcının süren dizileri durur (`stop_reason='unsubscribe'`). Bitmiş dizi durumunu korur ve nedeni
+      // yalnızca bağlantının ait olduğu dizide kaydedilir (TB-10; başka kampanyaların sayaçlarına yazılmaz).
+      const stop = await stopSequences(
+        tx,
+        { recipientHash: cl.recipientHash },
+        "unsubscribe",
+        now,
+        cl.id,
+      );
+      const stopped = stop.stopped;
       await audit(
         tx,
         "unsubscribe.one_click",
@@ -284,6 +284,10 @@ export async function ingestUnsubscribeEvent(
         {
           suppression: res.outcome,
           stopped: stopped.length,
+          ...(stopped.length > 0 ? { stoppedIds: auditIds(stopped) } : {}),
+          ...(stop.annotated.length > 0
+            ? { annotated: stop.annotated.length, annotatedIds: auditIds(stop.annotated) }
+            : {}),
           via: event.via,
           kid: claims.k,
           ...(reclick ? { reclick: true } : {}),
@@ -302,7 +306,8 @@ export async function ingestUnsubscribeEvent(
           now,
         );
       }
-      if (res.outcome === "existing" && stopped.length === 0) return { outcome: "already" };
+      if (res.outcome === "existing" && stopped.length === 0 && stop.annotated.length === 0)
+        return { outcome: "already" };
       return { outcome: "unsubscribed", stopped: stopped.length, suppression: res.outcome };
     });
   } catch (e) {

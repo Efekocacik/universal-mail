@@ -26,6 +26,10 @@ import { activeMaintenance, acquireMaintenance } from "./maintenance";
  * - `messages.classification = 'complaint'` satırları eski CHECK'e uyması için `other` olur; anlam, çift yazılan
  *   `error_code` işaretinden (`arf_complaint` / `arf_complaint:<neden>`) korunur. İşaretsiz bir `complaint` satırı
  *   `arf_complaint` (doğrulanmış) olarak işaretlenir; doğrulanmamış olup olmadığı ayırt edilemez ve bu yönde kabul edilir.
+ * - 15.10-2 (TB-10) sonrası `completed` dizi çıkış/şikâyette durumunu korur ve yalnızca `stop_reason` alır. Eski sürüm
+ *   bu durumu `unsubscribed` olarak yazardı; geri almada `stop_reason` dolu ve `status <> 'unsubscribed'` olan diziler
+ *   eski gösterime (`unsubscribed`) katlanır. NEDEN korunur (şikâyette işaretle), ama "önce tamamlandı" bilgisi
+ *   KAYBOLUR: 0003 yeniden uygulanınca `stop_reason` geri dolar, dizi ise `unsubscribed` kalır (kalıcı; testli).
  * - `stop_reason = 'complaint'` ve `status = 'unsubscribed'` olan dizilere `exclusion_reasons` içinde `"arf_complaint"` eklenir.
  * - Tüm kimlikler, `sqlite_sequence`, indeksler ve `suppressions.message_id` bağlantıları korunur; bekçiler (satır sayısı,
  *   kimlik toplamı, yabancı anahtar) başarısız olursa işlemin tamamı geri alınır.
@@ -43,6 +47,8 @@ export interface RollbackResult {
   backupPath: string;
   complaintMessagesDowngraded: number;
   complaintSequencesMarked: number;
+  /** Durumu korunup nedeni kaydedilmiş (TB-10) ve eski gösterime (`unsubscribed`) katlanan diziler. */
+  stoppedAfterCompletionFolded: number;
 }
 
 const BAD = "abs(-9223372036854775808)";
@@ -85,6 +91,7 @@ export interface AuditDetail {
   messages: number;
   complaintMessagesDowngraded: number;
   complaintSequencesMarked: number;
+  stoppedAfterCompletionFolded: number;
   live: boolean;
 }
 
@@ -103,6 +110,8 @@ export function buildRollbackStatements(
     "INSERT INTO `__um_0003` VALUES ('messages', (SELECT COUNT(*) FROM `messages`)), ('campaign_leads', (SELECT COUNT(*) FROM `campaign_leads`)), ('sup_linked', (SELECT COUNT(`message_id`) FROM `suppressions`)), ('sup_sum', (SELECT COALESCE(SUM(`message_id`), 0) FROM `suppressions`)), ('msg_idsum', (SELECT COALESCE(SUM(`id`), 0) FROM `messages`)), ('seq', COALESCE((SELECT `seq` FROM `sqlite_sequence` WHERE `name` = 'messages'), 0)), ('audit', (SELECT COUNT(*) FROM `audit_log`))",
     // Anlamı eski gösterimde koru (çift yazma işareti eksikse onar), sonra eski CHECK'e uydur.
     "UPDATE `messages` SET `error_code` = 'arf_complaint' WHERE `classification` = 'complaint' AND `error_code` IS NULL",
+    // TB-10: nedeni kaydedilmiş bitmiş dizi, eski sürümde olduğu gibi `unsubscribed` olur (sütun düşmeden önce).
+    "UPDATE `campaign_leads` SET `status` = 'unsubscribed' WHERE `stop_reason` IS NOT NULL AND `status` <> 'unsubscribed'",
     "UPDATE `campaign_leads` SET `exclusion_reasons` = CASE WHEN json_valid(`exclusion_reasons`) THEN json_insert(`exclusion_reasons`, '$[#]', 'arf_complaint') ELSE '[\"arf_complaint\"]' END WHERE `status` = 'unsubscribed' AND `stop_reason` = 'complaint' AND `exclusion_reasons` NOT LIKE '%\"arf_complaint\"%'",
     "UPDATE `messages` SET `classification` = 'other' WHERE `classification` = 'complaint'",
     ddl,
@@ -230,6 +239,8 @@ export interface RollbackPlan {
     campaignLeads: number;
     complaintMessages: number;
     complaintSequences: number;
+    /** `stop_reason` dolu ama `unsubscribed` olmayan (TB-10) diziler; eski gösterime katlanır. */
+    stoppedAfterCompletion: number;
   };
   /** Uygulama için gereken tek kullanımlık doğrulama kodu (hedefe ve veritabanı durumuna bağlı). */
   code: string;
@@ -283,7 +294,13 @@ export async function planRollback(
         ]
       : [];
     let fp: Record<string, unknown> = {};
-    let counts = { messages: 0, campaignLeads: 0, complaintMessages: 0, complaintSequences: 0 };
+    let counts = {
+      messages: 0,
+      campaignLeads: 0,
+      complaintMessages: 0,
+      complaintSequences: 0,
+      stoppedAfterCompletion: 0,
+    };
     if (!blockers.length) {
       fp = await fingerprint(client);
       const one = async (sql: string) => Number((await client.execute(sql)).rows[0]?.[0] ?? 0);
@@ -294,7 +311,10 @@ export async function planRollback(
           "SELECT COUNT(*) FROM messages WHERE classification = 'complaint'",
         ),
         complaintSequences: await one(
-          "SELECT COUNT(*) FROM campaign_leads WHERE status = 'unsubscribed' AND stop_reason = 'complaint'",
+          "SELECT COUNT(*) FROM campaign_leads WHERE stop_reason = 'complaint'",
+        ),
+        stoppedAfterCompletion: await one(
+          "SELECT COUNT(*) FROM campaign_leads WHERE stop_reason IS NOT NULL AND status <> 'unsubscribed'",
         ),
       };
     }
@@ -402,7 +422,10 @@ export async function rollbackFaz3ArfComplaint(
       "SELECT COUNT(*) FROM messages WHERE classification = 'complaint'",
     );
     const complaintSequencesMarked = await count(
-      "SELECT COUNT(*) FROM campaign_leads WHERE status = 'unsubscribed' AND stop_reason = 'complaint'",
+      "SELECT COUNT(*) FROM campaign_leads WHERE stop_reason = 'complaint'",
+    );
+    const stoppedAfterCompletionFolded = await count(
+      "SELECT COUNT(*) FROM campaign_leads WHERE stop_reason IS NOT NULL AND status <> 'unsubscribed'",
     );
 
     // Yedek: al, aç, bütünlüğünü ve sayıları doğrula. Doğrulanamazsa geri alma BAŞLAMAZ.
@@ -425,6 +448,7 @@ export async function rollbackFaz3ArfComplaint(
           messages: counts.messages,
           complaintMessagesDowngraded,
           complaintSequencesMarked,
+          stoppedAfterCompletionFolded,
           live: opts.live ?? false,
         },
       }),
@@ -434,7 +458,12 @@ export async function rollbackFaz3ArfComplaint(
       throw new RollbackError(
         `Geri alma sonrası ${fk.rows.length} yabancı anahtar ihlali. Yedek: ${backupPath}`,
       );
-    return { backupPath, complaintMessagesDowngraded, complaintSequencesMarked };
+    return {
+      backupPath,
+      complaintMessagesDowngraded,
+      complaintSequencesMarked,
+      stoppedAfterCompletionFolded,
+    };
   } finally {
     lock.release();
   }

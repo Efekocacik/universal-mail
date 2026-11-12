@@ -54,7 +54,7 @@ async function main(): Promise<number> {
       );
       if (!p.blockers.length) {
         console.log(
-          `İletiler: ${p.counts.messages}, diziler: ${p.counts.campaignLeads}; 'complaint' iletisi: ${p.counts.complaintMessages}, şikâyetle durmuş dizi: ${p.counts.complaintSequences}`,
+          `İletiler: ${p.counts.messages}, diziler: ${p.counts.campaignLeads}; 'complaint' iletisi: ${p.counts.complaintMessages}, şikâyetle durmuş dizi: ${p.counts.complaintSequences}, bittikten sonra durmuş dizi (eski gösterime katlanacak): ${p.counts.stoppedAfterCompletion}`,
         );
         console.log(`Doğrulama kodu:   ${p.code}`);
         console.log("\nUygulamak için (uygulamanın TÜM süreçleri kapalıyken):");
@@ -75,7 +75,7 @@ async function main(): Promise<number> {
     });
     console.log(
       `✔ 0003 geri alındı. Yedek (doğrulandı): ${r.backupPath}. ${r.complaintMessagesDowngraded} şikâyet iletisi 'other' + işaret olarak, ` +
-        `${r.complaintSequencesMarked} şikâyetle durmuş dizi işaretli 'unsubscribed' olarak korundu. Denetim kaydı yazıldı (db.rollback_0003).`,
+        `${r.complaintSequencesMarked} şikâyetle durmuş dizi işaretli 'unsubscribed' olarak korundu; bittikten sonra durmuş ${r.stoppedAfterCompletionFolded} dizi 'unsubscribed' oldu. Denetim kaydı yazıldı (db.rollback_0003).`,
     );
     return 0;
   } catch (e) {

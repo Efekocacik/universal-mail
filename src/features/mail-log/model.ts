@@ -1,5 +1,6 @@
 import type { TrKey } from "@/lib/i18n";
 import { t } from "@/lib/i18n";
+import { isArfComplaintCode } from "@/lib/mail/inbound/complaint";
 
 /** Günlük ekranının saf yardımcıları (etiketler, rozet renkleri). */
 
@@ -42,12 +43,14 @@ export function deliveryLabel(d: string | null): string | null {
   return d === "bounced_hard" || d === "bounced_soft" ? t(`mlog.delivery.${d}` as TrKey) : null;
 }
 
-/** ARF şikâyet işareti (`arf_complaint` veya `arf_complaint:<neden>`): sınıflandırma sütunu `other` kalır. */
-export const isArfComplaintCode = (code: string | null | undefined): boolean =>
-  !!code && (code === "arf_complaint" || code.startsWith("arf_complaint:"));
+/**
+ * ARF şikâyeti: 15.10-2'den beri sınıf sütunu `complaint`; eski satırlarda `other` + işaret (`arf_complaint` veya
+ * `arf_complaint:<neden>`). İkisi de "Şikâyet raporu (ARF)" etiketini alır.
+ */
+export { isArfComplaintCode };
 
 export function classLabel(c: string | null, errorCode?: string | null): string | null {
-  if (isArfComplaintCode(errorCode)) return t("mlog.class.complaint");
+  if (c === "complaint" || isArfComplaintCode(errorCode)) return t("mlog.class.complaint");
   return c && ["reply", "bounce", "auto_reply", "unsubscribe", "negative", "other"].includes(c)
     ? t(`mlog.class.${c}` as TrKey)
     : null;

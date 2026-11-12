@@ -4,6 +4,7 @@ import { campaigns, messages } from "@/lib/db/schema";
 import { maskEmail } from "@/lib/compliance/suppression";
 import { parseEmail } from "@/lib/email/address";
 import { csvCell } from "@/lib/export/csv";
+import { effectiveClassification } from "./inbound/complaint";
 
 /**
  * Gönderim günlüğü (FR-CMP-10) ve CSV dışa aktarımı (Aşama 13).
@@ -78,7 +79,8 @@ function toItem({ m, campaignName }: Row): MailLogItem {
     stepIndex: m.stepIndex,
     status: m.status,
     deliveryStatus: m.deliveryStatus,
-    classification: m.classification,
+    // 15.10-2: eski satırlar (`other` + ARF işareti) de `complaint` olarak gösterilir/dışa aktarılır.
+    classification: effectiveClassification(m.classification, m.errorCode),
     peer: redacted ? null : m.direction === "out" ? maskAddress(m.toAddress) : m.peerDomain,
     subject: redacted ? null : m.subjectLogged,
     errorCode: redacted ? null : m.errorCode,
