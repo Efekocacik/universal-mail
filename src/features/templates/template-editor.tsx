@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FieldHint, Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { PageHeader } from "@/components/ui/page";
@@ -39,6 +40,7 @@ import {
   languageName,
   PREVIEW_DEBOUNCE_MS,
   readOnlyReason,
+  subjectHintKey,
   toDraft,
   variableChips,
   type Draft,
@@ -484,6 +486,22 @@ export function TemplateEditor({ id }: { id?: number }) {
               </div>
             </div>
             <FieldHint>{t("tplEditor.kind.hint")}</FieldHint>
+            {draft.kind === "followup" && (
+              <label className="flex items-start gap-2 text-[13px]" data-testid="tpl-reuse-subject">
+                <Checkbox
+                  className="mt-0.5"
+                  checked={draft.followupReuseSubject}
+                  disabled={readOnly}
+                  onCheckedChange={(v) => setDraft({ ...draft, followupReuseSubject: v === true })}
+                />
+                <span>
+                  <span className="font-medium">{t("tplEditor.reuseSubject")}</span>
+                  <span className="block text-[12px] text-muted-foreground">
+                    {t("tplEditor.reuseSubject.hint")}
+                  </span>
+                </span>
+              </label>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="tpl-subject">{t("tplEditor.subject")}</Label>
               <Input
@@ -492,9 +510,13 @@ export function TemplateEditor({ id }: { id?: number }) {
                 value={draft.subject}
                 maxLength={150}
                 disabled={readOnly}
+                aria-describedby={subjectHintKey(draft) ? "tpl-subject-hint" : undefined}
                 onFocus={() => (lastField.current = "subject")}
                 onChange={(e) => setDraft({ ...draft, subject: e.target.value })}
               />
+              {subjectHintKey(draft) && (
+                <FieldHint id="tpl-subject-hint">{t(subjectHintKey(draft)!)}</FieldHint>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="tpl-body">{t("tplEditor.body")}</Label>

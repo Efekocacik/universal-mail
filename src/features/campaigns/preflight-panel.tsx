@@ -21,12 +21,14 @@ import {
   useMailboxes,
   usePreflight,
   type CampaignDetail,
+  type PreflightPreview,
 } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import { EmailPreview } from "./email-preview";
 import { blockerHint, blockerLabel, dayLabel, reasonLabel } from "./model";
 import { LoadError, Notice, Stat } from "./parts";
+import { previewSteps, stepLabel } from "./preflight-model";
 import { useSafeMutation } from "./use-safe-mutation";
 
 type CheckTone = "ok" | "warn" | "block";
@@ -116,7 +118,11 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
   const r = pf.data!;
 
   const blocked = r.blockers.length > 0 || !r.ready;
-  const missingVars = [...new Set(r.previews.flatMap((p) => p.missing))];
+  const missingVars = [
+    ...new Set(
+      r.previews.flatMap((p) => (p.steps ?? []).flatMap((s) => s.missing).concat(p.missing)),
+    ),
+  ];
   const mailbox = mailboxes.data?.find((m) => m.id === campaign.mailboxId);
   const win = campaign.sendWindow;
   const disabledReason = blocked
@@ -154,6 +160,16 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
               text={t("preflight.check.rate", {
                 perDay: fmtNumber(r.estimate.perDay),
                 days: fmtNumber(r.estimate.days),
+              })}
+            />
+          )}
+          {r.estimate.stepCount > 1 && (
+            <CheckRow
+              tone="ok"
+              text={t("preflight.check.followups", {
+                total: fmtNumber(r.estimate.totalMessages),
+                after: fmtNumber(r.estimate.lastFollowupAfterDays),
+                days: fmtNumber(r.estimate.totalDays),
               })}
             />
           )}
@@ -222,20 +238,13 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
                 value={String(p.campaignLeadId)}
                 className="mt-2 space-y-2"
               >
-                {p.missing.length > 0 && (
-                  <Notice tone="warning">
-                    {t("preflight.missing", { vars: p.missing.join(", ") })}
-                  </Notice>
-                )}
-                <EmailPreview
-                  subject={p.subject}
-                  html={p.html}
+                <PreviewSteps
+                  preview={p}
                   from={
                     mailbox
                       ? `${mailbox.label}${mailbox.address ? ` <${mailbox.address}>` : ""}`
                       : null
                   }
-                  to={p.recipientMasked}
                 />
               </TabsContent>
             ))}
@@ -320,5 +329,53 @@ function BlockerList({ codes }: { codes: readonly string[] }) {
         <CheckRow key={c} tone="block" text={blockerLabel(c)} hint={blockerHint(c)} />
       ))}
     </ul>
+  );
+}
+
+/**
+ * Bir alıcının bütün adımları (9c): "İlk e-posta / 2. adım (+5 gün) / 3. adım (+5 gün)" düğmeleriyle seçilir. Takip
+ * adımları gönderimdeki konu devamıyla gösterilir; eksik değişken veya birleştirme hatası adımın üstünde yazar.
+ */
+function PreviewSteps({ preview, from }: { preview: PreflightPreview; from: string | null }) {
+  const steps = previewSteps(preview);
+  const [selected, setSelected] = useState(0);
+  const step = steps[Math.min(selected, steps.length - 1)]!;
+  return (
+    <div className="space-y-2">
+      {steps.length > 1 && (
+        <div
+          role="group"
+          aria-label={t("preflight.step.group")}
+          className="flex flex-wrap gap-1.5"
+          data-testid="preflight-step-switch"
+        >
+          {steps.map((s, i) => (
+            <Button
+              key={s.stepIndex}
+              size="sm"
+              variant={i === selected ? "default" : "outline"}
+              aria-pressed={i === selected}
+              onClick={() => setSelected(i)}
+            >
+              {stepLabel(s)}
+            </Button>
+          ))}
+        </div>
+      )}
+      {step.missing.length > 0 && (
+        <Notice tone="warning">{t("preflight.missing", { vars: step.missing.join(", ") })}</Notice>
+      )}
+      {step.errors.length > 0 && (
+        <Notice tone="danger">
+          {t("preflight.step.errors", { reasons: step.errors.map(reasonLabel).join(", ") })}
+        </Notice>
+      )}
+      <EmailPreview
+        subject={step.subject}
+        html={step.html}
+        from={from}
+        to={preview.recipientMasked}
+      />
+    </div>
   );
 }
