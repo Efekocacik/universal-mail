@@ -11,7 +11,10 @@ import { ownRunCodeFor } from "./pause-codes";
  * veritabanındadır; aynı taramanın sonu iki kez işlense bile tek bildirim olur. Metinlerde Google içeriği yoktur:
  * yalnızca sayı ve kullanıcının bölge adı.
  *
- * Bağlantılar (Paket C süzgeç sözleşmesi): `/?scan=<id>&lifecycle=new|opened`.
+ * Bağlantılar (Paket C süzgeç sözleşmesi): `/?scan=<id>&lifecycle=new|opened&detectedSince=<tarama oluşturma anı>`.
+ * `detectedSince` ZORUNLUDUR: API varsayılan pencere uygulamaz, Keşif ise yokluğunda "son N gün"e düşer; ikisi de bu
+ * taramanın bulduklarından fazlasını gösterebilir (ör. önceki bir taramada "yeni" sayılmış ve bu taramada yeniden
+ * görülmüş işletmeler). Tarama oluşturulduktan önce tespit edilmiş hiçbir şey bu taramanın sonucu olamaz.
  */
 
 /** Yeni bir bildirim yazıldığında Electron ana sürecine "hemen yokla" dürtüsü (IPC). Web sürecinde etkisizdir. */
@@ -48,6 +51,7 @@ async function scanContext(db: Db, scanId: number) {
       scheduleId: scans.scheduleId,
       status: scans.status,
       pauseCode: scans.pauseCode,
+      createdAt: scans.createdAt,
     })
     .from(scans)
     .innerJoin(regions, eq(regions.id, scans.regionId))
@@ -77,7 +81,7 @@ export async function onScanCompleted(
         kind: "scan.done",
         dedupeKey: `scan.done:${p.scanId}`,
         params: { n: p.newDetected, region: ctx.region.slice(0, 200), scanId: p.scanId },
-        url: `/?scan=${p.scanId}&lifecycle=new`,
+        url: `/?scan=${p.scanId}&lifecycle=new&detectedSince=${ctx.createdAt}`,
         entity: "scan",
         entityId: p.scanId,
       },
@@ -92,7 +96,7 @@ export async function onScanCompleted(
         kind: "place.opened",
         dedupeKey: `place.opened:scan:${p.scanId}`,
         params: { n: p.openedPlaces, region: ctx.region.slice(0, 200), scanId: p.scanId },
-        url: `/?scan=${p.scanId}&lifecycle=opened`,
+        url: `/?scan=${p.scanId}&lifecycle=opened&detectedSince=${ctx.createdAt}`,
         entity: "scan",
         entityId: p.scanId,
       },

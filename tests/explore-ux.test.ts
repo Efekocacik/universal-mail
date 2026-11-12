@@ -25,7 +25,12 @@ import {
   toggleId,
   type Selection,
 } from "@/features/explore/selection";
-import { countActiveFilters, EMPTY_FILTERS, toApiFilters } from "@/features/explore/filters";
+import {
+  countActiveFilters,
+  EMPTY_FILTERS,
+  initialExploreFilters,
+  toApiFilters,
+} from "@/features/explore/filters";
 import { MAX_SELECTION as SERVER_MAX } from "@/lib/api/filters";
 import {
   addIdsToCampaign,
@@ -229,6 +234,25 @@ describe("keşif bağlantısı (gösterge paneli ve bildirimlerle ortak sözleş
     expect(
       exploreHref({ lifecycle: ["opened"], detectedSince: now - 60 * day, detectedDays: 60 }),
     ).toBe("/?lifecycle=opened");
+  });
+
+  it("bağlantıdan başlangıç süzgeci: 0 tüm zamanlar, pencere gün sayısını taşır, boş bağlantı boş süzgeç", () => {
+    expect(initialExploreFilters()).toEqual(EMPTY_FILTERS);
+    expect(initialExploreFilters({ lifecycle: ["opened"], detectedSince: 0 })).toMatchObject({
+      lifecycle: ["opened"],
+      detected: null,
+    });
+    expect(
+      initialExploreFilters({ lifecycle: ["new"], detectedSince: 7, detectedDays: 60 }).detected,
+    ).toEqual({ since: 7, days: 60 });
+    expect(initialExploreFilters({ scanId: 3, detectedSince: 9, archived: true })).toMatchObject({
+      scanId: 3,
+      detected: { since: 9 },
+      archived: true,
+    });
+    expect(
+      toApiFilters(initialExploreFilters({ detectedSince: 9 }), null, false).detectedSince,
+    ).toBe(9);
   });
 
   it("üretilen bağlantı geri çözülünce aynıdır", () => {

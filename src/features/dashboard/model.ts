@@ -10,11 +10,13 @@ export type ExploreLifecycle = "new" | "opened" | "future";
 
 /**
  * Keşif'e süzgeçli bağlantı. `lifecycle` ve `detectedSince` (epoch ms) parametrelerini Keşif sayfası (Paket C)
- * okur; bağlantı yalnızca adres üretir, hiçbir şey değiştirmez.
+ * okur; bağlantı yalnızca adres üretir, hiçbir şey değiştirmez. `detectedSince` ZORUNLUDUR (genelde hafta başı):
+ * API varsayılan pencere uygulamaz, Keşif de yokluğunda "son N gün"e düşer; ikisi de gösterge panelindeki sayıyla
+ * aynı kümeyi göstermez. Geçersiz (≤ 0) değer bağlantıya yazılmaz.
  */
-export function exploreLink(lifecycle: ExploreLifecycle, detectedSince?: number): string {
+export function exploreLink(lifecycle: ExploreLifecycle, detectedSince: number): string {
   const q = new URLSearchParams({ lifecycle });
-  if (detectedSince !== undefined && Number.isSafeInteger(detectedSince) && detectedSince > 0) {
+  if (Number.isSafeInteger(detectedSince) && detectedSince > 0) {
     q.set("detectedSince", String(detectedSince));
   }
   return `/?${q.toString()}`;

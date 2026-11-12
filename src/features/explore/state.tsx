@@ -15,6 +15,7 @@ import type { BBox } from "@/lib/client/types";
 import {
   countActiveFilters,
   EMPTY_FILTERS,
+  initialExploreFilters,
   toApiFilters,
   type LeadSort,
   type UiFilters,
@@ -144,18 +145,7 @@ export function ExploreProvider({
   children: React.ReactNode;
   initial?: InitialExploreState;
 }) {
-  const [filters, setFiltersState] = useState<UiFilters>({
-    ...EMPTY_FILTERS,
-    scanId: initial?.scanId,
-    lifecycle: initial?.lifecycle ?? [],
-    detected:
-      initial?.detectedSince === undefined || initial.detectedSince <= 0
-        ? null // `detectedSince=0`: açıkça tüm zamanlar
-        : initial.detectedDays !== undefined
-          ? { since: initial.detectedSince, days: initial.detectedDays }
-          : { since: initial.detectedSince },
-    archived: initial?.archived === true,
-  });
+  const [filters, setFiltersState] = useState<UiFilters>(() => initialExploreFilters(initial));
   const [sort, setSort] = useState<LeadSort>("novelty");
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [tab, setTab] = useState<"list" | "scan">("list");

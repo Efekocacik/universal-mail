@@ -1,7 +1,12 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/db/client";
+import { parseExploreLink } from "@/features/explore/deep-link";
+import { initialExploreFilters, toApiFilters } from "@/features/explore/filters";
+import { parseLeadFilters } from "@/lib/api/filters";
+import { toSearchParams } from "@/lib/client/api";
 import { initDatabase } from "@/lib/db/init";
+import { queryLeads } from "@/lib/leads/query";
 import {
   auditLog,
   categorySets,
@@ -201,7 +206,23 @@ describe("runner: açılan işletmeler ve bildirimler", () => {
     expect(kinds).toEqual(["place.opened", "scan.done"]);
     const done = rows.find((r) => r.kind === "scan.done")!;
     expect(done.params).toMatchObject({ n: s2!.progress.newPlaces, region: "London" });
-    expect(done.url).toBe(`/?scan=${second.scanId}&lifecycle=new`);
+    expect(done.url).toBe(`/?scan=${second.scanId}&lifecycle=new&detectedSince=${s2!.createdAt}`);
+    // Entegrasyon (B → C): bildirim bağlantısını Keşif'in API'si aynen uyguladığında bildirimdeki sayı kadar işletme
+    // görünür (önceki taramalarda "yeni" sayılanlar karışmaz).
+    const follow = async (url: string) => {
+      const link = parseExploreLink(
+        Object.fromEntries(new URLSearchParams(url.slice(url.indexOf("?") + 1))),
+        { defaultWindowDays: 60 },
+      );
+      const api = toSearchParams(toApiFilters(initialExploreFilters(link), null, false));
+      return (await queryLeads(db, parseLeadFilters(api))).total;
+    };
+    expect(await follow(done.url)).toBe(done.params.n);
+    const openedN = rows.find((r) => r.kind === "place.opened")!;
+    expect(openedN.url).toBe(
+      `/?scan=${second.scanId}&lifecycle=opened&detectedSince=${s2!.createdAt}`,
+    );
+    expect(await follow(openedN.url)).toBe(openedN.params.n);
     // Parametrelerde Google içeriği yok (işletme adı vb.).
     expect(JSON.stringify(rows.map((r) => r.params))).not.toMatch(/Coffee|Pub|Street/);
 

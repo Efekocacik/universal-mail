@@ -1,5 +1,6 @@
 import type { BBox } from "@/lib/client/types";
 import { EMPTY_SNAPSHOT, type FilterSnapshot } from "@/lib/leads/saved-filter-payload";
+import type { ExploreLink } from "./deep-link";
 
 /** Keşif süzgeçleri (saf; React'ten bağımsız). Kayıtlı süzgeç yükü (`FilterSnapshot`) ile yapısal olarak aynıdır. */
 export type UiFilters = FilterSnapshot;
@@ -9,6 +10,25 @@ export const EMPTY_FILTERS: UiFilters = EMPTY_SNAPSHOT;
 
 const bboxParam = (b: BBox) =>
   [b.south, b.west, b.north, b.east].map((n) => n.toFixed(5)).join(",");
+
+/**
+ * Bağlantıdan (gösterge paneli, bildirim) gelen başlangıç süzgeçleri (saf; ExploreProvider kullanır, sınanır).
+ * `detectedSince=0` açıkça "tüm zamanlar" demektir (pencere yok); varsayılan pencereden gelen değer gün sayısını taşır.
+ */
+export function initialExploreFilters(initial?: ExploreLink): UiFilters {
+  return {
+    ...EMPTY_FILTERS,
+    scanId: initial?.scanId,
+    lifecycle: initial?.lifecycle ?? [],
+    detected:
+      initial?.detectedSince === undefined || initial.detectedSince <= 0
+        ? null
+        : initial.detectedDays !== undefined
+          ? { since: initial.detectedSince, days: initial.detectedDays }
+          : { since: initial.detectedSince },
+    archived: initial?.archived === true,
+  };
+}
 
 export function toApiFilters(
   f: UiFilters,

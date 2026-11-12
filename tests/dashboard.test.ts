@@ -13,7 +13,12 @@ import {
   usagePct,
   utcDayStart,
 } from "@/features/dashboard/model";
+import { parseExploreLink } from "@/features/explore/deep-link";
+import { initialExploreFilters, toApiFilters } from "@/features/explore/filters";
+import { parseLeadFilters } from "@/lib/api/filters";
 import { recordUsage } from "@/lib/budget";
+import { toSearchParams } from "@/lib/client/api";
+import { queryLeads } from "@/lib/leads/query";
 import { dashboardUrl } from "@/lib/client/dashboard";
 import type { DashboardMailboxQueue } from "@/lib/client/dashboard";
 import {
@@ -501,6 +506,63 @@ describe("getDashboard: bütçe, yeni işletmeler, taramalar, bildirimler", () =
   });
 });
 
+describe("entegrasyon: gösterge paneli → Keşif bağlantıları (E → C)", () => {
+  /**
+   * Bağlantı, Keşif'in GERÇEK zinciriyle izlenir: sayfa (`parseExploreLink`, "yeni" penceresi 60 gün) → başlangıç süzgeci
+   * (`initialExploreFilters`) → API parametreleri (`toApiFilters` + `toSearchParams`) → sunucu (`parseLeadFilters` +
+   * `queryLeads`). Varılan liste, kutucuktaki sayıyla AYNI işletmeleri göstermelidir.
+   */
+  async function follow(href: string) {
+    const sp = Object.fromEntries(new URLSearchParams(href.slice(href.indexOf("?") + 1)));
+    const link = parseExploreLink(sp, { defaultWindowDays: 60, now: NOW });
+    const filters = initialExploreFilters(link);
+    const api = toSearchParams(toApiFilters(filters, null, false));
+    const r = await queryLeads(db, parseLeadFilters(api), { limit: 500 });
+    return {
+      link,
+      filters,
+      total: r.total,
+      ids: r.rows.map((x) => x.leadId).sort((a, b) => a - b),
+    };
+  }
+
+  it("bu haftanın yeni/açılan sayıları ve listeleri Keşif'te aynı kümeyle açılır", async () => {
+    const fresh = await addPlaceLead({ newAt: NOW - DAY });
+    const both = await addPlaceLead({ newAt: NOW - 2 * DAY, openedAt: NOW - HOUR });
+    const opened = await addPlaceLead({ openedAt: NOW - 3 * HOUR });
+    // Bu haftadan önce (ama Keşif'in 60 günlük varsayılan penceresinin içinde): sayılmamalı.
+    await addPlaceLead({ newAt: WEEK_IST - HOUR });
+    await addPlaceLead({ openedAt: NOW - 20 * DAY });
+    // Arşivlenmiş: ne panelde ne Keşif'te.
+    await addPlaceLead({ newAt: NOW - DAY, archived: true });
+
+    const d = await getDashboard(db, { now: NOW, timeZone: "Europe/Istanbul" });
+    expect(d.weekStart).toBe(WEEK_IST);
+    expect(d.counters!.newThisWeek).toBe(2);
+    expect(d.counters!.openedThisWeek).toBe(2);
+
+    const toNew = await follow(exploreLink("new", d.weekStart));
+    expect(toNew.link.detectedDays).toBeUndefined(); // varsayılan pencere DEĞİL, hafta başı
+    expect(toNew.filters).toMatchObject({ lifecycle: ["new"], detected: { since: WEEK_IST } });
+    expect(toNew.total).toBe(d.counters!.newThisWeek);
+    expect(toNew.ids).toEqual([fresh, both]);
+
+    const toOpened = await follow(exploreLink("opened", d.weekStart));
+    expect(toOpened.total).toBe(d.counters!.openedThisWeek);
+    expect(toOpened.ids).toEqual([both, opened]);
+
+    // Listedeki her satırın bağlantısı, satırın türündeki kümeye gider ve satırı içerir.
+    for (const it of d.newThisWeek!.items) {
+      const r = await follow(exploreLink(it.kind, d.weekStart));
+      expect(r.ids).toContain(it.leadId);
+    }
+    expect(d.newThisWeek!.total).toBe(3);
+
+    // Dikiş kanıtı: hafta başı verilmeseydi Keşif 60 günlük pencereye düşer ve sayı tutmazdı.
+    expect((await follow("/?lifecycle=new")).total).toBe(3);
+  });
+});
+
 describe("getDashboard: kısmi başarısızlık", () => {
   it("bir bölüm hata verirse yalnızca o bölüm null olur; günlükte veri yok", async () => {
     const logs: string[] = [];
@@ -586,7 +648,7 @@ describe("gösterge paneli görünüm mantığı", () => {
 
   it("Keşif bağlantıları", () => {
     expect(exploreLink("opened", WEEK_IST)).toBe(`/?lifecycle=opened&detectedSince=${WEEK_IST}`);
-    expect(exploreLink("new")).toBe("/?lifecycle=new");
+    expect(exploreLink("new", 0)).toBe("/?lifecycle=new");
     expect(exploreLink("future", -1)).toBe("/?lifecycle=future");
   });
 
