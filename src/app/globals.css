@@ -190,6 +190,53 @@ body {
     0 0 0 2px var(--contacted),
     0 1px 3px rgb(0 0 0 / 0.45);
 }
+/* >>> Faz 4 paket C: harita işaretçisi durumları (FR-UI-02). Yalnızca bu blok C'ye aittir. >>> */
+/* Yanıt verdi / müşteri: yeşil halka. */
+.um-pin--replied {
+  box-shadow:
+    0 0 0 2px var(--success),
+    0 1px 3px rgb(0 0 0 / 0.45);
+}
+/* İlgilenmiyor / iletişime geçme: gri kesikli çerçeve ve soluk dolgu (renk körlüğünde de ayırt edilir). */
+.um-pin--stopped {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+  opacity: 0.75;
+}
+/* Toplu seçimdeki işaretçi: koyu (ön plan rengi) dış halka. Birincil renk yeşil olduğu ve "yanıt verdi" halkasıyla
+   karışacağı için kullanılmaz. */
+.um-pin--checked {
+  outline: 3px solid var(--foreground);
+  outline-offset: 2px;
+}
+.um-pin--checked.um-pin--stopped {
+  opacity: 1;
+}
+/* Gösterge simgeleri: işaretçilerle aynı görsel dil. */
+.um-legend-ring {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 2px solid #fff;
+}
+.um-legend-ring--contacted {
+  box-shadow: 0 0 0 2px var(--contacted);
+}
+.um-legend-ring--replied {
+  box-shadow: 0 0 0 2px var(--success);
+}
+.um-legend-ring--stopped {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+}
+.um-legend-ring--checked {
+  outline: 2px solid var(--foreground);
+  outline-offset: 1px;
+}
+/* <<< Faz 4 paket C <<< */
 .um-cluster {
   display: flex;
   align-items: center;

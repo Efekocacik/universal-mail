@@ -10,6 +10,8 @@ export const LABEL_COLORS = ["#7c3aed", "#16a34a", "#d4a017", "#9aa0a8"] as cons
 export interface MapViewProps {
   points: MapPoint[];
   selectedId: number | null;
+  /** Toplu seçimdeki (işaretli) lead'ler; işaretçileri ayrıca vurgulanır. */
+  checkedIds: ReadonlySet<number>;
   onSelect: (id: number | null) => void;
   draft: DraftRegion | null;
   onDraftChange: (r: DraftRegion | null) => void;

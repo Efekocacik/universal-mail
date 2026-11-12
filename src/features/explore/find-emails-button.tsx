@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Mail } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -27,28 +27,47 @@ type Target = { leadIds: number[] } | { filtersQuery: string };
  * "E-posta bul": seçili lead'ler (veya listedeki süzgeçlere uyanlar) için web sitelerinden e-posta aramayı başlatır.
  * Önce ne olacağını ve (varsa) Google maliyetini gösterir; kullanıcı onaylamadan bir şey kuyruğa alınmaz.
  */
+/** Sunucu önizlemesi; Faz 4: süzgeçle seçimde eşleşen toplam ve 2000 sınırı. */
+type Preview = FindEmailsPreview & { matched?: number; capped?: boolean; max?: number };
+
 export function FindEmailsButton({
   target,
   label,
   variant = "outline",
   size = "sm",
   initialForce = false,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
+  hideTrigger = false,
+  title,
 }: {
   target: Target;
   label?: string;
   variant?: "outline" | "default";
   size?: "sm" | "md";
   initialForce?: boolean;
+  /** Denetimli kullanım (klavye kısayolu E ve seçim çubuğu pencereyi dışarıdan açar). */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  hideTrigger?: boolean;
+  title?: string;
 }) {
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const onOpenChangeRef = useRef(onOpenChangeProp);
+  onOpenChangeRef.current = onOpenChangeProp;
+  const setOpen = useCallback((v: boolean) => {
+    setOpenState(v);
+    onOpenChangeRef.current?.(v);
+  }, []);
   const [loadGoogle, setLoadGoogle] = useState(false);
   const [useExternal, setUseExternal] = useState(false);
   const [force, setForce] = useState(initialForce);
 
   const preview = useMutation({
     mutationFn: () =>
-      api<{ preview: FindEmailsPreview }>("/api/leads/find-emails", {
+      api<{ preview: Preview }>("/api/leads/find-emails", {
         method: "POST",
         json: { ...target, loadGoogle, useExternal, force, dryRun: true },
       }),
@@ -78,12 +97,14 @@ export function FindEmailsButton({
   });
 
   const p = preview.data?.preview;
-  const onOpenChange = useCallback((v: boolean) => setOpen(v), []);
+  const onOpenChange = setOpen;
   return (
     <>
-      <Button variant={variant} size={size} onClick={() => setOpen(true)}>
-        <Mail /> {label ?? t("findEmails.button")}
-      </Button>
+      {!hideTrigger && (
+        <Button variant={variant} size={size} onClick={() => setOpen(true)} title={title}>
+          <Mail /> {label ?? t("findEmails.button")}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogHeader>
@@ -99,6 +120,17 @@ export function FindEmailsButton({
             </div>
           ) : (
             <div className="um-enter space-y-3">
+              {p.capped && p.matched !== undefined && (
+                <p
+                  className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px]"
+                  role="status"
+                >
+                  {t("findEmails.capped", {
+                    matched: fmtNumber(p.matched),
+                    max: fmtNumber(p.max ?? p.leads),
+                  })}
+                </p>
+              )}
               <dl className="divide-y rounded-lg border bg-muted/50 px-3 py-1 text-[13px]">
                 <Row label={t("findEmails.leads")}>{fmtNumber(p.leads)}</Row>
                 <Row label={t("findEmails.ready")}>{fmtNumber(p.ready)}</Row>
