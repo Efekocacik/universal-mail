@@ -1,9 +1,33 @@
-import { eq, gt, inArray } from "drizzle-orm";
+import { and, eq, gt, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
-import { leads, placeSnapshots, places } from "@/lib/db/schema";
+import {
+  domainRegistrations,
+  leadEnrichment,
+  leads,
+  placeSnapshots,
+  places,
+} from "@/lib/db/schema";
+import type { NoveltySignal } from "@/lib/domain/types";
 import { computeNovelty, type NoveltyConfig } from "@/lib/novelty/score";
+import { getSettings } from "@/lib/settings";
 import { chunk } from "@/lib/util";
+
+/**
+ * Yenilik yapılandırması: eşikler + (RDAP açıksa) genç alan adı penceresi. Çalıştırıcı, işçi ve uç noktalar bunu
+ * kullanır; böylece alan adı sinyali her yeniden hesaplamada tutarlı kalır.
+ */
+export async function loadNoveltyConfig(db: Db): Promise<NoveltyConfig> {
+  const s = await getSettings(db, [
+    "novelty.thresholds",
+    "novelty.rdap",
+    "novelty.domainYoungDays",
+  ] as const);
+  return {
+    ...s["novelty.thresholds"],
+    ...(s["novelty.rdap"].enabled ? { domainYoungDays: s["novelty.domainYoungDays"] } : {}),
+  };
+}
 
 export interface RecomputeOptions {
   /** Yalnızca bu taramada görülen işletmeler. */
@@ -40,10 +64,11 @@ export async function recomputeNovelty(
     id: number;
     score: number;
     label: string;
-    signals: { id: string; group: string; points: number; reason: string }[];
+    signals: NoveltySignal[];
     p: typeof places.$inferSelect;
     ratings: number | null;
     cached: string | null;
+    registeredAt: number | null;
   };
 
   const handle = async (rows: Row[]) => {
@@ -61,6 +86,7 @@ export async function recomputeNovelty(
           userRatingCount: row.ratings,
           newDetectedAt: row.p.newDetectedAt,
           openedDetectedAt: row.p.openedDetectedAt,
+          domainRegisteredAt: row.registeredAt,
           extraSignals: carried,
           now: opts.now,
         },
@@ -99,10 +125,19 @@ export async function recomputeNovelty(
         p: places,
         ratings: placeCache.userRatingCount,
         cached: placeCache.placeId,
+        registeredAt: domainRegistrations.registeredAt,
       })
       .from(leads)
       .innerJoin(places, eq(leads.placeId, places.placeId))
-      .leftJoin(placeCache, eq(placeCache.placeId, places.placeId));
+      .leftJoin(placeCache, eq(placeCache.placeId, places.placeId))
+      .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
+      .leftJoin(
+        domainRegistrations,
+        and(
+          eq(domainRegistrations.domain, leadEnrichment.siteDomain),
+          eq(domainRegistrations.status, "ok"),
+        ),
+      );
 
   if (ids) {
     for (const part of chunk(ids, 400))
