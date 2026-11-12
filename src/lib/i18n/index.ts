@@ -1,4 +1,5 @@
 import { en } from "./en";
+import { enOne } from "./en/plurals";
 import { tr, type TrKey } from "./tr";
 
 export type { TrKey } from "./tr";
@@ -48,9 +49,23 @@ export function hasTranslation(key: TrKey, locale: Locale): boolean {
   return locale === "tr" ? key in tr : (en as Partial<Record<TrKey, string>>)[key] !== undefined;
 }
 
+const EN_PLURAL = new Intl.PluralRules("en");
+
+/**
+ * `{n}` İngilizcede tekil mi? Çağıranlar sayıyı çoğu zaman biçimlenmiş dize olarak verir (`fmtNumber(1)` → "1");
+ * binlik ayırıcılar atılıp sayıya çevrilir. Sayı değilse (ör. "—") çoğul kalır.
+ */
+function isEnglishOne(v: string | number | undefined): boolean {
+  if (v === undefined) return false;
+  const num = typeof v === "number" ? v : Number(String(v).replace(/[,\s\u00a0\u202f]/g, ""));
+  return String(v).trim() !== "" && Number.isFinite(num) && EN_PLURAL.select(num) === "one";
+}
+
 export function t(key: TrKey, params?: Record<string, string | number>, locale?: Locale): string {
   const lang = locale ?? current;
-  const enText = lang === "en" ? (en as Partial<Record<TrKey, string>>)[key] : undefined;
+  // İngilizce tekil/çoğul (`en/plurals.ts`): Türkçede isim sayıdan sonra tekil kaldığı için yalnızca İngilizcede.
+  const one = lang === "en" && isEnglishOne(params?.n) ? enOne[key] : undefined;
+  const enText = lang === "en" ? (one ?? (en as Partial<Record<TrKey, string>>)[key]) : undefined;
   let text: string = enText ?? tr[key] ?? key;
   if (params) {
     for (const [k, v] of Object.entries(params)) text = text.replaceAll(`{${k}}`, String(v));
