@@ -70,7 +70,7 @@ export function ConfirmDialog({
         <DialogHeader>
           <div className="flex items-start gap-3">
             <span
-              className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${danger ? "bg-destructive/10 text-destructive" : warning ? "bg-nov-likely/20 text-[#8a6700]" : "bg-success/10 text-success"}`}
+              className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full ${danger ? "bg-destructive/10 text-destructive" : warning ? "bg-nov-likely/20 text-warning-text" : "bg-success/10 text-success"}`}
               aria-hidden
             >
               <Icon className="size-5" />

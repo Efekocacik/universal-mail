@@ -3,7 +3,8 @@
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { useEffect, useRef, useState } from "react";
-import { t } from "@/lib/i18n";
+import { useResolvedTheme } from "@/components/providers";
+import { getLocale, t } from "@/lib/i18n";
 import { regionFromDrag } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
 
@@ -327,6 +328,7 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
 }
 
 export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: string }) {
+  const colorScheme = useResolvedTheme() === "dark" ? "DARK" : "LIGHT";
   const [authError, setAuthError] = useState(false);
 
   useEffect(() => {
@@ -350,9 +352,12 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
   }
 
   return (
-    <div className="relative size-full">
-      <APIProvider apiKey={props.apiKey} language="tr">
+    <div className="relative size-full" data-color-scheme={colorScheme}>
+      <APIProvider apiKey={props.apiKey} language={getLocale()}>
         <Map
+          // Faz 4 (10a-1/10a-7): harita teması arayüz temasını izler; colorScheme yalnızca kurulumda okunur → key.
+          key={colorScheme}
+          colorScheme={colorScheme}
           mapId={props.mapId}
           defaultCenter={{ lat: 50, lng: 10 }}
           defaultZoom={4}
