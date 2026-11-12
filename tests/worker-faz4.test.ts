@@ -14,6 +14,7 @@ import { createAndStartScan } from "@/lib/scan/service";
 import { persistPlaces } from "@/lib/scan/store";
 import { setSetting } from "@/lib/settings";
 import { registerScanBackgroundHandlers } from "@/worker/background";
+import { registerCoreHandlers } from "@/worker/handlers";
 import {
   FINISHED_JOB_RETENTION_MS,
   HOUSEKEEPING_INTERVAL_MS,
@@ -30,7 +31,9 @@ import {
   handleWake,
   isWakeMessage,
   WAKE_DEBOUNCE_MS,
+  wakeFailed,
 } from "@/worker/wake";
+import { withShortRetry } from "@/worker/retry";
 import { createTestDb, type TestDb } from "./helpers/db";
 
 const DAY = 86_400_000;
@@ -92,6 +95,21 @@ afterEach(async () => {
   await t.cleanup();
 });
 
+/** İlk `n` `transaction` çağrısı TRANSACTION_ACTIVE ile reddedilen veritabanı (aynı bağlantıda açık işlem benzetimi). */
+function flakyTx(n: number): Db {
+  let left = n;
+  return new Proxy(db, {
+    get(target, prop, recv) {
+      if (prop === "transaction" && left > 0) {
+        left--;
+        return () => Promise.reject(new Error("TRANSACTION_ACTIVE: cannot start a transaction"));
+      }
+      const v = Reflect.get(target, prop, recv);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  });
+}
+
 describe("tick işi", () => {
   it("zamanı gelen zamanlamayı çalıştırır ve bir sonraki tick'i 5 dk sonraya kurar", async () => {
     await setup();
@@ -112,6 +130,31 @@ describe("tick işi", () => {
     const ticks = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
     const next = ticks.find((j) => j.id !== tickId)!;
     expect(next).toMatchObject({ status: "queued", runAt: now + TICK_INTERVAL_MS });
+  });
+
+  it("son denetim: zinciri yeniden kurma geçici hatada yeniden denenir; kalıcı hatada tick.rearm_failed", async () => {
+    const now = Date.now();
+    registerScanBackgroundHandlers({ now: () => now, sleep: async () => undefined });
+    const tickId = (await scheduleTick(db, { runAt: now, now }))!;
+    await db.update(jobs).set({ status: "running" }).where(eq(jobs.id, tickId));
+    const logs: string[] = [];
+    const run = (d: Db) =>
+      getJobHandler(SCHEDULE_TICK_JOB)!({
+        ...ctx({ id: tickId, type: SCHEDULE_TICK_JOB }),
+        db: d,
+        log: (m: string) => logs.push(m),
+      } as JobContext);
+    await run(flakyTx(2)); // iki geçici ret, üçüncü deneme kurar
+    const queued = async () =>
+      (await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB))).filter(
+        (j) => j.status === "queued",
+      );
+    expect(await queued()).toHaveLength(1);
+    expect(logs.filter((l) => l.startsWith("retry step=tick.rearm"))).toHaveLength(2);
+    await db.delete(jobs).where(eq(jobs.status, "queued"));
+    await expect(run(flakyTx(10))).rejects.toThrow(/TRANSACTION_ACTIVE/);
+    expect(logs.some((l) => l.startsWith("tick.rearm_failed"))).toBe(true);
+    expect(await queued()).toHaveLength(0);
   });
 
   it("tur hata verse bile zincir kopmaz", async () => {
@@ -201,6 +244,64 @@ describe("uyandırma", () => {
     const mail = await db.select().from(jobs).where(eq(jobs.type, MAIL_SEND_JOB));
     expect(mail).toHaveLength(1);
     expect(mail[0]!.runAt).toBe(now);
+  });
+
+  it("son denetim: tick kurulamasa da gönderim uyandırılır; başarısız uyandırma kapıyı tüketmez", async () => {
+    const now = Date.now();
+    const logs: string[] = [];
+    const r = await handleWake(flakyTx(1), { now, mailEnabled: true, log: (m) => logs.push(m) });
+    expect(r).toEqual({ tickInserted: false, mail: "inserted", tickFailed: true });
+    expect(wakeFailed(r)).toBe(true);
+    expect(wakeFailed({ tickInserted: true, mail: "noop" })).toBe(false);
+    expect(logs.some((l) => l.includes("wake.failed step=tick"))).toBe(true);
+    expect(await db.select().from(jobs).where(eq(jobs.type, MAIL_SEND_JOB))).toHaveLength(1);
+
+    let clock = 1_000_000;
+    const gate = createWakeGate(() => clock);
+    let result: unknown = { tickFailed: true, mail: "noop" };
+    const wakes: number[] = [];
+    const handler = createWorkerMessageHandler({
+      shutdown: () => undefined,
+      gate,
+      wake: async () => {
+        wakes.push(clock);
+        return result;
+      },
+      onError: () => undefined,
+    });
+    handler({ type: "wake" });
+    await new Promise((res) => setTimeout(res, 0));
+    clock += 1_000; // pencere içinde, ama önceki başarısızdı: yeniden denenir
+    result = { tickInserted: true, mail: "noop" };
+    handler({ type: "wake" });
+    await new Promise((res) => setTimeout(res, 0));
+    clock += 1_000; // başarılı uyandırma pencereyi tüketti
+    handler({ type: "wake" });
+    await new Promise((res) => setTimeout(res, 0));
+    expect(wakes).toEqual([1_000_000, 1_001_000]);
+  });
+
+  it("son denetim: kısa yeniden deneme yardımcısı", async () => {
+    let calls = 0;
+    const logs: string[] = [];
+    const sleeps: number[] = [];
+    const v = await withShortRetry(
+      "x",
+      async () => {
+        if (++calls < 3) throw new Error("TRANSACTION_ACTIVE");
+        return 42;
+      },
+      { sleep: async (ms) => void sleeps.push(ms), log: (m) => logs.push(m), delayMs: 10 },
+    );
+    expect(v).toBe(42);
+    expect(sleeps).toEqual([10, 20]);
+    expect(logs).toHaveLength(2);
+    await expect(
+      withShortRetry("y", async () => Promise.reject(new Error("kalıcı")), {
+        attempts: 2,
+        sleep: async () => undefined,
+      }),
+    ).rejects.toThrow("kalıcı");
   });
 
   it("tick yoksa eklenir; ileti doğrulama ve sıçrama kapısı", async () => {
@@ -388,6 +489,41 @@ describe("recover (M9 ve zamanlanmış taramalar)", () => {
     expect(ns).toHaveLength(1);
     expect(ns[0]).toMatchObject({ kind: "scan.paused" });
     expect(ns[0]!.params).toMatchObject({ n: 2 });
+  });
+
+  it("son denetim P1: scan.run hazırlıkta (onay/sağlayıcı) fırlarsa tarama 'kuyrukta' öksüz kalmaz", async () => {
+    await setup();
+    registerCoreHandlers();
+    const { scanId, scheduleId } = await pausedScheduledRun("London", APP_STOPPED);
+    await db.update(scans).set({ status: "queued", pauseCode: null }).where(eq(scans.id, scanId));
+    await setSetting(db, "consent", null); // işçi işi almadan önce onay geri alındı
+    await expect(
+      getJobHandler("scan.run")!(ctx({ id: 99, type: "scan.run" }, { scanId })),
+    ).rejects.toThrow(/onay/i);
+    const [row] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(row).toMatchObject({ status: "failed" });
+    expect(row!.error).toMatch(/onay/i);
+    // Zamanlama başarısız sonucu görür (PREVIOUS_RUN_ACTIVE ile sessizce atlamaz) ve kullanıcıya bildirilir.
+    const [s] = await db.select().from(scanSchedules).where(eq(scanSchedules.id, scheduleId));
+    expect(s!.lastOutcome).toBe("failed");
+    const ns = await db.select().from(notifications);
+    expect(ns.map((n) => n.kind)).toContain("scan.failed");
+  });
+
+  it("son denetim P1: bitmiş/duraklatılmış tarama hazırlık hatasında değiştirilmez", async () => {
+    await setup();
+    registerCoreHandlers();
+    const scanId = await newScan("London");
+    await db
+      .update(scans)
+      .set({ status: "paused", pauseCode: INTERRUPTED })
+      .where(eq(scans.id, scanId));
+    await setSetting(db, "consent", null);
+    await expect(
+      getJobHandler("scan.run")!(ctx({ id: 98, type: "scan.run" }, { scanId })),
+    ).rejects.toThrow();
+    const [row] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(row).toMatchObject({ status: "paused", pauseCode: INTERRUPTED });
   });
 
   it("inceleme P2: Google anahtarı yoksa etkin zamanlamanın taraması da sürmez (tick'in kapıları)", async () => {

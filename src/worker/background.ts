@@ -13,6 +13,8 @@ import {
   TICK_INTERVAL_MS,
 } from "@/lib/scan/schedule";
 import { getSetting } from "@/lib/settings";
+import { errorMessage } from "@/lib/util";
+import { withShortRetry } from "./retry";
 
 const refreshPayload = z
   .object({ limit: z.number().int().min(1).max(5000).optional(), manual: z.boolean().optional() })
@@ -21,27 +23,40 @@ const refreshPayload = z
 /**
  * Faz 4 arka plan işleri (Paket B). Hepsi idempotenttir ve saat enjeksiyonuna açıktır (`now`).
  * - `scan.schedule.tick`: zamanı gelen zamanlamaları çalıştırır ve bir sonraki tick'i (5 dk) planlar. Tick hatası bile
- *   zinciri koparmaz (`finally`). Bakım turu da zinciri yeniden kurar.
+ *   zinciri koparmaz; yeniden kurma da kısa aralıkla yeniden denenir. Bakım turu da zinciri yeniden kurar.
  * - `places.watch_future`: yakında açılacak yerlerin durumunu denetler (ayar `novelty.futureWatch`).
  * - `places.refresh_ids`: 12 aydan eski yer kimliklerini yeniler (ücretsiz IDs Only).
  * - `novelty.rdap`: web sitesi alan adlarının kayıt tarihini (RDAP) alır ve bağlı lead'lerin skorunu yeniler.
  */
-export function registerScanBackgroundHandlers(opts: { now?: () => number } = {}): void {
+export function registerScanBackgroundHandlers(
+  opts: { now?: () => number; sleep?: (ms: number) => Promise<void>; rearmAttempts?: number } = {},
+): void {
   const clock = opts.now ?? Date.now;
 
   registerJobHandler(SCHEDULE_TICK_JOB, async (ctx: JobContext) => {
     const now = clock();
+    let failure: { error: unknown } | null = null;
     try {
       const out = await runDueSchedules(ctx.db, { now, log: ctx.log });
       if (out.length > 0)
         ctx.log(`zamanlama turu: ${out.map((o) => `#${o.scheduleId} ${o.outcome}`).join(", ")}`);
-    } finally {
-      await scheduleTick(ctx.db, {
-        runAt: now + TICK_INTERVAL_MS,
-        now,
-        exceptJobId: ctx.job.id,
-      });
+    } catch (e) {
+      failure = { error: e };
     }
+    // Zincirin yeniden kurulması kısa aralıkla birkaç kez denenir (tek bağlantıda açık işlem / SQLITE_BUSY geçicidir);
+    // yine olmazsa yapılandırılmış satır yazılır ve tur hatası (varsa) onu gölgelemeden fırlatılır. Durum özeti
+    // (`scheduleSummary.stalled`) kopuk zinciri ayrıca gösterir; bakım turu en geç düzenli turda yeniden kurar.
+    try {
+      await withShortRetry(
+        "tick.rearm",
+        () => scheduleTick(ctx.db, { runAt: now + TICK_INTERVAL_MS, now, exceptJobId: ctx.job.id }),
+        { attempts: opts.rearmAttempts ?? 3, delayMs: 250, sleep: opts.sleep, log: ctx.log },
+      );
+    } catch (e) {
+      ctx.log(`tick.rearm_failed error=${errorMessage(e).slice(0, 160)}`);
+      if (!failure) throw e;
+    }
+    if (failure) throw failure.error;
   });
 
   registerJobHandler(FUTURE_WATCH_JOB, async (ctx: JobContext) => {

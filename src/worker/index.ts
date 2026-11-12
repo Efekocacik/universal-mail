@@ -19,6 +19,7 @@ import {
 import { registerScanBackgroundHandlers } from "./background";
 import { runHousekeeping, startHousekeepingLoop } from "./housekeeping";
 import { Worker } from "./loop";
+import { withShortRetry } from "./retry";
 import { createWakeGate, createWorkerMessageHandler, handleWake } from "./wake";
 
 /** Geliştirme: `.env.local` dosyasını yükle (üretimde Electron ortam değişkenlerini verir). */
@@ -69,6 +70,10 @@ async function main(): Promise<void> {
         : "[worker] demo gönderim zamanlayıcısı açık (yalnızca demo).",
     );
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
+  const startLog = (m: string) => console.log(`[worker] ${m}`);
+  // Kesilen işlerin toparlanması bakım turundan ÖNCE ve tek başına çalışır: bakım turunun tick/kuyruk işlemleri aynı
+  // tek bağlantıda açıkken recover'ın sorguları TRANSACTION_ACTIVE ile reddedilip işçiyi açılışta çökertiyordu.
+  await withShortRetry("recover", () => worker.recover(), { log: startLog });
 
   // Faz 4 bakım turu (Google saklama politikası, yenilik skorları, M3 iş/bildirim temizliği, arka plan işleri ve
   // zamanlama tick zinciri). Açılışta ve 6 saatte bir; adımlar birbirinden bağımsız ve idempotenttir. Başarısız tur
@@ -80,7 +85,12 @@ async function main(): Promise<void> {
     log: hkLog,
   });
   // Zamanlanmış taramalar: ilk tick açılıştan 60 sn sonra (tekil; kuyrukta varsa eklenmez).
-  await scheduleTick(db, { runAt: Date.now() + FIRST_TICK_DELAY_MS, now: Date.now() });
+  // Başarısız olursa işçi çökmez: bakım turunun `tick` adımı zinciri yeniden kurar.
+  await withShortRetry(
+    "tick",
+    () => scheduleTick(db, { runAt: Date.now() + FIRST_TICK_DELAY_MS, now: Date.now() }),
+    { log: startLog },
+  ).catch((e) => console.error("[worker] ilk tick kurulamadı (bakım turu yeniden kuracak):", e));
   const wakeGate = createWakeGate();
   // Çıkış olayı çekme zinciri kendini yeniden planlar; beklenmedik bir kopmaya karşı (ör. iş başarısız işaretlendi)
   // düzenli olarak yeniden kurulur. İdempotent: kuyrukta/çalışan tur varsa yenisi eklenmez; iş kapalıysa veya adres
@@ -114,7 +124,7 @@ async function main(): Promise<void> {
     }),
   );
 
-  await worker.run();
+  await worker.run({ recover: false });
   process.exit(0);
 }
 

@@ -74,7 +74,12 @@ function jsonRes(data: unknown, status = 200): Response {
 
 function setup(
   routes: Record<string, Route>,
-  opts: { alertEveryMs?: number; alertStore?: PollerDeps["alertStore"] } = {},
+  opts: {
+    alertEveryMs?: number;
+    alertStore?: PollerDeps["alertStore"];
+    /** true dönerse o gösterim fırlatır (işletim sistemi reddetti). */
+    failShow?: (t: OsToast) => boolean;
+  } = {},
 ) {
   const shown: OsToast[] = [];
   const logs: string[] = [];
@@ -89,7 +94,10 @@ function setup(
       if (!r) return jsonRes({ error: "yok" }, 404);
       return r(init);
     },
-    show: (t) => shown.push(t),
+    show: (t) => {
+      if (opts.failShow?.(t)) throw new Error("izin yok");
+      shown.push(t);
+    },
     text: (key, n) => ({ title: `${key}:${n ?? ""}`, body: key }),
     log: (m) => logs.push(m),
     now: () => now,
@@ -123,6 +131,49 @@ describe("electron/notify: NotificationPoller", () => {
     const claim = s.calls.find((c) => c.url.endsWith("/os-claim"))!;
     expect(claim.init?.method).toBe("POST");
     expect((claim.init?.headers as Record<string, string>).Origin).toBe("http://127.0.0.1:4310");
+  });
+
+  it("son denetim: gösterim hatası kalan bildirimleri düşürmez, toast.failed yazar; uyarı yeniden denenir", async () => {
+    let failAlert = true;
+    const saved: string[][] = [];
+    const s = setup(
+      {
+        "/api/notifications/os-claim": () =>
+          jsonRes({
+            items: [
+              { id: 1, title: "A", body: "", url: "/scans" },
+              { id: 2, title: "B", body: "", url: "/scans" },
+            ],
+          }),
+        "/api/config": () => jsonRes({ notificationsOs: true }),
+        "/api/compliance/delivery-alerts": () => jsonRes({ alerts: [{ kind: "delivery_stale" }] }),
+      },
+      {
+        alertEveryMs: 1,
+        failShow: (t) => t.title === "A" || (failAlert && t.url === "/compliance"),
+        alertStore: { load: () => [], save: (x) => saved.push(x) },
+      },
+    );
+    await s.poller.poll();
+    expect(s.shown.map((t) => t.title)).toEqual(["B"]);
+    expect(s.logs.some((l) => l.startsWith("toast.failed ids=1 "))).toBe(true);
+    expect(s.logs.some((l) => l.startsWith("toast.failed ids=alert:delivery_stale"))).toBe(true);
+    // Gösterilemeyen uyarı "bildirildi" diye saklanmaz; sonraki yoklamada gösterilir.
+    expect(saved.flat()).not.toContain("delivery_stale");
+    failAlert = false;
+    s.advance(10);
+    await s.poller.poll();
+    expect(s.shown.filter((t) => t.url === "/compliance")).toHaveLength(1);
+    expect(saved.at(-1)).toEqual(["delivery_stale"]);
+  });
+
+  it("son denetim: yoklama hatası zamanlayıcı/dürtme yolunda işlenmemiş ret olmaz", async () => {
+    const s = setup({});
+    const boom = vi.spyOn(s.poller, "poll").mockRejectedValue(new Error("çöktü"));
+    s.poller.nudge();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(s.logs.some((l) => l.includes("çöktü"))).toBe(true);
+    boom.mockRestore();
   });
 
   it("uç yoksa (404) sessizce sürer ve yalnızca bir kez günlüğe yazar", async () => {

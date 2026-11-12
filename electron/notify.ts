@@ -139,9 +139,27 @@ export class NotificationPoller {
 
   start(): void {
     if (this.timer) return;
-    this.timer = setInterval(() => void this.poll(), this.intervalMs);
+    this.timer = setInterval(() => this.pollSafely(), this.intervalMs);
     this.timer.unref?.();
-    void this.poll();
+    this.pollSafely();
+  }
+
+  /** Zamanlayıcı/dürtme yolu: yoklama hatası işlenmemiş ret olarak ana süreci düşürmez, günlüğe yazılır. */
+  private pollSafely(): void {
+    this.poll().catch((e) =>
+      this.deps.log(`bildirim yoklaması hata verdi: ${(e as Error)?.message ?? e}`),
+    );
+  }
+
+  /** Gösterme hatası kalan bildirimleri düşürmez; her başarısız gösterim `toast.failed` satırı yazar. */
+  private showSafely(toast: OsToast, ids: string): boolean {
+    try {
+      this.deps.show(toast);
+      return true;
+    } catch (e) {
+      this.deps.log(`toast.failed ids=${ids} error=${(e as Error)?.message ?? e}`);
+      return false;
+    }
   }
 
   stop(): void {
@@ -151,7 +169,7 @@ export class NotificationPoller {
 
   /** Hemen yokla (işçi bildirim ekledi, bilgisayar uyandı). Süren yoklama varsa bitince bir kez daha yoklanır. */
   nudge(): void {
-    void this.poll();
+    this.pollSafely();
   }
 
   async poll(): Promise<void> {
@@ -209,9 +227,16 @@ export class NotificationPoller {
     } catch {
       return 0;
     }
-    const toasts = buildToasts(parseClaimItems(data), (n) => this.deps.text("summary", n));
-    for (const t of toasts) this.deps.show(t);
-    return toasts.length;
+    const items = parseClaimItems(data);
+    const toasts = buildToasts(items, (n) => this.deps.text("summary", n));
+    let shown = 0;
+    toasts.forEach((t, i) => {
+      // Özet bildirim tüm kimlikleri kapsar; tekil bildirimde sıra kimlik sırasıdır.
+      const ids =
+        toasts.length === items.length ? String(items[i]!.id) : items.map((x) => x.id).join(",");
+      if (this.showSafely(t, ids)) shown++;
+    });
+    return shown;
   }
 
   async checkDeliveryAlerts(): Promise<boolean> {
@@ -231,7 +256,18 @@ export class NotificationPoller {
     } catch {
       return false;
     }
-    const { fresh, current } = freshAlerts(this.alertKinds, data);
+    const found = freshAlerts(this.alertKinds, data);
+    const { fresh } = found;
+    let current = found.current;
+    // Önce gösterilir: gösterilemeyen yeni uyarı "bildirildi" sayılmaz, sonraki yoklamada yeniden denenir.
+    const shown =
+      fresh.length > 0 &&
+      this.showSafely(
+        { ...this.deps.text("deliveryAlert"), url: "/compliance" },
+        `alert:${fresh.join(",")}`,
+      );
+    if (fresh.length > 0 && !shown)
+      current = new Set([...current].filter((s) => !fresh.includes(s)));
     const changed =
       current.size !== this.alertKinds.size || [...current].some((s) => !this.alertKinds.has(s));
     this.alertKinds = current;
@@ -242,9 +278,7 @@ export class NotificationPoller {
         this.deps.log(`uyarı imzaları yazılamadı: ${(e as Error).message}`);
       }
     }
-    if (fresh.length === 0) return false;
-    this.deps.show({ ...this.deps.text("deliveryAlert"), url: "/compliance" });
-    return true;
+    return shown;
   }
 }
 

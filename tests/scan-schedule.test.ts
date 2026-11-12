@@ -28,6 +28,7 @@ import {
   scheduleSummary,
   scheduleTick,
   SCHEDULE_TICK_JOB,
+  TICK_STALL_MS,
 } from "@/lib/scan/schedule";
 import { createScheduleFromScan, getSchedule, updateSchedule } from "@/lib/scan/schedule-service";
 import { createAndStartScan, pauseScan, resumeScan } from "@/lib/scan/service";
@@ -562,8 +563,29 @@ describe("HTTP: /api/schedules", () => {
 
   it("durum: zamanlama özeti", async () => {
     const { nextRunAt } = await makeSchedule(7);
-    expect(await scheduleSummary(db, nextRunAt - 1)).toEqual({ total: 1, due: 0, nextRunAt });
+    await db.delete(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+    expect(await scheduleSummary(db, nextRunAt - 1)).toEqual({
+      total: 1,
+      due: 0,
+      nextRunAt,
+      tickArmed: false,
+      stalled: false,
+    });
     expect((await scheduleSummary(db, nextRunAt)).due).toBe(1);
+    // Son denetim: zamanı gelmiş zamanlama 10 dk'dan uzun süredir tick'siz bekliyorsa zincir kopuk görünür.
+    expect(await scheduleSummary(db, nextRunAt + TICK_STALL_MS - 1)).toMatchObject({
+      stalled: false,
+    });
+    expect(await scheduleSummary(db, nextRunAt + TICK_STALL_MS)).toMatchObject({
+      due: 1,
+      tickArmed: false,
+      stalled: true,
+    });
+    await scheduleTick(db, { runAt: nextRunAt + TICK_STALL_MS, now: nextRunAt });
+    expect(await scheduleSummary(db, nextRunAt + TICK_STALL_MS)).toMatchObject({
+      tickArmed: true,
+      stalled: false,
+    });
     const st = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
     expect(st.schedules).toMatchObject({ total: 1 });
   });

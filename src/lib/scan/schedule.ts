@@ -529,11 +529,24 @@ export async function scheduleTick(
   });
 }
 
-/** Durum özeti (GET /api/status): zamanı gelmiş etkin zamanlama sayısı ve en yakın çalışma. */
+/** Zamanı gelmiş zamanlama, kuyrukta/çalışan tick olmadan bu kadar beklerse zincir kopmuş sayılır. */
+export const TICK_STALL_MS = 10 * 60_000;
+
+/**
+ * Durum özeti (GET /api/status): zamanı gelmiş etkin zamanlama sayısı ve en yakın çalışma. `tickArmed`: kuyrukta ya da
+ * çalışan tick işi var mı; `stalled`: zamanı gelmiş zamanlama `TICK_STALL_MS`'den uzun süredir bekliyor ve tick zinciri
+ * kopuk (bakım turu yeniden kurana kadar zamanlamalar çalışmaz; işçi yeniden başlatılınca zincir kurulur).
+ */
 export async function scheduleSummary(
   db: Db,
   now: number,
-): Promise<{ total: number; due: number; nextRunAt: number | null }> {
+): Promise<{
+  total: number;
+  due: number;
+  nextRunAt: number | null;
+  tickArmed: boolean;
+  stalled: boolean;
+}> {
   const r = await db
     .select({
       total: sql<number>`count(*)`,
@@ -542,9 +555,19 @@ export async function scheduleSummary(
     })
     .from(scanSchedules)
     .where(eq(scanSchedules.enabled, true));
+  const tick = await db
+    .select({ id: jobs.id })
+    .from(jobs)
+    .where(and(eq(jobs.type, SCHEDULE_TICK_JOB), inArray(jobs.status, ["queued", "running"])))
+    .limit(1);
+  const due = Number(r[0]?.due ?? 0);
+  const nextRunAt = r[0]?.next === null || r[0]?.next === undefined ? null : Number(r[0].next);
+  const tickArmed = tick.length > 0;
   return {
     total: Number(r[0]?.total ?? 0),
-    due: Number(r[0]?.due ?? 0),
-    nextRunAt: r[0]?.next === null || r[0]?.next === undefined ? null : Number(r[0].next),
+    due,
+    nextRunAt,
+    tickArmed,
+    stalled: due > 0 && !tickArmed && nextRunAt !== null && nextRunAt <= now - TICK_STALL_MS,
   };
 }

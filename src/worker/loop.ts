@@ -220,8 +220,9 @@ export class Worker {
     return true;
   }
 
-  async run(): Promise<void> {
-    await this.recover();
+  /** `recover: false`: çağıran `recover()`'ı zaten çalıştırdı (işçi açılışı, bakım turundan önce). */
+  async run(opts: { recover?: boolean } = {}): Promise<void> {
+    if (opts.recover !== false) await this.recover();
     this.log("işçi başladı");
     while (!this.stopping) {
       let worked = false;
