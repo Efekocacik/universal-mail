@@ -110,6 +110,8 @@ export async function budgetStatus(
 export interface SpendCheck {
   ok: boolean;
   projectedUsd: number;
+  /** Bu çağrıların bu ayki ücretsiz kotadan sonra getireceği ek maliyet (USD). */
+  addUsd: number;
   reason?: string;
 }
 
@@ -132,10 +134,11 @@ export async function canSpend(
     return {
       ok: false,
       projectedUsd,
+      addUsd: add,
       reason: `Aylık bütçe sınırına ulaşıldı (tahmini ${projectedUsd.toFixed(2)} / ${monthlyUsd.toFixed(2)} USD).`,
     };
   }
-  return { ok: true, projectedUsd };
+  return { ok: true, projectedUsd, addUsd: add };
 }
 
 export function skuName(sku: string): string {

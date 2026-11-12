@@ -33,6 +33,7 @@ import {
   type ScanEstimate,
 } from "./planner";
 import { ACTIVE_SCAN_MESSAGE, ScanGateError } from "./gate-error";
+import { COST_CAP } from "./pause-codes";
 import { insertUnits, loadScan, setScanStatus } from "./store";
 
 export { PlanError };
@@ -159,6 +160,8 @@ export interface StartScanOptions {
   priority?: number;
   /** Bilinen bölge (zamanlama); verilmezse ad + geometriyle bulunur/oluşturulur. */
   regionId?: number;
+  /** Zamanlanmış tarama: onaylı toplam maliyet tavanı (USD); `estimate.costCapUsd` olarak saklanır. */
+  costCapUsd?: number | null;
 }
 
 /**
@@ -188,7 +191,10 @@ export async function insertPreparedScan(
       fieldProfile: p.input.fieldProfile,
       provider: p.provider,
       status: "queued",
-      estimate: p.estimate,
+      estimate:
+        origin === "schedule" && typeof opts.costCapUsd === "number"
+          ? { ...p.estimate, costCapUsd: opts.costCapUsd }
+          : p.estimate,
       progress: { unitsTotal: p.units.length, unitsDone: 0, placesFound: 0, callsTotal: 0 },
       createdAt: now,
       origin,
@@ -282,6 +288,15 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
       error:
         "Aylık bütçe sınırına ulaşıldı. Ayarlar'dan bütçeyi artırın veya gelecek ayı bekleyin.",
     };
+  }
+  // Onaylı maliyet tavanında duran zamanlanmış taramayı kullanıcı ELLE sürdürüyorsa bu açık bir onaydır: tavan kalkar
+  // (tarama elle başlatılmış gibi sürer; güvenlik çağrı sınırı ve aylık bütçe yine geçerlidir).
+  if (scan.pauseCode === COST_CAP && scan.estimate && typeof scan.estimate === "object") {
+    await db
+      .update(scans)
+      .set({ estimate: { ...(scan.estimate as object), costCapUsd: null } })
+      .where(eq(scans.id, scanId));
+    await audit(db, "scan.cost_cap_lifted", "scan", scanId, {});
   }
   await setScanStatus(db, scanId, "queued");
   await enqueueScanJob(db, scanId);

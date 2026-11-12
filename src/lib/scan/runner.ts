@@ -13,7 +13,13 @@ import type { PlacesProvider, SearchResult } from "@/lib/places/provider";
 import { typeToQuery } from "@/lib/places/provider";
 import { chunk, errorMessage, sleep as defaultSleep } from "@/lib/util";
 import { recomputeNovelty } from "./novelty-sync";
-import { APP_STOPPED, BUDGET_STOP_CODE, CALL_LIMIT, providerPauseCode } from "./pause-codes";
+import {
+  APP_STOPPED,
+  BUDGET_STOP_CODE,
+  CALL_LIMIT,
+  COST_CAP,
+  providerPauseCode,
+} from "./pause-codes";
 import { onScanCompleted, onScanFailed, onScanPaused } from "./scan-notifications";
 import { canSubdivide } from "./planner";
 import {
@@ -57,6 +63,8 @@ interface RunState {
   /** Faz 4: FUTURE_OPENING → OPERATIONAL geçişi görülen yer sayısı (persistPlaces().openedIds). */
   openedPlaces: number;
   maxCalls: number;
+  /** Zamanlanmış taramanın onaylı toplam maliyet tavanı (`readCostCap`); yoksa null. */
+  costCapUsd: number | null;
   regionCountry: string | null;
 }
 
@@ -67,6 +75,18 @@ export { APP_STOPPED, INTERRUPTED } from "./pause-codes";
 function readMaxCalls(scan: ScanRow): number {
   const est = scan.estimate as { maxCalls?: number } | null;
   return typeof est?.maxCalls === "number" ? est.maxCalls : 5000;
+}
+
+/**
+ * Zamanlanmış taramanın onaylı TOPLAM maliyet tavanı (USD) ya da `null`. Tavan tarama oluşturulurken yazılır
+ * (schedule.ts `runSchedule`) ve tüm çalıştırmalarda `scans.cost_usd` (birikimli) ile karşılaştırılır: geçici hatadan,
+ * uygulama kapanışından veya bütçe yenilenmesinden sonraki kendiliğinden sürdürmeler (`effectiveMaxCalls` her seferinde
+ * yeni çağrı payı verir) onaylanan tutarı AŞAMAZ. Elle başlatılan taramada tavan yoktur.
+ */
+export function readCostCap(scan: Pick<ScanRow, "origin" | "estimate">): number | null {
+  if (scan.origin !== "schedule") return null;
+  const cap = (scan.estimate as { costCapUsd?: unknown } | null)?.costCapUsd;
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
 }
 
 /**
@@ -114,6 +134,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     newPlaces: 0,
     openedPlaces: scan.progress?.openedPlaces ?? 0,
     maxCalls: 0,
+    costCapUsd: readCostCap(scan),
     regionCountry:
       (
         await db
@@ -215,6 +236,16 @@ async function runUnit(
       });
       await onScanPaused(db, scan.id, now(), log);
       return "budget_stopped";
+    }
+    // Zamanlanmış tarama: bir sonraki ücretli çağrı onaylı toplam tutarı aşacaksa çağrı YAPILMAZ.
+    if (state.costCapUsd !== null && state.costUsd + spend.addUsd > state.costCapUsd + 1e-9) {
+      await requeue();
+      await setScanStatus(db, scan.id, "paused", {
+        pauseReason: `Bu zamanlanmış tarama onayladığınız ${state.costCapUsd.toFixed(2)} USD tutarına ulaştı. Devam etmek için taramayı sürdürün; sürdürürseniz bu tavan bu tarama için kalkar.`,
+        pauseCode: COST_CAP,
+      });
+      await onScanPaused(db, scan.id, now(), log);
+      return "paused";
     }
 
     let res: SearchResult;

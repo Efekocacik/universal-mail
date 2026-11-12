@@ -337,6 +337,17 @@ async function handleOwnRun(
 }
 
 /**
+ * Zamanlanmış taramanın onaylı TOPLAM maliyet tavanı: zamanlamanın önceden onaylanan tutarı (`ack_max_usd`) ile bu
+ * çalışmanın yüksek tahmininin büyüğü. Arka plan çalışmasında kapı "yüksek tahmin ≤ ack_max_usd" denetlediği için bu
+ * `ack_max_usd`'dir; "Şimdi çalıştır"da kullanıcı yüksek tahmini ekranda görüp onaylamıştır. Çalıştırıcı, tüm
+ * kendiliğinden sürdürmeler dahil taramanın bunu aşmasına izin vermez (runner.ts `readCostCap`).
+ */
+export function approvedCostCap(ackMaxUsd: number | null, highUsd: number): number {
+  // Sente yukarı yuvarlanır: tavan, kullanıcının gördüğü yüksek tahminin altına asla inmez.
+  return Math.ceil(Math.max(ackMaxUsd ?? 0, highUsd) * 100 - 1e-9) / 100;
+}
+
+/**
  * Tek zamanlamayı bu an için çalıştırır (CAS + tarama oluşturma tek işlemde). `expectedNextRunAt` CAS değeridir.
  * Etkileşimli ("Şimdi çalıştır") çağrıda `slot = now` kullanılır ve `acknowledgeRisk` geçerlidir.
  */
@@ -390,6 +401,7 @@ export async function runSchedule(
           scheduleSlot: slot,
           priority: 5,
           regionId: s.regionId,
+          costCapUsd: approvedCostCap(s.ackMaxUsd, ev.prepared.estimate.costUsd.high),
         },
         now,
       );

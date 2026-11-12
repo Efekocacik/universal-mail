@@ -11,9 +11,12 @@ import { auditLog, categorySets, jobs, notifications, scanSchedules, scans } fro
 import { PlacesApiError } from "@/lib/places/errors";
 import { renderNotification } from "@/lib/notifications/render";
 import { MockPlacesProvider } from "@/lib/places/mock";
+import type { SkuId } from "@/lib/domain/types";
+import { marginalCostUsd, SKU_PRICING } from "@/lib/places/pricing";
 import type { PlacesProvider } from "@/lib/places/provider";
-import { runScan, type RunnerDeps } from "@/lib/scan/runner";
+import { readCostCap, runScan, type RunnerDeps } from "@/lib/scan/runner";
 import {
+  approvedCostCap,
   computeDue,
   DAY_MS,
   nextRunAfter,
@@ -25,7 +28,7 @@ import {
   SCHEDULE_TICK_JOB,
 } from "@/lib/scan/schedule";
 import { createScheduleFromScan, getSchedule } from "@/lib/scan/schedule-service";
-import { createAndStartScan, pauseScan } from "@/lib/scan/service";
+import { createAndStartScan, pauseScan, resumeScan } from "@/lib/scan/service";
 import { setSecret } from "@/lib/secrets/store";
 import { getSetting, setSetting } from "@/lib/settings";
 import { createTestDb, type TestDb } from "./helpers/db";
@@ -604,6 +607,82 @@ describe("kendi kendine duran zamanlanmış tarama zamanlamayı kilitlemez (ince
     await setSetting(db, "budget.monthlyUsd", 1000);
     const [r] = await runDueSchedules(db, { now: t2 + DAY_MS });
     expect(r).toMatchObject({ outcome: "resumed", scanId });
+  });
+
+  it("H: kendiliğinden sürdürmeler onaylı toplam maliyeti aşamaz; elle sürdürme tavanı kaldırır", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    const t1 = nextRunAt + 5;
+    const [first] = await runDueSchedules(db, { now: t1 });
+    const scanId = (first as { scanId: number }).scanId;
+    const [created] = await db.select().from(scans).where(eq(scans.id, scanId));
+    const est = created!.estimate as { sku: SkuId; costUsd: { high: number }; costCapUsd: number };
+    const sched = await getSchedule(db, id);
+    // Tavan tarama oluşturulurken yazılır: onaylı tutar ile yüksek tahminin büyüğü.
+    expect(est.costCapUsd).toBe(approvedCostCap(sched.ackMaxUsd, est.costUsd.high));
+    expect(est.costCapUsd).toBeGreaterThanOrEqual(est.costUsd.high);
+
+    // Ücretsiz kota bu ay bitmiş: her çağrı ücretli. Tahminin üstüne çıkan bir taramayı taklit etmek için tavanı
+    // yaklaşık iki çağrılık tutara indiriyoruz; tarama ise her ikinci çağrıda geçici ağ hatası alıp kendiliğinden sürer.
+    const free = SKU_PRICING[est.sku].freeMonthly;
+    await recordUsage(db, "mock", est.sku, free, t1); // ücretsiz kota içinde: maliyet 0, bütçe etkilenmez
+    const perCall = marginalCostUsd(est.sku, free, 1);
+    expect(perCall).toBeGreaterThan(0);
+    const cap = Math.round(perCall * 2.5 * 10_000) / 10_000;
+    await db
+      .update(scans)
+      .set({ estimate: { ...est, costCapUsd: cap } })
+      .where(eq(scans.id, scanId));
+    const inner = new MockPlacesProvider({ getEpoch: () => 1 });
+    let n = 0;
+    const everyOtherFails = Object.assign(Object.create(inner) as PlacesProvider, {
+      searchText: async (r: Parameters<PlacesProvider["searchText"]>[0]) => {
+        if (n++ % 2 === 1) throw new PlacesApiError("network", "Ağ hatası (test)");
+        return inner.searchText(r);
+      },
+    });
+
+    let now = t1;
+    let outcome = await runScan(runnerDeps(everyOtherFails, now), scanId);
+    for (let i = 0; i < 30 && outcome === "paused"; i++) {
+      const [row] = await db.select().from(scans).where(eq(scans.id, scanId));
+      if (row!.pauseCode !== "PROVIDER_NETWORK") break;
+      now += 3_600_000;
+      const [r] = await runDueSchedules(db, { now });
+      expect(r).toMatchObject({ outcome: "resumed", scanId });
+      outcome = await runScan(runnerDeps(everyOtherFails, now), scanId);
+    }
+    const [stopped] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect(stopped).toMatchObject({ status: "paused", pauseCode: "COST_CAP" });
+    // Birikimli maliyet tavanı aşmaz (kendiliğinden sürdürmelerin hepsi dahil) ve tavana bir çağrı yakındır.
+    expect(stopped!.costUsd).toBeLessThanOrEqual(cap + 1e-9);
+    expect(stopped!.costUsd).toBeGreaterThan(cap - perCall - 1e-9);
+    expect(stopped!.pauseReason).toContain(cap.toFixed(2));
+    // Tavan kendiliğinden sürdürülmez: zamanlama kullanıcıya sorar.
+    expect(await getSchedule(db, id)).toMatchObject({ lastSkipCode: "SCAN_PAUSED" });
+    const [again] = await runDueSchedules(db, { now: now + DAY_MS });
+    expect(again).toMatchObject({ outcome: "skipped", code: "SCAN_PAUSED" });
+    expect((await db.select().from(scans).where(eq(scans.id, scanId)))[0]!.status).toBe("paused");
+
+    // Kullanıcının elle "Devam et"i açık onaydır: tavan bu tarama için kalkar ve tarama biter.
+    expect(await resumeScan(db, scanId)).toEqual({ ok: true });
+    const [lifted] = await db.select().from(scans).where(eq(scans.id, scanId));
+    expect((lifted!.estimate as { costCapUsd: unknown }).costCapUsd).toBeNull();
+    expect((await db.select().from(auditLog)).map((a) => a.action)).toContain(
+      "scan.cost_cap_lifted",
+    );
+    expect(await runScan(runnerDeps(flaky(0), now + DAY_MS), scanId)).toBe("completed");
+  });
+
+  it("H: tavan yalnızca zamanlanmış taramada geçerlidir; elle başlatılan taramada yoktur", async () => {
+    const manual = await finishedScan();
+    const [m] = await db.select().from(scans).where(eq(scans.id, manual));
+    expect((m!.estimate as { costCapUsd?: unknown }).costCapUsd).toBeUndefined();
+    expect(readCostCap(m!)).toBeNull();
+    expect(readCostCap({ origin: "schedule", estimate: { costCapUsd: 2.5 } })).toBe(2.5);
+    expect(readCostCap({ origin: "schedule", estimate: { costCapUsd: null } })).toBeNull();
+    expect(readCostCap({ origin: "manual", estimate: { costCapUsd: 2.5 } })).toBeNull();
+    expect(approvedCostCap(null, 1.234)).toBe(1.24);
+    expect(approvedCostCap(5, 1.2)).toBe(5);
   });
 
   it("kullanıcı duraklattıysa kendiliğinden sürmez: SCAN_PAUSED, günde bir hatırlatma", async () => {

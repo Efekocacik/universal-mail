@@ -8,6 +8,8 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
  *  pause_code            neden                                   zamanlanmış taramada kendiliğinden sürer mi?
  *  null                  kullanıcı duraklattı (veya eski kayıt)  hayır (kullanıcının kararı)
  *  CALL_LIMIT            güvenlik çağrı sınırı aşıldı            hayır (maliyet kontrolü; kullanıcı onaylar)
+ *  COST_CAP              zamanlanmış taramanın onaylı toplam      hayır (kullanıcı sürdürürse tavan kalkar)
+ *                        maliyet tavanına ulaşıldı
  *  APP_STOPPED           uygulama kapanırken güvenle duraklatıldı evet
  *  INTERRUPTED           işçi beklenmedik şekilde durdu          evet
  *  PROVIDER_QUOTA|RATE|NETWORK|SERVER  geçici Google hatası       evet (bir saat sonra yeniden denenir)
@@ -16,6 +18,8 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
 export const APP_STOPPED = "APP_STOPPED";
 export const INTERRUPTED = "INTERRUPTED";
 export const CALL_LIMIT = "CALL_LIMIT";
+/** Zamanlanmış taramanın onaylı toplam maliyet tavanı (`estimate.costCapUsd`) doldu; tüm sürdürmeler dahil. */
+export const COST_CAP = "COST_CAP";
 export const BUDGET_STOP_CODE = "BUDGET_BLOCKED";
 
 export function providerPauseCode(kind: PlacesErrorKind): string {
