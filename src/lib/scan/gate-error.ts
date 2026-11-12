@@ -18,7 +18,16 @@ export const GATE_HTTP_STATUS: Record<GateCode, number> = {
   ACTIVE_SCAN: 409,
 };
 
-export type GateFailure = { ok: false; code: GateCode; message: string };
+/**
+ * `fields`: yanıt gövdesine eklenen yapılandırılmış sayılar (ör. NEEDS_ACK `highUsd`/`remainingUsd`); istemci yerelleştirilmiş
+ * metni bunlarla kurar (apiError.NEEDS_ACK.detail). Yalnızca o metnin tüm yer tutucuları varsa doldurulur.
+ */
+export type GateFailure = {
+  ok: false;
+  code: GateCode;
+  message: string;
+  fields?: Record<string, number>;
+};
 export type GateResult<T = object> = ({ ok: true } & T) | GateFailure;
 
 /** Kapı hatası; kütüphane içinde fırlatılır (ör. işlem içindeki ACTIVE_SCAN), uçta HttpError'a çevrilir. */

@@ -24,7 +24,7 @@ Canlıya geçiş hazırlık paketlerinin hepsi `feat/golive-prep` dalında birle
 | **[GELEN]** | Gerçek Gmail gelen kutusu işi (`inbox.sync`), okuma izni verilmiş kutular için. Başlık güveni kapalıyken iletiler `no_attestation` ile saklanır, etki otomatik uygulanmaz | C6 | Kodlandı; **okuma kilidi açık**, başlık güveni kapalı |
 | **[BELİRSİZ]** | "Belirsiz" (`unknown`) sonuçlu gönderimi elle çözme: **Kampanyalar → İnceleme bekleyenler** | C7 | Kodlandı |
 
-Hâlâ açık olanlar: imzalı macOS sürümü (C5c), Gmail başlık güveni (`09` Bölüm 1.3), işletim sistemi/e-posta uyarı bildirimi (uyarılar yalnızca uygulama içinde görünür; `08` TB-4), aktarıcının gerçek dağıtımı, ülke kilidinin açılması ve **bu belgedeki canlı testlerin tamamı**.
+Hâlâ açık olanlar: imzalı macOS sürümü (C5c), Gmail başlık güveni (`09` Bölüm 1.3), uygulama kapalıyken e-posta/push uyarısı (uygulama açıkken işletim sistemi bildirimi Faz 4'te eklendi, Bölüm 6.2; `08` TB-4), aktarıcının gerçek dağıtımı, ülke kilidinin açılması ve **bu belgedeki canlı testlerin tamamı**.
 
 ## 1. Şirket girdileri (26 madde)
 
@@ -189,7 +189,7 @@ Gerçek Gmail ile tek tıklamalı çıkış denemesi bu aşamada **yapılmaz**; 
 | Uç nokta kanıtı 30 günde düşer; başarısız yeniden doğrulama kanıtı hemen düşürür | Canlı gönderim için çıkış bağlantısı hazırlanamaz ve gönderim durur | Düzenli çekme açıkken 25. günde kendiliğinden yeniden doğrulama (başarısızsa saatte bir); kampanya/uyum sayfalarında uyarı bandı (bitiyor, bitti, doğrulanamadı). Uygulama kapalıysa elle **Doğrula** |
 | Düzenli çekme kapalı veya çalışmıyor | Çıkış talepleri aktarıcıda birikir, uygulamaya ulaşmaz | Canlı **kampanya** gönderimi kendiliğinden ERTELENİR (`unsubscribe_drain_unhealthy`; dizi dışlanmaz, başarısız sayılmaz, 15 dk sonra yeniden denenir): çekme açık VE son 24 saatte sağlıklı kuyruk kaydı yoksa gönderim yok. Hazırlık ekranında "teslimat" maddesi çekme kapalıyken engel. Sağlık kaydı 24 saatten eskiyse uyarı bandı; Aşama 2/10 |
 | Aynı işletmeye birden fazla adresle yazılması | Alıcı aynı firmaya sales@ ve info@ üzerinden birden çok kez ileti alır | **C8:** işletme (lead kaydı veya kayıtlı alan adı) başına kampanyada tek dizi (`business_already_in_campaign`, dağıtıcı dışlar) ve başka kampanyadaki temastan sonra adres sınırlarıyla aynı bekleme (`business_contact_cooldown`, dağıtıcı erteler); ekleme ve başlatma özeti bunu sayar. Bilinçli sınırlar: `08` TB-11 |
-| Uyarılar yalnızca uygulama içinde | Uygulama açılmadıkça uyarı görülmez | E-posta/push veya işletim sistemi bildirimi açık iş (`08` TB-4) |
+| Uyarılar yalnızca uygulama içinde | Uygulama kapalıyken uyarı görülmez | **Faz 4 (TB-4, kısmen kapandı):** masaüstü uygulaması AÇIKKEN (simge durumunda veya arka planda da) yeni çıkış teslimat uyarısı için işletim sistemi bildirimi gösterilir (Bölüm 6.2). Uygulama tamamen kapalıyken e-posta/push uyarısı hâlâ yok |
 
 ### 5.1 Gizli bilgiler sıfırlandıysa (ana anahtar penceresinde "Gizli bilgileri sıfırla…" seçildiyse)
 
@@ -201,3 +201,33 @@ Sıfırlama `secrets.json` dosyasını yedeğe alır; içindeki **imza ve kanal 
 4. **Doğrula** → "Uç nokta doğrulandı." (bekleyen talepler bu sırada çekilir ve işlenir).
 5. **Kuyruğu denetle** → "Kuyruk sağlıklı."
 6. Places/Maps/Hunter anahtarlarını ve OAuth istemci sırrını yeniden girin; Gmail kutusunu yeniden bağlayın.
+
+## 6. Faz 4 — arayüz, dil ve masaüstü (Paket D)
+
+Bu bölümdeki her şey **ŞİMDİ** kullanılabilir; gönderim kapılarına dokunmaz.
+
+### 6.1 Görünüm ve dil (Ayarlar → Görünüm ve dil)
+
+- **Arayüz dili:** Türkçe (varsayılan) veya English. Seçim anında uygulanır, bu bilgisayarda hatırlanır; masaüstü menüleri ve uygulama pencereleri de aynı dile geçer. Kurulum sihirbazının üstünde de dil seçici vardır (sihirbazda yazılmış ama henüz kaydedilmemiş bilgiler ve bulunulan adım dil değişince korunur). Ayarlar sayfasında kaydedilmemiş bir değişiklik varken dil değiştirilmek istenirse önce onay sorulur (dil değişince ekranlar yeniden yüklenir). Google bağlantı sonucu sayfası (sistem tarayıcısında açılan) da seçili dilde gösterilir. Alıcıya giden e-postaların dili bundan **bağımsızdır** (şablon dili, alıcının ülkesine göre).
+- **Tema:** Sistem (bilgisayarın açık/koyu ayarını izler), Açık, Koyu.
+- **Koyu harita (açık iş, şirket hesabı gerekir):** koyu temada harita kontrolleri koyulaşır; ancak Google harita karolarının gerçekten koyu çizilmesi için Google Cloud'da **vektör tipinde bir Map ID** ve buna bağlı koyu bir **harita stili** gerekir (Google Cloud → Google Maps Platform → Harita Yönetimi → Map ID oluştur → "JavaScript, Vektör"; stil olarak açık ve koyu varyantı olan bir stil bağlayın). Oluşan kısa kodu Ayarlar → Google bağlantısı → Gelişmiş: Harita Kimliği alanına yazın. Bu alan artık yazarken denetlenir: e-posta, boşluk, nokta veya `/` içeren değer kaydedilemez. Gerçek anahtar ve Map ID olmadan bu adım doğrulanamadı.
+
+### 6.2 Masaüstü bildirimleri (Ayarlar → Görünüm ve dil → Masaüstü uygulaması)
+
+- **Masaüstü bildirimleri** (`notifications.os`, varsayılan açık): tarama bitti, yanıt geldi, gönderim sorunu gibi bildirimler uygulama arka plandayken de ekranın köşesinde görünür; tıklayınca ilgili sayfa açılır. Bir bildirim yalnızca **bir kez** gösterilir; aynı anda üçten fazlası tek özet olarak gelir. Kapatılırsa işletim sistemi bildirimi gösterilmez; yeni bildirim uygulama içinde kısa bir uyarı ve üst çubuktaki zil ile duyurulur.
+- **Çıkış teslimat uyarısı (TB-4):** çıkış talepleri çekilemiyorsa, uç nokta doğrulaması bitiyor/bittiyse veya doğrulanamadıysa uygulama açıkken **yeni** beliren uyarı için bir kez işletim sistemi bildirimi gösterilir (Uyum sayfasına götürür). Bildirilmiş uyarılar kullanıcı veri klasöründe (`notified-alerts.json`) tutulur: süren bir uyarı ne her yoklamada ne de her açılışta tekrarlanır; uyarı kapanıp yeniden belirirse yine bir kez bildirilir.
+- **Windows:** bildirimlerin görünmesi için uygulama kimliği `com.universalmail.app` olarak ayarlanır; Windows "Odak yardımı / Rahatsız etmeyin" açıksa bildirimler Bildirim Merkezi'ne düşer.
+- **macOS:** ilk bildirimde sistem izin sorabilir; Sistem Ayarları → Bildirimler → Universal Mail'den açılır.
+- **Uykudan uyanma:** bilgisayar uykudan çıkınca işçi hemen uyandırılır (`{type:'wake'}`) ve bildirimler hemen yoklanır; bekleyen zamanlanmış işler gecikmeden çalışır.
+- **Entegrasyon denetim listesi (Paket B ile birleşince doğrulanacak):**
+  1. İşçi (`src/worker/index.ts`) ana süreçten gelen `{type:'wake'}` iletisini işlemeli (hemen zamanlayıcı turu + gönderici uyandırma). Paket D yalnızca gönderir; işlenmezse uyanma sonrası işler bir sonraki normal tura (en çok birkaç dakika) kalır.
+  2. İşçi yeni bir bildirim eklediğinde ana sürece `{type:'notify'}` göndermeli (ortak sözleşmeye eklenen ileti: işçi → ana süreç). Ana süreç bunu alınca hemen `os-claim` yoklar. Gönderilmezse işletim sistemi bildirimi en çok 30 sn gecikir (düzenli yoklama), kaybolmaz.
+  3. `POST /api/notifications/os-claim`, `GET /api/notifications`, `POST /api/notifications/read` ve `/api/status` `unreadNotifications` alanı Paket B'den gelir; gelene kadar zil "henüz etkin değil" der, işletim sistemi bildirimi sessizce bekler.
+
+### 6.3 Oturum açılınca başlat
+
+Ayarlar → Görünüm ve dil → Masaüstü uygulaması → **Bilgisayar açılınca başlat** (varsayılan kapalı). Yalnızca paketlenmiş uygulamada, macOS ve Windows'ta uygulanır; geliştirme sürümünde ve Linux'ta anahtar gösterilmez. Uygulamanın ayarı esastır: uygulama macOS Oturum Öğeleri'nden veya Windows Başlangıç listesinden kaldırılmışsa ya da kayıt kaybolmuşsa, ayar açıkken uygulama bir sonraki açılışta kendini yeniden ekler. Kapatmak için bu anahtarı kullanın. Düzenli çekme ve kampanya gönderimi uygulamanın açık olmasına bağlı olduğundan, gönderim yapılan bilgisayarda açılması önerilir.
+
+### 6.4 Günlük dosyaları
+
+`app.log` (ana süreç, sunucu ve işçi çıktısı) 5 MB'ı geçince döndürülür (`.1`, `.2`; en eski silinir). Döndürme açılışta ve uygulama açıkken 10 dakikada bir yapılır; bir hafta açık kalan uygulama diski doldurmaz.

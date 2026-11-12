@@ -15,6 +15,8 @@ import {
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { Toaster, toast } from "sonner";
+import { LanguageSwitch } from "@/components/appearance-controls";
+import { useResolvedTheme } from "@/components/providers";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -22,10 +24,12 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
-import { api } from "@/lib/client/api";
-import { qk, useCountries, useSettings } from "@/lib/client/queries";
+import { api, errorText } from "@/lib/client/api";
+import { readCarried, useCarryOver } from "@/lib/client/locale-switch";
+import { qk, useConfig, useCountries, useSettings } from "@/lib/client/queries";
 import type { CompanyProfile } from "@/lib/client/types";
-import { t } from "@/lib/i18n";
+import { getLocale, t } from "@/lib/i18n";
+import { mapIdProblem } from "@/lib/settings/map-id";
 import {
   companyPayload,
   isCompanyStepValid,
@@ -125,26 +129,65 @@ function Why({ children }: { children: string }) {
   );
 }
 
+const WIZARD_DRAFT_ID = "setup-wizard";
+interface WizardDraft {
+  index: number | null;
+  accepted: boolean;
+  signer: { name: string; title: string };
+  company: CompanyProfile;
+  selected: string[];
+  filter: string;
+  provider: "google" | "mock";
+  placesKey: string;
+  mapsKey: string;
+  mapId: string;
+  keyTest: { ok: boolean; message: string } | null;
+  budget: string;
+  touched: Record<string, boolean>;
+}
+
 export function SetupWizard() {
   const router = useRouter();
   const qc = useQueryClient();
   const { data, isLoading } = useSettings();
   const { data: countries } = useCountries();
-  const [index, setIndex] = useState<number | null>(null);
+  const { data: config } = useConfig();
+  const theme = useResolvedTheme();
+  // Dil değişince (başlıktaki seçici) arayüz yeniden kurulur; yazılmış ama henüz kaydedilmemiş alanlar ve bulunulan
+  // adım kaybolmasın diye taslak yeni örneğe taşınır (src/lib/client/locale-switch.ts).
+  const [carried] = useState(() => readCarried<WizardDraft>(WIZARD_DRAFT_ID));
+  const [index, setIndex] = useState<number | null>(carried?.index ?? null);
 
   // Form durumları
-  const [accepted, setAccepted] = useState(false);
-  const [signer, setSigner] = useState({ name: "", title: "" });
-  const [company, setCompany] = useState<CompanyProfile>(EMPTY_COMPANY);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [filter, setFilter] = useState("");
-  const [provider, setProvider] = useState<"google" | "mock">("google");
-  const [placesKey, setPlacesKey] = useState("");
-  const [mapsKey, setMapsKey] = useState("");
-  const [mapId, setMapId] = useState("");
-  const [keyTest, setKeyTest] = useState<{ ok: boolean; message: string } | null>(null);
-  const [budget, setBudget] = useState("30");
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [accepted, setAccepted] = useState(carried?.accepted ?? false);
+  const [signer, setSigner] = useState(carried?.signer ?? { name: "", title: "" });
+  const [company, setCompany] = useState<CompanyProfile>(carried?.company ?? EMPTY_COMPANY);
+  const [selected, setSelected] = useState<string[]>(carried?.selected ?? []);
+  const [filter, setFilter] = useState(carried?.filter ?? "");
+  const [provider, setProvider] = useState<"google" | "mock">(carried?.provider ?? "google");
+  const [placesKey, setPlacesKey] = useState(carried?.placesKey ?? "");
+  const [mapsKey, setMapsKey] = useState(carried?.mapsKey ?? "");
+  const [mapId, setMapId] = useState(carried?.mapId ?? "");
+  const [keyTest, setKeyTest] = useState<{ ok: boolean; message: string } | null>(
+    carried?.keyTest ?? null,
+  );
+  const [budget, setBudget] = useState(carried?.budget ?? "30");
+  const [touched, setTouched] = useState<Record<string, boolean>>(carried?.touched ?? {});
+  useCarryOver<WizardDraft>(WIZARD_DRAFT_ID, {
+    index,
+    accepted,
+    signer,
+    company,
+    selected,
+    filter,
+    provider,
+    placesKey,
+    mapsKey,
+    mapId,
+    keyTest,
+    budget,
+    touched,
+  });
   const touch = (k: string) => setTouched((o) => (o[k] ? o : { ...o, [k]: true }));
 
   // Kaldığı yerden devam: ilk eksik adımı bul.
@@ -202,7 +245,7 @@ export function SetupWizard() {
       router.replace("/");
       router.refresh();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
 
   const countryList = useMemo(
@@ -236,6 +279,8 @@ export function SetupWizard() {
         : null;
   const err = (k: string, v: string, n: number) => (touched[k] ? minErr(v, n) : null);
   const keyShort = placesKey.trim().length > 0 && placesKey.trim().length < 8;
+  // Harita Kimliği satır içi doğrulama (sunucuyla aynı kural: src/lib/settings/map-id.ts).
+  const mapIdErr = provider === "google" ? mapIdProblem(mapId) : null;
 
   const next = async () => {
     try {
@@ -246,7 +291,10 @@ export function SetupWizard() {
       } else if (step === "markets") {
         await saveSettings.mutateAsync({ "targets.countries": selected });
       } else if (step === "google") {
-        await saveSettings.mutateAsync({ "places.provider": provider, "maps.mapId": mapId.trim() });
+        await saveSettings.mutateAsync({
+          "places.provider": provider,
+          ...(mapIdProblem(mapId) ? {} : { "maps.mapId": mapId.trim() }),
+        });
         if (provider === "google") {
           if (placesKey.trim())
             await saveSecret.mutateAsync({ name: "google.placesKey", value: placesKey.trim() });
@@ -259,7 +307,7 @@ export function SetupWizard() {
       refresh();
       setIndex(index + 1);
     } catch (e) {
-      toast.error((e as Error).message);
+      toast.error(errorText(e));
     }
   };
 
@@ -272,7 +320,7 @@ export function SetupWizard() {
         : step === "markets"
           ? selected.length > 0
           : step === "google"
-            ? provider === "mock" || keyStored || placesKey.trim().length >= 8
+            ? (provider === "mock" || keyStored || placesKey.trim().length >= 8) && !mapIdErr
             : step === "budget"
               ? budgetValid
               : true;
@@ -322,14 +370,16 @@ export function SetupWizard() {
   return (
     <TooltipProvider>
       <div className="mx-auto flex min-h-dvh max-w-2xl flex-col gap-6 px-5 py-8">
-        <header className="flex items-center gap-2.5">
+        <header className="flex flex-wrap items-center gap-2.5">
           <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-base font-bold text-primary-foreground">
             U
           </span>
-          <div>
+          <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold leading-tight tracking-tight">Universal Mail</h1>
             <p className="text-[12px] text-muted-foreground">{t("setup.tagline")}</p>
           </div>
+          {/* İlk açılışta dil seçimi: Türkçe bilmeyen bir kullanıcı da kurulumu tamamlayabilsin. */}
+          <LanguageSwitch value={config?.language ?? getLocale()} />
         </header>
 
         <Stepper index={index} />
@@ -617,7 +667,7 @@ export function SetupWizard() {
                         } catch (e) {
                           setKeyTest({
                             ok: false,
-                            message: `${(e as Error).message} ${t("setup.keyTest.fail")}`,
+                            message: `${errorText(e)} ${t("setup.keyTest.fail")}`,
                           });
                         }
                       }}
@@ -668,6 +718,12 @@ export function SetupWizard() {
                       onChange={(e) => setMapId(e.target.value)}
                       placeholder={t("settings.mapId.placeholder")}
                       spellCheck={false}
+                      aria-invalid={!!mapIdErr}
+                      aria-describedby="s-mapid-err"
+                    />
+                    <FieldError
+                      id="s-mapid-err"
+                      message={mapIdErr ? t(`settings.mapId.err.${mapIdErr}`) : null}
                     />
                   </div>
                   <p className="whitespace-pre-line text-[12px] text-muted-foreground">
@@ -791,7 +847,7 @@ export function SetupWizard() {
           </div>
         </footer>
       </div>
-      <Toaster position="bottom-right" richColors closeButton />
+      <Toaster position="bottom-right" richColors closeButton theme={theme} />
     </TooltipProvider>
   );
 }

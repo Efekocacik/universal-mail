@@ -16,7 +16,7 @@ import {
   type CampaignDetail,
 } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
-import { t } from "@/lib/i18n";
+import { t, type TrKey } from "@/lib/i18n";
 import {
   allowedActions,
   dayLabel,
@@ -33,10 +33,11 @@ import { PreflightPanel } from "./preflight-panel";
 import { MessagesTable, QueueTable } from "./queue-table";
 import { useSafeMutation } from "./use-safe-mutation";
 
-const DONE_MESSAGE: Record<CampaignAction, string | null> = {
-  pause: t("campaign.paused.done"),
-  resume: t("campaign.resumed.done"),
-  cancel: t("campaign.cancelled.done"),
+// Anahtar eşlemesi (metin DEĞİL): t() kullanım anında çağrılır ki dil değişimi izlensin (modül düzeyinde t() yok).
+const DONE_MESSAGE: Record<CampaignAction, TrKey | null> = {
+  pause: "campaign.paused.done",
+  resume: "campaign.resumed.done",
+  cancel: "campaign.cancelled.done",
   draft: null,
   ready: null,
   start: null,
@@ -48,7 +49,7 @@ function Actions({ c }: { c: CampaignDetail }) {
   const control = useSafeMutation((action: CampaignAction) => campaignApi.control(c.id, action), {
     onSuccess: (_r, action) => {
       const msg = DONE_MESSAGE[action];
-      if (msg) toast.success(msg);
+      if (msg) toast.success(t(msg));
     },
   });
   const busy = control.isPending;

@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Input, Label, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import {
@@ -73,8 +74,9 @@ export function ErasurePanel() {
   return (
     <div className="space-y-4">
       <section aria-labelledby="er-title" className="space-y-3 rounded-xl border bg-card p-4">
-        <h2 id="er-title" className="text-sm font-semibold">
+        <h2 id="er-title" className="flex items-center gap-1.5 text-sm font-semibold">
           {t("erasure.title")}
+          <HelpTip>{t("help.erasure")}</HelpTip>
         </h2>
         <p className="text-[13px] text-muted-foreground">{t("erasure.help")}</p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -226,7 +228,11 @@ export function ErasurePanel() {
               </Notice>
             )}
             {state.data.history.length === 0 ? (
-              <EmptyState title={t("erasure.history.empty")} />
+              <EmptyState
+                title={t("erasure.history.empty")}
+                body={t("erasure.history.empty.body")}
+                className="rounded-lg border border-dashed"
+              />
             ) : (
               <ul className="divide-y rounded-lg border" aria-label={t("erasure.history")}>
                 {state.data.history.map((h) => (

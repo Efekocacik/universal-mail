@@ -39,6 +39,8 @@ export interface AppConfig {
   language: "tr" | "en";
   /** Faz 4: görünüm teması (`system` işletim sistemini izler). */
   theme: "system" | "light" | "dark";
+  /** Faz 4: masaüstü işletim sistemi bildirimleri açık mı (`notifications.os`). */
+  notificationsOs: boolean;
 }
 
 export interface StatusScan {

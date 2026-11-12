@@ -34,7 +34,10 @@ export {
   type GateResult,
 } from "./gate-error";
 
-const fail = (code: GateCode, message: string): GateFailure => ({ ok: false, code, message });
+const fail = (code: GateCode, message: string, fields?: Record<string, number>): GateFailure =>
+  fields ? { ok: false, code, message, fields } : { ok: false, code, message };
+
+const usd2 = (n: number) => Math.round(n * 100) / 100;
 
 /** Veri toplama işlevleri kurulum ve kullanım onayı olmadan çalışmaz (FR-SET-08). */
 export async function checkCollectionReady(db: Db): Promise<GateResult> {
@@ -128,6 +131,8 @@ export async function checkPaidScan(
       return fail(
         "NEEDS_ACK",
         `Yüksek tahmin (${high.toFixed(2)} USD) kalan bütçenizi (${budget.remainingUsd.toFixed(2)} USD) aşabilir. Tarama bütçe dolunca otomatik durur. Yine de başlatmak için onaylayın.`,
+        // Tutarlar yapılandırılmış alan olarak da gelir: İngilizce arayüz onay metnini bunlarla kurar (apiError.NEEDS_ACK.detail).
+        { highUsd: usd2(high), remainingUsd: usd2(budget.remainingUsd) },
       );
     }
   }

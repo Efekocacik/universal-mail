@@ -8,9 +8,10 @@ import { outreach } from "./en/outreach";
 import { scan } from "./en/scan";
 
 /**
- * İngilizce sözlük (NFR-09). Türkçe parçalarla aynı adlı parçalardan birleştirilir. Şimdilik KISMİ: olmayan anahtar
- * `t()` içinde Türkçeye düşer; eksikler `tests/i18n.test.ts` kapsam raporunda listelenir (Paket D tamamlayınca rapor
- * katı moda alınır ve tür `Record<TrKey, string>` olur).
+ * İngilizce sözlük (NFR-09). Türkçe parçalarla aynı adlı parçalardan birleştirilir. `base` ve `core` TAM çevrilidir
+ * (türü her anahtarı zorunlu kılar; `tests/i18n-en-parity.test.ts`). Diğer parçalar kendi paketlerince doldurulur;
+ * olmayan anahtar `t()` içinde Türkçeye düşer ve `tests/i18n.test.ts` kapsam raporunda listelenir. Tüm parçalar
+ * tamamlanınca tür `Record<TrKey, string>` yapılır.
  */
 export const en: Partial<Record<TrKey, string>> = {
   ...base,

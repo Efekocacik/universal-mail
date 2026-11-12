@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError } from "@/features/campaigns/parts";
 import { fmtDateTime } from "@/lib/client/format";
 import { auditExportUrl, useAudit } from "@/lib/client/mail-ops";
@@ -27,7 +28,10 @@ export function AuditPanel() {
   const items = q.data?.pages.flatMap((p) => p.items) ?? [];
   return (
     <div className="space-y-3">
-      <p className="text-[13px] text-muted-foreground">{t("audit.help")}</p>
+      <p className="flex items-start gap-1.5 text-[13px] text-muted-foreground">
+        <span>{t("audit.help")}</span>
+        <HelpTip className="mt-0.5 shrink-0">{t("help.audit")}</HelpTip>
+      </p>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="audit-prefix">{t("audit.filter")}</Label>
@@ -59,6 +63,7 @@ export function AuditPanel() {
         <EmptyState
           icon={History}
           title={t("audit.empty")}
+          body={prefix ? undefined : t("audit.empty.body")}
           className="rounded-xl border border-dashed bg-card"
         />
       ) : (

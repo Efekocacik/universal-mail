@@ -171,12 +171,31 @@ export function TemplatesPage() {
           <LoadError error={q.error} onRetry={() => void q.refetch()} />
         ) : items.length > 0 ? (
           items.map((x) => <TemplateCard key={x.id} tpl={x} />)
-        ) : (
+        ) : language || kind ? (
+          // Faz 4 (10a-5): süzgece uyan yok → süzgeçleri temizle; hiç şablon yok → ilk şablonu oluştur.
           <EmptyState
             className="rounded-xl border border-dashed bg-card p-10"
             icon={FilePlus2}
             title={t("templates.empty.title")}
             body={t("templates.empty.body")}
+            action={
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLanguage("");
+                  setKind("");
+                }}
+              >
+                {t("templates.empty.clear")}
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            className="rounded-xl border border-dashed bg-card p-10"
+            icon={FilePlus2}
+            title={t("templates.empty.none.title")}
+            body={t("templates.empty.none.body")}
             action={
               <Button asChild>
                 <Link href="/templates/new">

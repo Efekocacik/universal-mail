@@ -4,6 +4,9 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
+  Notification,
+  powerMonitor,
   safeStorage,
   session,
   shell,
@@ -17,12 +20,23 @@ import net from "node:net";
 import path from "node:path";
 import { SESSION_CACHE_FILENAME, WORKER_STATUS_FILENAME } from "../src/lib/config/paths";
 import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
+import { t, type TrKey } from "../src/lib/i18n";
+import { rotateIfLarge } from "./logs";
 import {
   loadOrRecoverMasterKey,
   MASTER_KEY_FILENAME,
   MasterKeyQuit,
   SECRETS_FILENAME,
 } from "./master-key";
+import { joinAppPath, NotificationPoller, type OsToast } from "./notify";
+import {
+  loginItemSupported,
+  parseStoredPrefs,
+  UI_PREFS_FILENAME,
+  validateUiPrefsPatch,
+  windowBackground,
+  type UiPrefs,
+} from "./ui-prefs";
 
 /**
  * Universal Mail masaüstü kabuğu.
@@ -45,6 +59,37 @@ let mainWindow: BrowserWindow | null = null;
 
 app.setName("Universal Mail");
 if (process.env.UM_USER_DATA_DIR) app.setPath("userData", process.env.UM_USER_DATA_DIR);
+// Windows bildirimleri uygulama kimliği olmadan sessizce gösterilmez (electron-builder.yml appId ile aynı).
+if (process.platform === "win32") app.setAppUserModelId("com.universalmail.app");
+
+/* ------------------------------ arayüz tercihleri ------------------------------ */
+
+/**
+ * Tema/dil/oturum açılınca başlatma (bkz. ./ui-prefs.ts). Açılışta dosyadan okunur (sunucu hazır olmadan menü ve
+ * pencere doğru dilde/renkte açılsın); arayüz ayarı değiştirince `um:set-ui-prefs` ile güncellenir.
+ */
+let prefs: UiPrefs = parseStoredPrefs(null);
+const prefsFile = () => path.join(app.getPath("userData"), UI_PREFS_FILENAME);
+
+function loadPrefs(): void {
+  try {
+    prefs = parseStoredPrefs(fs.readFileSync(prefsFile(), "utf8"));
+  } catch {
+    prefs = parseStoredPrefs(null);
+  }
+  nativeTheme.themeSource = prefs.theme;
+}
+
+function savePrefs(): void {
+  try {
+    fs.writeFileSync(prefsFile(), JSON.stringify(prefs), { mode: 0o600 });
+  } catch (e) {
+    log("main", `ui-prefs yazılamadı: ${(e as Error).message}`);
+  }
+}
+
+/** Ana süreç metni: kullanıcının arayüz dilinde (paylaşılan sözlük). */
+const tl = (key: TrKey, params?: Record<string, string | number>) => t(key, params, prefs.language);
 
 /* ------------------------------ günlük kaydı ------------------------------ */
 
@@ -59,16 +104,22 @@ function log(scope: string, message: string): void {
   }
 }
 
+/** Günlük boyut sınırı (M9): açılışta ve uygulama açıkken düzenli olarak denetlenir (bkz. ./logs.ts). */
 function rotateLogs(): void {
-  for (const f of ["app.log"]) {
-    const p = path.join(logDir, f);
-    try {
-      if (fs.existsSync(p) && fs.statSync(p).size > 5_000_000) fs.renameSync(p, `${p}.1`);
-    } catch {
-      /* yoksay */
-    }
-  }
+  if (!logDir) return;
+  rotateIfLarge(path.join(logDir, "app.log"), {
+    size: (p) => {
+      try {
+        return fs.statSync(p).size;
+      } catch {
+        return null;
+      }
+    },
+    rename: (from, to) => fs.renameSync(from, to),
+    remove: (p) => fs.rmSync(p, { force: true }),
+  });
 }
+const LOG_ROTATE_EVERY_MS = 10 * 60_000;
 
 /* --------------------------------- yollar --------------------------------- */
 
@@ -113,10 +164,7 @@ function loadMasterKeyUnsafe(): string {
       log("main", "UYARI: güvenli depolama yok; duman testi için geçici anahtar kullanılıyor.");
       return crypto.randomBytes(32).toString("hex");
     }
-    dialog.showErrorBox(
-      "Güvenli depolama kullanılamıyor",
-      "İşletim sisteminin anahtar deposu (Anahtarlık / Kimlik Bilgisi Yöneticisi) bu oturumda kullanılamıyor. API anahtarlarınız güvenli saklanamayacağı için uygulama kapatılıyor.",
-    );
+    dialog.showErrorBox(tl("electron.keystore.title"), tl("electron.keystore.body"));
     app.exit(1);
     return "";
   }
@@ -242,6 +290,10 @@ function writeWorkerStatus(entry: { restarts: number; code: number | null } | nu
 
 function startWorker(env: NodeJS.ProcessEnv): void {
   const w = spawnChild("worker", "worker.cjs", env);
+  // İşçi yeni bir bildirim eklediğinde `{type:'notify'}` gönderir: işletim sistemi bildirimi beklemeden gösterilir.
+  w.on("message", (m: unknown) => {
+    if ((m as { type?: unknown } | null)?.type === "notify") poller?.nudge();
+  });
   const startedAt = Date.now();
   const healthyTimer = setTimeout(() => {
     if (w.exitCode !== null) return;
@@ -310,7 +362,7 @@ function createWindow(url: string): BrowserWindow {
     minHeight: 560,
     show: !SMOKE,
     title: "Universal Mail",
-    backgroundColor: "#f6f6f3",
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -335,13 +387,12 @@ function createWindow(url: string): BrowserWindow {
   win.webContents.on("will-prevent-unload", (e) => {
     const response = dialog.showMessageBoxSync(win, {
       type: "question",
-      buttons: ["Değişiklikleri at", "Düzenlemeye dön"],
+      buttons: [tl("electron.unsaved.discard"), tl("electron.unsaved.keep")],
       defaultId: 1,
       cancelId: 1,
-      title: "Kaydedilmemiş değişiklikler",
-      message: "Kaydedilmemiş değişiklikler kaybolsun mu?",
-      detail:
-        "Bu sayfada kaydetmediğiniz değişiklikler var. Devam ederseniz bu değişiklikler kaybolur.",
+      title: tl("electron.unsaved.title"),
+      message: tl("electron.unsaved.message"),
+      detail: tl("electron.unsaved.detail"),
     });
     if (response === 0) e.preventDefault();
     else closeApproved = false;
@@ -369,13 +420,12 @@ async function confirmQuit(win: BrowserWindow): Promise<void> {
   if (running) {
     const { response } = await dialog.showMessageBox(win, {
       type: "question",
-      buttons: ["Kapat ve duraklat", "Vazgeç"],
+      buttons: [tl("electron.quitScan.quit"), tl("electron.quitScan.cancel")],
       defaultId: 1,
       cancelId: 1,
-      title: "Tarama sürüyor",
-      message: "Bir tarama sürüyor.",
-      detail:
-        "Uygulamayı kapatırsanız tarama duraklatılır. Uygulamayı açtığınızda kaldığı yerden devam ettirebilirsiniz; ücretli çağrılar siz onaylamadan sürmez.",
+      title: tl("electron.quitScan.title"),
+      message: tl("electron.quitScan.message"),
+      detail: tl("electron.quitScan.detail"),
     });
     if (response !== 0) return;
   }
@@ -392,7 +442,7 @@ function buildMenu(): void {
     ...(mac ? [{ role: "appMenu" } as MenuItemConstructorOptions] : []),
     { role: "editMenu" },
     {
-      label: "Görünüm",
+      label: tl("electron.menu.view"),
       submenu: [
         { role: "reload" },
         { role: "forceReload" },
@@ -407,14 +457,108 @@ function buildMenu(): void {
     },
     { role: "windowMenu" },
     {
-      label: "Yardım",
+      label: tl("electron.menu.help"),
       submenu: [
-        { label: "Veri klasörünü aç", click: () => void shell.openPath(dataDir()) },
-        { label: "Günlük klasörünü aç", click: () => void shell.openPath(logDir) },
+        { label: tl("electron.menu.openData"), click: () => void shell.openPath(dataDir()) },
+        { label: tl("electron.menu.openLogs"), click: () => void shell.openPath(logDir) },
       ],
     },
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/* ------------------------- işletim sistemi bildirimleri ------------------------- */
+
+let poller: NotificationPoller | null = null;
+/** Bildirilmiş teslimat uyarısı imzaları (yeniden başlatmada aynı uyarı tekrar bildirilmez). */
+const alertsFile = () => path.join(app.getPath("userData"), "notified-alerts.json");
+
+function showToast(toast: OsToast): void {
+  if (!Notification.isSupported()) return;
+  const n = new Notification({ title: toast.title, body: toast.body, silent: false });
+  n.on("click", () => {
+    const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    // Yalnızca uygulama içi yol; aynı köken dışına asla gidilmez (joinAppPath).
+    void win.loadURL(joinAppPath(origin, toast.url));
+  });
+  n.show();
+}
+
+function startNotifications(): void {
+  if (SMOKE || poller) return;
+  poller = new NotificationPoller({
+    origin: () => origin,
+    fetch: (url, init) => fetch(url, init),
+    show: showToast,
+    text: (key, n) =>
+      key === "summary"
+        ? {
+            title: t("notif.summary.title", { n: n ?? 0 }, prefs.language),
+            body: tl("notif.summary.body"),
+          }
+        : { title: tl("electron.deliveryAlert.title"), body: tl("electron.deliveryAlert.body") },
+    log: (m) => log("notify", m),
+    now: () => Date.now(),
+    alertStore: {
+      load: () => {
+        try {
+          return JSON.parse(fs.readFileSync(alertsFile(), "utf8")) as string[];
+        } catch {
+          return []; // ilk açılış veya bozuk dosya
+        }
+      },
+      save: (sigs) => fs.writeFileSync(alertsFile(), JSON.stringify(sigs), { mode: 0o600 }),
+    },
+  });
+  poller.start();
+}
+
+/** Oturum öğesi bu ortamda yönetilebilir mi (paketli uygulama, macOS/Windows)? */
+const loginItemAvailable = () => loginItemSupported(process.platform, app.isPackaged);
+
+/** İşletim sistemindeki GERÇEK "oturum açılınca başlat" durumu; desteklenmiyorsa null. */
+function osOpenAtLogin(): boolean | null {
+  if (!loginItemAvailable()) return null;
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch (e) {
+    log("main", `Oturum öğesi okunamadı: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Uygulama tercihlerini (IPC'den gelen, doğrulanmış) uygular: tema, dil (menü yeniden kurulur), oturum öğesi.
+ * Oturum öğesi dosyadaki değerle DEĞİL işletim sisteminin gerçek durumuyla karşılaştırılır: kullanıcı uygulamayı
+ * macOS Oturum Öğeleri'nden / Windows Başlangıç'tan kaldırdıysa veya kayıt kaybolduysa ayardaki değer yeniden
+ * uygulanır (kaynak doğruluk uygulamanın ayarıdır). Dönen `openAtLogin`, uygulamadan sonraki gerçek durumdur.
+ */
+function applyPrefsPatch(input: unknown): { ok: boolean; openAtLogin: boolean | null } {
+  const { patch, rejected } = validateUiPrefsPatch(input);
+  if (rejected.length) log("main", `ui-prefs: yok sayılan alanlar: ${rejected.join(", ")}`);
+  const before = prefs;
+  prefs = { ...prefs, ...patch };
+  if (patch.theme && patch.theme !== before.theme) nativeTheme.themeSource = patch.theme;
+  if (patch.language && patch.language !== before.language) buildMenu();
+  if (patch.openAtLogin !== undefined) {
+    const actual = osOpenAtLogin();
+    if (actual === null) {
+      if (patch.openAtLogin !== before.openAtLogin)
+        log("main", "Oturum açılınca başlat bu ortamda desteklenmiyor (paketsiz veya platform).");
+    } else if (actual !== patch.openAtLogin) {
+      app.setLoginItemSettings({ openAtLogin: patch.openAtLogin });
+      log(
+        "main",
+        `Oturum açılınca başlat: ${patch.openAtLogin ? "açık" : "kapalı"} (işletim sistemi: ${actual ? "açık" : "kapalı"})`,
+      );
+    }
+  }
+  if (JSON.stringify(before) !== JSON.stringify(prefs)) savePrefs();
+  return { ok: rejected.length === 0, openAtLogin: osOpenAtLogin() };
 }
 
 /* ------------------------------ duman testi ------------------------------ */
@@ -497,6 +641,7 @@ async function smokeTest(): Promise<void> {
 
 async function shutdown(): Promise<void> {
   quitting = true;
+  poller?.stop();
   const worker = children.get("worker");
   if (worker && worker.connected) worker.send("shutdown");
   if (worker) {
@@ -529,6 +674,10 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     logDir = path.join(app.getPath("userData"), "logs");
     fs.mkdirSync(logDir, { recursive: true });
     rotateLogs();
+    setInterval(rotateLogs, LOG_ROTATE_EVERY_MS).unref();
+    loadPrefs();
+    // Oturum öğesini işletim sisteminin gerçek durumuyla eşitle (kayıt kaybolduysa veya dışarıdan kaldırıldıysa).
+    if (prefs.openAtLogin) applyPrefsPatch({ openAtLogin: true });
     log(
       "main",
       `Universal Mail ${app.getVersion()} başlıyor (${process.platform}/${process.arch}, paketli=${app.isPackaged})`,
@@ -536,6 +685,24 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
 
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
     ipcMain.handle("um:open-data-folder", () => shell.openPath(dataDir()));
+    // Yalnızca uygulamanın kendi penceresinden (yerel köken) gelen tercih değişikliği kabul edilir.
+    ipcMain.handle("um:set-ui-prefs", (e, input: unknown) => {
+      if (!origin || !isLocal(e.senderFrame?.url ?? "")) return { ok: false, openAtLogin: null };
+      return applyPrefsPatch(input);
+    });
+    // Masaüstü yetenekleri ana süreçten gelir (paketli mi, platform destekliyor mu): Ayarlar'da yalnızca gerçekten
+    // çalışan anahtarlar görünür. Salt okunur; yine de yalnızca uygulamanın kendi penceresine yanıt verilir.
+    ipcMain.handle("um:desktop-caps", (e) => {
+      if (!origin || !isLocal(e.senderFrame?.url ?? ""))
+        return { loginItem: false, openAtLogin: null };
+      return { loginItem: loginItemAvailable(), openAtLogin: osOpenAtLogin() };
+    });
+    // Bilgisayar uykudan uyanınca: işçi kaçırılan zamanlanmış işleri hemen değerlendirsin, bildirimler yoklansın.
+    powerMonitor.on("resume", () => {
+      const w = children.get("worker");
+      if (w?.connected) w.send({ type: "wake" });
+      poller?.nudge();
+    });
     buildMenu();
 
     try {
@@ -558,8 +725,8 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
         return;
       }
       dialog.showErrorBox(
-        "Universal Mail başlatılamadı",
-        `${(e as Error).message}\n\nGünlük klasörü: ${logDir}`,
+        tl("electron.startError.title"),
+        `${(e as Error).message}\n\n${tl("electron.startError.logDir", { dir: logDir })}`,
       );
       await shutdown();
       app.exit(1);
@@ -568,6 +735,7 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
 
     mainWindow = createWindow(origin);
     if (SMOKE) void smokeTest();
+    else startNotifications();
   });
 
   app.on("window-all-closed", () => app.quit());

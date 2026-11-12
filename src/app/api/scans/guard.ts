@@ -21,8 +21,8 @@ import type { ScanRequestBody } from "./schema";
  * Uç nokta kapıları: kurallar `src/lib/scan/gates.ts`'tedir (zamanlayıcı da aynılarını kullanır); burada yalnızca tipli
  * sonuç HttpError'a çevrilir. Durum kodları ve `code` alanları öncekiyle aynıdır.
  */
-export function gateHttpError(f: Pick<GateFailure, "code" | "message">): HttpError {
-  return new HttpError(GATE_HTTP_STATUS[f.code], f.message, { code: f.code });
+export function gateHttpError(f: Pick<GateFailure, "code" | "message" | "fields">): HttpError {
+  return new HttpError(GATE_HTTP_STATUS[f.code], f.message, { ...f.fields, code: f.code });
 }
 
 /** Veri toplama işlevleri kurulum ve kullanım onayı olmadan çalışmaz (FR-SET-08). */

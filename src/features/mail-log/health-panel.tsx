@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import { api } from "@/lib/client/api";
@@ -182,9 +183,12 @@ function DnsCard({
   );
   return (
     <section aria-labelledby={`${ids}-title`} className="space-y-3 rounded-xl border bg-card p-4">
-      <h2 id={`${ids}-title`} className="text-sm font-semibold">
-        {t("health.dns.title")}
-        {address ? ` · ${address}` : ""}
+      <h2 id={`${ids}-title`} className="flex items-center gap-1.5 text-sm font-semibold">
+        <span>
+          {t("health.dns.title")}
+          {address ? ` · ${address}` : ""}
+        </span>
+        <HelpTip>{t("help.dns")}</HelpTip>
       </h2>
       <p className="text-[13px] text-muted-foreground">
         {consumerGmail ? t("health.dns.help.consumer") : t("health.dns.help")}

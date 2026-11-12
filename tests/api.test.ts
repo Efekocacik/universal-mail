@@ -368,7 +368,12 @@ describe("tarama uç noktaları: kapılar", () => {
     };
     const res = await scansRoute.POST(req("POST", "/api/scans", big), undefined);
     expect(res.status).toBe(409);
-    expect((await json(res)).code).toBe("NEEDS_ACK");
+    const ack = await json(res);
+    expect(ack.code).toBe("NEEDS_ACK");
+    // Faz 4: tutarlar yapılandırılmış alan olarak da gelir (İngilizce onay metni bunlarla kurulur).
+    expect(typeof ack.highUsd).toBe("number");
+    expect(typeof ack.remainingUsd).toBe("number");
+    expect(ack.highUsd).toBeGreaterThan(ack.remainingUsd);
     expect(
       (
         await scansRoute.POST(
