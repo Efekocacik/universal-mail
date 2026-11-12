@@ -29,6 +29,8 @@ export async function setScanStatus(
   status: ScanStatus,
   extra: {
     pauseReason?: string | null;
+    /** Faz 4: duraklatma nedeninin makine kodu (ör. `APP_STOPPED`); verilmezse temizlenir. */
+    pauseCode?: string | null;
     error?: string | null;
     finishedAt?: number | null;
     startedAt?: number;
@@ -39,6 +41,7 @@ export async function setScanStatus(
     .set({
       status,
       pauseReason: extra.pauseReason ?? null,
+      pauseCode: extra.pauseCode ?? null,
       error: extra.error ?? null,
       ...(extra.finishedAt !== undefined ? { finishedAt: extra.finishedAt } : {}),
       ...(extra.startedAt !== undefined ? { startedAt: extra.startedAt } : {}),

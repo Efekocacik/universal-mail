@@ -35,8 +35,16 @@ export interface SearchResult {
 }
 
 export interface DetailsResult {
+  /** Tam kayıt; konum istenmediyse (ör. yalnızca `id,businessStatus`) Google yanıtı normalleştirilemez ve `null` olur. */
   place: PlaceRecord | null;
   sku: SkuId;
+  /**
+   * Yanıttaki yer kimliği (konum istenmese bile). Eskimiş bir kimlik sorulduğunda Google GÜNCEL kimliği döndürür; yer
+   * kimliği yenileme işi bunu kullanır. Yanıt yoksa `null`.
+   */
+  id?: string | null;
+  /** Yanıttaki işletme durumu (istendiyse). */
+  businessStatus?: string;
 }
 
 export interface PlacesProvider {

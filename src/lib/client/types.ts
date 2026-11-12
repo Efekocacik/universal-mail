@@ -57,6 +57,8 @@ export interface AppStatus {
   pendingJobs: number;
   /** Faz 4: okunmamış bildirim sayısı (zil rozeti). */
   unreadNotifications: number;
+  /** Faz 4: etkin zamanlama sayısı, zamanı gelmiş olanlar ve en yakın çalışma anı. */
+  schedules: { total: number; due: number; nextRunAt: number | null };
 }
 
 export interface CityResult {
@@ -98,6 +100,9 @@ export interface ScanListItem {
   createdAt: number;
   startedAt: number | null;
   finishedAt: number | null;
+  /** Faz 4: elle mi zamanlamadan mı başladı. */
+  origin: "manual" | "schedule";
+  scheduleId: number | null;
 }
 
 export interface LeadDetailResponse {
@@ -143,7 +148,17 @@ export interface LeadDetailResponse {
     newDetectedAt: number | null;
     openedDetectedAt: number | null;
     notFoundInScanId: number | null;
+    /** Faz 4: Google bu yeri artık bulamıyor (NOT_FOUND) olarak işaretlendiği an. */
+    goneAt?: number | null;
     mapsUrl: string;
+  } | null;
+  /** Faz 4: web sitesi alan adının RDAP kayıt tarihi (site taraması alan adı bulduysa). */
+  domainAge?: {
+    domain: string;
+    status:
+      "pending" | "ok" | "no_date" | "not_found" | "unsupported_tld" | "rate_limited" | "error";
+    registeredAt: number | null;
+    checkedAt: number | null;
   } | null;
   /** Oturum önbelleğindeki Google içeriği; uygulama yeniden açıldığında null olur. */
   google: {
@@ -166,6 +181,7 @@ export interface GoogleDataSummary {
   cachedPlaces: number;
   storedCoordinates: number;
   maxRetentionDays: number;
+  /** Faz 4: alan sınıfına göre ayrıntı `GoogleRetentionSummary` (features/settings/google-retention-card.tsx). */
 }
 
 export interface SettingsResponse {

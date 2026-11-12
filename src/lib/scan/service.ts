@@ -20,6 +20,7 @@ import type {
   SkuId,
 } from "@/lib/domain/types";
 import { roundBBox } from "@/lib/geo/bbox";
+import { SKU_PRICING } from "@/lib/places/pricing";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { getSetting } from "@/lib/settings";
 import { buildQueries, computeScanKey } from "./queries";
@@ -63,13 +64,20 @@ async function resolvePlan(db: Db, req: ScanRequest) {
 export async function estimateForRequest(
   db: Db,
   req: ScanRequest,
+  opts: { ignoreFreeTier?: boolean } = {},
 ): Promise<{ estimate: ScanEstimate; queries: number }> {
   const { input, queries } = await resolvePlan(db, req);
   const provider = await getSetting(db, "places.provider");
   const sku = skuForScan(input.strategy, input.fieldProfile);
   const skus: SkuId[] = [sku, skuForScan(input.strategy, input.fieldProfile, "keyword")];
   const monthCallsBySku: Partial<Record<SkuId, number>> = {};
-  for (const s of new Set(skus)) monthCallsBySku[s] = await monthSkuCalls(db, provider, s);
+  for (const s of new Set(skus)) {
+    const used = await monthSkuCalls(db, provider, s);
+    // `ignoreFreeTier`: ücretsiz aylık kota bitmiş varsayılır (liste fiyatı). Zamanlama ön onayı (M5) bununla
+    // hesaplanır; aksi halde ay içinde kota bitince "ücretsiz" onaylanmış her çalışma NEEDS_ACK ile atlanırdı.
+    const free = SKU_PRICING[s].freeMonthly;
+    monthCallsBySku[s] = opts.ignoreFreeTier && Number.isFinite(free) ? Math.max(used, free) : used;
+  }
   return { estimate: estimateScan(input, { monthCallsBySku }), queries: queries.length };
 }
 
@@ -149,6 +157,8 @@ export interface StartScanOptions {
   scheduleSlot?: number | null;
   /** İş önceliği: elle 10 (önce), zamanlanmış 5. */
   priority?: number;
+  /** Bilinen bölge (zamanlama); verilmezse ad + geometriyle bulunur/oluşturulur. */
+  regionId?: number;
 }
 
 /**
@@ -165,7 +175,7 @@ export async function insertPreparedScan(
 ): Promise<CreatedScan> {
   if ((await activeScanForKey(tx, p.scanKey)) !== null)
     throw new ScanGateError("ACTIVE_SCAN", ACTIVE_SCAN_MESSAGE);
-  const regionId = await findOrCreateRegion(tx, p.req.region, now);
+  const regionId = opts.regionId ?? (await findOrCreateRegion(tx, p.req.region, now));
   const origin = opts.origin ?? "manual";
   const inserted = await tx
     .insert(scans)

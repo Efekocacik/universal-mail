@@ -107,7 +107,12 @@ export class GooglePlacesClient implements PlacesProvider {
       method: "GET",
       mask: detailsFieldMask(fields),
     });
-    return { place: normalizeGooglePlace(json), sku: skuFor("details", fields) };
+    return {
+      place: normalizeGooglePlace(json),
+      sku: skuFor("details", fields),
+      id: typeof json.id === "string" && json.id ? json.id : null,
+      businessStatus: typeof json.businessStatus === "string" ? json.businessStatus : undefined,
+    };
   }
 
   private parsePlaces(json: Record<string, unknown>): PlaceRecord[] {

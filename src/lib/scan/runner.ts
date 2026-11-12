@@ -60,6 +60,10 @@ interface RunState {
 }
 
 const MAX_CONSECUTIVE_UNIT_FAILURES = 5;
+/** Faz 4: uygulama kapanırken güvenle duraklatıldı (zamanlanmış tarama açılışta kendiliğinden sürer). */
+export const APP_STOPPED = "APP_STOPPED";
+/** Faz 4: çalışan beklenmedik şekilde durduğu için kurtarmada duraklatıldı. */
+export const INTERRUPTED = "INTERRUPTED";
 
 function readMaxCalls(scan: ScanRow): number {
   const est = scan.estimate as { maxCalls?: number } | null;
@@ -128,6 +132,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     if (deps.shouldStop?.()) {
       await setScanStatus(db, scanId, "paused", {
         pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+        pauseCode: APP_STOPPED,
       });
       return "paused";
     }
@@ -195,6 +200,7 @@ async function runUnit(
       await requeue();
       await setScanStatus(db, scan.id, "paused", {
         pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+        pauseCode: APP_STOPPED,
       });
       return "paused";
     }
@@ -202,7 +208,10 @@ async function runUnit(
     const spend = await canSpend(db, provider.id, await deps.getBudgetUsd(), sku, 1);
     if (!spend.ok) {
       await requeue();
-      await setScanStatus(db, scan.id, "budget_stopped", { pauseReason: spend.reason });
+      await setScanStatus(db, scan.id, "budget_stopped", {
+        pauseReason: spend.reason,
+        pauseCode: "BUDGET_BLOCKED",
+      });
       return "budget_stopped";
     }
 
