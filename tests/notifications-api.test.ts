@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as listRoute from "@/app/api/notifications/route";
 import * as readRoute from "@/app/api/notifications/read/route";
 import * as claimRoute from "@/app/api/notifications/os-claim/route";
@@ -8,7 +8,10 @@ import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog } from "@/lib/db/schema";
 import { notify } from "@/lib/notifications";
-import { isInAppPath } from "@/lib/client/notifications";
+import { safeAppPath } from "@/lib/client/app-path";
+import { BELL_LIMIT, fetchBell, markBellRead, type BellItem } from "@/lib/client/notification-bell";
+import type { AppStatus } from "@/lib/client/types";
+import type { NotificationItem } from "@/lib/scan/notification-view";
 import { setSetting } from "@/lib/settings";
 import { middleware } from "@/middleware";
 import { createTestDb, type TestDb } from "./helpers/db";
@@ -183,10 +186,86 @@ describe("POST /api/notifications/os-claim", () => {
 });
 
 describe("istemci yol denetimi", () => {
-  it("yalnızca uygulama içi yollar", () => {
-    expect(isInAppPath("/?scan=12&lifecycle=new")).toBe(true);
-    expect(isInAppPath("/scans")).toBe(true);
+  it("yalnızca uygulama içi yollar (zil ve OS bildirimi aynı kuralı kullanır)", () => {
+    expect(safeAppPath("/?scan=12&lifecycle=new")).toBe("/?scan=12&lifecycle=new");
+    expect(safeAppPath("/scans")).toBe("/scans");
     for (const bad of ["https://evil", "//evil", "javascript:alert(1)", "/a\\b", ""])
-      expect(isInAppPath(bad)).toBe(false);
+      expect(safeAppPath(bad)).toBe("/");
+  });
+});
+
+/**
+ * Entegrasyon: Paket D'nin zili (src/lib/client/notification-bell.ts) Paket B'nin GERÇEK uçlarıyla konuşur. İstemcinin
+ * `fetch`'i yerel uç işleyicilerine yönlendirilir; böylece istek biçimi (sorgu, gövde) ve yanıt biçimi birlikte sınanır.
+ */
+describe("sözleşme: zil istemcisi ↔ bildirim uçları", () => {
+  // Tür düzeyi: sunucunun satır biçimi zilin beklediği biçime birebir atanabilir (alan eklenir/silinirse derleme kırılır).
+  const toBell = (i: NotificationItem): BellItem => i;
+  const toServer = (i: BellItem): NotificationItem => i;
+  void toBell;
+  void toServer;
+  const _status: Pick<AppStatus, "unreadNotifications"> = { unreadNotifications: 0 };
+  void _status;
+
+  const requests: { method: string; url: string; body: unknown }[] = [];
+  beforeEach(() => {
+    requests.length = 0;
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit = {}) => {
+      const method = init.method ?? "GET";
+      const body = typeof init.body === "string" ? init.body : undefined;
+      requests.push({ method, url, body: body ? JSON.parse(body) : undefined });
+      const r = req(method, url, body ? JSON.parse(body) : undefined);
+      if (url.startsWith("/api/notifications/read")) return readRoute.POST(r, undefined);
+      if (url.startsWith("/api/notifications")) return listRoute.GET(r, undefined);
+      if (url.startsWith("/api/status")) return statusRoute.GET(r, undefined);
+      return new Response("{}", { status: 404 });
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("liste, okunmamış sayısı ve okundu işaretleme uçtan uca uyuşur", async () => {
+    await seed(3);
+    const bell = await fetchBell();
+    expect(requests[0]).toMatchObject({
+      method: "GET",
+      url: `/api/notifications?limit=${BELL_LIMIT}`,
+    });
+    expect(bell!.unread).toBe(3);
+    expect(bell!.items).toHaveLength(3);
+    // Ayrıştırma sunucu satırını DEĞİŞTİRMEZ (alan adları ve bağlantı birebir).
+    const raw = await json(
+      await listRoute.GET(req("GET", `/api/notifications?limit=${BELL_LIMIT}`), undefined),
+    );
+    expect(bell!.items).toEqual(raw.items);
+    for (const i of bell!.items)
+      expect(Object.keys(i).sort()).toEqual([
+        "body",
+        "createdAt",
+        "id",
+        "kind",
+        "readAt",
+        "title",
+        "url",
+      ]);
+
+    await markBellRead({ ids: [bell!.items[0]!.id] });
+    expect(requests.at(-1)).toMatchObject({
+      method: "POST",
+      url: "/api/notifications/read",
+      body: { ids: [bell!.items[0]!.id] },
+    });
+    const status = (await json(
+      await statusRoute.GET(req("GET", "/api/status"), undefined),
+    )) as AppStatus;
+    expect(status.unreadNotifications).toBe(2);
+    expect((await fetchBell())!.unread).toBe(2);
+
+    await markBellRead({ all: true });
+    expect(requests.at(-1)!.body).toEqual({ all: true });
+    const after = await fetchBell();
+    expect(after!.unread).toBe(0);
+    expect(after!.items.every((i) => i.readAt !== null)).toBe(true);
   });
 });
