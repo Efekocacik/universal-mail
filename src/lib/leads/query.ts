@@ -79,12 +79,16 @@ export interface LeadRow {
   primaryEmailKind: string | null;
 }
 
-/** Kalıcı bayraklardan türetilen iş durumu (önbellek boşken bile süzgeç ve sayımlar çalışsın diye). */
-const DERIVED_STATUS = sql<string>`CASE WHEN ${places.isClosed} THEN 'CLOSED_PERMANENTLY' WHEN ${places.wasFuture} THEN 'FUTURE_OPENING' ELSE 'OPERATIONAL' END`;
+/**
+ * Kalıcı bayraklardan türetilen iş durumu (önbellek boşken bile süzgeç ve sayımlar çalışsın diye). Faz 4: gösterge paneli
+ * gibi başka okuma modelleri aynı tanımı kullansın diye dışa açıktır (`places` birleştirmesi gerekir).
+ */
+export const DERIVED_STATUS = sql<string>`CASE WHEN ${places.isClosed} THEN 'CLOSED_PERMANENTLY' WHEN ${places.wasFuture} THEN 'FUTURE_OPENING' ELSE 'OPERATIONAL' END`;
 /**
  * Lead'in e-posta durumu: işlem sürüyorsa o, sonuç varsa SRS durumu, aksi halde işlem durumu; hiç denenmemişse "unchecked".
+ * Faz 4: dışa açıktır (`lead_enrichment` LEFT JOIN gerekir).
  */
-const EMAIL_STATE = sql<string>`CASE
+export const EMAIL_STATE = sql<string>`CASE
   WHEN ${leadEnrichment.leadId} IS NULL THEN 'unchecked'
   WHEN ${leadEnrichment.status} IN ('queued','running') THEN ${leadEnrichment.status}
   WHEN ${leadEnrichment.emailStatus} IS NOT NULL THEN ${leadEnrichment.emailStatus}

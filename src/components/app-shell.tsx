@@ -1,6 +1,6 @@
 "use client";
 
-import { Compass, Layers, Mail, Settings } from "lucide-react";
+import { Compass, LayoutDashboard, Layers, Mail, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Toaster } from "sonner";
@@ -14,10 +14,12 @@ import { t } from "@/lib/i18n";
 import { WorkerStatusBanner } from "./worker-status-banner";
 
 /**
- * Gezinme öğeleri (docs/07-UI-REHBERI.md: 4 sabit öğe). Şablonlar ve Uyum ekranları "Kampanyalar" altındadır
- * (sayfa içi alt gezinme); bu yüzden o yollarda "Kampanyalar" etkin görünür.
+ * Gezinme öğeleri (docs/07-UI-REHBERI.md §4: 5 sabit öğe). Şablonlar ve Uyum ekranları "Kampanyalar" altındadır
+ * (sayfa içi alt gezinme); bu yüzden o yollarda "Kampanyalar" etkin görünür. Gösterge paneli (Faz 4) ilk sıradadır;
+ * açılış ekranı ve logo bağlantısı Keşif (`/`) olarak kalır (`/?scan=` bağlantıları buna dayanır).
  */
 export const NAV_ITEMS = [
+  { href: "/dashboard", key: "nav.dashboard", icon: LayoutDashboard },
   { href: "/", key: "nav.explore", icon: Compass },
   { href: "/scans", key: "nav.scans", icon: Layers },
   {

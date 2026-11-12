@@ -215,7 +215,11 @@ const isBusy = (e: unknown) =>
 /** Veritabanı başka bir işlemle meşgul mü (aynı süreç: `TRANSACTION_ACTIVE`, başka süreç: `SQLITE_BUSY`)? */
 export const isBusyError = isBusy;
 
-const CONTACTED = ["sending", "sent", "unknown"] as const;
+/**
+ * "Temas kuruldu" sayılan giden ileti durumları (günlük üst sınır ve alan adı/gün kuralı bunlarla sayar). Faz 4: gösterge
+ * paneli sayaçları üst sınır denetimiyle AYNI tanımı kullansın diye dışa açıktır.
+ */
+export const CONTACTED = ["sending", "sent", "unknown"] as const;
 
 interface Reservation {
   rowId: number;

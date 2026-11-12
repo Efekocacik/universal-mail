@@ -265,13 +265,14 @@ describe("kaynak taramalı güvenlik denetimleri (Aşama 12 arayüzü)", () => {
     expect(read("src/features/campaigns/preview-doc.ts")).toMatch(/PREVIEW_SANDBOX = ""/);
   });
 
-  it("üst çubuk 4 sabit öğede kalır; Şablonlar ve Uyum 'Kampanyalar' altındadır", () => {
+  it("üst çubuk 5 sabit öğede kalır (Faz 4: Gösterge paneli); Şablonlar ve Uyum 'Kampanyalar' altındadır", () => {
     const shell = read("src/components/app-shell.tsx");
     const block = shell.slice(
       shell.indexOf("export const NAV_ITEMS"),
       shell.indexOf("as const satisfies"),
     );
     expect([...block.matchAll(/href:\s*"([^"]+)"/g)].map((m) => m[1])).toEqual([
+      "/dashboard",
       "/",
       "/scans",
       "/campaigns",

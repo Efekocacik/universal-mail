@@ -47,7 +47,7 @@ Etiket sözlüğü (aynı eylem her yerde aynı adla): **Kaydet**, **Vazgeç** (
 
 - Sayfa: `PageHeader` (başlık + tek cümle açıklama + sağda ana eylem), altında içerik. Genişlik sınırlı (`max-w-5xl`), kenar boşluğu `p-6` (dar ekranda `p-4`).
 - Bölümler `Card`/`Section` ile gruplanır; aralık ölçeği 4 / 8 / 12 / 16 / 24 px.
-- Gezinme: üst çubukta 4 sabit öğe (Keşif, Taramalar, Kampanyalar, Ayarlar); etiketler dar ekranda da simgeyle birlikte okunur. Mevcut konum her zaman belli (`aria-current`).
+- Gezinme: üst çubukta 5 sabit öğe (Gösterge paneli, Keşif, Taramalar, Kampanyalar, Ayarlar); etiketler dar ekranda da simgeyle birlikte okunur. Mevcut konum her zaman belli (`aria-current`). Açılış ekranı ve logo bağlantısı Keşif (`/`) olarak kalır. "Pano" yerine "Gösterge paneli" seçildi: "Pano" uygulamada zaten "panoya kopyalandı" (clipboard) anlamında geçiyor.
 - Kampanya alanı: **Şablonlar**, **Uyum** (ülke politikası, engel listesi) ve **Günlük** (gönderim günlüğü, inceleme kuyruğu, işlem kaydı, gönderim sağlığı) üst çubukta ayrı öğe değildir; sayfa içi alt gezinmeyle (Kampanyalar · Şablonlar · Uyum · Günlük) ulaşılır ve üst çubukta "Kampanyalar" etkin görünür.
 - Dokunma/tıklama hedefi en az 32 px (liste satırları 44+).
 - Kaydırma: `um-scroll` sınıfı (ince çubuk, yerleşim kayması yok, taşma dışarı sızmaz). Sabit başlıklar `sticky`.
