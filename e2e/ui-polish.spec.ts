@@ -132,7 +132,8 @@ test.describe("Faz 4 · arayüz cilası (Paket D)", () => {
     await expect(tip).not.toHaveAttribute("aria-describedby", /.+/);
     await tip.focus();
     await page.keyboard.press("Enter");
-    const note = page.getByRole("note");
+    // Engel listesi açıklama kutusunun kendisi de role="note"dur; balonun içeriği Radix'in `data-side` özniteliğini taşır.
+    const note = page.getByRole("note").and(page.locator("[data-side]"));
     await expect(note).toBeVisible();
     await expect(note).toContainText("Abonelikten çıkanlar buraya kendiliğinden eklenir");
     // Odak tetikleyicide kalır; açıklama hem aria-describedby hem canlı bölge ile duyurulur.
@@ -163,7 +164,7 @@ test.describe("Faz 4 · arayüz cilası (Paket D)", () => {
 
   test("dil: kaydedilmemiş değişiklik varken önce onay istenir; Vazgeç değişikliği korur", async () => {
     await page.goto("/settings#appearance");
-    const budget = page.locator("#budget");
+    const budget = page.getByLabel("Aylık bütçe (USD)", { exact: true });
     await expect(budget).toBeVisible();
     const original = await budget.inputValue();
     await budget.fill("1234");

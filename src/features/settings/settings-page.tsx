@@ -653,13 +653,15 @@ function BudgetSection() {
         }}
       >
         <div className="space-y-1.5">
-          <Label htmlFor="budget">{t("settings.budget.monthly")}</Label>
+          <Label htmlFor="budget-monthly">{t("settings.budget.monthly")}</Label>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground" aria-hidden>
               $
             </span>
             <Input
-              id="budget"
+              // Bölüm çapası `#budget` (gezinme ve /settings#budget bağlantıları) ile çakışmasın; aksi halde etiket
+              // ilk eşleşen öğeye (bölüm kutusuna) bağlanır ve alan erişilebilir adını kaybeder.
+              id="budget-monthly"
               inputMode="decimal"
               value={value}
               onChange={(e) => setValue(e.target.value)}

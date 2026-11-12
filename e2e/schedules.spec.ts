@@ -110,7 +110,8 @@ test("Taramalar sayfası: düzenli tarama bölümü, aralık değişimi ve şimd
   await expect(row).toBeVisible();
   await row.getByLabel("Ne sıklıkla?").selectOption("30");
   await expect(page.getByText("Düzenli tarama güncellendi.")).toBeVisible();
-  await expect(row.getByText(/Ayda bir/)).toBeVisible();
+  // Satırdaki özet metni (seçim kutusundaki "Ayda bir" seçeneği değil).
+  await expect(row.getByText(/Ayda bir · /)).toBeVisible();
   await row.getByRole("button", { name: "Şimdi çalıştır" }).click();
   await expect(page.getByText(/Tarama #\d+ başlatıldı\./)).toBeVisible();
   await expect(page.getByText("Zamanlanmış").first()).toBeVisible();
@@ -129,7 +130,12 @@ test("zamanlama kapatılır ve silinir; geçmiş taramalar kalır", async () => 
 
 test("tarama kartından 'Düzenli tekrarla' penceresi", async () => {
   await page.goto("/scans");
-  const card = page.locator("article").filter({ hasText: "Amsterdam" }).first();
+  // Zamanlamadan doğan taramada (ör. "Şimdi çalıştır") bu düğme bilerek yoktur; elle başlatılmış kartı seç.
+  const card = page
+    .locator("article")
+    .filter({ hasText: "Amsterdam" })
+    .filter({ has: page.getByRole("button", { name: "Düzenli tekrarla" }) })
+    .first();
   await card.getByRole("button", { name: "Düzenli tekrarla" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByText("Bu tarama düzenli tekrarlansın mı?")).toBeVisible();
