@@ -72,7 +72,10 @@ function jsonRes(data: unknown, status = 200): Response {
   });
 }
 
-function setup(routes: Record<string, Route>, opts: { alertEveryMs?: number } = {}) {
+function setup(
+  routes: Record<string, Route>,
+  opts: { alertEveryMs?: number; alertStore?: PollerDeps["alertStore"] } = {},
+) {
   const shown: OsToast[] = [];
   const logs: string[] = [];
   const calls: { url: string; init?: RequestInit }[] = [];
@@ -90,8 +93,12 @@ function setup(routes: Record<string, Route>, opts: { alertEveryMs?: number } = 
     text: (key, n) => ({ title: `${key}:${n ?? ""}`, body: key }),
     log: (m) => logs.push(m),
     now: () => now,
+    alertStore: opts.alertStore,
   };
-  const poller = new NotificationPoller(deps, { intervalMs: 1000, ...opts });
+  const poller = new NotificationPoller(deps, {
+    intervalMs: 1000,
+    alertEveryMs: opts.alertEveryMs,
+  });
   return {
     poller,
     shown,
@@ -108,7 +115,7 @@ describe("electron/notify: NotificationPoller", () => {
     const s = setup({
       "/api/notifications/os-claim": () =>
         jsonRes({ items: [{ id: 7, title: "Yanıt geldi", body: "Kafe X", url: "/campaigns/3" }] }),
-      "/api/settings": () => jsonRes({ settings: { "notifications.os": true } }),
+      "/api/config": () => jsonRes({ notificationsOs: true }),
       "/api/compliance/delivery-alerts": () => jsonRes({ alerts: [] }),
     });
     await s.poller.poll();
@@ -148,7 +155,7 @@ describe("electron/notify: NotificationPoller", () => {
     const s = setup(
       {
         "/api/notifications/os-claim": () => jsonRes({ items: [] }),
-        "/api/settings": () => jsonRes({ settings: { "notifications.os": true } }),
+        "/api/config": () => jsonRes({ notificationsOs: true }),
         "/api/compliance/delivery-alerts": () => jsonRes({ alerts }),
       },
       { alertEveryMs: 60_000 },
@@ -169,10 +176,62 @@ describe("electron/notify: NotificationPoller", () => {
     expect(s.shown).toHaveLength(2);
   });
 
+  it("teslimat uyarısı: bildirilen imzalar kalıcıdır; yeniden başlatmada süren uyarı tekrar bildirilmez", async () => {
+    let stored: string[] = [];
+    const store = { load: () => stored, save: (s: string[]) => void (stored = s) };
+    let alerts: unknown[] = [{ kind: "proof_expiring" }];
+    const routes = {
+      "/api/config": () => jsonRes({ notificationsOs: true }),
+      "/api/compliance/delivery-alerts": () => jsonRes({ alerts }),
+    };
+    const first = setup(routes, { alertStore: store });
+    expect(await first.poller.checkDeliveryAlerts()).toBe(true);
+    expect(stored).toEqual(["proof_expiring"]);
+    // Uygulama yeniden açıldı: aynı uyarı sürüyor → bildirim yok, /api/settings hiç çağrılmaz.
+    const second = setup(routes, { alertStore: store });
+    expect(await second.poller.checkDeliveryAlerts()).toBe(false);
+    expect(second.shown).toEqual([]);
+    expect(second.calls.some((c) => c.url.endsWith("/api/settings"))).toBe(false);
+    // Uyarı kapandı (kayıt boşalır), sonra yeniden belirdi → bir kez daha bildirilir.
+    alerts = [];
+    expect(await second.poller.checkDeliveryAlerts()).toBe(false);
+    expect(stored).toEqual([]);
+    alerts = [{ kind: "proof_expiring" }];
+    const third = setup(routes, { alertStore: store });
+    expect(await third.poller.checkDeliveryAlerts()).toBe(true);
+  });
+
+  it("bozuk/okunamayan imza deposu boş kabul edilir; yazma hatası günlüğe düşer", async () => {
+    const routes = {
+      "/api/config": () => jsonRes({ notificationsOs: true }),
+      "/api/compliance/delivery-alerts": () => jsonRes({ alerts: [{ kind: "delivery_stale" }] }),
+    };
+    const s = setup(routes, {
+      alertStore: {
+        load: () => {
+          throw new Error("bozuk");
+        },
+        save: () => {
+          throw new Error("disk dolu");
+        },
+      },
+    });
+    expect(await s.poller.checkDeliveryAlerts()).toBe(true);
+    expect(s.logs.some((l) => l.includes("okunamadı"))).toBe(true);
+    expect(s.logs.some((l) => l.includes("disk dolu"))).toBe(true);
+    const s2 = setup(routes, {
+      alertStore: {
+        load: () => ["delivery_stale", 42 as unknown as string, "x".repeat(500)],
+        save: () => undefined,
+      },
+    });
+    expect(await s2.poller.checkDeliveryAlerts()).toBe(false);
+  });
+
   it("notifications.os kapalıysa teslimat uyarısı gösterilmez", async () => {
     const s = setup({
       "/api/notifications/os-claim": () => jsonRes({ items: [] }),
-      "/api/settings": () => jsonRes({ settings: { "notifications.os": false } }),
+      "/api/config": () => jsonRes({ notificationsOs: false }),
       "/api/compliance/delivery-alerts": () => jsonRes({ alerts: [{ kind: "proof_expired" }] }),
     });
     expect(await s.poller.checkDeliveryAlerts()).toBe(false);
@@ -182,11 +241,11 @@ describe("electron/notify: NotificationPoller", () => {
   it("ayar/uyarı uçları hatalıysa sessizce false", async () => {
     expect(await setup({}).poller.checkDeliveryAlerts()).toBe(false);
     const s = setup({
-      "/api/settings": () => new Response("x", { status: 200 }),
+      "/api/config": () => new Response("x", { status: 200 }),
     });
     expect(await s.poller.checkDeliveryAlerts()).toBe(false);
     const s2 = setup({
-      "/api/settings": () => jsonRes({ settings: {} }),
+      "/api/config": () => jsonRes({}),
       "/api/compliance/delivery-alerts": () => new Response("x", { status: 200 }),
     });
     expect(await s2.poller.checkDeliveryAlerts()).toBe(false);

@@ -93,6 +93,24 @@ function ProviderBadge() {
   );
 }
 
+/**
+ * Dar ekranda (<640 px, ör. dar tarayıcı penceresi) üst çubukta rozet için yer yoktur (TB-9: 320 px'te taşma). Gösterilen
+ * işletmelerin örnek veri olduğu yine de hiçbir genişlikte gizlenmez: üst çubuğun altında tek satırlık ince bir şerit
+ * yatay yer kaplamadan aynı açıklamayı yazar.
+ */
+function ProviderStrip() {
+  const { data } = useStatus();
+  if (data?.provider !== "mock") return null;
+  return (
+    <p
+      className="border-b bg-nov-future/12 px-3 py-1 text-center text-[11px] font-medium leading-tight text-future-text sm:hidden"
+      data-testid="provider-strip"
+    >
+      {t("provider.demo.tip")}
+    </p>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const theme = useResolvedTheme();
@@ -150,6 +168,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <BudgetPill />
           </div>
         </header>
+        <ProviderStrip />
         <WorkerStatusBanner />
         <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
           {children}

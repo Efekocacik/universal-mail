@@ -12,7 +12,10 @@ import { joinAppPath, safeAppPath } from "../src/lib/client/app-path";
  *    `notifications.os` kapalıysa sunucu boş liste döner.
  *  - Üçten fazla bildirim tek bir özet bildirime birleştirilir (gösterge paneline gider).
  *  - `alertEveryMs` (10 dk) aralıkla çıkış teslimat uyarıları (`/api/compliance/delivery-alerts`) okunur; YENİ beliren
- *    uyarı için tek bir bildirim gösterilir (TB-4). Bu da `notifications.os` ayarına uyar.
+ *    uyarı için tek bir bildirim gösterilir (TB-4). Bildirilmiş uyarı imzaları `alertStore` ile diske yazılır: süren
+ *    bir uyarı (ör. proof_expiring) her açılışta yeniden bildirilmez; uyarı kaybolup yeniden belirirse yine bildirilir.
+ *    Bu da `notifications.os` ayarına uyar (hafif `/api/config` uçtan okunur; gizli bilgi durumu içeren
+ *    `/api/settings` çekilmez).
  * Güvenlik: bildirimin bağlantısı yalnızca uygulama içi yol olabilir (`safeAppPath` + aynı köken denetimi); dış adres
  * asla açılmaz. Arayüze genel bir "bildirim göster" köprüsü AÇILMAZ (ele geçirilmiş sayfa işletim sistemini
  * bildirimle dolduramaz).
@@ -93,6 +96,8 @@ export interface PollerDeps {
   text: (key: "summary" | "deliveryAlert", n?: number) => { title: string; body: string };
   log: (message: string) => void;
   now: () => number;
+  /** Bildirilmiş teslimat uyarısı imzalarının kalıcı deposu (yeniden başlatmada aynı uyarı tekrar bildirilmesin). */
+  alertStore?: { load: () => string[]; save: (signatures: string[]) => void };
 }
 
 export interface PollerOptions {
@@ -100,12 +105,25 @@ export interface PollerOptions {
   alertEveryMs?: number;
 }
 
+/** Kalıcı imzaları savunmacı biçimde okur (bozuk dosya: boş küme; en çok 100 kısa metin). */
+function loadSignatures(deps: PollerDeps): string[] {
+  try {
+    const raw = deps.alertStore?.load() ?? [];
+    return Array.isArray(raw)
+      ? raw.filter((s): s is string => typeof s === "string" && s.length <= 120).slice(0, 100)
+      : [];
+  } catch (e) {
+    deps.log(`uyarı imzaları okunamadı: ${(e as Error).message}`);
+    return [];
+  }
+}
+
 export class NotificationPoller {
   private timer: ReturnType<typeof setInterval> | null = null;
   private running = false;
   private again = false;
   private lastAlertCheck = -Infinity;
-  private alertKinds = new Set<string>();
+  private alertKinds: Set<string>;
   private claimMissingLogged = false;
   readonly intervalMs: number;
   readonly alertEveryMs: number;
@@ -114,6 +132,7 @@ export class NotificationPoller {
     private readonly deps: PollerDeps,
     opts: PollerOptions = {},
   ) {
+    this.alertKinds = new Set(loadSignatures(deps));
     this.intervalMs = opts.intervalMs ?? 30_000;
     this.alertEveryMs = opts.alertEveryMs ?? 10 * 60_000;
   }
@@ -196,11 +215,11 @@ export class NotificationPoller {
   }
 
   async checkDeliveryAlerts(): Promise<boolean> {
-    const settings = await this.request("/api/settings");
-    if (!settings?.ok) return false;
+    const config = await this.request("/api/config");
+    if (!config?.ok) return false;
     try {
-      const s = (await settings.json()) as { settings?: Record<string, unknown> };
-      if (s.settings?.["notifications.os"] === false) return false;
+      const c = (await config.json()) as { notificationsOs?: unknown };
+      if (c.notificationsOs === false) return false;
     } catch {
       return false;
     }
@@ -213,7 +232,16 @@ export class NotificationPoller {
       return false;
     }
     const { fresh, current } = freshAlerts(this.alertKinds, data);
+    const changed =
+      current.size !== this.alertKinds.size || [...current].some((s) => !this.alertKinds.has(s));
     this.alertKinds = current;
+    if (changed) {
+      try {
+        this.deps.alertStore?.save([...current]);
+      } catch (e) {
+        this.deps.log(`uyarı imzaları yazılamadı: ${(e as Error).message}`);
+      }
+    }
     if (fresh.length === 0) return false;
     this.deps.show({ ...this.deps.text("deliveryAlert"), url: "/compliance" });
     return true;

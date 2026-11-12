@@ -40,6 +40,11 @@ export function Tip({
  * ile de açılır, Esc veya dışarı tıklamayla kapanır (WCAG 1.4.13: kalıcı ve kapatılabilir içerik). Fareyle üzerine
  * gelince kısa gecikmeyle açılır ve imleç ayrılınca kapanır; tıklanarak açıldıysa kullanıcı kapatana kadar açık kalır.
  * Odak tetikleyicide kalır (okuma sırasında sayfa zıplamaz). Genel API değişmedi: `<HelpTip>{metin}</HelpTip>`.
+ *
+ * Ekran okuyucu: içerik `<body>` sonundaki bir portalda çizildiği için (Sekme ile ulaşılamaz) metin iki yoldan duyurulur:
+ *  - açıkken tetikleyici `aria-describedby` ile içeriğe bağlanır (odak geri geldiğinde açıklama okunur);
+ *  - tetikleyicinin yanındaki, HER ZAMAN DOM'da duran görünmez `aria-live="polite"` bölgesi açılınca metni alır;
+ *    Enter/Boşluk ile açan kullanıcı odak değişmeden metni duyar.
  */
 export function HelpTip({
   children,
@@ -52,6 +57,7 @@ export function HelpTip({
   title?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const contentId = React.useId();
   const pinned = React.useRef(false);
   const timer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const clear = () => {
@@ -81,6 +87,7 @@ export function HelpTip({
             className,
           )}
           aria-label={t("common.whatIsThis")}
+          aria-describedby={open ? contentId : undefined}
           data-help-tip
           onClick={(e) => {
             // Tıklama: açıksa ve fareyle açıldıysa sabitle; değilse aç/kapat (Radix varsayılanı).
@@ -97,6 +104,14 @@ export function HelpTip({
           <CircleHelp className="size-3.5" aria-hidden />
         </button>
       </PopoverPrimitive.Trigger>
+      <span className="sr-only" aria-live="polite" data-help-tip-live>
+        {open ? (
+          <>
+            {title ? `${title}. ` : null}
+            {children}
+          </>
+        ) : null}
+      </span>
       <PopoverPrimitive.Portal>
         <PopoverPrimitive.Content
           role="note"
@@ -108,8 +123,11 @@ export function HelpTip({
           onPointerLeave={(e) => hover(false)(e)}
           className="z-[60] max-w-72 rounded-md border bg-popover px-3 py-2 text-[12px] leading-snug text-popover-foreground shadow-lg outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-150"
         >
-          {title && <p className="mb-0.5 font-semibold">{title}</p>}
-          {children}
+          {/* Kimlik iç kapta: Radix içerik kimliği (tetikleyicinin aria-controls'u) bozulmasın. */}
+          <div id={contentId}>
+            {title && <p className="mb-0.5 font-semibold">{title}</p>}
+            {children}
+          </div>
         </PopoverPrimitive.Content>
       </PopoverPrimitive.Portal>
     </PopoverPrimitive.Root>

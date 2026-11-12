@@ -70,6 +70,14 @@ export function unreadIncreased(prev: number | undefined, next: number | undefin
   return prev !== undefined && next !== undefined && next > prev;
 }
 
+/**
+ * Yeni bildirimi işletim sistemi bildirimi mi gösterecek? Yalnızca masaüstünde (Electron) VE "Masaüstü bildirimleri"
+ * (`notifications.os`) açıkken; aksi halde uygulama içi kısa uyarı gösterilir (kapatan kullanıcı haberi kaçırmasın).
+ */
+export function osToastHandles(desktop: boolean, osEnabled: boolean): boolean {
+  return desktop && osEnabled;
+}
+
 /** Listeyi getirir; uç yoksa (henüz kurulmamış, 404) `null`. Diğer hatalar fırlatılır. */
 export async function fetchBell(limit = BELL_LIMIT): Promise<BellList | null> {
   try {

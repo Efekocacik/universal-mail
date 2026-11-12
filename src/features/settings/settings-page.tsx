@@ -30,6 +30,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { HelpTip } from "@/components/ui/tooltip";
 import { api, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
+import { useUnsavedChanges } from "@/lib/client/locale-switch";
 import {
   qk,
   useBudget,
@@ -130,14 +131,27 @@ function SaveBar({
 
 /* ----------------------------- Görünüm ve dil ----------------------------- */
 
-/** Masaüstü (Electron) yetenekleri: tarayıcıda yok. İlk çizimde sunucu ile aynı olsun diye etkiden sonra okunur. */
+/**
+ * Masaüstü (Electron) yetenekleri: tarayıcıda yok. İlk çizimde sunucu ile aynı olsun diye etkiden sonra okunur.
+ * "Oturum açılınca başlat" desteği ana süreçten sorulur (paketsiz geliştirme sürümünde yoktur).
+ */
 function useDesktop() {
   const [desktop, setDesktop] = useState<{ loginItem: boolean; osNotifications: boolean } | null>(
     null,
   );
   useEffect(() => {
     const um = window.universalMail;
-    setDesktop(um ? { loginItem: !!um.loginItem, osNotifications: !!um.osNotifications } : null);
+    if (!um) return;
+    let alive = true;
+    const osNotifications = !!um.osNotifications;
+    setDesktop({ loginItem: false, osNotifications });
+    void um
+      .getDesktopCaps?.()
+      .then((c) => alive && setDesktop({ loginItem: !!c?.loginItem, osNotifications }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
   }, []);
   return desktop;
 }
@@ -153,11 +167,13 @@ function AppearanceSection() {
   const openAtLogin = s?.["app.openAtLogin"] ?? false;
   const osNotif = s?.["notifications.os"] ?? true;
 
-  // Masaüstü: kayıtlı "oturum açılınca başlat" tercihini işletim sistemiyle eşitle (ör. yeniden kurulumdan sonra).
+  // Masaüstü: kayıtlı "oturum açılınca başlat" tercihini işletim sistemiyle eşitle. Ana süreç işletim sisteminin
+  // GERÇEK durumuyla karşılaştırır; uygulama Oturum Öğeleri'nden kaldırıldıysa veya kayıt kaybolduysa yeniden uygular.
+  const loaded = !!s;
   useEffect(() => {
-    if (desktop?.loginItem && s)
+    if (desktop?.loginItem && loaded)
       void window.universalMail?.setUiPrefs?.({ openAtLogin }).catch(() => undefined);
-  }, [desktop?.loginItem, openAtLogin, s]);
+  }, [desktop?.loginItem, openAtLogin, loaded]);
 
   const toggle = (key: keyof DesktopSettings, value: boolean) =>
     save.mutate(
@@ -269,6 +285,7 @@ function SecretRow({
 }) {
   const invalidate = useInvalidateAll();
   const [value, setValue] = useState("");
+  useUnsavedChanges(value.trim() !== "");
   const [shown, setShown] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -417,6 +434,7 @@ function GoogleSection() {
   const save = useSave();
   const [mapId, setMapId] = useState("");
   useEffect(() => setMapId(data?.settings["maps.mapId"] ?? ""), [data?.settings]);
+  useUnsavedChanges(!!data && mapId.trim() !== (data.settings["maps.mapId"] ?? "").trim());
   if (!data) return <Skeleton className="h-64" />;
   const provider = data.settings["places.provider"];
   const savedMapId = data.settings["maps.mapId"] ?? "";
@@ -619,6 +637,7 @@ function BudgetSection() {
   const num = Number(value.replace(",", "."));
   const valid = Number.isFinite(num) && value.trim() !== "" && num >= 0 && num <= 100000;
   const dirty = !!data && valid && num !== data.settings["budget.monthlyUsd"];
+  useUnsavedChanges(!!data && value.trim() !== String(data.settings["budget.monthlyUsd"]));
 
   return (
     <Section
@@ -747,6 +766,7 @@ function MarketsSection() {
     !!data &&
     JSON.stringify([...selected].sort()) !==
       JSON.stringify([...(data?.settings["targets.countries"] ?? [])].sort());
+  useUnsavedChanges(dirty);
 
   return (
     <Section title={t("settings.markets.title")} description={t("settings.markets.desc")}>
@@ -845,6 +865,7 @@ function CompanySection() {
   };
   const saved = { ...EMPTY_COMPANY, ...(data?.settings["company.profile"] ?? {}) };
   const dirty = !!data && JSON.stringify(form) !== JSON.stringify(saved);
+  useUnsavedChanges(dirty);
   const valid =
     form.legalName.trim().length >= 2 &&
     form.address.trim().length >= 5 &&
@@ -1050,6 +1071,7 @@ function NoveltySection() {
     v.newWindowDays <= 365;
   const saved = data?.settings["novelty.thresholds"];
   const dirty = !!saved && JSON.stringify(v) !== JSON.stringify(saved);
+  useUnsavedChanges(dirty);
   const num = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setV({ ...v, [k]: Number(e.target.value) });
   return (
@@ -1121,6 +1143,7 @@ function CategoryEditor({ c }: { c: Category }) {
   const invalidate = useInvalidateAll();
   const [type, setType] = useState("");
   const [kw, setKw] = useState("");
+  useUnsavedChanges(type.trim() !== "" || kw.trim() !== "");
   const [pendingChip, setPendingChip] = useState<{ kind: ChipKind; tag: string } | null>(null);
   const patch = useMutation({
     mutationFn: (p: Partial<Pick<Category, "enabled" | "keywords" | "placeTypes">>) =>
@@ -1318,6 +1341,7 @@ function DataSection() {
   const save = useSave();
   const [days, setDays] = useState(30);
   useEffect(() => data && setDays(data.settings["google.cacheDays"]), [data]);
+  useUnsavedChanges(!!data && days !== data.settings["google.cacheDays"]);
   if (!data) return <Skeleton className="h-40" />;
   const consent = data.settings.consent;
   const daysValid = Number.isInteger(days) && days >= 1 && days <= 30;

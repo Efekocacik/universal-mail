@@ -1,4 +1,4 @@
-import { t, type TrKey } from "@/lib/i18n";
+import { t, type Locale, type TrKey } from "@/lib/i18n";
 
 /**
  * Gmail OAuth sonucunun Türkçe metni (C12). Hem sistem tarayıcısında açılan bağımsız sonuç sayfası hem de uygulama
@@ -41,22 +41,31 @@ export function oauthReasonKey(reason: string | null): TrKey {
   return `mbx.oauth.reason.${known ? reason : "other"}` as TrKey;
 }
 
-export function oauthResultText(r: OAuthResultLike): {
+/**
+ * Sonuç metni. Sunucuda (geri çağrı sayfası) dil AÇIKÇA verilir: süreç içi etkin dil sunucuda istekler arasında
+ * paylaşıldığından güvenilmez. Arayüzde verilmezse etkin dil kullanılır.
+ */
+export function oauthResultText(
+  r: OAuthResultLike,
+  locale?: Locale,
+): {
   title: string;
   message: string;
   hint: string | null;
 } {
   if (r.ok) {
     return {
-      title: t("mbx.oauth.page.ok"),
-      message: r.readDenied ? t("mbx.oauth.result.readDenied") : t("mbx.oauth.result.ok"),
+      title: t("mbx.oauth.page.ok", {}, locale),
+      message: r.readDenied
+        ? t("mbx.oauth.result.readDenied", {}, locale)
+        : t("mbx.oauth.result.ok", {}, locale),
       hint: null,
     };
   }
   const hintKey = r.reason ? HINTED[r.reason] : undefined;
   return {
-    title: t("mbx.oauth.page.error"),
-    message: t(oauthReasonKey(r.reason)),
-    hint: hintKey ? t(hintKey) : null,
+    title: t("mbx.oauth.page.error", {}, locale),
+    message: t(oauthReasonKey(r.reason), {}, locale),
+    hint: hintKey ? t(hintKey, {}, locale) : null,
   };
 }

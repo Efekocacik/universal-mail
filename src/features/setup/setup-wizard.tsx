@@ -25,6 +25,7 @@ import { Skeleton } from "@/components/ui/misc";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/cn";
 import { api, errorText } from "@/lib/client/api";
+import { readCarried, useCarryOver } from "@/lib/client/locale-switch";
 import { qk, useConfig, useCountries, useSettings } from "@/lib/client/queries";
 import type { CompanyProfile } from "@/lib/client/types";
 import { getLocale, t } from "@/lib/i18n";
@@ -128,6 +129,23 @@ function Why({ children }: { children: string }) {
   );
 }
 
+const WIZARD_DRAFT_ID = "setup-wizard";
+interface WizardDraft {
+  index: number | null;
+  accepted: boolean;
+  signer: { name: string; title: string };
+  company: CompanyProfile;
+  selected: string[];
+  filter: string;
+  provider: "google" | "mock";
+  placesKey: string;
+  mapsKey: string;
+  mapId: string;
+  keyTest: { ok: boolean; message: string } | null;
+  budget: string;
+  touched: Record<string, boolean>;
+}
+
 export function SetupWizard() {
   const router = useRouter();
   const qc = useQueryClient();
@@ -135,21 +153,41 @@ export function SetupWizard() {
   const { data: countries } = useCountries();
   const { data: config } = useConfig();
   const theme = useResolvedTheme();
-  const [index, setIndex] = useState<number | null>(null);
+  // Dil değişince (başlıktaki seçici) arayüz yeniden kurulur; yazılmış ama henüz kaydedilmemiş alanlar ve bulunulan
+  // adım kaybolmasın diye taslak yeni örneğe taşınır (src/lib/client/locale-switch.ts).
+  const [carried] = useState(() => readCarried<WizardDraft>(WIZARD_DRAFT_ID));
+  const [index, setIndex] = useState<number | null>(carried?.index ?? null);
 
   // Form durumları
-  const [accepted, setAccepted] = useState(false);
-  const [signer, setSigner] = useState({ name: "", title: "" });
-  const [company, setCompany] = useState<CompanyProfile>(EMPTY_COMPANY);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [filter, setFilter] = useState("");
-  const [provider, setProvider] = useState<"google" | "mock">("google");
-  const [placesKey, setPlacesKey] = useState("");
-  const [mapsKey, setMapsKey] = useState("");
-  const [mapId, setMapId] = useState("");
-  const [keyTest, setKeyTest] = useState<{ ok: boolean; message: string } | null>(null);
-  const [budget, setBudget] = useState("30");
-  const [touched, setTouched] = useState<Record<string, boolean>>({});
+  const [accepted, setAccepted] = useState(carried?.accepted ?? false);
+  const [signer, setSigner] = useState(carried?.signer ?? { name: "", title: "" });
+  const [company, setCompany] = useState<CompanyProfile>(carried?.company ?? EMPTY_COMPANY);
+  const [selected, setSelected] = useState<string[]>(carried?.selected ?? []);
+  const [filter, setFilter] = useState(carried?.filter ?? "");
+  const [provider, setProvider] = useState<"google" | "mock">(carried?.provider ?? "google");
+  const [placesKey, setPlacesKey] = useState(carried?.placesKey ?? "");
+  const [mapsKey, setMapsKey] = useState(carried?.mapsKey ?? "");
+  const [mapId, setMapId] = useState(carried?.mapId ?? "");
+  const [keyTest, setKeyTest] = useState<{ ok: boolean; message: string } | null>(
+    carried?.keyTest ?? null,
+  );
+  const [budget, setBudget] = useState(carried?.budget ?? "30");
+  const [touched, setTouched] = useState<Record<string, boolean>>(carried?.touched ?? {});
+  useCarryOver<WizardDraft>(WIZARD_DRAFT_ID, {
+    index,
+    accepted,
+    signer,
+    company,
+    selected,
+    filter,
+    provider,
+    placesKey,
+    mapsKey,
+    mapId,
+    keyTest,
+    budget,
+    touched,
+  });
   const touch = (k: string) => setTouched((o) => (o[k] ? o : { ...o, [k]: true }));
 
   // Kaldığı yerden devam: ilk eksik adımı bul.

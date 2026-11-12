@@ -5,6 +5,7 @@ import {
   BELL_LIMIT,
   fetchBell,
   markBellRead,
+  osToastHandles,
   parseBellList,
   unreadIncreased,
 } from "@/lib/client/notification-bell";
@@ -138,5 +139,15 @@ describe("zil: ağ", () => {
     expect(url).toBe("/api/notifications/read");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({ all: true });
+  });
+});
+
+describe("uygulama içi uyarı mı, işletim sistemi bildirimi mi", () => {
+  it("yalnızca masaüstünde VE 'Masaüstü bildirimleri' açıkken OS bildirimi üstlenir", () => {
+    expect(osToastHandles(true, true)).toBe(true);
+    // Masaüstünde kapatan kullanıcı haberi kaçırmasın: uygulama içi uyarı gösterilir.
+    expect(osToastHandles(true, false)).toBe(false);
+    expect(osToastHandles(false, true)).toBe(false);
+    expect(osToastHandles(false, false)).toBe(false);
   });
 });

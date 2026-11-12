@@ -24,7 +24,9 @@ import { getLocale, isLocale, onLocaleChange, setLocale, type Locale } from "@/l
  * İlk dil ve tema SUNUCUDA ayarlardan okunur (kök yerleşim) ve buraya verilir; böylece sunucu çıktısı ile ilk istemci
  * çizimi aynıdır (yanıp sönme, hidrasyon uyuşmazlığı yok). Kullanıcı Ayarlar'dan değiştirince `/api/config` tazelenir;
  * buradaki dinleyiciler dili/temayı uygular. Dil değişince alt ağaç yeniden kurulur (`key`), böylece her `t()` yeni
- * dilde değerlendirilir; dil değişimi seyrek ve bilinçli bir eylem olduğundan bu kabul edilebilir.
+ * dilde değerlendirilir; dil değişimi seyrek ve bilinçli bir eylem olduğundan bu kabul edilebilir. Yerel durum kaybı
+ * şöyle önlenir (src/lib/client/locale-switch.ts): kaydedilmemiş değişikliği olan form varsa dil seçici önce onay
+ * ister; kurulum sihirbazı taslağını yeni örneğe taşır; klavye odağı dil seçiciye geri döner.
  */
 export function Providers({
   children,
@@ -59,8 +61,9 @@ function I18nProvider({
   initialLocale: Locale;
   children: React.ReactNode;
 }) {
-  // İlk çizimden ÖNCE (eşzamanlı) ayarlanır: sunucuda da istemcide de aynı dil kullanılır. Tek kullanıcılı yerel
-  // uygulamada süreç içi dil değeri paylaşılır; API kodu dili her zaman açıkça verir (bkz. src/lib/i18n/index.ts).
+  // İlk çizimden ÖNCE (eşzamanlı) ayarlanır: sunucu çıktısı ile istemcinin ilk çizimi aynı dilde olsun (hidrasyon).
+  // Sunucuda bu süreç içi değer son çizilen sayfaya göre değişebilir; bu yüzden sunucu kodu (API, bildirim metni,
+  // OAuth geri çağrı sayfası) `t()`'ye dili HER ZAMAN açıkça verir ve bu değere güvenmez (bkz. src/lib/i18n/index.ts).
   useState(() => {
     setLocale(initialLocale);
     return initialLocale;
@@ -82,14 +85,23 @@ function I18nProvider({
 
 /* ----------------------------------- tema ---------------------------------- */
 
-const ThemeContext = createContext<{ pref: ThemePref; resolved: ResolvedTheme }>({
+const ThemeContext = createContext<{ pref: ThemePref; resolved: ResolvedTheme; ready: boolean }>({
   pref: "system",
   resolved: "light",
+  ready: false,
 });
 
 /** Gösterilen tema (Toaster, Google haritası gibi CSS belirteci kullanamayan bileşenler için). */
 export const useResolvedTheme = (): ResolvedTheme => useContext(ThemeContext).resolved;
 export const useThemePref = (): ThemePref => useContext(ThemeContext).pref;
+/**
+ * Gösterilen tema istemcide kesinleşti mi? Hidrasyon çiziminde sistem teması bilinmez (sunucu anlık görüntüsü "açık");
+ * hemen ardından düzeltilir. Tema değişince yeniden kurulması pahalı olan bileşenler (Google haritası: her kurulum
+ * ayrı bir harita yüklemesi) bunu bekler.
+ */
+export const useThemeReady = (): boolean => useContext(ThemeContext).ready;
+
+const noopSubscribe = () => () => {};
 
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 function subscribeSystemDark(cb: () => void): () => void {
@@ -110,6 +122,12 @@ function ThemeSync({
   const { data } = useConfig();
   const pref: ThemePref = data?.theme ?? initialTheme;
   const systemDark = useSyncExternalStore(subscribeSystemDark, systemDarkSnapshot, () => false);
+  // Hidrasyonda yanlış, istemci düzeltme çiziminde (systemDark ile AYNI geçişte) doğru.
+  const ready = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
   const resolved = resolveTheme(pref, systemDark);
 
   useEffect(() => {
@@ -123,5 +141,7 @@ function ThemeSync({
     void window.universalMail?.setUiPrefs?.({ theme: pref, language }).catch(() => undefined);
   }, [pref, language]);
 
-  return <ThemeContext.Provider value={{ pref, resolved }}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={{ pref, resolved, ready }}>{children}</ThemeContext.Provider>
+  );
 }

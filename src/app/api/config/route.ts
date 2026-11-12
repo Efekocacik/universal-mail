@@ -16,6 +16,7 @@ export const GET = route(async () => {
     "novelty.thresholds",
     "ui.language",
     "ui.theme",
+    "notifications.os",
   ] as const);
   const setup = await getSetupState(db);
   return json({
@@ -28,5 +29,7 @@ export const GET = route(async () => {
     novelty: s["novelty.thresholds"],
     language: s["ui.language"],
     theme: s["ui.theme"],
+    // Faz 4: masaüstü işletim sistemi bildirimleri açık mı (Electron ana süreci ve uygulama içi zil okur).
+    notificationsOs: s["notifications.os"],
   });
 });

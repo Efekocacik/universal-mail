@@ -208,21 +208,25 @@ Bu bölümdeki her şey **ŞİMDİ** kullanılabilir; gönderim kapılarına dok
 
 ### 6.1 Görünüm ve dil (Ayarlar → Görünüm ve dil)
 
-- **Arayüz dili:** Türkçe (varsayılan) veya English. Seçim anında uygulanır, bu bilgisayarda hatırlanır; masaüstü menüleri ve uygulama pencereleri de aynı dile geçer. Kurulum sihirbazının üstünde de dil seçici vardır. Alıcıya giden e-postaların dili bundan **bağımsızdır** (şablon dili, alıcının ülkesine göre).
+- **Arayüz dili:** Türkçe (varsayılan) veya English. Seçim anında uygulanır, bu bilgisayarda hatırlanır; masaüstü menüleri ve uygulama pencereleri de aynı dile geçer. Kurulum sihirbazının üstünde de dil seçici vardır (sihirbazda yazılmış ama henüz kaydedilmemiş bilgiler ve bulunulan adım dil değişince korunur). Ayarlar sayfasında kaydedilmemiş bir değişiklik varken dil değiştirilmek istenirse önce onay sorulur (dil değişince ekranlar yeniden yüklenir). Google bağlantı sonucu sayfası (sistem tarayıcısında açılan) da seçili dilde gösterilir. Alıcıya giden e-postaların dili bundan **bağımsızdır** (şablon dili, alıcının ülkesine göre).
 - **Tema:** Sistem (bilgisayarın açık/koyu ayarını izler), Açık, Koyu.
 - **Koyu harita (açık iş, şirket hesabı gerekir):** koyu temada harita kontrolleri koyulaşır; ancak Google harita karolarının gerçekten koyu çizilmesi için Google Cloud'da **vektör tipinde bir Map ID** ve buna bağlı koyu bir **harita stili** gerekir (Google Cloud → Google Maps Platform → Harita Yönetimi → Map ID oluştur → "JavaScript, Vektör"; stil olarak açık ve koyu varyantı olan bir stil bağlayın). Oluşan kısa kodu Ayarlar → Google bağlantısı → Gelişmiş: Harita Kimliği alanına yazın. Bu alan artık yazarken denetlenir: e-posta, boşluk, nokta veya `/` içeren değer kaydedilemez. Gerçek anahtar ve Map ID olmadan bu adım doğrulanamadı.
 
 ### 6.2 Masaüstü bildirimleri (Ayarlar → Görünüm ve dil → Masaüstü uygulaması)
 
-- **Masaüstü bildirimleri** (`notifications.os`, varsayılan açık): tarama bitti, yanıt geldi, gönderim sorunu gibi bildirimler uygulama arka plandayken de ekranın köşesinde görünür; tıklayınca ilgili sayfa açılır. Bir bildirim yalnızca **bir kez** gösterilir; aynı anda üçten fazlası tek özet olarak gelir. Kapatılırsa bildirimler yalnızca üst çubuktaki zilde görünür.
-- **Çıkış teslimat uyarısı (TB-4):** çıkış talepleri çekilemiyorsa, uç nokta doğrulaması bitiyor/bittiyse veya doğrulanamadıysa uygulama açıkken **yeni** beliren uyarı için bir kez işletim sistemi bildirimi gösterilir (Uyum sayfasına götürür). Uygulama açıldığında zaten var olan uyarı da bir kez bildirilir; aynı uyarı her yoklamada tekrarlanmaz.
+- **Masaüstü bildirimleri** (`notifications.os`, varsayılan açık): tarama bitti, yanıt geldi, gönderim sorunu gibi bildirimler uygulama arka plandayken de ekranın köşesinde görünür; tıklayınca ilgili sayfa açılır. Bir bildirim yalnızca **bir kez** gösterilir; aynı anda üçten fazlası tek özet olarak gelir. Kapatılırsa işletim sistemi bildirimi gösterilmez; yeni bildirim uygulama içinde kısa bir uyarı ve üst çubuktaki zil ile duyurulur.
+- **Çıkış teslimat uyarısı (TB-4):** çıkış talepleri çekilemiyorsa, uç nokta doğrulaması bitiyor/bittiyse veya doğrulanamadıysa uygulama açıkken **yeni** beliren uyarı için bir kez işletim sistemi bildirimi gösterilir (Uyum sayfasına götürür). Bildirilmiş uyarılar kullanıcı veri klasöründe (`notified-alerts.json`) tutulur: süren bir uyarı ne her yoklamada ne de her açılışta tekrarlanır; uyarı kapanıp yeniden belirirse yine bir kez bildirilir.
 - **Windows:** bildirimlerin görünmesi için uygulama kimliği `com.universalmail.app` olarak ayarlanır; Windows "Odak yardımı / Rahatsız etmeyin" açıksa bildirimler Bildirim Merkezi'ne düşer.
 - **macOS:** ilk bildirimde sistem izin sorabilir; Sistem Ayarları → Bildirimler → Universal Mail'den açılır.
 - **Uykudan uyanma:** bilgisayar uykudan çıkınca işçi hemen uyandırılır (`{type:'wake'}`) ve bildirimler hemen yoklanır; bekleyen zamanlanmış işler gecikmeden çalışır.
+- **Entegrasyon denetim listesi (Paket B ile birleşince doğrulanacak):**
+  1. İşçi (`src/worker/index.ts`) ana süreçten gelen `{type:'wake'}` iletisini işlemeli (hemen zamanlayıcı turu + gönderici uyandırma). Paket D yalnızca gönderir; işlenmezse uyanma sonrası işler bir sonraki normal tura (en çok birkaç dakika) kalır.
+  2. İşçi yeni bir bildirim eklediğinde ana sürece `{type:'notify'}` göndermeli (ortak sözleşmeye eklenen ileti: işçi → ana süreç). Ana süreç bunu alınca hemen `os-claim` yoklar. Gönderilmezse işletim sistemi bildirimi en çok 30 sn gecikir (düzenli yoklama), kaybolmaz.
+  3. `POST /api/notifications/os-claim`, `GET /api/notifications`, `POST /api/notifications/read` ve `/api/status` `unreadNotifications` alanı Paket B'den gelir; gelene kadar zil "henüz etkin değil" der, işletim sistemi bildirimi sessizce bekler.
 
 ### 6.3 Oturum açılınca başlat
 
-Ayarlar → Görünüm ve dil → Masaüstü uygulaması → **Bilgisayar açılınca başlat** (varsayılan kapalı). Yalnızca paketlenmiş uygulamada, macOS ve Windows'ta uygulanır (geliştirme sürümünde ve Linux'ta anahtar etkisizdir). Düzenli çekme ve kampanya gönderimi uygulamanın açık olmasına bağlı olduğundan, gönderim yapılan bilgisayarda açılması önerilir.
+Ayarlar → Görünüm ve dil → Masaüstü uygulaması → **Bilgisayar açılınca başlat** (varsayılan kapalı). Yalnızca paketlenmiş uygulamada, macOS ve Windows'ta uygulanır; geliştirme sürümünde ve Linux'ta anahtar gösterilmez. Uygulamanın ayarı esastır: uygulama macOS Oturum Öğeleri'nden veya Windows Başlangıç listesinden kaldırılmışsa ya da kayıt kaybolmuşsa, ayar açıkken uygulama bir sonraki açılışta kendini yeniden ekler. Kapatmak için bu anahtarı kullanın. Düzenli çekme ve kampanya gönderimi uygulamanın açık olmasına bağlı olduğundan, gönderim yapılan bilgisayarda açılması önerilir.
 
 ### 6.4 Günlük dosyaları
 

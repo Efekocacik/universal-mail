@@ -3,7 +3,7 @@
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { useEffect, useRef, useState } from "react";
-import { useResolvedTheme } from "@/components/providers";
+import { useResolvedTheme, useThemeReady } from "@/components/providers";
 import { getLocale, t } from "@/lib/i18n";
 import { regionFromDrag } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
@@ -123,10 +123,16 @@ function ViewReporter({ onBoundsChange }: Pick<MapViewProps, "onBoundsChange">) 
   return null;
 }
 
-function Focuser({ focus }: Pick<MapViewProps, "focus">) {
+function Focuser({
+  focus,
+  applied,
+}: Pick<MapViewProps, "focus"> & { applied: React.RefObject<MapViewProps["focus"]> }) {
   const map = useMap();
   useEffect(() => {
     if (!map || !focus) return;
+    // Tema değişiminde harita yeniden kurulur: aynı odak isteği yeniden uygulanmaz (kullanıcının kaydırması korunur).
+    if (applied.current === focus) return;
+    applied.current = focus;
     if (focus.fit) {
       map.fitBounds(
         {
@@ -141,7 +147,7 @@ function Focuser({ focus }: Pick<MapViewProps, "focus">) {
       map.panTo({ lat: focus.lat, lng: focus.lng });
       if (focus.zoom && (map.getZoom() ?? 0) < focus.zoom) map.setZoom(focus.zoom);
     }
-  }, [map, focus]);
+  }, [map, focus, applied]);
   return null;
 }
 
@@ -327,9 +333,17 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
   );
 }
 
+const DEFAULT_CAMERA = { center: { lat: 50, lng: 10 }, zoom: 4 };
+
 export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: string }) {
   const colorScheme = useResolvedTheme() === "dark" ? "DARK" : "LIGHT";
+  // Tema istemcide kesinleşmeden harita kurulmaz: aksi halde koyu sistemde önce açık sonra koyu iki harita yüklenir.
+  const themeReady = useThemeReady();
   const [authError, setAuthError] = useState(false);
+  // `colorScheme` yalnızca kurulumda okunduğundan tema değişince harita yeniden kurulur (key). Kamera ve uygulanmış
+  // odak isteği bu bileşende tutulur; yeni harita kullanıcının bıraktığı konum ve yakınlıkta açılır.
+  const camera = useRef(DEFAULT_CAMERA);
+  const appliedFocus = useRef<MapViewProps["focus"]>(null);
 
   useEffect(() => {
     // Google, anahtar/faturalandırma/kısıt sorununda bu global işlevi çağırır.
@@ -354,29 +368,38 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
   return (
     <div className="relative size-full" data-color-scheme={colorScheme}>
       <APIProvider apiKey={props.apiKey} language={getLocale()}>
-        <Map
-          // Faz 4 (10a-1/10a-7): harita teması arayüz temasını izler; colorScheme yalnızca kurulumda okunur → key.
-          key={colorScheme}
-          colorScheme={colorScheme}
-          mapId={props.mapId}
-          defaultCenter={{ lat: 50, lng: 10 }}
-          defaultZoom={4}
-          gestureHandling="greedy"
-          mapTypeControl={false}
-          streetViewControl={false}
-          fullscreenControl={false}
-          rotateControl={false}
-          tiltInteractionEnabled={false}
-          headingInteractionEnabled={false}
-          clickableIcons={false}
-          className="size-full"
-          onClick={() => props.onSelect(null)}
-        >
-          <Markers points={props.points} selectedId={props.selectedId} onSelect={props.onSelect} />
-          <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
-          <ViewReporter onBoundsChange={props.onBoundsChange} />
-          <Focuser focus={props.focus} />
-        </Map>
+        {themeReady && (
+          <Map
+            // Faz 4 (10a-1/10a-7): harita teması arayüz temasını izler; colorScheme yalnızca kurulumda okunur → key.
+            key={colorScheme}
+            colorScheme={colorScheme}
+            mapId={props.mapId}
+            defaultCenter={camera.current.center}
+            defaultZoom={camera.current.zoom}
+            onCameraChanged={(ev) => {
+              camera.current = { center: ev.detail.center, zoom: ev.detail.zoom };
+            }}
+            gestureHandling="greedy"
+            mapTypeControl={false}
+            streetViewControl={false}
+            fullscreenControl={false}
+            rotateControl={false}
+            tiltInteractionEnabled={false}
+            headingInteractionEnabled={false}
+            clickableIcons={false}
+            className="size-full"
+            onClick={() => props.onSelect(null)}
+          >
+            <Markers
+              points={props.points}
+              selectedId={props.selectedId}
+              onSelect={props.onSelect}
+            />
+            <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
+            <ViewReporter onBoundsChange={props.onBoundsChange} />
+            <Focuser focus={props.focus} applied={appliedFocus} />
+          </Map>
+        )}
         <DrawOverlay drawMode={props.drawMode} onDrawn={props.onDrawn} />
       </APIProvider>
     </div>

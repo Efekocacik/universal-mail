@@ -15,17 +15,18 @@ import {
   BELL_QUERY_KEY,
   fetchBell,
   markBellRead,
+  osToastHandles,
   unreadIncreased,
   type BellItem,
 } from "@/lib/client/notification-bell";
-import { qk, useStatus } from "@/lib/client/queries";
+import { qk, useConfig, useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
 
 /**
  * Üst çubuktaki bildirim zili (Faz 4). Okunmamış sayı mevcut durum yoklamasından gelir (`/api/status`
  * `unreadNotifications`); liste yalnızca açılınca getirilir. Bir bildirime tıklamak ilgili sayfaya gider ve onu okundu
- * yapar. Tarayıcıda (Electron dışında) yeni bildirim geldiğinde kısa bir uyarı gösterilir; masaüstünde bu işi işletim
- * sistemi bildirimi yapar. Bildirim uçları henüz yoksa zil "kullanılamıyor" der, başka bir şeyi etkilemez.
+ * yapar. Yeni bildirim geldiğinde kısa bir uygulama içi uyarı gösterilir; yalnızca masaüstünde VE "Masaüstü
+ * bildirimleri" açıkken gösterilmez (o zaman bu işi işletim sistemi bildirimi yapar; aynı haber iki kez gelmesin). Bildirim uçları henüz yoksa zil "kullanılamıyor" der, başka bir şeyi etkilemez.
  */
 export function NotificationBell() {
   const router = useRouter();
@@ -33,6 +34,8 @@ export function NotificationBell() {
   const [open, setOpen] = useState(false);
   const { data: status } = useStatus();
   const unread = (status as { unreadNotifications?: number } | undefined)?.unreadNotifications;
+  const { data: config } = useConfig();
+  const osEnabled = config?.notificationsOs !== false;
 
   const list = useQuery({
     queryKey: BELL_QUERY_KEY,
@@ -41,12 +44,13 @@ export function NotificationBell() {
     staleTime: 0,
   });
 
-  // Tarayıcıda yeni bildirim: sayı arttığında ve sayfa görünürken en yenisinin başlığını kısaca göster.
+  // Yeni bildirim: sayı arttığında ve sayfa görünürken en yenisinin başlığını kısaca göster.
   const prev = useRef<number | undefined>(undefined);
   useEffect(() => {
     const before = prev.current;
     prev.current = unread;
-    if (!unreadIncreased(before, unread) || window.universalMail?.osNotifications) return;
+    if (!unreadIncreased(before, unread)) return;
+    if (osToastHandles(!!window.universalMail?.osNotifications, osEnabled)) return;
     if (document.visibilityState !== "visible") return;
     void fetchBell(1)
       .then((r) => {
@@ -54,7 +58,7 @@ export function NotificationBell() {
         if (top && top.readAt === null) toast.info(t("bell.newToast", { title: top.title }));
       })
       .catch(() => undefined);
-  }, [unread]);
+  }, [unread, osEnabled]);
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: BELL_QUERY_KEY });

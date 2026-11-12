@@ -87,11 +87,16 @@ test.describe("Faz 4 · arayüz cilası (Paket D)", () => {
   });
 
   test("TB-9: 320 px genişlikte üst çubuk yatay kaydırma oluşturmaz", async () => {
+    const demo =
+      ((await (await page.request.get("/api/status")).json()) as { provider?: string }).provider ===
+      "mock";
     await page.setViewportSize({ width: 320, height: 720 });
     try {
       for (const url of ["/", "/settings", "/campaigns"]) {
         await page.goto(url);
         await expect(page.getByTestId("notification-bell")).toBeVisible();
+        // Demo verisi dar ekranda da belirtilir (rozet yerine üst çubuğun altında ince şerit).
+        if (demo) await expect(page.getByTestId("provider-strip")).toBeVisible();
         const overflow = await page.evaluate(
           () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
         );
@@ -116,21 +121,72 @@ test.describe("Faz 4 · arayüz cilası (Paket D)", () => {
     await expect(dialog).toBeHidden();
   });
 
-  test("'Bu nedir?' balonu tıklamayla açılır ve Escape ile kapanır", async () => {
+  test("'Bu nedir?' balonu klavyeyle açılır, ekran okuyucuya duyurulur ve Escape ile kapanır", async () => {
     await page.goto("/compliance?tab=suppression");
-    const tip = page.locator("[data-help-tip]").first();
+    // Engel listesi açıklamasının yanındaki balon (sayfadaki ilk balona güvenilmez).
+    const notice = page
+      .locator("span", { has: page.locator("[data-help-tip]") })
+      .filter({ hasText: "Engel listesindeki adreslere" });
+    const tip = notice.getByRole("button", { name: "Bu nedir?" });
     await expect(tip).toBeVisible();
-    await tip.click();
+    await expect(tip).not.toHaveAttribute("aria-describedby", /.+/);
+    await tip.focus();
+    await page.keyboard.press("Enter");
     const note = page.getByRole("note");
     await expect(note).toBeVisible();
-    await expect(note).toContainText(/engel/i);
+    await expect(note).toContainText("Abonelikten çıkanlar buraya kendiliğinden eklenir");
+    // Odak tetikleyicide kalır; açıklama hem aria-describedby hem canlı bölge ile duyurulur.
+    await expect(tip).toBeFocused();
+    const describedBy = await tip.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    await expect(page.locator(`[id="${describedBy}"]`)).toContainText("Abonelikten çıkanlar");
+    await expect(notice.locator("[data-help-tip-live]")).toContainText("Abonelikten çıkanlar");
     await page.keyboard.press("Escape");
     await expect(note).toBeHidden();
+    await expect(notice.locator("[data-help-tip-live]")).toHaveText("");
   });
 
-  test("engel listesi boşken açıklayıcı boş durum ve 'Ekle' düğmesi görünür", async () => {
+  test("engel listesi: boş durum veya liste; süzgeç sonuçsuzsa 'Süzgeçleri temizle' çalışır", async () => {
     await page.goto("/compliance?tab=suppression");
-    await expect(page.getByText("Engelleme listesi boş")).toBeVisible();
+    // Paylaşılan e2e veritabanında başka senaryolar engel eklemiş olabilir: iki geçerli durumdan biri görünür.
+    const emptyNone = page.getByText("Engelleme listesi boş");
+    const list = page.getByRole("list", { name: /Engel/ });
+    await expect(emptyNone.or(list).first()).toBeVisible();
+    // Hiçbir kayda uymayan benzersiz arama: süzgeçli boş durum ve temizleme düğmesi (veriden bağımsız).
+    const search = page.getByRole("textbox", { name: "Alan adı ara" });
+    await search.fill(`yok-${Date.now()}.e2e-bos.example`);
+    await expect(page.getByText("Bu süzgece uyan kayıt yok")).toBeVisible();
+    await page.getByRole("button", { name: "Süzgeçleri temizle" }).click();
+    await expect(search).toHaveValue("");
+    await expect(page.getByText("Bu süzgece uyan kayıt yok")).toBeHidden();
+  });
+
+  test("dil: kaydedilmemiş değişiklik varken önce onay istenir; Vazgeç değişikliği korur", async () => {
+    await page.goto("/settings#appearance");
+    const budget = page.locator("#budget");
+    await expect(budget).toBeVisible();
+    const original = await budget.inputValue();
+    await budget.fill("1234");
+    await page.getByTestId("language-switch").getByRole("radio", { name: "English" }).click();
+    const dialog = page.getByRole("dialog", { name: "Kaydedilmemiş değişiklikler var" });
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Vazgeç" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+    await expect(budget).toHaveValue("1234");
+    await budget.fill(original);
+  });
+
+  test("dil: klavyeyle değiştirince odak dil seçicide kalır", async () => {
+    await page.goto("/settings#appearance");
+    const group = page.getByTestId("language-switch");
+    await group.getByRole("radio", { name: "Türkçe" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(group.getByRole("radio", { name: "English" })).toBeFocused();
+    await page.keyboard.press("ArrowLeft");
+    await expect(page.locator("html")).toHaveAttribute("lang", "tr");
+    await expect(group.getByRole("radio", { name: "Türkçe" })).toBeFocused();
   });
 
   test("Map ID: e-posta yazılınca satır içi hata ve Kaydet kapalı; temizlenince kalkar", async () => {

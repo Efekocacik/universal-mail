@@ -1,9 +1,16 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { toast } from "sonner";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Segmented } from "@/components/ui/segmented";
 import { api, errorText } from "@/lib/client/api";
+import {
+  hasUnsavedChanges,
+  requestFocusAfterRemount,
+  takeFocusAfterRemount,
+} from "@/lib/client/locale-switch";
 import { qk } from "@/lib/client/queries";
 import { THEME_PREFS, type ThemePref } from "@/lib/client/theme";
 import type { AppConfig } from "@/lib/client/types";
@@ -57,18 +64,45 @@ export const LANGUAGE_OPTIONS = [
   { value: "en", label: "English", lang: "en" },
 ] as const satisfies readonly { value: Locale; label: string; lang: string }[];
 
+/**
+ * Dil seçici. Dil değişince arayüz yeni dilde yeniden kurulur (providers.tsx); bu sırada AYNI sayfadaki kaydedilmemiş
+ * form değişiklikleri kaybolacağından önce onay istenir (`useUnsavedChanges` ile bildiren formlar). Kurulum sihirbazı
+ * taslağını kendisi taşır (`useCarryOver`), onay gerekmez. Klavyeyle seçildiyse odak yeni dilde yine bu gruba döner.
+ */
 export function LanguageSwitch({ value, className }: { value: Locale; className?: string }) {
   const save = useUiPrefMutation();
+  const [pending, setPending] = useState<Locale | null>(null);
+  const apply = (v: Locale) => {
+    const el = document.activeElement;
+    if (el instanceof HTMLElement && el.closest('[data-testid="language-switch"]'))
+      requestFocusAfterRemount();
+    save.mutate({ "ui.language": v });
+  };
   return (
-    <Segmented
-      value={value}
-      options={LANGUAGE_OPTIONS}
-      label={t("settings.language")}
-      disabled={save.isPending}
-      onChange={(v) => save.mutate({ "ui.language": v })}
-      className={className}
-      testId="language-switch"
-    />
+    <>
+      <Segmented
+        value={value}
+        options={LANGUAGE_OPTIONS}
+        label={t("settings.language")}
+        disabled={save.isPending}
+        onChange={(v) => (hasUnsavedChanges() ? setPending(v) : apply(v))}
+        className={className}
+        testId="language-switch"
+        focusOnMount={takeFocusAfterRemount}
+      />
+      <ConfirmDialog
+        open={pending !== null}
+        onOpenChange={(o) => !o && setPending(null)}
+        tone="warning"
+        title={t("settings.language.unsaved.title")}
+        description={t("settings.language.unsaved.body")}
+        confirmLabel={t("settings.language.unsaved.confirm")}
+        cancelLabel={t("settings.language.unsaved.cancel")}
+        onConfirm={() => {
+          if (pending) apply(pending);
+        }}
+      />
+    </>
   );
 }
 

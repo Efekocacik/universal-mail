@@ -75,7 +75,12 @@ export async function requirePaidScanAllowed(
     throw new HttpError(
       409,
       `Yüksek tahmin (${estimate.costUsd.high.toFixed(2)} USD) kalan bütçenizi (${budget.remainingUsd.toFixed(2)} USD) aşabilir. Tarama bütçe dolunca otomatik durur. Yine de başlatmak için onaylayın.`,
-      { code: "NEEDS_ACK" },
+      // Tutarlar yapılandırılmış alan olarak da gelir: İngilizce arayüz onay metnini bunlarla kurar (apiError.NEEDS_ACK.detail).
+      {
+        code: "NEEDS_ACK",
+        highUsd: Math.round(estimate.costUsd.high * 100) / 100,
+        remainingUsd: Math.round(budget.remainingUsd * 100) / 100,
+      },
     );
   }
 }

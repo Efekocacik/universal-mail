@@ -470,6 +470,8 @@ function buildMenu(): void {
 /* ------------------------- işletim sistemi bildirimleri ------------------------- */
 
 let poller: NotificationPoller | null = null;
+/** Bildirilmiş teslimat uyarısı imzaları (yeniden başlatmada aynı uyarı tekrar bildirilmez). */
+const alertsFile = () => path.join(app.getPath("userData"), "notified-alerts.json");
 
 function showToast(toast: OsToast): void {
   if (!Notification.isSupported()) return;
@@ -501,28 +503,62 @@ function startNotifications(): void {
         : { title: tl("electron.deliveryAlert.title"), body: tl("electron.deliveryAlert.body") },
     log: (m) => log("notify", m),
     now: () => Date.now(),
+    alertStore: {
+      load: () => {
+        try {
+          return JSON.parse(fs.readFileSync(alertsFile(), "utf8")) as string[];
+        } catch {
+          return []; // ilk açılış veya bozuk dosya
+        }
+      },
+      save: (sigs) => fs.writeFileSync(alertsFile(), JSON.stringify(sigs), { mode: 0o600 }),
+    },
   });
   poller.start();
 }
 
-/** Uygulama tercihlerini (IPC'den gelen, doğrulanmış) uygular: tema, dil (menü yeniden kurulur), oturum öğesi. */
-function applyPrefsPatch(input: unknown): { ok: boolean } {
+/** Oturum öğesi bu ortamda yönetilebilir mi (paketli uygulama, macOS/Windows)? */
+const loginItemAvailable = () => loginItemSupported(process.platform, app.isPackaged);
+
+/** İşletim sistemindeki GERÇEK "oturum açılınca başlat" durumu; desteklenmiyorsa null. */
+function osOpenAtLogin(): boolean | null {
+  if (!loginItemAvailable()) return null;
+  try {
+    return app.getLoginItemSettings().openAtLogin;
+  } catch (e) {
+    log("main", `Oturum öğesi okunamadı: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/**
+ * Uygulama tercihlerini (IPC'den gelen, doğrulanmış) uygular: tema, dil (menü yeniden kurulur), oturum öğesi.
+ * Oturum öğesi dosyadaki değerle DEĞİL işletim sisteminin gerçek durumuyla karşılaştırılır: kullanıcı uygulamayı
+ * macOS Oturum Öğeleri'nden / Windows Başlangıç'tan kaldırdıysa veya kayıt kaybolduysa ayardaki değer yeniden
+ * uygulanır (kaynak doğruluk uygulamanın ayarıdır). Dönen `openAtLogin`, uygulamadan sonraki gerçek durumdur.
+ */
+function applyPrefsPatch(input: unknown): { ok: boolean; openAtLogin: boolean | null } {
   const { patch, rejected } = validateUiPrefsPatch(input);
   if (rejected.length) log("main", `ui-prefs: yok sayılan alanlar: ${rejected.join(", ")}`);
   const before = prefs;
   prefs = { ...prefs, ...patch };
   if (patch.theme && patch.theme !== before.theme) nativeTheme.themeSource = patch.theme;
   if (patch.language && patch.language !== before.language) buildMenu();
-  if (patch.openAtLogin !== undefined && patch.openAtLogin !== before.openAtLogin) {
-    if (loginItemSupported(process.platform, app.isPackaged)) {
+  if (patch.openAtLogin !== undefined) {
+    const actual = osOpenAtLogin();
+    if (actual === null) {
+      if (patch.openAtLogin !== before.openAtLogin)
+        log("main", "Oturum açılınca başlat bu ortamda desteklenmiyor (paketsiz veya platform).");
+    } else if (actual !== patch.openAtLogin) {
       app.setLoginItemSettings({ openAtLogin: patch.openAtLogin });
-      log("main", `Oturum açılınca başlat: ${patch.openAtLogin ? "açık" : "kapalı"}`);
-    } else {
-      log("main", "Oturum açılınca başlat bu ortamda desteklenmiyor (paketsiz veya platform).");
+      log(
+        "main",
+        `Oturum açılınca başlat: ${patch.openAtLogin ? "açık" : "kapalı"} (işletim sistemi: ${actual ? "açık" : "kapalı"})`,
+      );
     }
   }
   if (JSON.stringify(before) !== JSON.stringify(prefs)) savePrefs();
-  return { ok: rejected.length === 0 };
+  return { ok: rejected.length === 0, openAtLogin: osOpenAtLogin() };
 }
 
 /* ------------------------------ duman testi ------------------------------ */
@@ -640,6 +676,8 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     rotateLogs();
     setInterval(rotateLogs, LOG_ROTATE_EVERY_MS).unref();
     loadPrefs();
+    // Oturum öğesini işletim sisteminin gerçek durumuyla eşitle (kayıt kaybolduysa veya dışarıdan kaldırıldıysa).
+    if (prefs.openAtLogin) applyPrefsPatch({ openAtLogin: true });
     log(
       "main",
       `Universal Mail ${app.getVersion()} başlıyor (${process.platform}/${process.arch}, paketli=${app.isPackaged})`,
@@ -649,8 +687,15 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     ipcMain.handle("um:open-data-folder", () => shell.openPath(dataDir()));
     // Yalnızca uygulamanın kendi penceresinden (yerel köken) gelen tercih değişikliği kabul edilir.
     ipcMain.handle("um:set-ui-prefs", (e, input: unknown) => {
-      if (!origin || !isLocal(e.senderFrame?.url ?? "")) return { ok: false };
+      if (!origin || !isLocal(e.senderFrame?.url ?? "")) return { ok: false, openAtLogin: null };
       return applyPrefsPatch(input);
+    });
+    // Masaüstü yetenekleri ana süreçten gelir (paketli mi, platform destekliyor mu): Ayarlar'da yalnızca gerçekten
+    // çalışan anahtarlar görünür. Salt okunur; yine de yalnızca uygulamanın kendi penceresine yanıt verilir.
+    ipcMain.handle("um:desktop-caps", (e) => {
+      if (!origin || !isLocal(e.senderFrame?.url ?? ""))
+        return { loginItem: false, openAtLogin: null };
+      return { loginItem: loginItemAvailable(), openAtLogin: osOpenAtLogin() };
     });
     // Bilgisayar uykudan uyanınca: işçi kaçırılan zamanlanmış işleri hemen değerlendirsin, bildirimler yoklansın.
     powerMonitor.on("resume", () => {
