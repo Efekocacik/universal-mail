@@ -1,7 +1,7 @@
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
 import { body, database, HttpError, json, route } from "@/lib/api/http";
-import { parseLeadFilters } from "@/lib/api/filters";
+import { filterQuerySchema, MAX_SELECTION, parseLeadFilters } from "@/lib/api/filters";
 import { monthSkuCalls } from "@/lib/budget";
 import { audit } from "@/lib/db/audit";
 import { leads } from "@/lib/db/schema";
@@ -10,7 +10,7 @@ import { websiteStates, type LeadInfo } from "@/lib/email/service";
 import { getEnrichmentMap, upsertEnrichment } from "@/lib/email/store";
 import { getSecret } from "@/lib/secrets/store";
 import { enqueueJob } from "@/lib/jobs/queue";
-import { queryLeadIds } from "@/lib/leads/query";
+import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
 import { marginalCostUsd } from "@/lib/places/pricing";
 import { getSettings } from "@/lib/settings";
 import { chunk, round } from "@/lib/util";
@@ -21,9 +21,13 @@ export const dynamic = "force-dynamic";
 const schema = z
   .object({
     /** Seçili lead'ler. */
-    leadIds: z.array(z.number().int()).min(1).max(2000).optional(),
-    /** Alternatif: listedeki süzgeçlerin sorgu dizesi (en fazla 2000 lead). */
-    filtersQuery: z.string().max(2000).optional(),
+    leadIds: z.array(z.number().int()).min(1).max(MAX_SELECTION).optional(),
+    /**
+     * Alternatif: listedeki süzgeçlerin sorgu dizesi (ortak 8000 karakter sınırı). En fazla 2000 lead işlenir; fazlası
+     * eşleşirse önizleme `matched` ve `capped: true` taşır (sessizce kesilmez; yeniden çalıştırınca kalanlar işlenir,
+     * çünkü taranmış olanlar atlanır).
+     */
+    filtersQuery: filterQuerySchema.optional(),
     /** Web sitesi adresi önbellekte olmayan işletmeler için önce Google verisini (Place Details Enterprise) yükle. */
     loadGoogle: z.boolean().default(false),
     /** Yerel taramada bulunamayanlar için harici servisi (Hunter) kullan; yalnızca ayarlarda etkinse. */
@@ -44,10 +48,20 @@ export const POST = route(async (req: Request) => {
   await requireCollectionReady(db);
   const input = await body(req, schema);
 
-  const ids = input.leadIds
-    ? [...new Set(input.leadIds)]
-    : await queryLeadIds(db, parseLeadFilters(new URLSearchParams(input.filtersQuery)), 2000);
-  if (ids.length === 0) throw new HttpError(400, "Süzgece uyan işletme yok.");
+  let ids: number[];
+  let matched: number;
+  if (input.leadIds) {
+    ids = [...new Set(input.leadIds)];
+    matched = ids.length;
+  } else {
+    const filters = parseLeadFilters(new URLSearchParams(input.filtersQuery));
+    [ids, matched] = await Promise.all([
+      queryLeadIds(db, filters, MAX_SELECTION),
+      countLeadIds(db, filters),
+    ]);
+  }
+  if (ids.length === 0)
+    throw new HttpError(400, "Süzgece uyan işletme yok.", { code: "NOTHING_MATCHED" });
 
   const infos: LeadInfo[] = [];
   for (const part of chunk(ids, 500))
@@ -102,6 +116,10 @@ export const POST = route(async (req: Request) => {
   const budget = await budgetSummary(db);
   const preview = {
     leads: infos.length,
+    /** Seçime/süzgece uyan toplam; `capped` ise yalnızca ilk 2000'i işlenir. */
+    matched,
+    capped: matched > ids.length,
+    max: MAX_SELECTION,
     ready: ready.length,
     noWebsite: noWebsite.length,
     needsGoogle: googleTargets.length,

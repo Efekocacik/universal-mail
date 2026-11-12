@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LeadFilters, LeadSort } from "@/lib/leads/query";
+import { LEAD_LIFECYCLES, type LeadFilters, type LeadSort } from "@/lib/leads/query";
 import { HttpError } from "./http";
 
 const NOVELTY = ["future_opening", "high", "likely", "low"] as const;
@@ -13,6 +13,27 @@ const LEAD_STATUS = [
   "customer",
   "do_not_contact",
 ] as const;
+
+/**
+ * Lead listesinin süzgeç sorgu dizesi (`/api/leads` ile aynı biçim) için TEK sınır. Kampanyaya ekleme, e-posta bulma,
+ * toplu işlemler ve dışa aktarma bunu kullanır; böylece uzun (çok ülkeli/kategorili) bir süzgeç birinde geçip diğerinde
+ * 400 vermez. 8000 karakter, Node'un 16 KB başlık sınırının güvenle altındadır.
+ */
+export const FILTER_QUERY_MAX = 8000;
+export const filterQuerySchema = z.string().max(FILTER_QUERY_MAX);
+
+/** Bir toplu işlemde tek tek seçilebilecek en fazla lead (e-posta bulma ve toplu işlemlerle aynı). */
+export const MAX_SELECTION = 2000;
+
+/**
+ * Toplu uç noktaların ortak seçim biçimi: açık kimlikler (1–2000) VEYA süzgeç sorgusu. Süzgeç seçimi sunucuda o anki
+ * veriye göre çözülür; 2000'den fazlası eşleşirse yanıt `capped: true` taşır (sessizce kesilmez).
+ */
+export const selectionSchema = z.union([
+  z.object({ leadIds: z.array(z.number().int().positive()).min(1).max(MAX_SELECTION) }).strict(),
+  z.object({ filterQuery: filterQuerySchema }).strict(),
+]);
+export type Selection = z.infer<typeof selectionSchema>;
 
 const list = (v: string | null) =>
   v
@@ -31,22 +52,34 @@ export function parseLeadFilters(sp: URLSearchParams): LeadFilters {
   const novelty = list(sp.get("novelty"));
   const leadStatus = list(sp.get("status"));
   const source = list(sp.get("source"));
+  const lifecycle = list(sp.get("lifecycle"));
   const parsed = z
     .object({
       novelty: z.array(z.enum(NOVELTY)).optional(),
       leadStatus: z.array(z.enum(LEAD_STATUS)).optional(),
       source: z.array(z.enum(["google", "demo"])).optional(),
+      lifecycle: z.array(z.enum(LEAD_LIFECYCLES)).optional(),
     })
-    .safeParse({ novelty, leadStatus, source });
-  if (!parsed.success) throw new HttpError(400, "Geçersiz süzgeç değeri.");
+    .safeParse({ novelty, leadStatus, source, lifecycle });
+  if (!parsed.success)
+    throw new HttpError(400, "Geçersiz süzgeç değeri.", { code: "FILTER_INVALID" });
 
   let bbox: LeadFilters["bbox"];
   const b = sp.get("bbox");
   if (b) {
     const [south, west, north, east] = b.split(",").map(Number);
     if ([south, west, north, east].some((x) => x === undefined || !Number.isFinite(x)))
-      throw new HttpError(400, "Geçersiz harita kutusu.");
+      throw new HttpError(400, "Geçersiz harita kutusu.", { code: "FILTER_INVALID" });
     bbox = { south: south!, west: west!, north: north!, east: east! };
+  }
+
+  const since = sp.get("detectedSince");
+  let detectedSince: number | undefined;
+  if (since !== null && since !== "") {
+    const n = Number(since);
+    if (!Number.isInteger(n) || n < 0 || n > 8_640_000_000_000_000)
+      throw new HttpError(400, "Geçersiz tarih süzgeci.", { code: "FILTER_INVALID" });
+    detectedSince = n;
   }
 
   return {
@@ -65,6 +98,9 @@ export function parseLeadFilters(sp: URLSearchParams): LeadFilters {
     scanId: num(sp.get("scanId")),
     notFound: bool(sp.get("notFound")),
     emailStatus: list(sp.get("emailStatus")),
+    archived: bool(sp.get("archived")) === true ? true : undefined,
+    lifecycle: parsed.data.lifecycle,
+    detectedSince,
   };
 }
 
