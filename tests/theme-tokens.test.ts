@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import {
   applyThemeClass,
@@ -85,6 +86,35 @@ describe("tema belirteçleri (globals.css)", () => {
     ["--future-text", "--card"],
   ];
 
+  /** `bg-nov-likely/15` sarı uyarı kutusu: `--nov-likely` %15, alttaki zemin %85. */
+  function tint(tokens: Map<string, string>, under: string): string {
+    const a = tokens.get("--nov-likely")!.replace("#", "");
+    const b = tokens.get(under)!.replace("#", "");
+    return (
+      "#" +
+      [0, 2, 4]
+        .map((i) =>
+          Math.round(
+            parseInt(a.slice(i, i + 2), 16) * 0.15 + parseInt(b.slice(i, i + 2), 16) * 0.85,
+          )
+            .toString(16)
+            .padStart(2, "0"),
+        )
+        .join("")
+    );
+  }
+
+  it.each([
+    ["açık", light],
+    ["koyu", dark],
+  ] as const)("%s tema: sarı uyarı kutusundaki --caution-text AA (≥ 4.5)", (_name, tokens) => {
+    for (const under of ["--background", "--card"]) {
+      expect(contrast(tokens.get("--caution-text")!, tint(tokens, under))).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    }
+  });
+
   it.each([
     ["açık", light],
     ["koyu", dark],
@@ -133,5 +163,103 @@ describe("tema modeli (src/lib/client/theme.ts)", () => {
   it("isThemePref yalnızca bilinen değerleri kabul eder", () => {
     for (const p of THEME_PREFS) expect(isThemePref(p)).toBe(true);
     for (const v of ["auto", "", null, 1, "DARK"]) expect(isThemePref(v)).toBe(false);
+  });
+});
+
+/**
+ * Faz 4 F: bileşenlerde sabit renk yok. `src/features` ve `src/components` altındaki her .ts/.tsx dosyasının dize,
+ * şablon ve JSX metinlerinde hex (`#1f2328`, `text-[#6b5200]`), `rgb()/rgba()` veya `hsl()/hsla()` aranır; renkler
+ * globals.css belirteçlerinden (Tailwind sınıfı veya `var(--…)`) gelir, böylece koyu tema kendiliğinden doğru olur.
+ * Yorumlar taranmaz. İstisnalar aşağıda gerekçesiyle listelenir ve listede kalan her dosyanın gerçekten istisna
+ * gerektirdiği de denetlenir (eskimiş istisna kalmaz).
+ */
+describe("bileşenlerde sabit renk yok (src/features, src/components)", () => {
+  const ROOT = path.resolve(__dirname, "..");
+  const SCAN_DIRS = ["src/features", "src/components"];
+  const ALLOW: Record<string, string> = {
+    "src/features/campaigns/preview-doc.ts":
+      "e-posta önizlemesi alıcının istemcisini taklit eder: temadan bağımsız beyaz zemin + koyu metin",
+  };
+  const COLOR_RE = /#[0-9a-fA-F]{3,8}(?![0-9a-zA-Z_-])|(?<![a-zA-Z])(?:rgba?|hsla?)\(/;
+
+  function files(dir: string): string[] {
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) return files(p);
+      return /\.tsx?$/.test(e.name) ? [p] : [];
+    });
+  }
+
+  function colorLiterals(file: string): string[] {
+    const src = ts.createSourceFile(
+      file,
+      fs.readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+    );
+    const hits: string[] = [];
+    const visit = (n: ts.Node) => {
+      if (
+        ts.isStringLiteral(n) ||
+        ts.isNoSubstitutionTemplateLiteral(n) ||
+        ts.isTemplateHead(n) ||
+        ts.isTemplateMiddle(n) ||
+        ts.isTemplateTail(n) ||
+        ts.isJsxText(n)
+      ) {
+        const m = COLOR_RE.exec(n.text);
+        if (m) {
+          const { line } = src.getLineAndCharacterOfPosition(n.getStart());
+          hits.push(`${line + 1}: ${m[0]}`);
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(src);
+    return hits;
+  }
+
+  const all = SCAN_DIRS.flatMap((d) => files(path.join(ROOT, d))).map((f) => ({
+    rel: path.relative(ROOT, f).split(path.sep).join("/"),
+    hits: colorLiterals(f),
+  }));
+
+  it("tarama gerçekten dosya buluyor", () => {
+    expect(all.length).toBeGreaterThan(50);
+  });
+
+  it("izin listesi dışındaki dosyalarda hex/rgb/hsl renk yok", () => {
+    const offenders = all
+      .filter((f) => f.hits.length > 0 && !(f.rel in ALLOW))
+      .map((f) => `${f.rel} → ${f.hits.join(", ")}`);
+    expect(offenders).toEqual([]);
+  });
+
+  it("izin listesindeki her dosya hâlâ var ve istisnayı gerçekten kullanıyor", () => {
+    for (const rel of Object.keys(ALLOW)) {
+      const f = all.find((x) => x.rel === rel);
+      expect(f, rel).toBeDefined();
+      expect(f!.hits.length, rel).toBeGreaterThan(0);
+    }
+  });
+
+  it("denetim gerçekten yakalar (örnek dizeler)", () => {
+    for (const bad of [
+      "text-[#6b5200]",
+      "#fff",
+      "rgba(20,112,90,0.12)",
+      "shadow-[0_1px_8px_rgb(0_0_0/0.04)]",
+      "hsl(0 0% 0%)",
+    ])
+      expect(COLOR_RE.test(bad), bad).toBe(true);
+    for (const ok of [
+      "text-caution-text",
+      "var(--map-stroke)",
+      "#main",
+      "/#section",
+      "bg-nov-likely/15",
+    ])
+      expect(COLOR_RE.test(ok), ok).toBe(false);
   });
 });

@@ -9,7 +9,7 @@ const VIEW_KEY = "um.explore.schematicView";
 
 /** Temas durumu kodu → halka rengi (FR-UI-02: gönderildi, yanıt verdi, durduruldu ayrı gösterilir). */
 const CONTACT_STROKE = [
-  "#fff",
+  "var(--pin-border)",
   "var(--contacted)",
   "var(--success)",
   "var(--muted-foreground)",
@@ -177,7 +177,7 @@ export function SchematicMapView({
   return (
     <div
       ref={ref}
-      className="relative size-full cursor-grab touch-none select-none overflow-hidden bg-[#eef1ec] active:cursor-grabbing"
+      className="relative size-full cursor-grab touch-none select-none overflow-hidden bg-map-bg active:cursor-grabbing"
       onPointerDown={(e) => {
         drag.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, moved: false };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -217,8 +217,7 @@ export function SchematicMapView({
             y={region.y}
             width={region.w}
             height={region.h}
-            fill="rgba(20,112,90,0.08)"
-            stroke="#14705a"
+            style={{ fill: "var(--map-stroke)", fillOpacity: 0.08, stroke: "var(--map-stroke)" }}
             strokeWidth={2}
             strokeDasharray="6 4"
           />
@@ -245,9 +244,12 @@ export function SchematicMapView({
                 cx={p.x}
                 cy={p.y}
                 r={selectedId === p.id ? 9 : 5}
-                fill={p.color}
                 style={{
-                  stroke: selectedId === p.id ? "#0d4d3d" : (CONTACT_STROKE[p.contact] ?? "#fff"),
+                  fill: p.color,
+                  stroke:
+                    selectedId === p.id
+                      ? "var(--map-stroke)"
+                      : (CONTACT_STROKE[p.contact] ?? "var(--pin-border)"),
                 }}
                 strokeWidth={selectedId === p.id ? 3 : p.contact ? 2 : 1.5}
                 strokeDasharray={p.contact === 3 && selectedId !== p.id ? "2 1.5" : undefined}

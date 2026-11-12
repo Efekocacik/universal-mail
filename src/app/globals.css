@@ -50,6 +50,7 @@
   --color-contacted: var(--contacted);
   --color-success-text: var(--success-text);
   --color-warning-text: var(--warning-text);
+  --color-caution-text: var(--caution-text);
   --color-danger-text: var(--danger-text);
   --color-info-text: var(--info-text);
   --color-low-text: var(--low-text);
@@ -103,6 +104,8 @@
   /* Rozet ve uyarı metinleri (açık zemin üzerinde AA kontrast); bileşenlerde sabit hex YOK, bu belirteçler kullanılır. */
   --success-text: #166534;
   --warning-text: #8a6700;
+  /* Sarı uyarı kutusu (`bg-nov-likely/15`) içindeki metin: açık zeminde `--warning-text`ten koyu (AA ≥ 4.5). */
+  --caution-text: #6b5200;
   --danger-text: #b91c1c;
   --info-text: #1d4ed8;
   --low-text: #5b6168;
@@ -151,6 +154,7 @@
   --contacted: #60a5fa;
   --success-text: #86efac;
   --warning-text: #f2c94c;
+  --caution-text: #f2c94c;
   --danger-text: #fca5a5;
   --info-text: #93c5fd;
   --low-text: #b4b9c0;
@@ -197,6 +201,7 @@
     --contacted: #60a5fa;
     --success-text: #86efac;
     --warning-text: #f2c94c;
+    --caution-text: #f2c94c;
     --danger-text: #fca5a5;
     --info-text: #93c5fd;
     --low-text: #b4b9c0;

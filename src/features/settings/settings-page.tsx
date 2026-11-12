@@ -701,7 +701,7 @@ function BudgetSection() {
             }
           />
           {budget.level !== "ok" && (
-            <p className="flex items-center gap-1.5 text-[13px] font-medium text-[#6b5200]">
+            <p className="flex items-center gap-1.5 text-[13px] font-medium text-caution-text">
               <CircleAlert className="size-4 shrink-0" aria-hidden />
               {budget.level === "blocked"
                 ? t("settings.budget.blocked")

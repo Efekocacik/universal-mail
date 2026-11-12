@@ -123,7 +123,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           {t("a11y.skip")}
         </a>
-        <header className="relative z-30 flex h-12 min-w-0 shrink-0 items-center gap-1.5 border-b bg-card/90 px-3 min-[400px]:gap-3 sm:px-4 shadow-[0_1px_8px_rgb(0_0_0/0.04)] backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-4">
+        <header className="relative z-30 flex h-12 min-w-0 shrink-0 items-center gap-1.5 border-b bg-card/90 px-3 min-[400px]:gap-3 sm:px-4 shadow-xs backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:gap-4">
           <Link
             href="/"
             className="flex shrink-0 items-center gap-2 rounded-md font-semibold tracking-tight max-[359px]:hidden"

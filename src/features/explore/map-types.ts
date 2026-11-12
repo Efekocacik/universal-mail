@@ -5,7 +5,12 @@ import type { DraftRegion, DrawMode, FocusRequest } from "./state";
 export type MapPoint = number[];
 
 /** Etiket kodu → renk (SRS 9): 0 mor (yakında açılacak), 1 yeşil (yüksek), 2 sarı (muhtemel), 3 gri (düşük). */
-export const LABEL_COLORS = ["#7c3aed", "#16a34a", "#d4a017", "#9aa0a8"] as const;
+export const LABEL_COLORS = [
+  "var(--nov-future)",
+  "var(--nov-high)",
+  "var(--nov-likely)",
+  "var(--nov-low)",
+] as const;
 
 export interface MapViewProps {
   points: MapPoint[];

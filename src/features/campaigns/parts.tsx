@@ -118,7 +118,7 @@ export function Notice({
     tone === "danger"
       ? "bg-destructive/10 text-destructive"
       : tone === "warning"
-        ? "bg-nov-likely/15 text-[#6b5200]"
+        ? "bg-nov-likely/15 text-caution-text"
         : "bg-muted text-muted-foreground";
   const Icon = tone === "info" ? Info : AlertTriangle;
   return (

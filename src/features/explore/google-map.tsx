@@ -8,13 +8,30 @@ import { getLocale, t } from "@/lib/i18n";
 import { pinClassName, readCamera, regionFromDrag, writeCamera, type Camera } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
 
-const SHAPE_STYLE = {
-  strokeColor: "#14705a",
-  strokeOpacity: 0.95,
-  strokeWeight: 2,
-  fillColor: "#14705a",
-  fillOpacity: 0.08,
+/** Çizim sırasındaki sürükleme şekli (SVG, CSS belirteçleriyle). */
+const DRAG_SHAPE_STYLE = {
+  fill: "var(--map-stroke)",
+  fillOpacity: 0.12,
+  stroke: "var(--map-stroke)",
 } as const;
+
+/**
+ * Bölge şeklinin Google Maps seçenekleri. Maps JS `strokeColor`/`fillColor` CSS değişkeni kabul etmez; renk o anki
+ * temanın `--map-stroke` belirtecinden okunur (bileşenlerde sabit hex yok). Tema değişince `<Map key>` yeniden kurulur, şekil
+ * de yeni renkle oluşur. Okunamazsa Maps kendi varsayılanını kullanır.
+ */
+function shapeStyle() {
+  const color =
+    typeof document === "undefined"
+      ? ""
+      : getComputedStyle(document.documentElement).getPropertyValue("--map-stroke").trim();
+  return {
+    ...(color ? { strokeColor: color, fillColor: color } : {}),
+    strokeOpacity: 0.95,
+    strokeWeight: 2,
+    fillOpacity: 0.08,
+  };
+}
 
 interface PinRef {
   marker: google.maps.marker.AdvancedMarkerElement;
@@ -213,7 +230,7 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
     const listeners: google.maps.MapsEventListener[] = [];
     if (kind === "circle" && d.circle) {
       const circle = new google.maps.Circle({
-        ...SHAPE_STYLE,
+        ...shapeStyle(),
         map,
         center: { lat: d.circle.lat, lng: d.circle.lng },
         radius: d.circle.radiusM,
@@ -239,7 +256,7 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
       shapeRef.current = circle;
     } else {
       const rect = new google.maps.Rectangle({
-        ...SHAPE_STYLE,
+        ...shapeStyle(),
         map,
         bounds: { south: d.bbox.south, west: d.bbox.west, north: d.bbox.north, east: d.bbox.east },
         editable,
@@ -260,7 +277,6 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
       shapeRef.current = null;
     };
   }, [map, kind, editable]);
-
   // Dışarıdan gelen değişiklikleri (yarıçap kaydırıcısı vb.) şekle yansıt.
   useEffect(() => {
     const shape = shapeRef.current;
@@ -357,8 +373,7 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
               y={Math.min(drag.y0, drag.y1)}
               width={Math.abs(drag.x1 - drag.x0)}
               height={Math.abs(drag.y1 - drag.y0)}
-              fill="rgba(20,112,90,0.12)"
-              stroke="#14705a"
+              style={DRAG_SHAPE_STYLE}
               strokeWidth={2}
             />
           ) : (
@@ -366,8 +381,7 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
               cx={drag.x0}
               cy={drag.y0}
               r={Math.hypot(drag.x1 - drag.x0, drag.y1 - drag.y0)}
-              fill="rgba(20,112,90,0.12)"
-              stroke="#14705a"
+              style={DRAG_SHAPE_STYLE}
               strokeWidth={2}
             />
           )}

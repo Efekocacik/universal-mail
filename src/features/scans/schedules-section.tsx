@@ -91,7 +91,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
               className={
                 vm.outcomeTone === "ok"
                   ? "rounded-md bg-muted px-2.5 py-1.5 text-[12px] text-muted-foreground"
-                  : "rounded-md bg-nov-likely/15 px-2.5 py-1.5 text-[12px] text-[#6b5200] dark:text-nov-likely"
+                  : "rounded-md bg-nov-likely/15 px-2.5 py-1.5 text-[12px] text-caution-text"
               }
             >
               {vm.skipReason}

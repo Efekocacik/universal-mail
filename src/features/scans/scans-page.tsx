@@ -210,7 +210,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
         </div>
       )}
       {scan.pauseReason && scan.status !== "completed" && (
-        <p className="mt-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-[#6b5200]">
+        <p className="mt-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-caution-text">
           {scan.pauseReason}
         </p>
       )}

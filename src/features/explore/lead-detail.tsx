@@ -312,7 +312,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
           )}
         </dl>
         {place.lat === null && (
-          <p className="flex items-start gap-1.5 rounded-md bg-nov-likely/15 px-2.5 py-2 text-[12px] text-[#6b5200]">
+          <p className="flex items-start gap-1.5 rounded-md bg-nov-likely/15 px-2.5 py-2 text-[12px] text-caution-text">
             <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
             {t("detail.coordsExpired")}
           </p>
