@@ -16,7 +16,12 @@ import * as schema from "@/lib/db/schema";
 import { countryPolicies, mailboxes, templates } from "@/lib/db/schema";
 import { COUNTRY_CODES } from "@/lib/geo/countries";
 import { BUILTIN_TEMPLATES, textToHtml } from "@/lib/mail/builtin-templates";
-import { DEMO_MAILBOX_ADDRESS, seedBuiltinTemplates, seedDemoMailbox } from "@/lib/mail/seed";
+import {
+  DEMO_MAILBOX_ADDRESS,
+  seedBuiltinTemplates,
+  seedDemoMailbox,
+  TEMPLATE_SEED_VERSION,
+} from "@/lib/mail/seed";
 import { TEMPLATE_VARIABLES, templateVariablesIn } from "@/lib/mail/variables";
 import { getSetting, setSetting } from "@/lib/settings";
 
@@ -184,21 +189,26 @@ describe("demo posta kutusu", () => {
 });
 
 describe("hazır şablonlar", () => {
-  it("Türkçe ve İngilizce ilk e-posta şablonlarını bir kez ekler", async () => {
-    expect(await seedBuiltinTemplates(db, NOW)).toBe(2);
+  it("Türkçe ve İngilizce ilk e-posta ve takip şablonlarını bir kez ekler (Faz 4: seed v2)", async () => {
+    expect(await seedBuiltinTemplates(db, NOW)).toBe(BUILTIN_TEMPLATES.length);
     const rows = await db.select().from(templates);
-    expect(rows.map((r) => r.language).sort()).toEqual(["en", "tr"]);
+    const initial = rows.filter((r) => r.kind === "initial");
+    expect(initial.map((r) => r.language).sort()).toEqual(["en", "tr"]);
     for (const r of rows) {
-      expect(r).toMatchObject({ kind: "initial", builtIn: true, version: 1, archivedAt: null });
+      expect(r).toMatchObject({ builtIn: true, version: 1, archivedAt: null });
       expect(r.bodyHtml).toBe(textToHtml(r.bodyText));
     }
     expect(await seedBuiltinTemplates(db, NOW + 1)).toBe(0);
-    expect(await db.select().from(templates)).toHaveLength(2);
+    expect(await db.select().from(templates)).toHaveLength(BUILTIN_TEMPLATES.length);
   });
 
   it("düzenlenen veya silinen şablonu geri getirmez ya da değiştirmez", async () => {
     await seedBuiltinTemplates(db, NOW);
-    const [en, tr] = await db.select().from(templates).orderBy(templates.language);
+    const [en, tr] = await db
+      .select()
+      .from(templates)
+      .where(eq(templates.kind, "initial"))
+      .orderBy(templates.language);
     await db
       .update(templates)
       .set({ subject: "Kendi konum", version: 2 })
@@ -206,7 +216,7 @@ describe("hazır şablonlar", () => {
     await db.delete(templates).where(eq(templates.id, tr!.id));
 
     expect(await seedBuiltinTemplates(db, NOW + 1)).toBe(0);
-    const rows = await db.select().from(templates);
+    const rows = await db.select().from(templates).where(eq(templates.kind, "initial"));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ subject: "Kendi konum", version: 2 });
   });
@@ -239,7 +249,10 @@ describe("seed bayrakları ve diğer ayarlar", () => {
     await seedCountryPolicies(db, NOW);
     await seedBuiltinTemplates(db, NOW);
     await seedDemoMailbox(db, NOW);
-    expect(await getSetting(db, "seed.faz3")).toEqual({ templates: 1, demoMailbox: 1 });
+    expect(await getSetting(db, "seed.faz3")).toEqual({
+      templates: TEMPLATE_SEED_VERSION,
+      demoMailbox: 1,
+    });
     expect(await getSetting(db, "budget.monthlyUsd")).toBe(55);
     expect(await getSetting(db, "targets.countries")).toEqual(["GB", "NL"]);
   });
@@ -260,7 +273,10 @@ describe("seed bayrakları ve diğer ayarlar", () => {
     expect(await db.select().from(templates)).toHaveLength(BUILTIN_TEMPLATES.length);
     expect(await db.select().from(mailboxes)).toHaveLength(1);
     // Bayrak onarılır.
-    expect(await getSetting(db, "seed.faz3")).toEqual({ templates: 1, demoMailbox: 1 });
+    expect(await getSetting(db, "seed.faz3")).toEqual({
+      templates: TEMPLATE_SEED_VERSION,
+      demoMailbox: 1,
+    });
   });
 
   it("bayrak bozukken arşivlenmiş hazır şablon da tekrar eklemeyi engeller", async () => {

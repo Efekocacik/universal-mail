@@ -1,4 +1,4 @@
-import { and, eq, inArray, like, ne, or } from "drizzle-orm";
+import { and, eq, gte, inArray, like, ne, or, sql } from "drizzle-orm";
 import { getDomain } from "tldts";
 import type { DbExecutor } from "@/lib/db/client";
 import {
@@ -100,7 +100,11 @@ export type IneligibleCode =
   | "previous_step_not_sent"
   | "followup_too_soon"
   | "reply_received"
+  | "inbound_review_pending"
   | "domain_daily_cap";
+
+/** İncelemede bekleyen yanıt varken takibin yeniden denetlenme aralığı (6 saat). */
+export const INBOUND_REVIEW_RECHECK_MS = 6 * 3_600_000;
 
 export interface IneligibleReason {
   code: IneligibleCode;
@@ -375,6 +379,7 @@ export async function evaluateSend(
         idempotencyKey: messages.idempotencyKey,
         sentAt: messages.sentAt,
         createdAt: messages.createdAt,
+        rfcMessageId: messages.rfcMessageId,
       })
       .from(messages)
       .where(
@@ -426,6 +431,42 @@ export async function evaluateSend(
       )
       .limit(1);
     if (replies.length > 0) c.add("reply_received");
+
+    // Faz 4 (9a): alıcıdan gelen ve İNCELEMEDE bekleyen (doğrulanmamış yanıt/çıkış veya "olumsuz") ileti varken takip
+    // gönderilmez. Bu ileti diziye bağlanmamıştır (kanıt yetersiz), bu yüzden yukarıdaki yanıt denetimi onu görmez.
+    // Karar verilince kendiliğinden kalkar: yanıt/çıkış diziyi bitirir, "yok say" takibin sürmesine izin verir.
+    if (step > 0 && replies.length === 0) {
+      const contacted = own.filter((m) => (CONTACTED as readonly string[]).includes(m.status));
+      if (contacted.length > 0) {
+        const firstSentAt = Math.min(...contacted.map((m) => m.sentAt ?? m.createdAt));
+        const ownIds = contacted
+          .map((m) => m.rfcMessageId)
+          .filter((x): x is string => typeof x === "string" && x.length > 0);
+        const fromRecipient = cl.recipientHash
+          ? eq(messages.peerHash, cl.recipientHash)
+          : undefined;
+        const inThread = ownIds.length > 0 ? inArray(messages.inReplyTo, ownIds) : undefined;
+        const match =
+          fromRecipient && inThread ? or(fromRecipient, inThread) : (fromRecipient ?? inThread);
+        if (match) {
+          const pending = await db
+            .select({ id: messages.id })
+            .from(messages)
+            .where(
+              and(
+                eq(messages.direction, "in"),
+                eq(messages.status, "received"),
+                gte(sql`coalesce(${messages.receivedAt}, ${messages.createdAt})`, firstSentAt),
+                match,
+              ),
+            )
+            .limit(1);
+          if (pending.length > 0) {
+            c.add("inbound_review_pending", { until: now + INBOUND_REVIEW_RECHECK_MS });
+          }
+        }
+      }
+    }
 
     if (recipient) {
       await checkHistory(db, c, recipient.hash, now, limits, cl.id);

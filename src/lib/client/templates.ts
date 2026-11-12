@@ -21,6 +21,8 @@ export interface TemplateDraftInput {
   categoryKey?: string | null;
   subject: string;
   bodyHtml: string;
+  /** Takip şablonunda ilk e-postanın konusunu "Re:" ile kullan (9d; varsayılan açık). */
+  followupReuseSubject?: boolean;
 }
 
 export type PreviewResponse =
