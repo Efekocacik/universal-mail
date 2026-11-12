@@ -99,6 +99,28 @@ describe("çıkış belirteci (demo)", () => {
     expect(JSON.stringify(await db.select().from(auditLog))).not.toContain(s.email);
   });
 
+  it("15.10-2: durma nedeni yazılır (TB-2); bitmiş dizi `completed` kalır (TB-10)", async () => {
+    const s = await seedSent(db, campaignId);
+    const done = await seedSent(db, await createCampaign(db, { status: "running" }), {
+      email: s.email,
+      sentAt: T0 - 3 * 86_400_000,
+    });
+    await db
+      .update(campaignLeads)
+      .set({ status: "completed" })
+      .where(eq(campaignLeads.id, done.cl));
+    expect(await processUnsubscribe(db, createUnsubscribeToken(s.cl), NOW)).toBe("unsubscribed");
+    const rows = await db.select().from(campaignLeads);
+    expect(rows.find((r) => r.id === s.cl)).toMatchObject({
+      status: "unsubscribed",
+      stopReason: "unsubscribe",
+    });
+    expect(rows.find((r) => r.id === done.cl)).toMatchObject({
+      status: "completed",
+      stopReason: "unsubscribe",
+    });
+  });
+
   it("var olmayan kayıt, geçersiz belirteçle aynı yanıtı verir; canlı kapsam kampanyası reddedilir", async () => {
     expect(await processUnsubscribe(db, createUnsubscribeToken(99999))).toBe("invalid");
   });

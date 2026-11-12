@@ -731,3 +731,38 @@ describe("gizli bilgi sızıntısı yok", () => {
     void and;
   });
 });
+
+describe("15.10-2: tek tıklamalı çıkış durma nedenini yazar (TB-2) ve bitmiş diziyi çevirmez (TB-10)", () => {
+  beforeEach(async () => {
+    await ensureSigningKey(db, NOW);
+  });
+  const clRow = async (s: Sent) =>
+    (await db.select().from(campaignLeads).where(eq(campaignLeads.id, s.cl)))[0]!;
+
+  it("süren dizi: `unsubscribed` + stop_reason='unsubscribe'; şikâyet işareti yazılmaz", async () => {
+    const { token } = await mint();
+    expect(await ingest(evt(token))).toEqual({
+      outcome: "unsubscribed",
+      stopped: 1,
+      suppression: "added",
+    });
+    expect(await clRow(a)).toMatchObject({
+      status: "unsubscribed",
+      stopReason: "unsubscribe",
+      exclusionReasons: [],
+    });
+  });
+
+  it("bitmiş dizi `completed` kalır, yalnızca neden kaydedilir; engel yine eklenir ve 'already' sayılmaz", async () => {
+    await db.update(campaignLeads).set({ status: "completed" }).where(eq(campaignLeads.id, a.cl));
+    const { token } = await mint();
+    expect(await ingest(evt(token))).toEqual({
+      outcome: "unsubscribed",
+      stopped: 0,
+      suppression: "added",
+    });
+    expect(await clRow(a)).toMatchObject({ status: "completed", stopReason: "unsubscribe" });
+    const [au] = await audits("unsubscribe.one_click");
+    expect(au!.detail).toMatchObject({ stopped: 0, annotated: 1 });
+  });
+});

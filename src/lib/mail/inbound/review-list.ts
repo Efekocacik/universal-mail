@@ -1,6 +1,7 @@
 import { and, desc, eq } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db/client";
 import { messages } from "@/lib/db/schema";
+import { effectiveClassification } from "./complaint";
 
 /**
  * İnceleme kuyruğu (K4): otomatik etki üretmeyen, insan kararı bekleyen gelen iletiler. Gönderen adresi saklanmadığı
@@ -27,7 +28,7 @@ export async function listReviewQueue(db: DbExecutor, limit = 100): Promise<Revi
     .limit(Math.min(Math.max(limit, 1), 200));
   return rows.map((m) => ({
     id: m.id,
-    classification: m.classification,
+    classification: effectiveClassification(m.classification, m.errorCode),
     reason: m.errorCode,
     senderDomain: m.peerDomain,
     receivedAt: m.receivedAt ?? m.createdAt,
