@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Input, Label, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import {
@@ -67,8 +68,9 @@ export function MailboxHealthCard({ mailboxId }: { mailboxId: number }) {
           });
   return (
     <section aria-labelledby="mbh-title" className="space-y-3 rounded-xl border bg-card p-4">
-      <h2 id="mbh-title" className="text-sm font-semibold">
+      <h2 id="mbh-title" className="flex items-center gap-1.5 text-sm font-semibold">
         {t("health.mb.title")}
+        <HelpTip>{t("help.bounceRate")}</HelpTip>
       </h2>
       <p className="text-[13px] text-muted-foreground">
         {t("health.mb.help", { days: h.windowDays, rate: bpToPercent(h.limits.bounceBp) })}

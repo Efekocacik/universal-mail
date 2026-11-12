@@ -16,6 +16,7 @@ import {
 import { FieldError, FieldHint, Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import {
@@ -524,10 +525,23 @@ export function SuppressionPanel() {
   const pages = list.data?.pages ?? [];
   const items = pages.flatMap((p) => p.items);
   const first = pages[0];
+  // "Hiç kayıt yok" ile "süzgece uyan yok" ayrı anlatılır (FR-UI-06); süzgeçliyse tek tıkla temizlenir.
+  const filtered = state !== "active" || !!reason || !!scope || search.trim() !== "";
+  const clearFilters = () => {
+    setState("active");
+    setReason("");
+    setScope("");
+    setSearch("");
+  };
 
   return (
     <div className="space-y-4">
-      <Notice>{t("sup.note")}</Notice>
+      <Notice>
+        <span className="inline-flex items-start gap-1.5">
+          <span>{t("sup.note")}</span>
+          <HelpTip className="mt-0.5 shrink-0">{t("help.suppression")}</HelpTip>
+        </span>
+      </Notice>
       {first && (
         <ul className="flex flex-wrap gap-2" aria-label={t("sup.summary")}>
           <li>
@@ -614,12 +628,31 @@ export function SuppressionPanel() {
       ) : list.isError ? (
         <LoadError error={list.error} onRetry={() => void list.refetch()} />
       ) : items.length === 0 ? (
-        <EmptyState
-          className="rounded-xl border border-dashed bg-card p-8"
-          icon={Ban}
-          title={t("sup.empty.title")}
-          body={t("sup.empty.body")}
-        />
+        filtered ? (
+          <EmptyState
+            className="rounded-xl border border-dashed bg-card p-8"
+            icon={Ban}
+            title={t("sup.empty.title")}
+            body={t("sup.empty.body")}
+            action={
+              <Button size="sm" variant="outline" onClick={clearFilters}>
+                {t("sup.empty.clear")}
+              </Button>
+            }
+          />
+        ) : (
+          <EmptyState
+            className="rounded-xl border border-dashed bg-card p-8"
+            icon={Ban}
+            title={t("sup.empty.none.title")}
+            body={t("sup.empty.none.body")}
+            action={
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <Plus /> {t("sup.add")}
+              </Button>
+            }
+          />
+        )
       ) : (
         <>
           <p className="tabular text-[12px] text-muted-foreground" aria-live="polite">
