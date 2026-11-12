@@ -5,7 +5,7 @@ import path from "node:path";
 import { createClient, type Client } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { toLibsqlUrl } from "@/lib/config/paths";
 import { openDatabase } from "@/lib/db/client";
 import {
@@ -36,7 +36,7 @@ import { withFileLock } from "@/lib/util/file-lock";
 const tmpBase = process.env.TMPDIR ?? os.tmpdir();
 const unsafeTmp = process.platform === "win32" && /[^\x20-\x7e]/.test(tmpBase);
 const REPO = path.resolve(__dirname, "..");
-const MIGRATIONS = path.join(REPO, "drizzle");
+const SOURCE_MIGRATIONS = path.join(REPO, "drizzle");
 const T = 1_700_000_000_000;
 
 let dir: string;
@@ -49,14 +49,21 @@ function partialMigrations(count: number): string {
   const d = fs.mkdtempSync(path.join(tmpBase, "um-mig3-"));
   fs.mkdirSync(path.join(d, "meta"));
   const journal = JSON.parse(
-    fs.readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf8"),
+    fs.readFileSync(path.join(SOURCE_MIGRATIONS, "meta", "_journal.json"), "utf8"),
   );
   journal.entries = journal.entries.slice(0, count);
   fs.writeFileSync(path.join(d, "meta", "_journal.json"), JSON.stringify(journal));
   for (const e of journal.entries as { tag: string }[])
-    fs.copyFileSync(path.join(MIGRATIONS, `${e.tag}.sql`), path.join(d, `${e.tag}.sql`));
+    fs.copyFileSync(path.join(SOURCE_MIGRATIONS, `${e.tag}.sql`), path.join(d, `${e.tag}.sql`));
   return d;
 }
+
+/**
+ * 0003 dönemi migrasyon klasörü (ilk 4 geçiş). Bu dosyadaki "son geçiş = 0003" senaryoları ve 0003 geri alma aracı, bu
+ * sürümün klasörüne karşı sınanır; 0004 (Faz 4) ve geri alması tests/migration-0004.test.ts'tedir.
+ */
+const MIGRATIONS = partialMigrations(4);
+afterAll(() => fs.rmSync(MIGRATIONS, { recursive: true, force: true }));
 
 /** `pre-rollback-*` yedekleri (yükseltme yedeği `pre-migrate-*` ayrıdır). */
 function rollbackBackups(): string[] {
@@ -640,7 +647,7 @@ describe("dosya kilidi (süreçler arası)", () => {
 });
 
 /** Alt süreci çalıştırır ve JSON çıktısını döndürür. */
-function runChild(args: string[]): Promise<Record<string, unknown>> {
+function runChild(args: string[], migrations = MIGRATIONS): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
@@ -649,7 +656,7 @@ function runChild(args: string[]): Promise<Record<string, unknown>> {
         cwd: REPO,
         env: {
           ...process.env,
-          UM_MIGRATIONS_DIR: MIGRATIONS,
+          UM_MIGRATIONS_DIR: migrations,
           UM_DATA_DIR: dir,
           UM_STATIC_DATA_DIR: path.join(REPO, "data"),
         },
@@ -692,16 +699,23 @@ describe.skipIf(unsafeTmp)(
           h.client.close();
 
           const startAt = String(Date.now() + 2500);
+          // `init` gerçek açılış yoludur: seed'ler GÜNCEL şemayı bekler, bu yüzden tüm geçişler (0004 dahil) uygulanır.
+          const folder = mode === "init" ? SOURCE_MIGRATIONS : MIGRATIONS;
+          const migTotal = (
+            JSON.parse(fs.readFileSync(path.join(folder, "meta", "_journal.json"), "utf8")) as {
+              entries: unknown[];
+            }
+          ).entries.length;
           const [a, b] = await Promise.all([
-            runChild([f, startAt, "A", mode]),
-            runChild([f, startAt, "B", mode]),
+            runChild([f, startAt, "A", mode], folder),
+            runChild([f, startAt, "B", mode], folder),
           ]);
           expect(a.error, JSON.stringify(a)).toBeUndefined();
           expect(b.error, JSON.stringify(b)).toBeUndefined();
-          expect([a.pending, b.pending].sort()).toEqual([0, 1]);
+          expect([a.pending, b.pending].sort()).toEqual([0, migTotal - 3]);
 
           const v = await handle(f);
-          expect(await num(v.client, "SELECT COUNT(*) FROM __drizzle_migrations")).toBe(4);
+          expect(await num(v.client, "SELECT COUNT(*) FROM __drizzle_migrations")).toBe(migTotal);
           expect(await num(v.client, "SELECT COUNT(*) FROM messages")).toBe(total);
           expect(
             await num(v.client, "SELECT COUNT(*) FROM messages WHERE classification='complaint'"),
@@ -712,7 +726,8 @@ describe.skipIf(unsafeTmp)(
           ).toBe(0);
           const after = await dump(v.client);
           expect(after.suppressions).toEqual(before.suppressions);
-          expect(after.leads).toEqual(before.leads);
+          // 0004 yalnızca boş `archived_at` sütunu ekler (init kipi); eski sütunlar bire bir aynı kalır.
+          expect(after.leads.map(({ archived_at: _a, ...rest }) => rest)).toEqual(before.leads);
           expect(after.messages).toHaveLength(before.messages.length);
           expect(fs.existsSync(maintenancePathFor(f))).toBe(false);
           expect(fs.existsSync(path.join(dir, "migrate.lock"))).toBe(false);
@@ -983,9 +998,14 @@ describe("rollback aracı uygulamanın normal çalışma yolundan çağrılamaz"
     const offenders: string[] = [];
     for (const f of roots.flatMap((r) => walk(r))) {
       const rel = path.relative(REPO, f).replace(/\\/g, "/");
-      if (rel === "src/lib/db/rollback-0003.ts" || rel === "scripts/rollback-0003.ts") continue;
+      // Geri alma araçlarının kendileri (0003 ve onu yeniden kullanan 0004) hariç.
+      if (/^(src\/lib\/db|scripts)\/rollback-000[34]\.ts$/.test(rel)) continue;
       const text = fs.readFileSync(f, "utf8");
-      if (/rollback-0003|rollbackFaz3ArfComplaint|executeRollback|planRollback/.test(text))
+      if (
+        /rollback-000[34]|rollbackFaz3ArfComplaint|rollbackFaz4|executeRollback|planRollback/.test(
+          text,
+        )
+      )
         offenders.push(rel);
     }
     expect(offenders).toEqual([]);

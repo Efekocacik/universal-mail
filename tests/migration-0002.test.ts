@@ -31,6 +31,11 @@ const NEW_TABLES = [
 
 /** Yalnızca ilk `count` migrasyonu içeren geçici bir migrasyon klasörü (journal kırpılmış). */
 let partialDir: string;
+/**
+ * 0003'e kadar (dahil) olan geçişler: "yalnızca ekleme" denetimleri 0002'nin etkisini ölçer. 0004 (Faz 4) mevcut
+ * tablolara sütun eklediği için kendi testinde (tests/migration-0004.test.ts) ayrıca doğrulanır.
+ */
+let upTo0003Dir: string;
 function partialMigrations(count: number): string {
   const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), "um-mig-"));
   fs.mkdirSync(path.join(dir, "meta"));
@@ -73,11 +78,13 @@ async function expectConstraint(p: Promise<unknown>, pattern: RegExp) {
 
 beforeAll(() => {
   partialDir = partialMigrations(2);
+  upTo0003Dir = partialMigrations(4);
 });
 
 afterAll(() => {
   // Kilitli dosya yok (veritabanı bellekte); yalnızca kopyalanan SQL/JSON dosyaları silinir.
   fs.rmSync(partialDir, { recursive: true, force: true });
+  fs.rmSync(upTo0003Dir, { recursive: true, force: true });
 });
 
 afterEach(() => {
@@ -142,7 +149,7 @@ describe("0002_faz3: mevcut veri korunur", () => {
     for (const t of tables) before[t] = await rows(`SELECT * FROM ${t} ORDER BY rowid`);
     const leadsBefore = await rows("SELECT * FROM leads ORDER BY id");
 
-    await migrate(db, { migrationsFolder: MIGRATIONS });
+    await migrate(db, { migrationsFolder: upTo0003Dir });
 
     for (const t of tables)
       expect(await rows(`SELECT * FROM ${t} ORDER BY rowid`), t).toEqual(before[t]);
@@ -153,9 +160,9 @@ describe("0002_faz3: mevcut veri korunur", () => {
 
     expect(await rows("PRAGMA foreign_key_check")).toEqual([]);
     expect(await rows("PRAGMA integrity_check")).toEqual([{ integrity_check: "ok" }]);
-    // Tam klasör uygulandığında günlükteki her geçiş kayıtlıdır (0003 ve sonrası eklendikçe bu test güncellenmez).
+    // Uygulanan klasörün günlüğündeki her geçiş kayıtlıdır.
     const journal = JSON.parse(
-      fs.readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf8"),
+      fs.readFileSync(path.join(upTo0003Dir, "meta", "_journal.json"), "utf8"),
     ) as { entries: unknown[] };
     expect((await rows("SELECT * FROM __drizzle_migrations")).length).toBe(journal.entries.length);
   });
@@ -167,7 +174,7 @@ describe("0002_faz3: mevcut veri korunur", () => {
       "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY name",
     )) as { name: string; sql: string }[];
 
-    await migrate(drizzle(client), { migrationsFolder: MIGRATIONS });
+    await migrate(drizzle(client), { migrationsFolder: upTo0003Dir });
     const tablesAfter = (await rows(
       "SELECT name, sql FROM sqlite_master WHERE type = 'table' AND name NOT LIKE '\\_\\_%' ESCAPE '\\' ORDER BY name",
     )) as { name: string; sql: string }[];
