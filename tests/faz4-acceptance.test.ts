@@ -1,5 +1,6 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { getDashboard, NEW_LIST_LIMIT } from "@/lib/dashboard";
 import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, categorySets, jobs, leads, notifications, places, scans } from "@/lib/db/schema";
@@ -21,6 +22,7 @@ import { createTestDb, type TestDb } from "./helpers/db";
  *  - Uygulama kapalıyken kaçırılan pencereler TEK çalışmada birleşir (missed_runs).
  *  - Demo zamanı (M2) her çalışmada ilerler: yeni ve açılan işletmeler birikir.
  *  - Bildirimler tekildir (tarama başına bir; tekrar tetikleme çoğaltmaz).
+ *  - Gösterge paneli (E) her haftanın sonunda o hafta biriken yeni ve açılan işletmeleri gösterir.
  */
 const START = Date.UTC(2026, 10, 2, 8, 0, 0);
 let t: TestDb;
@@ -61,6 +63,25 @@ afterEach(async () => {
   await t.cleanup();
 });
 
+/** Gösterge paneli ve aynı anda veritabanından bağımsız sayılan gerçek değerler (arşivlenmemiş lead'i olan yerler). */
+async function dashboardSnapshot(now: number) {
+  const d = await getDashboard(db, { now, timeZone: "UTC" });
+  const rows = await db
+    .select({ n: places.newDetectedAt, o: places.openedDetectedAt })
+    .from(places)
+    .innerJoin(leads, eq(leads.placeId, places.placeId))
+    .where(isNull(leads.archivedAt));
+  const inWeek = (v: number | null) => v !== null && v >= d.weekStart && v <= now;
+  return {
+    d,
+    truth: {
+      newThisWeek: rows.filter((r) => inWeek(r.n)).length,
+      openedThisWeek: rows.filter((r) => inWeek(r.o)).length,
+      either: rows.filter((r) => inWeek(r.n) || inWeek(r.o)).length,
+    },
+  };
+}
+
 describe("M1: 8 günlük zamanlanmış tarama benzetimi", () => {
   it("zamanında çalışır, kaçırılanı birleştirir, yenileri biriktirir, bildirimleri tekilleştirir", async () => {
     // Temel tarama 21 gün önce; haftalık zamanlama o gün kuruldu. Uygulama iki hafta kapalı kaldı.
@@ -94,6 +115,9 @@ describe("M1: 8 günlük zamanlanmış tarama benzetimi", () => {
     let lastDay = "";
     const closed = (now: number) => now >= START + 6 * DAY_MS && now < START + 8 * DAY_MS;
     let ticks = 0;
+    // 1. haftanın (2–8 Kasım) son açık tick'i: uygulama 8 Kasım 08:00'de kapanır.
+    const week1LastTick = START + 6 * DAY_MS - TICK_INTERVAL_MS;
+    let week1: Awaited<ReturnType<typeof dashboardSnapshot>> | null = null;
     for (let now = START; now <= START + 8 * DAY_MS; now += TICK_INTERVAL_MS) {
       if (closed(now)) continue; // uygulama kapalı (6. ve 7. gün)
       ticks++;
@@ -120,6 +144,7 @@ describe("M1: 8 günlük zamanlanmış tarama benzetimi", () => {
         started.push({ scanId: r.scanId, at: now, missedRuns: r.missedRuns });
         expect(await runScan(deps(now), r.scanId)).toBe("completed");
       }
+      if (now === week1LastTick) week1 = await dashboardSnapshot(now);
     }
     expect(ticks).toBeGreaterThan(1500);
 
@@ -140,6 +165,27 @@ describe("M1: 8 günlük zamanlanmış tarama benzetimi", () => {
     expect((await db.select().from(leads)).length).toBeGreaterThan(baseLeads);
     const opened = (await db.select().from(places)).filter((p) => p.openedDetectedAt !== null);
     expect(opened.length).toBeGreaterThan(0);
+
+    // 2b) Gösterge paneli (E): 1. haftanın sonunda o hafta biriken yeniler ve açılışlar (zamanlanmış çalışma + günlük
+    // açılış izlemesi); 8. gün (yeni hafta) yalnızca o haftanın çalışmasını gösterir. Sayaçlar, liste toplamı ve
+    // veritabanından bağımsız sayım birebir aynıdır.
+    expect(week1).not.toBeNull();
+    const end = await dashboardSnapshot(START + 8 * DAY_MS + TICK_INTERVAL_MS);
+    expect(week1!.d.weekStart).toBe(START - 8 * 60 * 60 * 1000);
+    expect(end.d.weekStart).toBe(START + 7 * DAY_MS - 8 * 60 * 60 * 1000);
+    for (const { d, truth } of [week1!, end]) {
+      expect(d.errors).toEqual([]);
+      expect(d.counters).toMatchObject({
+        newThisWeek: truth.newThisWeek,
+        openedThisWeek: truth.openedThisWeek,
+      });
+      expect(d.newThisWeek!.total).toBe(truth.either);
+      expect(d.newThisWeek!.items.length).toBe(Math.min(truth.either, NEW_LIST_LIMIT));
+      expect(truth.newThisWeek).toBeGreaterThan(0);
+    }
+    // Hafta boyunca açılanlar birikti; iki haftanın açılışları toplam açılışların tamamıdır (kayıp/çift sayım yok).
+    expect(week1!.truth.openedThisWeek + end.truth.openedThisWeek).toBe(opened.length);
+    expect(week1!.truth.openedThisWeek).toBeGreaterThan(0);
 
     // 3) Bildirimler: tarama başına tek scan.done; yeniden tetikleme çoğaltmaz.
     const before = await db.select().from(notifications);
