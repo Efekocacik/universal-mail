@@ -19,6 +19,13 @@ export const notifications = {
   "notif.scanPaused.title": "Tarama duraklatıldı",
   "notif.scanPaused.body":
     "{n} tarama, uygulama yeniden başlatılırken duraklatıldı. Taramalar sayfasından devam ettirebilirsiniz.",
+  "notif.scanPaused.titleRegion": "{region} taraması duraklatıldı",
+  "notif.scanPaused.body.SCAN_RETRYING":
+    "Google'a şu an ulaşılamıyor. Zamanlanmış tarama bir saat içinde kaldığı yerden kendiliğinden sürecek.",
+  "notif.scanPaused.body.SCAN_BUDGET_STOPPED":
+    "Aylık Google bütçesi dolduğu için zamanlanmış tarama durdu. Bütçe yenilenince ya da Ayarlar'dan artırınca kendiliğinden sürecek.",
+  "notif.scanPaused.body.SCAN_PAUSED":
+    "Zamanlanmış tarama güvenlik sınırına ulaştı ve duraklatıldı. Taramalar sayfasından sürdürün ya da iptal edin; o zamana kadar bu bölge yeniden taranmaz.",
   "notif.opened.title": "{n} işletme açıldı!",
   "notif.opened.body": "Yakında açılacak olarak izlenen işletmeler artık faaliyette.",
   "notif.opened.bodyRegion":
@@ -37,6 +44,10 @@ export const notifications = {
     "Aynı bölge ve kategoriler için başka bir tarama sürüyor; bir saat sonra yeniden denenecek.",
   "notif.scheduleSkipped.body.CATEGORY_SET_MISSING":
     "Zamanlamanın kullandığı bir kategori artık yok. Zamanlamayı Taramalar sayfasından düzenleyin.",
+  "notif.scheduleSkipped.body.SCAN_PAUSED":
+    "Bu zamanlamanın önceki taraması duraklatılmış durumda. Taramalar sayfasından sürdürün ya da iptal edin.",
+  "notif.scheduleSkipped.body.SCAN_BUDGET_STOPPED":
+    "Önceki tarama aylık bütçe dolduğu için durdu; bütçe yenilenince kaldığı yerden sürecek.",
   "notif.scheduleSkipped.body.other": "Tarama bu kez çalıştırılamadı; yeniden denenecek.",
   "notif.backgroundSkipped.title": "Arka plan denetimi atlandı",
   "notif.backgroundSkipped.body.PLACES_KEY_MISSING":

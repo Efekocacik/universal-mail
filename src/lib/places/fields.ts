@@ -85,8 +85,9 @@ export function skuFor(endpoint: Endpoint, fields: readonly string[]): SkuId {
     // Nearby Search'te `id` bile Pro sınıfındadır.
     return tier === "enterprise" ? "nearby_search_enterprise" : "nearby_search_pro";
   }
+  // Yalnızca `id` istenen Details çağrısı ücretsiz "IDs Only" birimidir (Essentials değil); bkz. pricing.ts.
   return tier === "ids"
-    ? "place_details_essentials"
+    ? "place_details_ids_only"
     : tier === "pro"
       ? "place_details_pro"
       : "place_details_enterprise";

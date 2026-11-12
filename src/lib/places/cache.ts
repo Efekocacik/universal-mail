@@ -4,6 +4,7 @@ import { placeCache } from "@/lib/db/cache-schema";
 import { places } from "@/lib/db/schema";
 import type { PlaceRecord } from "@/lib/domain/types";
 import { chunk } from "@/lib/util";
+import { effectiveCacheDays, MAX_COORD_DAYS } from "./retention";
 
 /**
  * Google oturum önbelleği işlemleri. Önbellek, ana veritabanından ayrı ve geçici bir dosyadadır (bkz. cache-schema.ts).
@@ -61,19 +62,23 @@ export async function getCacheMap(db: Db, ids: string[]): Promise<Map<string, Ca
   return out;
 }
 
-/** Google verisinin saklama üst sınırı (gün). Koordinatlar için Google şartlarındaki üst sınır 30 gündür. */
-export const MAX_GOOGLE_RETENTION_DAYS = 30;
+/**
+ * Google verisinin saklama üst sınırı (gün). Koordinatlar için Google şartlarındaki üst sınır 30 gündür. Alan düzeyindeki
+ * politika ve kaynakları: `GOOGLE_RETENTION_POLICY` (retention.ts).
+ */
+export const MAX_GOOGLE_RETENTION_DAYS = MAX_COORD_DAYS;
 
 /**
- * Süresi dolan Google verisini temizler: eski koordinatlar NULL'lanır, eski önbellek satırları silinir.
- * Place ID ve bizim türettiğimiz bayraklar kalır; yeniden gerektiğinde Place Details ile yenilenir.
+ * Süresi dolan Google verisini temizler (politika: `location` ttl, oturum alanları session): eski koordinatlar NULL'lanır,
+ * eski önbellek satırları silinir. Place ID ve bizim türettiğimiz bayraklar kalır (bayrakların ayrı süresi:
+ * `purgeDerivedFlags`); yeniden gerektiğinde Place Details ile yenilenir.
  */
 export async function purgeExpiredGoogleData(
   db: Db,
   retentionDays: number,
   now: number = Date.now(),
 ): Promise<{ coordinates: number; cacheRows: number }> {
-  const days = Math.min(Math.max(retentionDays, 1), MAX_GOOGLE_RETENTION_DAYS);
+  const days = effectiveCacheDays(retentionDays);
   const cutoff = now - days * 86_400_000;
   const coords = await db
     .update(places)

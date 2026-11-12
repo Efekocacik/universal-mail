@@ -12,6 +12,7 @@ import { ENRICH_DETAILS_FIELDS, REFRESH_FIELDS } from "@/lib/places/fields";
 import type { PlacesProvider } from "@/lib/places/provider";
 import { sleep as defaultSleep } from "@/lib/util";
 import { recomputeNovelty } from "./novelty-sync";
+import { statusFlags } from "./status-flags";
 
 /**
  * refresh: ad, adres, konum, tür ve durum önbelleğe yeniden yüklenir (Place Details Pro, ücretsiz kotası geniş).
@@ -35,6 +36,8 @@ export interface EnrichDeps {
 export interface EnrichResult {
   enriched: number;
   skipped: number;
+  /** Google'ın NOT_FOUND döndürdüğü (gone_at işaretlenen) yer sayısı. */
+  gone: number;
   /** Bütçe nedeniyle durduysa sebebi. */
   stoppedReason?: string;
 }
@@ -61,6 +64,7 @@ export async function enrichPlaces(
   const fields = mode === "enrich" ? ENRICH_DETAILS_FIELDS : REFRESH_FIELDS;
   const sku = skuForMode(mode);
   const done: string[] = [];
+  const gone: string[] = [];
   let skipped = 0;
   let stoppedReason: string | undefined;
 
@@ -82,6 +86,17 @@ export async function enrichPlaces(
     try {
       result = await provider.getDetails(id, fields);
     } catch (e) {
+      if (e instanceof PlacesApiError && e.kind === "not_found") {
+        // Eskimiş yer kimliği: sessizce atlanmaz, yer "Google'da artık yok" olarak işaretlenir (lead, kullanıcı verisi
+        // olduğu için silinmez). Kimlik yenileme işi (place-id-refresh) aynı işareti kullanır.
+        await db
+          .update(places)
+          .set({ goneAt: now(), updatedAt: now() })
+          .where(eq(places.placeId, id));
+        gone.push(id);
+        skipped++;
+        continue;
+      }
       if (e instanceof PlacesApiError && e.kind === "invalid") {
         skipped++;
         continue;
@@ -100,18 +115,19 @@ export async function enrichPlaces(
     if (mode === "enrich")
       await db.update(placeCache).set({ enrichedAt: t }).where(eq(placeCache.placeId, id));
 
-    const wasFuture = p.businessStatus === "FUTURE_OPENING";
-    const isClosed = p.businessStatus === "CLOSED_PERMANENTLY";
-    const opened = existing.wasFuture && !wasFuture && !isClosed;
+    // Durum yanıtta yoksa bayraklar korunur; "açıldı" yalnızca FUTURE_OPENING → OPERATIONAL (bkz. status-flags.ts).
+    const f = statusFlags(p.businessStatus, existing);
     await db
       .update(places)
       .set({
         lat: p.lat,
         lng: p.lng,
         coordsFetchedAt: t,
-        wasFuture,
-        isClosed,
-        openedDetectedAt: opened ? t : existing.openedDetectedAt,
+        wasFuture: f.wasFuture,
+        isClosed: f.isClosed,
+        statusCheckedAt: f.observed ? t : existing.statusCheckedAt,
+        openedDetectedAt: f.opened ? t : existing.openedDetectedAt,
+        goneAt: null,
         updatedAt: t,
       })
       .where(eq(places.placeId, id));
@@ -125,8 +141,13 @@ export async function enrichPlaces(
     await sleep(deps.minIntervalMs ?? (provider.id === "mock" ? 10 : 120));
   }
 
+  if (done.length + gone.length > 0) {
+    await recomputeNovelty(db, await deps.getNoveltyConfig(), {
+      placeIds: [...done, ...gone],
+      now: now(),
+    });
+  }
   if (done.length > 0) {
-    await recomputeNovelty(db, await deps.getNoveltyConfig(), { placeIds: done, now: now() });
     if (mode === "enrich")
       await emitEvent("place.enriched", {
         placeIds: done,
@@ -134,7 +155,7 @@ export async function enrichPlaces(
         useExternal: opts.useExternal,
       });
   }
-  return { enriched: done.length, skipped, stoppedReason };
+  return { enriched: done.length, skipped, gone: gone.length, stoppedReason };
 }
 
 export async function placeIdsForLeads(db: Db, leadIds: number[]): Promise<string[]> {

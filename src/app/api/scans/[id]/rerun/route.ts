@@ -2,15 +2,20 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { database, HttpError, intParam, json, route } from "@/lib/api/http";
 import { regions, scans } from "@/lib/db/schema";
-import { createAndStartScan, type ScanRequest } from "@/lib/scan/service";
-import { checkTargetCountry, requireCollectionReady, requirePaidScanAllowed } from "../../guard";
+import type { ScanRequest } from "@/lib/scan/service";
+import {
+  checkTargetCountry,
+  requireCollectionReady,
+  requirePaidScanAllowed,
+  startScanOrThrow,
+} from "../../guard";
 
 export const dynamic = "force-dynamic";
 
 /**
  * Aynı bölge ve ayarlarla yeni bir tarama başlatır. Anahtarı aynı olduğundan önceki tamamlanmış taramayla
- * karşılaştırılır ve yeni tespit edilen işletmeler işaretlenir (SRS 4.2, FR-DIS-08). Zamanlama Faz 4'tedir;
- * şimdilik kullanıcı bu düğmeyle elle başlatır.
+ * karşılaştırılır ve yeni tespit edilen işletmeler işaretlenir (SRS 4.2, FR-DIS-08). Düzenli tekrar için
+ * `/api/schedules` (Faz 4) kullanılır; aynı anahtarla etkin tarama varsa 409 `ACTIVE_SCAN`.
  */
 const rerunSchema = z.object({ acknowledgeRisk: z.boolean().optional() }).strict();
 
@@ -70,6 +75,6 @@ export const POST = route(async (req: Request, ctx: { params: Promise<{ id: stri
   };
   // Yeni taramayla AYNI kapı: güncel sağlayıcı anahtarı, bütçe ve tahmini maliyet onayı (`NEEDS_ACK`).
   await requirePaidScanAllowed(db, request, acknowledgeRisk);
-  const created = await createAndStartScan(db, request);
+  const created = await startScanOrThrow(db, request);
   return json({ scanId: created.scanId, estimate: created.estimate }, { status: 201 });
 });

@@ -9,7 +9,8 @@ import type { NotificationKind, NotificationParams } from "@/lib/db/schema";
  *   n       sayı (yeni/açılan işletme, duraklatılan tarama…)
  *   region  kullanıcının bölge adı (Google içeriği değil)
  *   code    UPPER_SNAKE atlama kodu (BUDGET_BLOCKED, NEEDS_ACK, PLACES_KEY_MISSING, SETUP_REQUIRED,
- *           COUNTRY_NOT_TARGETED, ACTIVE_SCAN, CATEGORY_SET_MISSING, CONSENT_REQUIRED)
+ *           COUNTRY_NOT_TARGETED, ACTIVE_SCAN, CATEGORY_SET_MISSING, CONSENT_REQUIRED, SCAN_PAUSED,
+ *           SCAN_BUDGET_STOPPED; `scan.paused` için ayrıca SCAN_RETRYING — Paket B, zamanlanmış taramanın durması)
  *   scanId, scheduleId  kimlikler (bağlantı ve tekilleştirme için; metinde kullanılmaz)
  */
 export interface RenderedNotification {
@@ -25,7 +26,11 @@ const SKIP_CODES = new Set([
   "COUNTRY_NOT_TARGETED",
   "ACTIVE_SCAN",
   "CATEGORY_SET_MISSING",
+  "SCAN_PAUSED",
+  "SCAN_BUDGET_STOPPED",
 ]);
+/** Zamanlanmış taramanın kendi kendine durma nedenleri (`scan.paused` + `code`). Kod yoksa eski "yeniden başlatma" metni. */
+const PAUSE_CODES = new Set(["SCAN_RETRYING", "SCAN_BUDGET_STOPPED", "SCAN_PAUSED"]);
 const BACKGROUND_CODES = new Set(["PLACES_KEY_MISSING", "BUDGET_BLOCKED", "CONSENT_REQUIRED"]);
 
 function count(params: NotificationParams, locale: Locale): string {
@@ -54,11 +59,20 @@ export function renderNotification(
         title: tt("notif.scanFailed.title"),
         body: r ? tt("notif.scanFailed.bodyRegion", { region: r }) : tt("notif.scanFailed.body"),
       };
-    case "scan.paused":
+    case "scan.paused": {
+      const c = code(p);
+      if (PAUSE_CODES.has(c))
+        return {
+          title: r
+            ? tt("notif.scanPaused.titleRegion", { region: r })
+            : tt("notif.scanPaused.title"),
+          body: tt(`notif.scanPaused.body.${c}` as TrKey),
+        };
       return {
         title: tt("notif.scanPaused.title"),
         body: tt("notif.scanPaused.body", { n: count(p, locale) }),
       };
+    }
     case "place.opened":
       return {
         title: tt("notif.opened.title", { n: count(p, locale) }),

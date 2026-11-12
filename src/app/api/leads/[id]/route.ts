@@ -7,6 +7,7 @@ import {
   getLeadContacts,
   getLeadEmails,
 } from "@/lib/email/store";
+import { domainAgeFor } from "@/lib/novelty/domain-age";
 import { googleMapsUrl } from "@/lib/places/maps-url";
 
 export const dynamic = "force-dynamic";
@@ -29,6 +30,8 @@ async function detail(id: number) {
     contacts: await getLeadContacts(db, id),
     enrichment,
     duplicates: await findDuplicates(db, id, emails),
+    /** Faz 4: web sitesi alan adının RDAP kayıt tarihi (yalnızca site taraması alan adı bulduysa). */
+    domainAge: await domainAgeFor(db, enrichment?.siteDomain ?? null),
     place: place
       ? {
           placeId: place.placeId,
@@ -41,6 +44,8 @@ async function detail(id: number) {
           newDetectedAt: place.newDetectedAt,
           openedDetectedAt: place.openedDetectedAt,
           notFoundInScanId: place.notFoundInScanId,
+          /** Faz 4: Google bu yeri artık bulamıyor (NOT_FOUND); lead silinmez. */
+          goneAt: place.goneAt,
           mapsUrl: googleMapsUrl(place.placeId, {
             source: place.source,
             lat: place.lat,

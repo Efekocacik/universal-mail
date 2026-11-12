@@ -18,6 +18,13 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DEFAULT_REPEAT,
+  RepeatFields,
+  useRepeatScan,
+  type RepeatValue,
+} from "@/features/scans/repeat-fields";
+import { parseCostCap } from "@/lib/client/schedules";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Progress, Skeleton } from "@/components/ui/misc";
@@ -79,6 +86,10 @@ export function ScanBuilder() {
   const [strategy, setStrategy] = useState<"text" | "nearby">("text");
   const [enrich, setEnrich] = useState(false);
   const [ack, setAck] = useState<string | null>(null);
+  // Faz 4: "Bu taramayı düzenli tekrarla" (tarama başlayınca zamanlama oluşturulur).
+  const [repeatOn, setRepeatOn] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatValue>(DEFAULT_REPEAT);
+  const repeatScan = useRepeatScan();
 
   const targets = config?.targetCountries ?? [];
   const searchCountries = country ? [country] : targets;
@@ -166,6 +177,7 @@ export function ScanBuilder() {
       }),
     onSuccess: (res) => {
       toast.success(t("builder.started", { id: res.scanId }));
+      if (repeatOn) void repeatScan.run(res.scanId, repeat);
       void qc.invalidateQueries({ queryKey: qk.status });
       void qc.invalidateQueries({ queryKey: qk.scans });
       ex.setDrawMode(null);
@@ -591,10 +603,26 @@ export function ScanBuilder() {
               <p className="text-[11px] leading-snug text-muted-foreground">{est.disclaimer}</p>
             </>
           )}
+          <div className="space-y-3 rounded-lg border border-dashed p-3">
+            <label className="flex items-start gap-2 text-[13px]">
+              <Checkbox
+                className="mt-0.5"
+                checked={repeatOn}
+                onCheckedChange={(v) => setRepeatOn(v === true)}
+              />
+              <span>
+                <span className="font-medium">{t("builder.repeat")}</span>
+                <span className="block text-[12px] text-muted-foreground">
+                  {t("builder.repeat.note")}
+                </span>
+              </span>
+            </label>
+            {repeatOn && <RepeatFields value={repeat} onChange={setRepeat} />}
+          </div>
           <Button
             className="w-full"
             size="lg"
-            disabled={!canStart}
+            disabled={!canStart || (repeatOn && !parseCostCap(repeat.capText).ok)}
             loading={start.isPending}
             aria-describedby="b-start-help"
             onClick={() => start.mutate(false)}

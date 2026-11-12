@@ -42,6 +42,11 @@ export interface FetchOptions {
   /** Yalnızca testler: iç ağ adreslerine ve her porta izin ver. */
   allowPrivate?: boolean;
   accept?: string;
+  /**
+   * Gövdesi indirilecek içerik türleri. Varsayılan: HTML/metin/XML/JSON-LD. RDAP gibi JSON uç noktaları
+   * `/^application\/(?:rdap\+)?json/i` verir; diğer türlerde gövde yine indirilmez.
+   */
+  bodyTypes?: RegExp;
 }
 
 export interface FetchResult {
@@ -138,7 +143,8 @@ function guardedLookup(allowPrivate: boolean): net.LookupFunction {
   };
 }
 
-function textual(contentType: string): boolean {
+function textual(contentType: string, bodyTypes?: RegExp): boolean {
+  if (bodyTypes) return bodyTypes.test(contentType);
   if (!contentType) return true;
   return /^(?:text\/|application\/(?:xhtml\+xml|xml)|application\/ld\+json)/i.test(contentType);
 }
@@ -197,9 +203,10 @@ function once(
             location: headers.location,
           });
 
-        if ((status >= 300 && status < 400) || !textual(contentType)) {
+        const wanted = textual(contentType, opts.bodyTypes);
+        if ((status >= 300 && status < 400) || !wanted) {
           res.destroy();
-          return finish("", !textual(contentType) && status < 300, false);
+          return finish("", !wanted && status < 300, false);
         }
         const enc = (headers["content-encoding"] ?? "").toLowerCase();
         let stream: NodeJS.ReadableStream = res;

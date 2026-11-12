@@ -268,7 +268,7 @@ export class MockPlacesProvider implements PlacesProvider {
   async getDetails(placeId: string, fields: readonly string[]): Promise<DetailsResult> {
     const epoch = await this.opts.getEpoch();
     const parsed = parseDemoId(placeId);
-    if (!parsed) return { place: null, sku: skuFor("details", fields) };
+    if (!parsed) return { place: null, sku: skuFor("details", fields), id: null };
     const bbox: BBox = {
       south: parsed.iy * TILE_DEG,
       north: (parsed.iy + 1) * TILE_DEG,
@@ -278,7 +278,12 @@ export class MockPlacesProvider implements PlacesProvider {
     const found = this.generate(bbox, [parsed.type], epoch, fields, true).find(
       (c) => c.place.placeId === placeId,
     );
-    return { place: found?.place ?? null, sku: skuFor("details", fields) };
+    return {
+      place: found?.place ?? null,
+      sku: skuFor("details", fields),
+      id: found?.place.placeId ?? null,
+      businessStatus: found?.place.businessStatus,
+    };
   }
 
   private generate(

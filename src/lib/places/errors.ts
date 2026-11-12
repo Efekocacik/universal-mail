@@ -1,5 +1,15 @@
 export type PlacesErrorKind =
-  "auth" | "billing" | "disabled" | "quota" | "rate" | "invalid" | "network" | "server" | "unknown";
+  | "auth"
+  | "billing"
+  | "disabled"
+  | "quota"
+  | "rate"
+  | "invalid"
+  /** Faz 4: yer kimliği Google'da yok (eskimiş/silinmiş place_id). Taramayı durdurmaz; yer `gone_at` ile işaretlenir. */
+  | "not_found"
+  | "network"
+  | "server"
+  | "unknown";
 
 export class PlacesApiError extends Error {
   readonly kind: PlacesErrorKind;
@@ -45,6 +55,8 @@ const MESSAGES_TR: Record<PlacesErrorKind, string> = {
     "Google kota sınırına ulaşıldı. Tarama duraklatıldı; kota sıfırlandığında veya sınırı yükselttiğinizde devam edebilirsiniz.",
   rate: "Google isteklerimizi geçici olarak yavaşlattı (çok sık istek). Tarama duraklatıldı; biraz sonra devam edebilirsiniz.",
   invalid: "Google isteği reddetti.",
+  not_found:
+    "Google bu işletmeyi artık bulamıyor (kayıt kaldırılmış veya kimliği değişmiş olabilir).",
   network: "Google'a ulaşılamadı. İnternet bağlantınızı kontrol edin; tarama duraklatıldı.",
   server: "Google geçici bir sunucu hatası verdi; tarama duraklatıldı.",
   unknown: "Google'dan beklenmeyen bir yanıt alındı.",
@@ -98,7 +110,9 @@ export function classifyGoogleError(
         ? "quota"
         : "rate";
   else if (status === 400 && reason === "API_KEY_INVALID") kind = "auth";
-  else if (status === 400 || status === 404) kind = "invalid";
+  // 404 / NOT_FOUND: eskimiş yer kimliği (Places "Place IDs" belgesi: kullanılmayan kimlikler NOT_FOUND döndürür).
+  else if (status === 404 || googleStatus === "NOT_FOUND") kind = "not_found";
+  else if (status === 400) kind = "invalid";
   else if (status >= 500) kind = "server";
   else kind = "unknown";
 
