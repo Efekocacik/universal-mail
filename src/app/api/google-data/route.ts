@@ -1,25 +1,18 @@
-import { sql } from "drizzle-orm";
 import { database, json, route } from "@/lib/api/http";
 import { audit } from "@/lib/db/audit";
-import { placeCache } from "@/lib/db/cache-schema";
-import { places } from "@/lib/db/schema";
-import { clearGoogleData, MAX_GOOGLE_RETENTION_DAYS } from "@/lib/places/cache";
+import { clearGoogleData } from "@/lib/places/cache";
+import { googleDataSummary } from "@/lib/scan/google-data";
 
 export const dynamic = "force-dynamic";
 
-/** Saklanan Google verisinin özeti: oturum önbelleğindeki işletme ve kayıtlı konum sayısı. */
+/**
+ * Saklanan Google verisinin özeti. Eski alanlar (`cachedPlaces`, `storedCoordinates`, `maxRetentionDays`) korunur;
+ * Faz 4: `byPolicy` (süresiz place_id / 30 gün koordinat / oturum önbelleği / türetilmiş bayraklar) ve alan düzeyinde
+ * `policy` tablosu (kaynak bağlantılarıyla) eklenir.
+ */
 export const GET = route(async () => {
   const db = await database();
-  const cache = await db.select({ n: sql<number>`count(*)` }).from(placeCache);
-  const coords = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(places)
-    .where(sql`${places.lat} IS NOT NULL`);
-  return json({
-    cachedPlaces: Number(cache[0]?.n ?? 0),
-    storedCoordinates: Number(coords[0]?.n ?? 0),
-    maxRetentionDays: MAX_GOOGLE_RETENTION_DAYS,
-  });
+  return json(await googleDataSummary(db, Date.now()));
 });
 
 /** "Google verilerini sil": önbellek ve konumlar temizlenir; yer kimlikleri ve kendi kayıtlarımız kalır. */
