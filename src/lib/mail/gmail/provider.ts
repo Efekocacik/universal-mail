@@ -49,6 +49,19 @@ const MIN_RETRY_MS = 1_000;
 const MAX_RETRY_MS = 24 * 3_600_000;
 const ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
+/**
+ * `messages.send` istek gövdesi. Faz 4 (9d): takip iletisi, biçimi geçerli `threadId` ile aynı Gmail konuşmasına
+ * eklenir (Gmail ayrıca konunun ve `References` başlığının uyumunu ister). Geçersiz/boş kimlik GÖNDERİLMEZ: ileti
+ * yine gider, yalnızca ayrı konuşma olarak görünür. Gmail kimliği reddederse (400) sonuç kalıcı `rejected` olur.
+ */
+export function gmailSendBody(input: Pick<ProviderSendInput, "raw" | "threadId">): {
+  raw: string;
+  threadId?: string;
+} {
+  const raw = Buffer.from(input.raw, "latin1").toString("base64url");
+  return input.threadId && ID_RE.test(input.threadId) ? { raw, threadId: input.threadId } : { raw };
+}
+
 export interface GmailProviderOptions {
   db: Db;
   mailbox: { id: number; address: string | null };
@@ -227,7 +240,7 @@ export class GmailProvider implements MailProvider {
     input: ProviderSendInput,
     token: string,
   ): Promise<ProviderResult | "unauthorized"> {
-    const body = JSON.stringify({ raw: Buffer.from(input.raw, "latin1").toString("base64url") });
+    const body = JSON.stringify(gmailSendBody(input));
     const signal = AbortSignal.any([input.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);
     let res: Response;
     try {

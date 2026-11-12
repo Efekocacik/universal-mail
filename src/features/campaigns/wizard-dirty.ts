@@ -113,3 +113,96 @@ export function leavingHref(e: ClickLike, a: AnchorLike, current: string): strin
   if (to.pathname === from.pathname && to.search === from.search) return null;
   return `${to.pathname}${to.search}${to.hash}`;
 }
+
+/* Geçmiş (geri tuşu) koruması --------------------------------------------------------------------------------------- */
+
+/**
+ * Kaydedilmemiş değişiklik varken tarayıcı/Electron "geri" hareketi (geri tuşu, Alt+←, kaydırma) sihirbazdan sessizce
+ * çıkmasın diye geçmişe aynı adreste bir "nöbetçi" kayıt eklenir. Geri gelindiğinde nöbetçi yeniden eklenir ve ayrılma
+ * sorusu gösterilir; kullanıcı "Değişiklikleri at" derse iki kayıt geri gidilir (nöbetçi + asıl sayfa).
+ */
+export const HISTORY_GUARD = "umWizardGuard";
+
+export function isGuardState(state: unknown): boolean {
+  return (
+    typeof state === "object" &&
+    state !== null &&
+    (state as Record<string, unknown>)[HISTORY_GUARD] === true
+  );
+}
+
+/** Mevcut geçmiş durumunu koruyarak (Next.js iç alanları dahil) nöbetçi işaretini ekler. */
+export function guardState(current: unknown): Record<string, unknown> {
+  const base =
+    typeof current === "object" && current !== null ? (current as Record<string, unknown>) : {};
+  return { ...base, [HISTORY_GUARD]: true };
+}
+
+/** "Değişiklikleri at" sonrası geri gidilecek adım sayısı: nöbetçi ve sihirbaz sayfası. */
+export const GUARD_BACK_STEPS = -2;
+
+/**
+ * "Değişiklikleri at" sonrası geri hareketi nasıl yapılır: geçmişte nöbetçi + sihirbazdan önce en az bir kayıt varsa
+ * iki kayıt geri gidilir; sihirbaz geçmişin İLK kaydıysa (`history.length <= 2`) `go(-2)` hiçbir şey yapmazdı, bu
+ * yüzden kampanyalar listesine yönlendirilir.
+ */
+export function guardBackAction(historyLength: number): "history" | "fallback" {
+  return Number.isFinite(historyLength) && historyLength > 2 ? "history" : "fallback";
+}
+
+/* Posta kutusu tavanı ipucu ----------------------------------------------------------------------------------------- */
+
+export interface MailboxCapInfo {
+  limits?: { todayCap: number; profileMaxDaily?: number };
+}
+
+/**
+ * Kampanyanın günlük sınırı seçili posta kutusunun izin verdiğinden yüksekse kullanıcıya açıklama (engel değil):
+ * `max` kutunun profil üst sınırı (kişisel Gmail 50) aşıldı, kampanya sınırına hiç ulaşılamaz; `today` bugünkü ısınma
+ * tavanı daha düşük, kutu ısındıkça artar. Gönderimde her zaman küçük olan uygulanır.
+ */
+export function mailboxCapHint(
+  dailyCap: number,
+  mailbox: MailboxCapInfo | undefined,
+): { kind: "max" | "today"; n: number } | null {
+  const l = mailbox?.limits;
+  if (!l || !Number.isFinite(dailyCap)) return null;
+  if (l.profileMaxDaily !== undefined && dailyCap > l.profileMaxDaily) {
+    return { kind: "max", n: l.profileMaxDaily };
+  }
+  if (dailyCap > l.todayCap) return { kind: "today", n: l.todayCap };
+  return null;
+}
+
+/* Takip şablonu ön seçimi (9b) -------------------------------------------------------------------------------------- */
+
+/**
+ * Takip sayısı artırıldığında boş kalan her dil/adım için o dilin takip şablonlarından sıradakini önerir (yerleşik
+ * "Takip 1" → 2. adım, "Takip 2" → 3. adım). Kullanıcının seçtiği şablon DEĞİŞTİRİLMEZ.
+ */
+export function prefillFollowups(
+  current: Readonly<Record<string, number[]>>,
+  templates: readonly { id: number; language: string; name?: string; builtIn?: boolean }[],
+  languages: readonly string[],
+  count: number,
+): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const [l, list] of Object.entries(current)) out[l] = [...list];
+  for (const l of languages) {
+    // Yerleşikler önce, sonra ada göre ("Takip 1" < "Takip 2"); kullanıcı şablonları sonra gelir.
+    const options = templates
+      .filter((x) => x.language === l)
+      .sort(
+        (a, b) =>
+          Number(b.builtIn === true) - Number(a.builtIn === true) ||
+          (a.name ?? "").localeCompare(b.name ?? "", undefined, { numeric: true }) ||
+          a.id - b.id,
+      );
+    if (options.length === 0) continue;
+    const list = (out[l] ??= []);
+    for (let i = 0; i < count; i++) {
+      if (!list[i]) list[i] = (options[i] ?? options[options.length - 1]!).id;
+    }
+  }
+  return out;
+}

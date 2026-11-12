@@ -1,8 +1,9 @@
-import { and, eq, inArray, lt, ne } from "drizzle-orm";
+import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db } from "@/lib/db/client";
 import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, type JobHandler } from "@/lib/jobs/registry";
+import { getSetting, setSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/util";
 import type { MailProvider } from "../provider/provider";
 import { reconcileStaleSending } from "../send-service";
@@ -84,6 +85,92 @@ export async function scheduleDispatch(
   });
 }
 
+/** Uyandırılan dağıtıcının en erken yeniden çalışması (dağıtıcının `MIN_WAKE_MS` tabanıyla aynı). */
+export const WAKE_FLOOR_MS = 5_000;
+export const WAKE_REQUEST_SETTING = "mail.dispatch.wakeRequestedAt";
+
+/**
+ * `wakeDispatch` sonucu: `pulled` bekleyen iş öne çekildi, `inserted` yeni iş eklendi, `flagged` çalışan işe "turdan
+ * sonra hemen yeniden bak" bayrağı bırakıldı, `noop` iş zaten şimdi çalışacak, `disabled` zamanlayıcı kapalı.
+ */
+export type WakeOutcome = "pulled" | "inserted" | "flagged" | "noop" | "disabled";
+
+/**
+ * Dağıtıcıyı HEMEN uyandırır (Faz 4, hata b): kampanya başlatma/devam, inceleme kararı (`mark_not_sent`) ve posta
+ * kutusu tavanının yükseltilmesi gibi işi "şimdi uygun" yapan değişikliklerden sonra çağrılır. Worker'a Electron'dan
+ * gelen `{type:'wake'}` IPC iletisi de bunu çağırır.
+ *
+ * İDEMPOTENT ve MONOTON: bekleyen tek `mail.send` işinin `run_at` değerini yalnızca ÖNE çeker, asla ikinci iş eklemez
+ * (kuyrukta veya çalışan iş yoksa `scheduleDispatch` ile aynı tek iş kuralıyla bir tane ekler). Çalışan iş varsa ayar
+ * bayrağı yazılır; işleyici turunu bitirince bayrağı görür ve sonraki turu `WAKE_FLOOR_MS` içinde planlar.
+ *
+ * GÖNDERİM KURALLARINI GEVŞETMEZ: uyandırma yalnızca `dispatchOnce` turunu erkene alır. 90 s aralık, kutu ve kampanya
+ * günlük tavanları, gönderim penceresi, canlı gönderim kilidi ve uygunluk denetimleri her ileti için
+ * `sendCampaignStep` içinde aynen uygulanır. Zamanlayıcı kapalıysa veritabanına HİÇ yazmaz.
+ */
+export async function wakeDispatch(
+  db: Db,
+  opts: {
+    now?: number;
+    env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+    enabled?: boolean;
+  } = {},
+): Promise<WakeOutcome> {
+  const enabled = opts.enabled ?? isMailSchedulerEnabled(opts.env ?? process.env);
+  if (!enabled) return "disabled";
+  const now = opts.now ?? Date.now();
+  return db.transaction(async (tx): Promise<WakeOutcome> => {
+    const pulled = await tx
+      .update(jobs)
+      .set({ runAt: now, updatedAt: now })
+      .where(and(eq(jobs.type, MAIL_SEND_JOB), eq(jobs.status, "queued"), gt(jobs.runAt, now)))
+      .returning({ id: jobs.id });
+    if (pulled.length > 0) return "pulled";
+    const existing = await tx
+      .select({ status: jobs.status })
+      .from(jobs)
+      .where(and(eq(jobs.type, MAIL_SEND_JOB), inArray(jobs.status, ["queued", "running"])));
+    if (existing.some((j) => j.status === "running")) {
+      await setSetting(tx, WAKE_REQUEST_SETTING, now);
+      return "flagged";
+    }
+    if (existing.length > 0) return "noop";
+    await tx.insert(jobs).values({
+      type: MAIL_SEND_JOB,
+      payload: {},
+      status: "queued",
+      priority: 0,
+      maxAttempts: 1,
+      runAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    return "inserted";
+  });
+}
+
+/**
+ * Çağıranlar için güvenli sarmalayıcı: uyandırma başarısız olursa yalnızca hata ADI günlüğe yazılır (kişisel veri
+ * yok) ve worker'ın periyodik bakımı işi en geç birkaç dakika içinde yeniden kurar. Asıl işlemi asla bozmaz.
+ */
+export async function wakeDispatchSafely(
+  db: Db,
+  opts: {
+    now?: number;
+    env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
+    source: string;
+  },
+): Promise<WakeOutcome | "failed"> {
+  try {
+    return await wakeDispatch(db, { now: opts.now, env: opts.env });
+  } catch (e) {
+    console.warn(
+      `[mail] dispatch.wake_failed source=${opts.source} error=${e instanceof Error ? e.name : "unknown"}`,
+    );
+    return "failed";
+  }
+}
+
 /**
  * Kalp atışı kesilmiş (sahibi çökmüş) `running` `mail.send` işlerini kuyruğa geri alır. Kalp atışı taze olan işe
  * DOKUNULMAZ: başka bir aktif worker'ın işi sahiplenilmez. Karşılaştırmalı güncelleme: arada kalp atışı gelirse iş
@@ -125,7 +212,8 @@ export function createMailSendHandler(opts: MailHandlerOptions): JobHandler {
       );
     }
     const clock = opts.now ?? Date.now;
-    let nextWakeAt = clock() + 60_000;
+    const turnStartedAt = clock();
+    let nextWakeAt = turnStartedAt + 60_000;
     try {
       const r = await opts.dispatcher.dispatchOnce({
         now: clock,
@@ -152,6 +240,18 @@ export function createMailSendHandler(opts: MailHandlerOptions): JobHandler {
     if (ctx.shouldStop()) return;
     try {
       await scheduleDispatch(ctx.db, { runAt: nextWakeAt, now: clock(), exceptJobId: ctx.job.id });
+      // Tur sürerken uyandırma istendiyse (`wakeDispatch` → `flagged`), yeni planlanan iş öne çekilir. Bayrak iş
+      // EKLENDİKTEN SONRA okunur: ekleme öncesi gelen istek burada, sonrası gelen istek doğrudan kuyruktaki işi görür.
+      const requested = await getSetting(ctx.db, WAKE_REQUEST_SETTING);
+      if (requested !== null && requested >= turnStartedAt) {
+        const soon = clock() + WAKE_FLOOR_MS;
+        await ctx.db
+          .update(jobs)
+          .set({ runAt: soon, updatedAt: clock() })
+          .where(
+            and(eq(jobs.type, MAIL_SEND_JOB), eq(jobs.status, "queued"), gt(jobs.runAt, soon)),
+          );
+      }
     } catch (e) {
       ctx.log(`sonraki dağıtım planlanamadı: ${errorMessage(e).slice(0, 120)}`);
     }

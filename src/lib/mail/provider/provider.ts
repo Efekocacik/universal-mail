@@ -18,6 +18,11 @@ export interface ProviderSendInput {
   to: string;
   messageId: string;
   signal: AbortSignal;
+  /**
+   * Faz 4 (9d): takip iletisinin ait olduğu sağlayıcı konuşması (Gmail `threadId`). Yalnızca aynı dizinin önceki
+   * kabul edilmiş iletisinden gelir; yoksa veya geçersizse sağlayıcı yok sayar (bugünkü davranış).
+   */
+  threadId?: string;
 }
 
 export type ProviderResult =

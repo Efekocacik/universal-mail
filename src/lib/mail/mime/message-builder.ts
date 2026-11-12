@@ -57,7 +57,7 @@ export interface BuildEmailInput {
   now: number;
   /** Verilmezse üretilir. */
   messageId?: string;
-  /** Takip iletisi: önceki adımın Message-ID'si ve zinciri. Konuya "Re:" eklenmez. */
+  /** Takip iletisi: önceki adımın Message-ID'si ve zinciri. Oluşturucu konuya "Re:" EKLEMEZ (konu devamı compose'dadır, 9d). */
   inReplyTo?: string | null;
   references?: readonly string[];
   unsubscribe?: Omit<UnsubscribeHeaderInput, "mode">;

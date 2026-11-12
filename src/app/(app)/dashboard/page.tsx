@@ -1,6 +1,6 @@
-import { DashboardPlaceholder } from "@/features/dashboard/dashboard-placeholder";
+import { DashboardPage } from "@/features/dashboard/dashboard-page";
 
-/** Faz 4 gösterge paneli. P0'da yer tutucu; Paket E gerçek sayfayla (src/features/dashboard/*) değiştirir. */
+/** Faz 4 gösterge paneli (Paket E). */
 export default function Page() {
-  return <DashboardPlaceholder />;
+  return <DashboardPage />;
 }

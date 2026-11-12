@@ -11,7 +11,12 @@ import type {
 import type { TemplateListItem } from "@/lib/mail/template-service";
 import type { AddLeadsResult, QueueItem } from "@/lib/campaigns/enrollment";
 import type { CampaignMessageItem } from "@/lib/campaigns/messages";
-import type { BlockerCode, PreflightReport } from "@/lib/campaigns/preflight";
+import type {
+  BlockerCode,
+  PreflightPreview,
+  PreflightReport,
+  PreflightStepPreview,
+} from "@/lib/campaigns/preflight";
 import type { CampaignDetail, CampaignSummary, StepInput } from "@/lib/campaigns/service";
 import type { CampaignAction, TransitionResult } from "@/lib/campaigns/lifecycle";
 import { api } from "./api";
@@ -35,7 +40,9 @@ export type {
   CampaignStatus,
   CampaignSummary,
   IneligibleCode,
+  PreflightPreview,
   PreflightReport,
+  PreflightStepPreview,
   QueueItem,
   ReviewItem,
   SendWindow,
@@ -59,7 +66,19 @@ export interface MailboxItem {
   /** Google yetkisi geçersiz/iptal: kutu yeniden bağlanana kadar gönderim ertelenir. */
   reauthorizationRequired?: boolean;
   /** Bugünkü geçerli günlük tavan, ısınma tabanı ve günlük üst sınır. */
-  limits?: { todayCap: number; warmupBase: number; maxDaily: number };
+  limits?: {
+    todayCap: number;
+    warmupBase: number;
+    maxDaily: number;
+    /** Günlük sınır penceresinin üst sınırları (kişisel Gmail 50/5, diğerleri 80/10). */
+    profileMaxDaily?: number;
+    maxWarmupStep?: number;
+  };
+  warmupStep?: number;
+  warmupStartedAt?: number | null;
+  updatedAt?: number;
+  /** Günlük sınır penceresi açılabilir mi (demo dışındaki her kutu). */
+  limitsEditable?: boolean;
 }
 
 /** Şablon listesi öğesi (gövde yok); `lockedBy` > 0 ise içerik değiştirilemez. */
