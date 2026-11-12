@@ -6,7 +6,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { campaignLeads, campaigns, messages, settings, suppressions } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
-import { ARF_COMPLAINT_CODE } from "./inbound/process";
+import { isComplaintMessageSql } from "./inbound/complaint-sql";
 
 /**
  * Posta kutusu düzeyi gönderim sağlığı (SRS 5.6.1: "bounce oranı %3'ü veya şikâyet oranı %0,1'i aşarsa yeni
@@ -374,7 +374,9 @@ export async function getMailboxHealth(
         eq(messages.direction, "in"),
         eq(messages.mailboxId, mailboxId),
         eq(messages.status, "matched"),
-        eq(messages.errorCode, ARF_COMPLAINT_CODE),
+        // 15.10-2: sınıf sütunu (`complaint`), eski satırlarda `arf_complaint` işareti. Doğrulanmamış rapor `matched`
+        // olamaz (inceleme veya eşleşmesiz kalır), bu yüzden durum ayrımı yeterlidir.
+        isComplaintMessageSql(),
         gte(sql`coalesce(${messages.receivedAt}, ${messages.createdAt})`, since),
       ),
     );
@@ -386,7 +388,7 @@ export async function getMailboxHealth(
         eq(messages.direction, "in"),
         eq(messages.mailboxId, mailboxId),
         eq(messages.status, "received"),
-        sql`${messages.errorCode} LIKE ${`${ARF_COMPLAINT_CODE}:%`}`,
+        isComplaintMessageSql(),
       ),
     );
   return {

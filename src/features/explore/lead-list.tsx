@@ -1,12 +1,13 @@
 "use client";
 
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Globe, Loader2, Mail, SearchX, Sparkles } from "lucide-react";
+import { Globe, Keyboard, Loader2, Mail, SearchX, Send, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { NOVELTY_DOT } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { cn } from "@/lib/cn";
@@ -15,11 +16,12 @@ import { useEnrichmentStatus, useFacets, useLeadsInfinite } from "@/lib/client/q
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { toSearchParams } from "@/lib/client/api";
-import { AddToCampaignButton } from "@/features/campaigns/add-to-campaign-button";
+import { shortcutHint } from "@/lib/client/shortcuts";
+import { BulkBar } from "./bulk-bar";
 import { ExportLeadsButton } from "./export-leads-button";
-import { FindEmailsButton } from "./find-emails-button";
 import { GoogleLoadButton } from "./google-load-button";
-import { useExplore } from "./state";
+import { headerCheckState, isEmpty, isSelected, MAX_SELECTION } from "./selection";
+import { useExplore, type LeadSort } from "./state";
 
 const ROW_HEIGHT = 84;
 
@@ -45,85 +47,116 @@ function EmailBadge({ row }: { row: LeadRow }) {
   return null;
 }
 
-function Row({ row, selected, onClick }: { row: LeadRow; selected: boolean; onClick: () => void }) {
+function Row({
+  row,
+  selected,
+  checked,
+  onClick,
+  onCheck,
+}: {
+  row: LeadRow;
+  selected: boolean;
+  checked: boolean;
+  onClick: () => void;
+  onCheck: (shift: boolean) => void;
+}) {
   const contacted = row.leadStatus !== "new" && row.leadStatus !== "enriched";
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-lead-row
-      aria-current={selected ? "true" : undefined}
+    <div
       className={cn(
-        "flex h-full w-full flex-col justify-center gap-1 border-b border-l-2 border-l-transparent px-4 text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:bg-accent/60",
+        "flex h-full w-full border-b border-l-2 border-l-transparent transition-colors duration-150",
         selected && "border-l-primary bg-accent",
+        checked && !selected && "bg-accent/40",
       )}
     >
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "size-2.5 shrink-0 rounded-full ring-2 ring-card",
-            NOVELTY_DOT[row.noveltyLabel],
-            contacted && "ring-contacted",
-          )}
-          aria-hidden
+      <div className="flex shrink-0 items-start pl-3 pt-[18px]">
+        <Checkbox
+          checked={checked}
+          aria-label={t("list.row.select", { name: row.name ?? t("list.unnamed") })}
+          data-lead-check
+          onClick={(e) => {
+            // Durum seçim modelinde tutulur; Shift+tıklama aralık seçer.
+            e.preventDefault();
+            onCheck(e.shiftKey);
+          }}
         />
-        <span
-          className={cn(
-            "min-w-0 flex-1 truncate text-[15px] font-semibold",
-            !row.name && "font-normal italic text-muted-foreground",
+      </div>
+      <button
+        type="button"
+        onClick={onClick}
+        data-lead-row
+        aria-current={selected ? "true" : undefined}
+        className="flex h-full min-w-0 flex-1 flex-col justify-center gap-1 pl-3 pr-4 text-left transition-colors duration-150 hover:bg-accent/60 focus-visible:bg-accent/60"
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "size-2.5 shrink-0 rounded-full ring-2 ring-card",
+              NOVELTY_DOT[row.noveltyLabel],
+              contacted && "ring-contacted",
+            )}
+            aria-hidden
+          />
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-[15px] font-semibold",
+              !row.name && "font-normal italic text-muted-foreground",
+            )}
+          >
+            {row.name ?? t("list.unnamed")}
+          </span>
+          <span
+            className="tabular shrink-0 text-[12px] text-muted-foreground"
+            title={t("list.score")}
+          >
+            <span className="sr-only">{t("list.score")}: </span>
+            {row.noveltyScore}
+          </span>
+        </div>
+        <div className="truncate pl-[18px] text-[13px] text-muted-foreground">
+          {[typeLabel(row.primaryType), row.city, countryLabel(row.countryCode)]
+            .filter(Boolean)
+            .join(" · ")}
+        </div>
+        <div className="flex items-center gap-1.5 overflow-hidden pl-[18px]">
+          {row.businessStatus === "FUTURE_OPENING" ? (
+            <Badge variant="future">
+              {t("list.opens")} {fmtOpeningDate(row.openingDate) || t("list.soon")}
+            </Badge>
+          ) : row.openedDetectedAt ? (
+            <Badge variant="high">
+              <Sparkles className="size-3" /> {t("list.justOpened")}
+            </Badge>
+          ) : row.newDetectedAt ? (
+            <Badge variant="high">
+              <Sparkles className="size-3" /> {t("list.newDetected")}
+            </Badge>
+          ) : null}
+          {row.notFound && <Badge variant="warning">{t("list.notFound")}</Badge>}
+          {row.website && (
+            <Badge variant="outline" title={t("list.website")} aria-label={t("list.website")}>
+              <Globe className="size-3" />
+            </Badge>
           )}
-        >
-          {row.name ?? t("list.unnamed")}
-        </span>
-        <span
-          className="tabular shrink-0 text-[12px] text-muted-foreground"
-          title={t("list.score")}
-        >
-          <span className="sr-only">{t("list.score")}: </span>
-          {row.noveltyScore}
-        </span>
-      </div>
-      <div className="truncate pl-[18px] text-[13px] text-muted-foreground">
-        {[typeLabel(row.primaryType), row.city, countryLabel(row.countryCode)]
-          .filter(Boolean)
-          .join(" · ")}
-      </div>
-      <div className="flex items-center gap-1.5 overflow-hidden pl-[18px]">
-        {row.businessStatus === "FUTURE_OPENING" ? (
-          <Badge variant="future">
-            {t("list.opens")} {fmtOpeningDate(row.openingDate) || t("list.soon")}
-          </Badge>
-        ) : row.openedDetectedAt ? (
-          <Badge variant="high">
-            <Sparkles className="size-3" /> {t("list.justOpened")}
-          </Badge>
-        ) : row.newDetectedAt ? (
-          <Badge variant="high">
-            <Sparkles className="size-3" /> {t("list.newDetected")}
-          </Badge>
-        ) : null}
-        {row.notFound && <Badge variant="warning">{t("list.notFound")}</Badge>}
-        {row.website && (
-          <Badge variant="outline" title={t("list.website")} aria-label={t("list.website")}>
-            <Globe className="size-3" />
-          </Badge>
-        )}
-        <EmailBadge row={row} />
-        {row.source === "demo" && <Badge variant="outline">DEMO</Badge>}
-        {contacted && <Badge variant="info">{t(`leadStatus.${row.leadStatus}`)}</Badge>}
-      </div>
-    </button>
+          <EmailBadge row={row} />
+          {row.source === "demo" && <Badge variant="outline">DEMO</Badge>}
+          {contacted && <Badge variant="info">{t(`leadStatus.${row.leadStatus}`)}</Badge>}
+        </div>
+      </button>
+    </div>
   );
 }
 
 export function LeadList() {
   const ex = useExplore();
-  const [sort, setSort] = useState<"novelty" | "name" | "recent">("novelty");
-  const q = useLeadsInfinite(ex.apiFilters, sort);
+  const q = useLeadsInfinite(ex.apiFilters, ex.sort);
   const rows = useMemo(() => q.data?.pages.flatMap((p) => p.rows) ?? [], [q.data]);
+  const loadedIds = useMemo(() => rows.map((r) => r.leadId), [rows]);
+  const visibleIds = useMemo(() => new Set(loadedIds), [loadedIds]);
   const total = q.data?.pages[0]?.total ?? 0;
   const parentRef = useRef<HTMLDivElement>(null);
   const hasMore = q.hasNextPage;
+  const hasSelection = !isEmpty(ex.selection);
 
   const virt = useVirtualizer({
     count: rows.length + (hasMore ? 1 : 0),
@@ -146,66 +179,96 @@ export function LeadList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ex.selectedId, rows.length]);
 
-  const move = useCallback(
-    (delta: number) => {
-      if (rows.length === 0) return;
-      const cur = rows.findIndex((r) => r.leadId === ex.selectedId);
-      const next = Math.min(rows.length - 1, Math.max(0, cur < 0 ? 0 : cur + delta));
-      const r = rows[next]!;
-      ex.select(r.leadId, { focus: true, lat: r.lat ?? undefined, lng: r.lng ?? undefined });
-    },
-    [rows, ex],
-  );
-
-  // Klavye: J/K ile liste gezinme (FR-UI-05). Metin alanlarında devre dışı. Esc, ExplorePage'deki GlobalKeys'te işlenir.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement;
-      if (el.closest("input, textarea, select, [contenteditable=true], [role=dialog]")) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === "j" || e.key === "J") {
-        e.preventDefault();
-        move(1);
-      } else if (e.key === "k" || e.key === "K") {
-        e.preventDefault();
-        move(-1);
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [move, ex]);
+  // Tümünü seç: hepsi yüklüyse ve sınırın altındaysa kimliklerle (süzgeç değişse de korunur); değilse "süzgece uyan
+  // tümü" sorgusuyla (süzgeç değişince temizlenir). Seçim varken kutu seçimi temizler.
+  const headerState = headerCheckState(ex.selection, loadedIds, ex.filterQuery);
+  const toggleAll = () => {
+    if (hasSelection) return ex.clearSelection();
+    if (total === 0) return;
+    if (!hasMore && rows.length <= MAX_SELECTION) ex.selectIds(loadedIds);
+    else ex.selectQuery(ex.filterQuery, total, "all");
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
-        <p className="tabular text-[13px] font-medium text-foreground" aria-live="polite">
-          {q.isLoading ? t("common.loading") : t("list.count", { n: fmtNumber(total) })}
+      {ex.filters.archived && (
+        <p
+          className="border-b bg-warning/10 px-4 py-2 text-[12px] text-foreground"
+          data-testid="archived-banner"
+        >
+          {t("list.archived.banner")}
         </p>
-        <div className="flex flex-wrap items-center gap-2">
-          {total > 0 && (
-            <FindEmailsButton target={{ filtersQuery: toSearchParams(ex.apiFilters).toString() }} />
-          )}
-          {total > 0 && (
-            <AddToCampaignButton
-              filterQuery={toSearchParams(ex.apiFilters).toString()}
-              total={total}
+      )}
+      {hasSelection ? (
+        <div className="flex items-stretch">
+          <div className="flex items-start border-b bg-accent/60 pl-4 pt-[17px]">
+            <Checkbox
+              checked={headerState}
+              aria-label={t("selection.clear")}
+              onClick={(e) => {
+                e.preventDefault();
+                toggleAll();
+              }}
             />
-          )}
-          {total > 0 && (
-            <ExportLeadsButton filterQuery={toSearchParams(ex.apiFilters).toString()} />
-          )}
-          <Select
-            aria-label={t("list.sort")}
-            value={sort}
-            onChange={(e) => setSort(e.target.value as typeof sort)}
-            className="h-8 w-auto py-0 pr-7 text-[13px] transition-colors hover:bg-accent"
-          >
-            <option value="novelty">{t("list.sort.novelty")}</option>
-            <option value="recent">{t("list.sort.recent")}</option>
-            <option value="name">{t("list.sort.name")}</option>
-          </Select>
+          </div>
+          <div className="min-w-0 flex-1">
+            <BulkBar visibleIds={visibleIds} />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+          <div className="flex items-center gap-3">
+            {total > 0 && (
+              <Checkbox
+                checked={false}
+                aria-label={t("selection.selectAll", { n: fmtNumber(total) })}
+                title={t("selection.selectAll", { n: fmtNumber(total) })}
+                data-testid="select-all"
+                onClick={(e) => {
+                  e.preventDefault();
+                  toggleAll();
+                }}
+              />
+            )}
+            <p className="tabular text-[13px] font-medium text-foreground" aria-live="polite">
+              {q.isLoading ? t("common.loading") : t("list.count", { n: fmtNumber(total) })}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {total > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => ex.openDialog("findEmails")}
+                title={`${t("findEmails.button")} (${shortcutHint("findEmails")})`}
+              >
+                <Mail /> {t("findEmails.button")}
+              </Button>
+            )}
+            {total > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => ex.openDialog("campaign")}
+                title={`${t("addToCampaign.button")} (${shortcutHint("addToCampaign")})`}
+              >
+                <Send /> {t("addToCampaign.button")}
+              </Button>
+            )}
+            {total > 0 && <ExportLeadsButton filterQuery={ex.filterQuery} />}
+            <Select
+              aria-label={t("list.sort")}
+              value={ex.sort}
+              onChange={(e) => ex.setSort(e.target.value as LeadSort)}
+              className="h-8 w-auto py-0 pr-7 text-[13px] transition-colors hover:bg-accent"
+            >
+              <option value="novelty">{t("list.sort.novelty")}</option>
+              <option value="recent">{t("list.sort.recent")}</option>
+              <option value="name">{t("list.sort.name")}</option>
+            </Select>
+          </div>
+        </div>
+      )}
 
       <EmailProgress />
       <UncachedBanner />
@@ -248,6 +311,10 @@ export function LeadList() {
                     <Row
                       row={row}
                       selected={row.leadId === ex.selectedId}
+                      checked={isSelected(ex.selection, row.leadId)}
+                      onCheck={(shift) =>
+                        shift ? ex.selectRange(row.leadId, loadedIds) : ex.toggleSelect(row.leadId)
+                      }
                       onClick={() =>
                         ex.select(row.leadId, {
                           focus: true,
@@ -266,6 +333,16 @@ export function LeadList() {
             })}
           </div>
         )}
+      </div>
+      <div className="flex shrink-0 justify-end border-t px-4 py-1">
+        <button
+          type="button"
+          onClick={() => ex.setShortcutsOpen(true)}
+          className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[12px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <Keyboard className="size-3.5" aria-hidden /> {t("shortcuts.open")}
+          <kbd className="rounded border bg-muted px-1 font-mono text-[11px]">?</kbd>
+        </button>
       </div>
     </div>
   );

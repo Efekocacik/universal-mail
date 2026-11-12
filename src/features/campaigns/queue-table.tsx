@@ -1,6 +1,7 @@
 "use client";
 
 import { Inbox, RefreshCw, X } from "lucide-react";
+import Link from "next/link";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -19,8 +20,9 @@ import {
 } from "@/lib/client/campaigns";
 import { countryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
-import { reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
-import { LoadError, ReasonList, SequenceStatusBadge } from "./parts";
+import { queueFilterLabel, reasonLabel, REMOVABLE_SEQUENCES, SEQUENCE_STATUSES } from "./model";
+import { LoadError, Notice, ReasonList, SequenceStatusBadge } from "./parts";
+import { isReviewHold, reevaluateView, shouldCountExcluded } from "./queue-model";
 import { useSafeMutation } from "./use-safe-mutation";
 
 const TH =
@@ -48,8 +50,8 @@ export function QueueTable({
     successMessage: t("queue.removed"),
   });
   const campaignStatus = useCampaign(campaignId).data?.status;
-  const editable = campaignStatus === "draft" || campaignStatus === "ready";
-  const excludedCount = useExcludedCount(campaignId, editable).data ?? 0;
+  const excludedCount = useExcludedCount(campaignId, shouldCountExcluded(campaignStatus)).data ?? 0;
+  const reevalView = reevaluateView(campaignStatus, excludedCount);
   const reevaluate = useSafeMutation(() => campaignLeadsApi.reevaluate(campaignId), {
     onSuccess: (r) => {
       if (r.reevaluated === 0) toast.info(t("queue.reevaluate.none"));
@@ -81,12 +83,17 @@ export function QueueTable({
           <option value="">{t("queue.filter.all")}</option>
           {SEQUENCE_STATUSES.map((s) => (
             <option key={s} value={s}>
-              {t(`sequenceStatus.${s}`)}
+              {queueFilterLabel(s)}
             </option>
           ))}
         </Select>
       </div>
-      {editable && excludedCount > 0 && (
+      {reevalView === "closed" && (
+        <div data-testid="queue-reevaluate-closed">
+          <Notice>{t("queue.reevaluate.closed", { n: fmtNumber(excludedCount) })}</Notice>
+        </div>
+      )}
+      {reevalView === "button" && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/40 px-3 py-2">
           <p className="text-[12px] text-muted-foreground">
             {t("queue.reevaluate.help", { n: fmtNumber(excludedCount) })}
@@ -153,12 +160,24 @@ export function QueueTable({
                     </td>
                     <td className="px-3 py-2.5">
                       <div className="space-y-1">
-                        <SequenceStatusBadge status={r.status} reasons={r.exclusionReasons} />
+                        <SequenceStatusBadge
+                          status={r.status}
+                          reasons={r.exclusionReasons}
+                          stopReason={r.stopReason}
+                        />
                         {r.exclusionReasons.length > 0 && <ReasonList codes={r.exclusionReasons} />}
                         {r.lastError && (
                           <p className="text-[12px] text-destructive">
                             {r.lastError.split(",").map(reasonLabel).join(", ")}
                           </p>
+                        )}
+                        {isReviewHold(r.lastError) && (
+                          <Link
+                            href="/mail-log?tab=review"
+                            className="text-[12px] font-medium underline underline-offset-2"
+                          >
+                            {t("queue.reviewHold.go")}
+                          </Link>
                         )}
                       </div>
                     </td>

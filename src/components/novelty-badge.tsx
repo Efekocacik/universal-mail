@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { HelpTip } from "@/components/ui/tooltip";
 import type { NoveltyLabel } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 
@@ -28,3 +29,15 @@ export const NOVELTY_DOT: Record<NoveltyLabel, string> = {
   likely: "bg-nov-likely",
   low: "bg-nov-low",
 };
+
+/**
+ * Yenilik kavramının "Bu nedir?" balonu (FR-UI-07): puanın ne anlama geldiği ve renklerin açıklaması. Yenilik süzgeci
+ * başlığının ve "Neden yeni?" alanının yanına konur.
+ */
+export function NoveltyHelp({ className }: { className?: string }) {
+  return (
+    <HelpTip className={className} title={t("help.novelty")}>
+      {t("help.noveltyLabels")}
+    </HelpTip>
+  );
+}

@@ -137,6 +137,8 @@ export function usePatchLead(id: number | null) {
       notes?: string | null;
       tags?: string[];
       displayName?: string | null;
+      /** "İletişime geçme" işaretini kaldırmak için açık onay (yoksa 409 `LEAD_UNBLOCK_CONFIRM`). */
+      confirmUnblock?: true;
     }) => api<LeadDetailResponse>(`/api/leads/${id}`, { method: "PATCH", json: patch }),
     onSuccess: (data) => {
       qc.setQueryData(qk.lead(id), data);

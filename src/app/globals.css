@@ -2,7 +2,20 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/inter";
 
-@custom-variant dark (&:is(.dark *));
+/*
+ * Koyu tema (Faz 4, 10a-1): `<html class="dark">` (kullanıcı "Koyu" seçti) VEYA "Sistem" seçiliyken işletim sistemi koyu
+ * ise (`<html>` sınıfsız ya da `.light` değil). Böylece "Sistem" JS gerektirmez ve ilk boyamada yanıp sönme olmaz.
+ */
+@custom-variant dark {
+  &:where(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -35,6 +48,16 @@
   --color-nov-likely: var(--nov-likely);
   --color-nov-low: var(--nov-low);
   --color-contacted: var(--contacted);
+  --color-success-text: var(--success-text);
+  --color-warning-text: var(--warning-text);
+  --color-caution-text: var(--caution-text);
+  --color-danger-text: var(--danger-text);
+  --color-info-text: var(--info-text);
+  --color-low-text: var(--low-text);
+  --color-future-text: var(--future-text);
+  --color-thumb: var(--thumb);
+  --color-map-bg: var(--map-bg);
+  --color-map-stroke: var(--map-stroke);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
@@ -78,6 +101,120 @@
   --nov-likely: #d4a017;
   --nov-low: #9aa0a8;
   --contacted: #2563eb;
+  /* Rozet ve uyarı metinleri (açık zemin üzerinde AA kontrast); bileşenlerde sabit hex YOK, bu belirteçler kullanılır. */
+  --success-text: #166534;
+  --warning-text: #8a6700;
+  /* Sarı uyarı kutusu (`bg-nov-likely/15`) içindeki metin: açık zeminde `--warning-text`ten koyu (AA ≥ 4.5). */
+  --caution-text: #6b5200;
+  --danger-text: #b91c1c;
+  --info-text: #1d4ed8;
+  --low-text: #5b6168;
+  --future-text: #6d28d9;
+  --thumb: #ffffff;
+  --map-bg: #eef1ec;
+  --map-stroke: #14705a;
+  --scrollbar: #c9cac2;
+  --scrollbar-hover: #aeb0a6;
+  --selection: #bfe3cb;
+  --pin-border: #ffffff;
+  color-scheme: light;
+}
+
+/* Koyu tema belirteçleri. Aynı değerler iki yerde: açık seçim (`.dark`) ve "Sistem" + işletim sistemi koyu. Bir
+ * belirteç eklerken İKİ bloğa da ekleyin (tests/theme-tokens.test.ts eksik belirteci yakalar). */
+:root.dark {
+  --background: #0f1113;
+  --foreground: #e7e8ea;
+  --card: #16191d;
+  --card-foreground: #e7e8ea;
+  --popover: #1b1e23;
+  --popover-foreground: #e7e8ea;
+  --primary: #22c55e;
+  --primary-foreground: #06260f;
+  --secondary: #23272d;
+  --secondary-foreground: #e1e3e6;
+  --muted: #1f2328;
+  --muted-foreground: #9aa0a8;
+  --accent: #13291c;
+  --accent-foreground: #bbf7d0;
+  --destructive: #ef4444;
+  --destructive-foreground: #1f0606;
+  --success: #22c55e;
+  --success-foreground: #06260f;
+  --warning: #f59e0b;
+  --info: #60a5fa;
+  --border: #2a2f36;
+  --input: #343a42;
+  --control: #6b7280;
+  --ring: #22c55e;
+  --nov-future: #a78bfa;
+  --nov-high: #34d399;
+  --nov-likely: #f2c94c;
+  --nov-low: #9aa0a8;
+  --contacted: #60a5fa;
+  --success-text: #86efac;
+  --warning-text: #f2c94c;
+  --caution-text: #f2c94c;
+  --danger-text: #fca5a5;
+  --info-text: #93c5fd;
+  --low-text: #b4b9c0;
+  --future-text: #c4b5fd;
+  --thumb: #e7e8ea;
+  --map-bg: #181c1a;
+  --map-stroke: #34d399;
+  --scrollbar: #3a3f45;
+  --scrollbar-hover: #4b5158;
+  --selection: #1f4d33;
+  --pin-border: #0f1113;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: #0f1113;
+    --foreground: #e7e8ea;
+    --card: #16191d;
+    --card-foreground: #e7e8ea;
+    --popover: #1b1e23;
+    --popover-foreground: #e7e8ea;
+    --primary: #22c55e;
+    --primary-foreground: #06260f;
+    --secondary: #23272d;
+    --secondary-foreground: #e1e3e6;
+    --muted: #1f2328;
+    --muted-foreground: #9aa0a8;
+    --accent: #13291c;
+    --accent-foreground: #bbf7d0;
+    --destructive: #ef4444;
+    --destructive-foreground: #1f0606;
+    --success: #22c55e;
+    --success-foreground: #06260f;
+    --warning: #f59e0b;
+    --info: #60a5fa;
+    --border: #2a2f36;
+    --input: #343a42;
+    --control: #6b7280;
+    --ring: #22c55e;
+    --nov-future: #a78bfa;
+    --nov-high: #34d399;
+    --nov-likely: #f2c94c;
+    --nov-low: #9aa0a8;
+    --contacted: #60a5fa;
+    --success-text: #86efac;
+    --warning-text: #f2c94c;
+    --caution-text: #f2c94c;
+    --danger-text: #fca5a5;
+    --info-text: #93c5fd;
+    --low-text: #b4b9c0;
+    --future-text: #c4b5fd;
+    --thumb: #e7e8ea;
+    --map-bg: #181c1a;
+    --map-stroke: #34d399;
+    --scrollbar: #3a3f45;
+    --scrollbar-hover: #4b5158;
+    --selection: #1f4d33;
+    --pin-border: #0f1113;
+    color-scheme: dark;
+  }
 }
 
 html,
@@ -109,20 +246,20 @@ html {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #c9cac2 transparent;
+  scrollbar-color: var(--scrollbar) transparent;
   -webkit-overflow-scrolling: touch;
 }
 .um-scroll::-webkit-scrollbar {
   width: 10px;
 }
 .um-scroll::-webkit-scrollbar-thumb {
-  background: #c9cac2;
+  background: var(--scrollbar);
   border-radius: 9999px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 .um-scroll::-webkit-scrollbar-thumb:hover {
-  background: #aeb0a6;
+  background: var(--scrollbar-hover);
   background-clip: content-box;
 }
 
@@ -142,7 +279,7 @@ html {
 }
 
 ::selection {
-  background: #bfe3cb;
+  background: var(--selection);
 }
 
 body {
@@ -172,7 +309,7 @@ body {
   width: 14px;
   height: 14px;
   border-radius: 9999px;
-  border: 2px solid #fff;
+  border: 2px solid var(--pin-border);
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
   transform: translateY(50%);
   transition: transform 120ms ease;
@@ -190,15 +327,62 @@ body {
     0 0 0 2px var(--contacted),
     0 1px 3px rgb(0 0 0 / 0.45);
 }
+/* >>> Faz 4 paket C: harita işaretçisi durumları (FR-UI-02). Yalnızca bu blok C'ye aittir. >>> */
+/* Yanıt verdi / müşteri: yeşil halka. */
+.um-pin--replied {
+  box-shadow:
+    0 0 0 2px var(--success),
+    0 1px 3px rgb(0 0 0 / 0.45);
+}
+/* İlgilenmiyor / iletişime geçme: gri kesikli çerçeve ve soluk dolgu (renk körlüğünde de ayırt edilir). */
+.um-pin--stopped {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+  opacity: 0.75;
+}
+/* Toplu seçimdeki işaretçi: koyu (ön plan rengi) dış halka. Birincil renk yeşil olduğu ve "yanıt verdi" halkasıyla
+   karışacağı için kullanılmaz. */
+.um-pin--checked {
+  outline: 3px solid var(--foreground);
+  outline-offset: 2px;
+}
+.um-pin--checked.um-pin--stopped {
+  opacity: 1;
+}
+/* Gösterge simgeleri: işaretçilerle aynı görsel dil. */
+.um-legend-ring {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--card);
+  border: 2px solid #fff;
+}
+.um-legend-ring--contacted {
+  box-shadow: 0 0 0 2px var(--contacted);
+}
+.um-legend-ring--replied {
+  box-shadow: 0 0 0 2px var(--success);
+}
+.um-legend-ring--stopped {
+  border-style: dashed;
+  border-color: var(--muted-foreground);
+}
+.um-legend-ring--checked {
+  outline: 2px solid var(--foreground);
+  outline-offset: 1px;
+}
+/* <<< Faz 4 paket C <<< */
 .um-cluster {
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
-  color: #fff;
+  color: var(--primary-foreground);
   font-weight: 600;
   font-size: 12px;
-  border: 2px solid #fff;
+  border: 2px solid var(--pin-border);
   box-shadow: 0 1px 4px rgb(0 0 0 / 0.4);
   background: var(--primary);
 }

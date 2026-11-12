@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { NoveltyBadge } from "@/components/novelty-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Kbd } from "@/components/ui/page";
 import { Skeleton } from "@/components/ui/misc";
@@ -20,7 +21,8 @@ import {
 } from "@/lib/client/format";
 import { useLead, usePatchLead } from "@/lib/client/queries";
 import type { LeadDetailResponse } from "@/lib/client/types";
-import { t } from "@/lib/i18n";
+import { t, type TrKey } from "@/lib/i18n";
+import { signalText } from "@/lib/novelty/signal-text";
 import { GoogleLoadButton } from "./google-load-button";
 import { LeadCampaigns } from "./lead-campaigns";
 import { LeadEmails } from "./lead-emails";
@@ -76,6 +78,15 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
+/** Alan adı yaşı satırı: kayıt tarihi ve yaklaşık yaş; tarih yoksa sade durum metni. */
+function domainAgeText(d: NonNullable<LeadDetailResponse["domainAge"]>): string {
+  if (d.status === "ok" && d.registeredAt !== null) {
+    const months = Math.max(0, Math.round((Date.now() - d.registeredAt) / (30.44 * 86_400_000)));
+    return t("detail.domainAge.value", { date: fmtDate(d.registeredAt), months });
+  }
+  return t(`detail.domainAge.${d.status === "ok" ? "pending" : d.status}` as TrKey);
+}
+
 export function LeadDetail({ id }: { id: number }) {
   const ex = useExplore();
   const { data, isLoading, error } = useLead(id);
@@ -116,6 +127,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
   const [displayName, setDisplayName] = useState(lead.displayName ?? "");
   const [tag, setTag] = useState("");
   const [saved, setSaved] = useState(false);
+  // Faz 4 (paket C): "İletişime geçme" işaretini kaldırmak açık onay ister (sunucu `confirmUnblock` olmadan 409 verir).
+  const [unblockTo, setUnblockTo] = useState<string | null>(null);
 
   useEffect(() => {
     setNotes(lead.notes ?? "");
@@ -184,6 +197,11 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             </Badge>
           )}
           {place.notFoundInScanId !== null && <Badge variant="warning">{t("list.notFound")}</Badge>}
+          {place.goneAt != null && (
+            <Badge variant="warning" title={t("detail.gone.hint")}>
+              {t("detail.gone")}
+            </Badge>
+          )}
         </div>
         <p className="flex items-start gap-1.5 text-[13px] text-muted-foreground">
           <MapPin className="mt-0.5 size-3.5 shrink-0" />
@@ -232,7 +250,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
                 <span className="tabular mt-0.5 inline-flex h-5 min-w-8 items-center justify-center rounded bg-secondary px-1 text-[11px] font-semibold">
                   +{s.points}
                 </span>
-                <span>{s.reason}</span>
+                <span>{signalText(s)}</span>
               </li>
             ))}
           </ul>
@@ -287,9 +305,14 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               </span>
             )}
           </Fact>
+          {data.domainAge && (
+            <Fact label={t("detail.domainAge")}>
+              <span title={data.domainAge.domain}>{domainAgeText(data.domainAge)}</span>
+            </Fact>
+          )}
         </dl>
         {place.lat === null && (
-          <p className="flex items-start gap-1.5 rounded-md bg-nov-likely/15 px-2.5 py-2 text-[12px] text-[#6b5200]">
+          <p className="flex items-start gap-1.5 rounded-md bg-nov-likely/15 px-2.5 py-2 text-[12px] text-caution-text">
             <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
             {t("detail.coordsExpired")}
           </p>
@@ -336,7 +359,11 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             <Select
               id="lead-status"
               value={lead.status}
-              onChange={(e) => save({ status: e.target.value })}
+              onChange={(e) =>
+                lead.status === "do_not_contact" && e.target.value !== "do_not_contact"
+                  ? setUnblockTo(e.target.value)
+                  : save({ status: e.target.value })
+              }
             >
               {LEAD_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -345,6 +372,17 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               ))}
             </Select>
           </div>
+          <ConfirmDialog
+            open={unblockTo !== null}
+            onOpenChange={(v) => !v && setUnblockTo(null)}
+            tone="warning"
+            title={t("detail.unblock.title")}
+            description={t("detail.unblock.body")}
+            confirmLabel={t("detail.unblock.confirm")}
+            onConfirm={() => {
+              if (unblockTo) save({ status: unblockTo, confirmUnblock: true });
+            }}
+          />
           <div className="space-y-1.5">
             <Label htmlFor="lead-tag">{t("detail.tags")}</Label>
             <div className="flex flex-wrap gap-1.5">

@@ -12,6 +12,11 @@ export interface NoveltyConfig {
   highAt: number;
   likelyAt: number;
   newWindowDays: number;
+  /**
+   * Faz 4: "genç alan adı" penceresi (gün; ayar `novelty.domainYoungDays`). Verilmezse (RDAP kapalı) alan adı yaşı
+   * sinyali üretilmez.
+   */
+  domainYoungDays?: number;
 }
 
 export const DEFAULT_NOVELTY_CONFIG: NoveltyConfig = {
@@ -27,6 +32,8 @@ export interface NoveltyInput {
   newDetectedAt?: number | null;
   /** FUTURE_OPENING → OPERATIONAL geçişinin gözlendiği an (ms). */
   openedDetectedAt?: number | null;
+  /** Faz 4: işletmenin web sitesi alan adının RDAP kayıt tarihi (ms). */
+  domainRegisteredAt?: number | null;
   extraSignals?: NoveltySignal[];
   now?: number;
 }
@@ -99,6 +106,19 @@ export function computeNovelty(
         reason: "Az sayıda değerlendirme var. Düşük güvenilirlikte bir gösterge.",
       });
     }
+  }
+
+  const young = config.domainYoungDays;
+  const reg = input.domainRegisteredAt;
+  if (typeof young === "number" && typeof reg === "number" && within(reg, now, young)) {
+    const months = Math.max(1, Math.round((now - reg) / (30.44 * DAY_MS)));
+    signals.push({
+      id: "domain_young",
+      group: "domain",
+      points: 20,
+      reason: `Web sitesinin alan adı yaklaşık ${months} ay önce kaydedilmiş. Yeni bir işletme olabilir; kanıt değildir.`,
+      params: { months, days: young },
+    });
   }
 
   signals.push(...(input.extraSignals ?? []));

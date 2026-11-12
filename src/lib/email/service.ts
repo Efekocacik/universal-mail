@@ -1,4 +1,5 @@
 import { inArray } from "drizzle-orm";
+import { registrableDomain } from "@/lib/novelty/rdap";
 import { placeCache } from "@/lib/db/cache-schema";
 import type { Db } from "@/lib/db/client";
 import { leads, type EmailSourceType } from "@/lib/db/schema";
@@ -318,6 +319,8 @@ export async function findEmailsForLeads(
           pagesFetched: site.pages.length,
           externalUsed: usedExternal,
           completedAt: ts,
+          // Faz 4 (Paket B): RDAP alan adı yaşı için KENDİ taramamızın ulaştığı sitenin kayıtlı alan adı.
+          siteDomain: registrableDomain(site.siteHost),
         },
         ts,
       );

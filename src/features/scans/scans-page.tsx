@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  CalendarClock,
   ChevronDown,
   Eye,
   Loader2,
@@ -27,6 +28,8 @@ import { qk, useScans } from "@/lib/client/queries";
 import type { ScanListItem, ScanStatus } from "@/lib/client/types";
 import { skuLabel } from "@/lib/places/pricing";
 import { t } from "@/lib/i18n";
+import { RepeatScanDialog } from "./repeat-fields";
+import { SchedulesSection } from "./schedules-section";
 
 const STATUS_VARIANT: Record<ScanStatus, BadgeProps["variant"]> = {
   draft: "outline",
@@ -59,6 +62,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
   const [open, setOpen] = useState(false);
   const [confirmRerun, setConfirmRerun] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [repeatOpen, setRepeatOpen] = useState(false);
   const active = scan.status === "running" || scan.status === "queued";
   const p = scan.progress;
   const pct = p.unitsTotal ? Math.round(((p.unitsDone ?? 0) / p.unitsTotal) * 100) : 0;
@@ -116,6 +120,11 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
               {t(`scanStatus.${scan.status}`)}
             </Badge>
             {scan.provider === "mock" && <Badge variant="future">DEMO</Badge>}
+            {scan.origin === "schedule" && (
+              <Badge variant="outline">
+                <CalendarClock className="size-3" aria-hidden /> {t("scans.origin.schedule")}
+              </Badge>
+            )}
             {scan.status === "completed" &&
               (scan.isBaseline ? (
                 <Badge variant="outline">{t("scans.baseline")}</Badge>
@@ -179,6 +188,11 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
               <RefreshCw /> {t("scans.rerun")}
             </Button>
           )}
+          {scan.status === "completed" && scan.origin !== "schedule" && (
+            <Button size="sm" variant="outline" onClick={() => setRepeatOpen(true)}>
+              <CalendarClock /> {t("schedules.repeat")}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -196,7 +210,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
         </div>
       )}
       {scan.pauseReason && scan.status !== "completed" && (
-        <p className="mt-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-[#6b5200]">
+        <p className="mt-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-caution-text">
           {scan.pauseReason}
         </p>
       )}
@@ -310,6 +324,9 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
           await rerun.mutateAsync(true);
         }}
       />
+      {repeatOpen && (
+        <RepeatScanDialog scanId={scan.id} open={repeatOpen} onOpenChange={setRepeatOpen} />
+      )}
       <ConfirmDialog
         open={confirmCancel}
         onOpenChange={setConfirmCancel}
@@ -344,6 +361,7 @@ export function ScansPage() {
             )
           }
         />
+        {hasScans && <SchedulesSection />}
         {isLoading ? (
           <div className="space-y-4" aria-busy="true">
             <Skeleton className="h-52" />

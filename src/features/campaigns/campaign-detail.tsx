@@ -16,25 +16,28 @@ import {
   type CampaignDetail,
 } from "@/lib/client/campaigns";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
-import { t } from "@/lib/i18n";
+import { t, type TrKey } from "@/lib/i18n";
 import {
   allowedActions,
   dayLabel,
   pauseReasonText,
   plainCounts,
+  plainCountsNote,
+  plainCountsText,
   progressOf,
   progressTone,
-  SEQUENCE_STATUSES,
+  statusStats,
 } from "./model";
 import { CampaignStatusBadge, DemoBadge, LoadError, Notice, Stat } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { MessagesTable, QueueTable } from "./queue-table";
 import { useSafeMutation } from "./use-safe-mutation";
 
-const DONE_MESSAGE: Record<CampaignAction, string | null> = {
-  pause: t("campaign.paused.done"),
-  resume: t("campaign.resumed.done"),
-  cancel: t("campaign.cancelled.done"),
+// Anahtar eşlemesi (metin DEĞİL): t() kullanım anında çağrılır ki dil değişimi izlensin (modül düzeyinde t() yok).
+const DONE_MESSAGE: Record<CampaignAction, TrKey | null> = {
+  pause: "campaign.paused.done",
+  resume: "campaign.resumed.done",
+  cancel: "campaign.cancelled.done",
   draft: null,
   ready: null,
   start: null,
@@ -46,7 +49,7 @@ function Actions({ c }: { c: CampaignDetail }) {
   const control = useSafeMutation((action: CampaignAction) => campaignApi.control(c.id, action), {
     onSuccess: (_r, action) => {
       const msg = DONE_MESSAGE[action];
-      if (msg) toast.success(msg);
+      if (msg) toast.success(t(msg));
     },
   });
   const busy = control.isPending;
@@ -108,20 +111,16 @@ function Actions({ c }: { c: CampaignDetail }) {
 
 function Overview({ c }: { c: CampaignDetail }) {
   const p = progressOf(c.counts);
-  const plain = plainCounts(c.counts);
+  const plain = plainCounts(c.counts, c.breakdown);
+  const note = plainCountsNote(plain, fmtNumber);
   const templates = useTemplates();
   const tplName = (id: number) => templates.data?.find((x) => x.id === id)?.name ?? `#${id}`;
   return (
     <div className="um-enter space-y-4">
       <div className="space-y-1.5 rounded-lg border bg-card p-4">
         <Progress value={p.pct} tone={progressTone(c.status)} label={c.name} />
-        <p className="tabular text-[14px] font-medium">
-          {t("campaign.progress.plain", {
-            sent: fmtNumber(plain.sent),
-            queued: fmtNumber(plain.queued),
-            failed: fmtNumber(plain.failed),
-          })}
-        </p>
+        <p className="tabular text-[14px] font-medium">{plainCountsText(plain, fmtNumber)}</p>
+        {note && <p className="tabular text-[13px] text-muted-foreground">{note}</p>}
         <p className="tabular text-[12px] text-muted-foreground">
           {t("campaign.progress", {
             done: fmtNumber(p.finished),
@@ -130,8 +129,8 @@ function Overview({ c }: { c: CampaignDetail }) {
           })}
         </p>
         <div className="grid grid-cols-2 gap-4 pt-2 sm:grid-cols-4">
-          {SEQUENCE_STATUSES.filter((s) => (c.counts[s] ?? 0) > 0).map((s) => (
-            <Stat key={s} label={t(`sequenceStatus.${s}`)} value={fmtNumber(c.counts[s] ?? 0)} />
+          {statusStats(c.counts, c.breakdown).map((s) => (
+            <Stat key={s.key} label={s.label} value={fmtNumber(s.value)} />
           ))}
         </div>
       </div>
@@ -225,12 +224,11 @@ export function CampaignDetailPage({ id }: { id: number }) {
             <p className="mt-1 text-[13px] text-muted-foreground">
               {t("campaign.updated", { at: fmtDateTime(c.updatedAt) })}
               {" · "}
-              <span className="tabular">
-                {t("campaign.progress.plain", {
-                  sent: fmtNumber(plainCounts(c.counts).sent),
-                  queued: fmtNumber(plainCounts(c.counts).queued),
-                  failed: fmtNumber(plainCounts(c.counts).failed),
-                })}
+              <span
+                className="tabular"
+                title={plainCountsNote(plainCounts(c.counts, c.breakdown), fmtNumber) ?? undefined}
+              >
+                {plainCountsText(plainCounts(c.counts, c.breakdown), fmtNumber)}
               </span>
             </p>
           </div>

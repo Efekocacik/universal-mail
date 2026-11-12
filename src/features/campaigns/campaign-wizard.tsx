@@ -1,9 +1,10 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Compass, Undo2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Compass, History, Undo2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -19,7 +20,7 @@ import {
   type SendWindow,
   type StepInput,
 } from "@/lib/client/campaigns";
-import { fmtNumber } from "@/lib/client/format";
+import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import type { MutationErrorInfo } from "@/lib/client/retry";
 import { t } from "@/lib/i18n";
 import {
@@ -34,7 +35,29 @@ import { DemoBadge, LoadError, Notice } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { QueueTable } from "./queue-table";
 import { useSafeMutation } from "./use-safe-mutation";
-import { basicsDirty, leavingHref, stepsDirty } from "./wizard-dirty";
+import {
+  basicsDirty,
+  GUARD_BACK_STEPS,
+  guardBackAction,
+  guardState,
+  isGuardState,
+  leavingHref,
+  mailboxCapHint,
+  prefillFollowups,
+  stepsDirty,
+  type BasicsValues,
+} from "./wizard-dirty";
+import {
+  browserDraftStore,
+  clearDraft,
+  clearDraftPart,
+  DRAFT_DEBOUNCE_MS,
+  draftKey,
+  readDraft,
+  writeDraftPart,
+  type DraftPart,
+  type WizardDraft,
+} from "./wizard-draft";
 
 /**
  * Kampanya sihirbazı (FR-CMP-01, 4 adım): temel ayarlar → adımlar → hedef lead'ler → özet ve başlat.
@@ -57,6 +80,50 @@ function FieldIssues({ info, path }: { info: MutationErrorInfo | null; path: str
 
 /* 1. Temel ayarlar ------------------------------------------------------------------------------ */
 
+/** Yerel taslak bağlamı: hangi anahtar, hangi kampanya sürümüne karşı ve otomatik kayıt açık mı. */
+interface DraftCtx {
+  key: string;
+  /** Düzenlemenin başladığı kampanya sürümü (adım bileşeni kurulurken okunur). */
+  against: number | null;
+  /** Geri yükleme sorusu yanıtlanana kadar KAPALI (yoksa soru beklerken taslak silinirdi). */
+  enabled: boolean;
+}
+
+/**
+ * Kaydedilmemiş değişiklikleri 1 sn gecikmeyle yerel taslağa yazar; değişiklik kalmayınca (kayıt veya geri alma)
+ * o bölümü taslaktan siler. Sunucuya hiçbir şey göndermez.
+ */
+function useDraftAutosave<P extends DraftPart>(
+  ctx: DraftCtx,
+  part: P,
+  value: NonNullable<WizardDraft[P]>,
+  dirty: boolean,
+) {
+  const json = JSON.stringify(value);
+  const { key, against, enabled } = ctx;
+  useEffect(() => {
+    if (!enabled) return;
+    const store = browserDraftStore();
+    if (!dirty) {
+      clearDraftPart(store, key, part);
+      return;
+    }
+    const id = setTimeout(
+      () =>
+        writeDraftPart(
+          store,
+          key,
+          part,
+          JSON.parse(json) as NonNullable<WizardDraft[P]>,
+          against,
+          Date.now(),
+        ),
+      DRAFT_DEBOUNCE_MS,
+    );
+    return () => clearTimeout(id);
+  }, [json, dirty, enabled, key, part, against]);
+}
+
 /** Adımın kaydedilmemiş değişiklik durumunu sihirbaza bildirir; adım kapanınca "temiz" sayılır. */
 function useReportDirty(dirty: boolean, onDirtyChange: (dirty: boolean) => void) {
   useEffect(() => {
@@ -69,22 +136,33 @@ function BasicsStep({
   campaign,
   onCreated,
   onDirtyChange,
+  draft,
+  draftCtx,
 }: {
   campaign?: CampaignDetail;
   onCreated: (id: number) => void;
   onDirtyChange: (dirty: boolean) => void;
+  /** Geri yüklenen yerel taslak (varsa başlangıç değerleri buradan gelir). */
+  draft?: BasicsValues;
+  draftCtx: DraftCtx;
 }) {
   const mailboxes = useMailboxes();
-  const [name, setName] = useState(campaign?.name ?? "");
-  const [mailboxId, setMailboxId] = useState<number | null>(campaign?.mailboxId ?? null);
-  const [win, setWin] = useState<SendWindow>(campaign?.sendWindow ?? DEFAULT_WINDOW);
-  const [dailyCap, setDailyCap] = useState(campaign?.dailyCap ?? 20);
-  const [minGapS, setMinGap] = useState(campaign?.minGapS ?? 90);
-  const [maxGapS, setMaxGap] = useState(campaign?.maxGapS ?? 240);
+  const [name, setName] = useState(draft?.name ?? campaign?.name ?? "");
+  const [mailboxId, setMailboxId] = useState<number | null>(
+    draft ? draft.mailboxId : (campaign?.mailboxId ?? null),
+  );
+  const [win, setWin] = useState<SendWindow>(
+    draft?.sendWindow ?? campaign?.sendWindow ?? DEFAULT_WINDOW,
+  );
+  const [dailyCap, setDailyCap] = useState(draft?.dailyCap ?? campaign?.dailyCap ?? 20);
+  const [minGapS, setMinGap] = useState(draft?.minGapS ?? campaign?.minGapS ?? 90);
+  const [maxGapS, setMaxGap] = useState(draft?.maxGapS ?? campaign?.maxGapS ?? 240);
   const [issues, setIssues] = useState<MutationErrorInfo | null>(null);
   const [nameTouched, setNameTouched] = useState(false);
   // Kullanıcı posta kutusunu kendisi seçti mi? (Otomatik seçim kullanıcı düzenlemesi sayılmaz.)
-  const [mailboxTouched, setMailboxTouched] = useState(false);
+  const [mailboxTouched, setMailboxTouched] = useState(
+    draft !== undefined && draft.mailboxId !== (campaign?.mailboxId ?? null),
+  );
 
   // Varsayılan: tek uygun (demo) posta kutusu.
   useEffect(() => {
@@ -105,6 +183,8 @@ function BasicsStep({
       successMessage: t("common.saved"),
       onSuccess: (r) => {
         setIssues(null);
+        // Kaydedilen değerlerin yerel taslağı artık gereksiz (yeni kampanyada "new" anahtarı).
+        clearDraftPart(browserDraftStore(), draftCtx.key, "basics");
         onCreated(r.id);
       },
       onError: (info) => setIssues(info),
@@ -118,14 +198,19 @@ function BasicsStep({
   const gapMaxOk = maxGapS >= minGapS && maxGapS <= 3600;
   const valid = nameOk && windowOk && capOk && gapMinOk && gapMaxOk;
   const readOnly = campaign !== undefined && campaign.status !== "draft";
-  const dirty =
-    !readOnly &&
-    basicsDirty(
-      campaign ?? null,
-      { name, mailboxId, sendWindow: win, dailyCap, minGapS, maxGapS },
-      { mailboxTouched },
-    );
+  const values: BasicsValues = { name, mailboxId, sendWindow: win, dailyCap, minGapS, maxGapS };
+  const dirty = !readOnly && basicsDirty(campaign ?? null, values, { mailboxTouched });
   useReportDirty(dirty, onDirtyChange);
+  useDraftAutosave(
+    { ...draftCtx, enabled: draftCtx.enabled && !readOnly },
+    "basics",
+    values,
+    dirty,
+  );
+  const capHint = mailboxCapHint(
+    dailyCap,
+    mailboxes.data?.find((m) => m.id === mailboxId),
+  );
 
   return (
     <form
@@ -246,6 +331,13 @@ function BasicsStep({
             aria-invalid={capOk ? undefined : true}
           />
           {!capOk && <FieldError>{t("wizard.err.cap")}</FieldError>}
+          {capOk && capHint && (
+            <p className="text-[12px] text-warning" data-testid="wizard-cap-hint">
+              {t(capHint.kind === "max" ? "wizard.capAboveMailboxMax" : "wizard.capAboveMailbox", {
+                n: capHint.n,
+              })}
+            </p>
+          )}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="cw-min">{t("wizard.gap.min")}</Label>
@@ -306,10 +398,15 @@ function StepsStep({
   campaign,
   onSaved,
   onDirtyChange,
+  draft,
+  draftCtx,
 }: {
   campaign: CampaignDetail;
   onSaved: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  /** Geri yüklenen yerel taslaktaki adımlar. */
+  draft?: StepInput[];
+  draftCtx: DraftCtx;
 }) {
   const templates = useTemplates();
   const initial = useMemo(
@@ -322,7 +419,7 @@ function StepsStep({
   );
   const languages = useMemo(() => [...new Set(initial.map((x) => x.language))].sort(), [initial]);
 
-  const existing = campaign.steps;
+  const existing = draft ?? campaign.steps;
   const [selected, setSelected] = useState<Record<string, number>>(() =>
     Object.fromEntries(
       existing.filter((s) => s.stepIndex === 0).map((s) => [s.language, s.templateId]),
@@ -358,6 +455,7 @@ function StepsStep({
     delays.slice(0, extra).every((d) => d >= 5 && d <= 90);
   const dirty = !readOnly && stepsDirty(campaign.steps, steps);
   useReportDirty(dirty, onDirtyChange);
+  useDraftAutosave({ ...draftCtx, enabled: draftCtx.enabled && !readOnly }, "steps", steps, dirty);
 
   const save = useSafeMutation(() => campaignApi.setSteps(campaign.id, campaign.updatedAt, steps), {
     successMessage: t("common.saved"),
@@ -415,13 +513,18 @@ function StepsStep({
       <fieldset className="space-y-3">
         <legend className="text-[13px] font-medium">{t("wizard.steps.followups")}</legend>
         {followup.length === 0 ? (
-          <Notice>{t("wizard.steps.noFollowup")}</Notice>
+          <Notice>{t("wizard.steps.noFollowupV2")}</Notice>
         ) : (
           <>
             <Select
               aria-label={t("wizard.steps.followupCount")}
               value={extra}
-              onChange={(e) => setExtra(Number(e.target.value))}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setExtra(n);
+                // Boş adımlara o dilin takip şablonu önerilir (seçili olan değiştirilmez).
+                setFollowups((f) => prefillFollowups(f, followup, langs, n));
+              }}
               disabled={readOnly}
               className="w-48"
             >
@@ -542,7 +645,7 @@ function WizardSummary({ campaign }: { campaign: CampaignDetail }) {
   const emailCount = campaign.steps.length
     ? Math.max(...campaign.steps.map((x) => x.stepIndex)) + 1
     : 0;
-  const missing = (v: string) => <span className="text-[#8a6700]">{v}</span>;
+  const missing = (v: string) => <span className="text-warning">{v}</span>;
   const rows: [string, React.ReactNode][] = [
     [
       t("wizard.summary.recipients"),
@@ -636,9 +739,63 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
     successMessage: t("preflight.backToDraft.done"),
   });
 
-  // Kaydedilmemiş değişiklik koruması: adım değiştirme, bağlantıyla ayrılma ve pencere/sekme kapatma veya yenileme.
+  // Kaydedilmemiş değişiklik koruması: adım değiştirme, bağlantıyla ayrılma, geri tuşu ve pencere/sekme kapatma.
   const [dirty, setDirty] = useState(false);
-  const [leaveTo, setLeaveTo] = useState<{ step: Step } | { href: string } | null>(null);
+  const [leaveTo, setLeaveTo] = useState<{ step: Step } | { href: string } | { back: true } | null>(
+    null,
+  );
+  /** Nöbetçi kayıt şu an tarafımızdan geri alınıyor (o popstate kullanıcının "geri"si değildir). */
+  const unwindingGuard = useRef(false);
+  /** Sihirbazdan bilerek ayrılınıyor: nöbetçi kaldırılmaz, gezinme ona göre yapılır. */
+  const leaving = useRef(false);
+  /**
+   * Geçmişte nöbetçi kayıt varsa önce onu kaldırır (`history.back()`), geri dönüş tamamlanınca `then` çalışır. Böylece
+   * kayıttan sonraki `router.replace` nöbetçinin değil asıl kaydın yerine geçer ve ölü "geri" kaydı kalmaz.
+   */
+  const dropGuardThen = useCallback((then: () => void) => {
+    if (unwindingGuard.current || !isGuardState(window.history.state)) {
+      then();
+      return;
+    }
+    unwindingGuard.current = true;
+    const done = () =>
+      // Aynı popstate'i dinleyen nöbetçi işleyicisi bayrağı görebilsin diye bir sonraki tura bırakılır.
+      window.setTimeout(() => {
+        unwindingGuard.current = false;
+        then();
+      }, 0);
+    window.addEventListener("popstate", done, { once: true });
+    window.history.back();
+  }, []);
+
+  // Yerel taslak: açılışta bir kez okunur; geri yükleme sorusu yanıtlanana kadar otomatik kayıt kapalıdır.
+  const dKey = draftKey(id);
+  const [draft, setDraft] = useState<{
+    checked: boolean;
+    offer: WizardDraft | null;
+    restored: WizardDraft | null;
+    nonce: number;
+  }>({ checked: false, offer: null, restored: null, nonce: 0 });
+  const loadedUpdatedAt = enabled ? campaign?.updatedAt : null;
+  const loadedStatus = campaign?.status;
+  useEffect(() => {
+    if (draft.checked || loadedUpdatedAt === undefined) return;
+    const offer =
+      loadedStatus === undefined || loadedStatus === "draft"
+        ? readDraft(browserDraftStore(), dKey, loadedUpdatedAt, Date.now())
+        : null;
+    setDraft((d) => ({ ...d, checked: true, offer }));
+  }, [draft.checked, loadedUpdatedAt, loadedStatus, dKey]);
+  // Geri yüklenen taslak yalnızca kampanya o sürümdeyken uygulanır; kayıttan sonra (sürüm değişince) yok sayılır.
+  const restored =
+    draft.restored && draft.restored.against === (campaign?.updatedAt ?? null)
+      ? draft.restored
+      : null;
+  const draftCtx = (against: number | null): DraftCtx => ({
+    key: dKey,
+    against,
+    enabled: draft.checked && draft.offer === null,
+  });
   // Düzenleme sürerken kampanya yenilenirse (ör. lead eklendi → updatedAt değişti) adım yeniden kurulup yerel
   // değişiklikleri silmesin: anahtar, değişiklik varken sabit tutulur ve kullanıcıya bilgi verilir.
   const liveKey = campaign?.updatedAt ?? "new";
@@ -646,7 +803,7 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
   useEffect(() => {
     if (!dirty) setHeldKey(liveKey);
   }, [dirty, liveKey]);
-  const stepKey = dirty ? heldKey : liveKey;
+  const stepKey = `${dirty ? heldKey : liveKey}:${draft.nonce}`;
   const serverChanged = dirty && heldKey !== liveKey;
 
   useEffect(() => {
@@ -671,13 +828,36 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
       e.stopPropagation();
       setLeaveTo({ href });
     };
+    // Geri hareketi: aynı adrese nöbetçi kayıt eklenir; geri gelinince yeniden eklenip ayrılma sorusu gösterilir.
+    if (!isGuardState(window.history.state)) {
+      window.history.pushState(guardState(window.history.state), "", window.location.href);
+    }
+    const onPop = () => {
+      // Nöbetçinin kendimiz tarafından kaldırılması (`dropGuardThen`) bir kullanıcı "geri"si değildir.
+      if (unwindingGuard.current) return;
+      window.history.pushState(guardState(window.history.state), "", window.location.href);
+      setLeaveTo({ back: true });
+    };
     window.addEventListener("beforeunload", onUnload);
+    window.addEventListener("popstate", onPop);
     document.addEventListener("click", onClick, true);
     return () => {
       window.removeEventListener("beforeunload", onUnload);
+      window.removeEventListener("popstate", onPop);
       document.removeEventListener("click", onClick, true);
     };
   }, [dirty]);
+
+  // Değişiklikler kaydedilir/bırakılır ya da elle geri alınırsa nöbetçi kayıt da geçmişten kaldırılır; yoksa sonraki
+  // "geri" aynı adrese gider ve hiçbir şey olmamış gibi görünür. Sayfadan ayrılırken (`leaving`) yapılmaz.
+  // Yalnızca "değişiklik var → yok" geçişinde (açılışta değil).
+  const wasDirty = useRef(false);
+  useEffect(() => {
+    const was = wasDirty.current;
+    wasDirty.current = dirty;
+    if (dirty || !was || leaving.current) return;
+    dropGuardThen(() => {});
+  }, [dirty, dropGuardThen]);
 
   if (enabled && q.isLoading) {
     return (
@@ -700,7 +880,7 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
   /** Adıma koşulsuz geçer (kayıttan sonra veya değişiklikler bilerek bırakıldığında). */
   const proceed = (s: Step) => {
     setStep(s);
-    if (campaign) router.replace(`/campaigns/${campaign.id}/edit?step=${s}`);
+    if (campaign) dropGuardThen(() => router.replace(`/campaigns/${campaign.id}/edit?step=${s}`));
   };
   /** Kullanıcının adım değiştirmesi: kaydedilmemiş değişiklik varsa önce sorulur. */
   const go = (s: Step) => {
@@ -776,6 +956,42 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
         </nav>
 
         {closed && <Notice tone="warning">{t("wizard.closed")}</Notice>}
+        {draft.offer && (
+          <Notice>
+            <div
+              className="flex flex-wrap items-center justify-between gap-2"
+              data-testid="wizard-draft-offer"
+            >
+              <p>{t("wizard.draft.offer", { at: fmtDateTime(draft.offer.savedAt) })}</p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    setDraft((d) => ({
+                      checked: true,
+                      offer: null,
+                      restored: d.offer,
+                      nonce: d.nonce + 1,
+                    }));
+                    toast.success(t("wizard.draft.restored"));
+                  }}
+                >
+                  <History aria-hidden /> {t("wizard.draft.restore")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    clearDraft(browserDraftStore(), dKey);
+                    setDraft((d) => ({ ...d, offer: null }));
+                  }}
+                >
+                  {t("wizard.draft.discard")}
+                </Button>
+              </div>
+            </div>
+          </Notice>
+        )}
         {campaign?.status === "ready" && step !== "review" && (
           <Notice tone="warning">
             <p>{t("wizard.readyLocked")}</p>
@@ -803,10 +1019,13 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
                 <BasicsStep
                   key={stepKey}
                   campaign={campaign}
+                  draft={restored?.basics}
+                  draftCtx={draftCtx(campaign?.updatedAt ?? null)}
                   onDirtyChange={setDirty}
                   onCreated={(newId) => {
-                    if (!campaign) router.replace(`/campaigns/${newId}/edit?step=steps`);
-                    else proceed("steps");
+                    if (!campaign) {
+                      dropGuardThen(() => router.replace(`/campaigns/${newId}/edit?step=steps`));
+                    } else proceed("steps");
                   }}
                 />
               )}
@@ -814,6 +1033,8 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
                 <StepsStep
                   key={stepKey}
                   campaign={campaign}
+                  draft={restored?.steps}
+                  draftCtx={draftCtx(campaign.updatedAt)}
                   onDirtyChange={setDirty}
                   onSaved={() => proceed("leads")}
                 />
@@ -859,9 +1080,20 @@ export function CampaignWizard({ id, initialStep }: { id?: number; initialStep?:
           const target = leaveTo;
           setLeaveTo(null);
           setDirty(false);
+          // Bilerek bırakılan değişikliklerin yerel taslağı da silinir.
+          clearDraft(browserDraftStore(), dKey);
           if (!target) return;
-          if ("step" in target) proceed(target.step);
-          else router.push(target.href);
+          if ("step" in target) {
+            proceed(target.step);
+            return;
+          }
+          leaving.current = true;
+          if ("href" in target) router.push(target.href);
+          else if (guardBackAction(window.history.length) === "history") {
+            window.history.go(GUARD_BACK_STEPS);
+          } else {
+            router.replace(campaign ? `/campaigns/${campaign.id}` : "/campaigns");
+          }
         }}
       />
     </div>

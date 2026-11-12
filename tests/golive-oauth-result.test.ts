@@ -24,7 +24,10 @@ import {
   RESULT_TTL_MS,
 } from "@/lib/mail/gmail/oauth-result";
 import { createGmailMailbox, setGmailClient } from "@/lib/mail/mailbox-service";
+import { setLocale } from "@/lib/i18n";
+import { en } from "@/lib/i18n/en";
 import { tr } from "@/lib/i18n/tr";
+import { setSetting } from "@/lib/settings";
 import { openMemoryDb, seedBase } from "./helpers/campaign-fixture";
 import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 
@@ -117,6 +120,27 @@ async function result(payload: unknown) {
   );
   return { status: r.status, body: (await r.json()) as Record<string, unknown> };
 }
+
+describe("geri çağrı: sayfa dili (Faz 4)", () => {
+  afterEach(() => setLocale("tr"));
+
+  it("sayfa ui.language ayarının dilindedir; sunucudaki süreç içi etkin dile bakmaz", async () => {
+    // Süreç içi dil başka bir sayfanın çizimiyle "en" kalmış olsa bile ayar Türkçe → Türkçe sayfa.
+    setLocale("en");
+    const trPage = await (await callback("state=bilinmeyen-state&code=x")).text();
+    expect(trPage).toContain('<html lang="tr">');
+    expect(trPage).toContain(tr["mbx.oauth.page.close"].replaceAll("'", "&#39;"));
+    // Ayar İngilizce → süreç içi dil Türkçe olsa da İngilizce sayfa.
+    await setSetting(db, "ui.language", "en");
+    setLocale("tr");
+    const enPage = await (await callback("state=bilinmeyen-state-2&code=x")).text();
+    expect(enPage).toContain('<html lang="en">');
+    expect(enPage).toContain(en["mbx.oauth.page.close"]!.replaceAll("'", "&#39;"));
+    expect(oauthResultText({ ok: true, reason: null, readDenied: false }, "en").title).toBe(
+      en["mbx.oauth.page.ok"],
+    );
+  });
+});
 
 describe("geri çağrı: bağımsız sonuç sayfası", () => {
   it("başarı: 200, Türkçe 'bağlantı tamamlandı / sekmeyi kapatın'; kod, state ve uygulama yönlendirmesi YOK", async () => {

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnySQLiteColumn,
   check,
   index,
   integer,
@@ -100,9 +101,45 @@ export const scans = sqliteTable(
     createdAt: integer("created_at").notNull(),
     startedAt: integer("started_at"),
     finishedAt: integer("finished_at"),
+    /** Faz 4 (0004): taramayı kim başlattı: kullanıcı (`manual`) veya zamanlanmış tarama (`schedule`). */
+    origin: text("origin").$type<ScanOrigin>().notNull().default("manual"),
+    /** Faz 4: zamanlanmış taramadan doğduysa kaynağı. Zamanlama silinince NULL olur (tarama geçmişi kalır). */
+    scheduleId: integer("schedule_id").references((): AnySQLiteColumn => scanSchedules.id, {
+      onDelete: "set null",
+    }),
+    /** Faz 4: zamanlamanın hangi çalışma anı (eski `next_run_at`) için açıldığı; bir an en çok bir tarama doğurur. */
+    scheduleSlot: integer("schedule_slot"),
+    /**
+     * Faz 4: duraklatma nedeninin makine kodu (UPPER_SNAKE, ör. `BUDGET_BLOCKED`); arayüz bunu yerelleştirir. Eski satırlarda
+     * NULL'dır ve metin `pause_reason`'a düşülür.
+     */
+    pauseCode: text("pause_code"),
   },
-  (t) => [index("scans_key_idx").on(t.scanKey, t.status), index("scans_status_idx").on(t.status)],
+  (t) => [
+    index("scans_key_idx").on(t.scanKey, t.status),
+    index("scans_status_idx").on(t.status),
+    // Faz 4: bir zamanlama anı en çok bir tarama doğurur (eşzamanlı iki tick'e karşı veritabanı güvencesi).
+    uniqueIndex("scans_schedule_slot_uq")
+      .on(t.scheduleId, t.scheduleSlot)
+      .where(sql`${t.scheduleId} IS NOT NULL`),
+    check("scans_origin_ck", sql`origin IN ('manual', 'schedule')`),
+    /**
+     * `manual` ⇔ zamanlama alanları boş; `schedule` ⇒ `schedule_slot` dolu (ve `schedule_id` doluysa anı da doludur).
+     * Zamanlama silinince (ON DELETE SET NULL) `origin='schedule', schedule_id=NULL, schedule_slot=dolu` kalır: BİLİNÇLİ
+     * geçmiş durumu; satır kısmi tekil indeksin dışına çıkar, çünkü o zamanlama artık çalışmaz.
+     */
+    check(
+      "scans_schedule_slot_ck",
+      sql`(origin = 'manual' AND schedule_id IS NULL AND schedule_slot IS NULL) OR (origin = 'schedule' AND schedule_slot IS NOT NULL)`,
+    ),
+    check(
+      "scans_pause_code_ck",
+      sql`pause_code IS NULL OR (length(pause_code) BETWEEN 1 AND 40 AND pause_code NOT GLOB '*[^A-Z0-9_]*')`,
+    ),
+  ],
 );
+
+export type ScanOrigin = "manual" | "schedule";
 
 export const scanUnits = sqliteTable(
   "scan_units",
@@ -161,8 +198,29 @@ export const places = sqliteTable(
     openedDetectedAt: integer("opened_detected_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    /** Faz 4 (0004): place_id'nin Google'da hâlâ geçerli olduğunun son doğrulandığı an (12 aylık yenileme önerisi). */
+    placeIdCheckedAt: integer("place_id_checked_at"),
+    /** Faz 4: Google bu place_id için NOT_FOUND döndürdü (yer artık yok veya kimliği değişti). */
+    goneAt: integer("gone_at"),
+    /** Faz 4: işletme durumunun (businessStatus) gerçekten gözlendiği son an (açılış izleme bunu kullanır). */
+    statusCheckedAt: integer("status_checked_at"),
   },
-  (t) => [index("places_latlng_idx").on(t.lat, t.lng), index("places_source_idx").on(t.source)],
+  (t) => [
+    index("places_latlng_idx").on(t.lat, t.lng),
+    index("places_source_idx").on(t.source),
+    // Faz 4: gösterge paneli / "açıldı" süzgeci / açılış izleme / kimlik yenileme.
+    index("places_opened_detected_idx")
+      .on(t.openedDetectedAt)
+      .where(sql`${t.openedDetectedAt} IS NOT NULL`),
+    index("places_new_detected_idx")
+      .on(t.newDetectedAt)
+      .where(sql`${t.newDetectedAt} IS NOT NULL`),
+    index("places_first_seen_idx").on(t.firstSeenAt),
+    index("places_future_watch_idx")
+      .on(t.statusCheckedAt)
+      .where(sql`${t.wasFuture} = 1`),
+    index("places_id_checked_idx").on(t.placeIdCheckedAt),
+  ],
 );
 
 /** Tarama karşılaştırması için yalnızca yer kimlikleri ve türetilmiş bir bayrak saklanır (Google içeriği değil). */
@@ -224,9 +282,20 @@ export const leads = sqliteTable(
     lastContactedAt: integer("last_contacted_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    /**
+     * Faz 4 (0004): toplu "sil" işlemi lead'i ARŞİVLER (kalıcı silme yalnızca uyum/silme talebi akışındadır). Gerekçe:
+     * geri alınabilir ("Geri al"), gönderim geçmişi (campaign_leads/messages) lead'e RESTRICT ile bağlı kalır ve tarama aynı
+     * place_id'yi yeniden eklediğinde arşivlenmiş satır "dirilmez" (upsert bu sütuna dokunmaz). Bu bir yumuşak silmedir:
+     * lead LİSTESİ okumaları `src/lib/leads/query.ts` (`buildWhere` / `LEAD_NOT_ARCHIVED`) üzerinden geçmelidir; listeyi
+     * kendi sorgusuyla okuyan yeni kod `LEAD_NOT_ARCHIVED` koşulunu eklemek zorundadır. İndeks kısmidir (çoğu satır NULL).
+     */
+    archivedAt: integer("archived_at"),
   },
   (t) => [
     uniqueIndex("leads_place_uq").on(t.placeId),
+    index("leads_archived_idx")
+      .on(t.archivedAt)
+      .where(sql`${t.archivedAt} IS NOT NULL`),
     index("leads_last_contacted_idx").on(t.lastContactedAt),
     index("leads_novelty_idx").on(t.noveltyScore),
     index("leads_status_idx").on(t.status),
@@ -324,10 +393,20 @@ export const leadEnrichment = sqliteTable(
     externalUsed: integer("external_used", { mode: "boolean" }).notNull().default(false),
     completedAt: integer("completed_at"),
     updatedAt: integer("updated_at").notNull(),
+    /**
+     * Faz 4 (0004): KENDİ taramamızın ulaştığı web sitesinin kayıtlı alan adı (küçük harf, ASCII/punycode; ör. `firma.de`).
+     * Yalnızca site taraması başarılı olduğunda yazılır (Google'ın websiteUri'si saklanmaz). RDAP yaş sinyali buna bağlanır.
+     */
+    siteDomain: text("site_domain"),
   },
   (t) => [
     index("lead_enrichment_status_idx").on(t.status),
     index("lead_enrichment_email_idx").on(t.emailStatus),
+    index("lead_enrichment_site_domain_idx").on(t.siteDomain),
+    check(
+      "lead_enrichment_site_domain_ck",
+      sql`site_domain IS NULL OR (length(site_domain) BETWEEN 3 AND 253 AND site_domain = lower(site_domain))`,
+    ),
   ],
 );
 
@@ -505,12 +584,20 @@ export const templates = sqliteTable(
     archivedAt: integer("archived_at"),
     createdAt: integer("created_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
+    /**
+     * Faz 4 (0004): takip şablonunda (`kind = 'followup'`) ilk e-postanın konusu "Re:" eklenmeden aynen kullanılır
+     * (konuşma sürekliliği). `initial` şablonlarda anlamsızdır ve yok sayılır.
+     */
+    followupReuseSubject: integer("followup_reuse_subject", { mode: "boolean" })
+      .notNull()
+      .default(true),
   },
   (t) => [
     index("templates_lookup_idx")
       .on(t.language, t.categoryKey, t.kind)
       .where(sql`${t.archivedAt} IS NULL`),
     check("templates_kind_ck", sql`kind IN ('initial', 'followup')`),
+    check("templates_followup_reuse_subject_ck", sql`followup_reuse_subject IN (0, 1)`),
   ],
 );
 
@@ -599,8 +686,11 @@ export type CampaignLeadStatus =
   | "failed";
 
 /**
- * Dizinin neden durduğu: `status = 'unsubscribed'` iken çıkış talebi ile şikâyet (ARF) ayrımı (Aşama 15.10).
- * Yalnızca `status = 'unsubscribed'` iken anlamlıdır; başka durumlarda yok sayılır (eski sürümler temizlemez).
+ * Dizinin neden durduğu: çıkış talebi ile şikâyet (ARF) ayrımı (Aşama 15.10). `status = 'unsubscribed'` iken ve TB-10'dan
+ * beri `status = 'completed'` iken de anlamlıdır ("Tamamlandı, sonra listeden çıktı / şikâyet etti"; yalnızca olayın
+ * ilgili olduğu dizi işaretlenir). Diğer durumlarda yok sayılır (eski sürümler temizlemez).
+ * 0003 migrasyonundaki ileri koruma ("unsubscribed dışındaki satırda stop_reason yok") YALNIZCA migrasyon anında geçerlidir;
+ * şema CHECK'i durumla birlikte denetlemez.
  */
 export type SequenceStopReason = "unsubscribe" | "complaint";
 
@@ -636,7 +726,10 @@ export const campaignLeads = sqliteTable(
     redactedAt: integer("redacted_at"),
     addedAt: integer("added_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
-    /** Aşama 15.10: durma nedeni (çıkış / şikâyet). Eski satırlarda migrasyonla doldurulur; yeni yazımlar 15.10-2'de. */
+    /**
+     * Aşama 15.10: durma nedeni (çıkış / şikâyet); 'unsubscribed' ve (TB-10) 'completed' satırlarda anlamlı, bkz.
+     * `SequenceStopReason`. Eski satırlarda 0003 migrasyonuyla doldurulur.
+     */
     stopReason: text("stop_reason").$type<SequenceStopReason>(),
   },
   (t) => [
@@ -745,6 +838,13 @@ export const messages = sqliteTable(
     index("messages_lead_idx").on(t.leadId),
     index("messages_thread_idx").on(t.threadId),
     index("messages_in_reply_to_idx").on(t.inReplyTo),
+    // Faz 4 (0004): gösterge paneli sayaçları ve günlük üst sınır sayımı (aralık sorgusu, LIKE değil).
+    index("messages_out_day_idx")
+      .on(t.sendDay, t.mailboxId)
+      .where(sql`${t.direction} = 'out' AND ${t.purpose} = 'campaign'`),
+    index("messages_in_received_idx")
+      .on(t.receivedAt)
+      .where(sql`${t.direction} = 'in'`),
     check("messages_direction_ck", sql`direction IN ('out', 'in')`),
     check("messages_purpose_ck", sql`purpose IN ('campaign', 'test', 'inbound')`),
     check(
@@ -819,5 +919,215 @@ export const suppressions = sqliteTable(
       sql`scope = 'domain' OR (email_hash IS NOT NULL AND hash_alg IS NOT NULL)`,
     ),
     check("suppressions_lift_ck", sql`lifted_at IS NULL OR lifted_reason IS NOT NULL`),
+  ],
+);
+
+/* ---------------------------------------------------------------------------
+ * Faz 4 (migrasyon 0004, yalnızca EKLEME): zamanlanmış taramalar, bildirimler, alan adı kayıt tarihi (RDAP) önbelleği
+ * ve kayıtlı süzgeçler. Kurallar:
+ *  - Bildirim parametrelerinde Google içeriği (işletme adı, adres, telefon) TUTULMAZ; yalnızca sayılar, kimlikler,
+ *    kullanıcının verdiği bölge adı ve kategori anahtarları. Metin okunurken dile göre üretilir.
+ *  - RDAP tablosu yalnızca alan adı, kayıt tarihi ve RDAP sunucusunu saklar (kayıt sahibi/vCard asla).
+ * ------------------------------------------------------------------------- */
+
+export type ScheduleIntervalDays = 7 | 14 | 30;
+export type ScheduleOutcome = "started" | "skipped" | "completed" | "failed";
+
+/** Bir bölge+kategori taramasının düzenli tekrarı (7/14/30 gün). `scan_key` başına tek zamanlama. */
+export const scanSchedules = sqliteTable(
+  "scan_schedules",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    regionId: integer("region_id")
+      .notNull()
+      .references(() => regions.id, { onDelete: "cascade" }),
+    scanKey: text("scan_key").notNull(),
+    categorySetIds: text("category_set_ids", { mode: "json" }).$type<number[]>().notNull(),
+    customKeywords: text("custom_keywords", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    strategy: text("strategy").$type<SearchStrategy>().notNull(),
+    fieldProfile: text("field_profile").$type<FieldProfile>().notNull(),
+    intervalDays: integer("interval_days").$type<ScheduleIntervalDays>().notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+    /** Kullanıcının tarama başına üst sınırı (USD); boş = bütçe kalanı. */
+    maxCostUsd: real("max_cost_usd"),
+    /**
+     * M5: etkileşimli oluşturma/düzenlemede kullanıcının ÖNCEDEN onayladığı tarama başına azami tahmini maliyet (USD).
+     * Arka plan çalışması riski kendisi onaylamaz; tahmin bu tutarı aşarsa NEEDS_ACK ile atlanır.
+     */
+    ackMaxUsd: real("ack_max_usd"),
+    ackAt: integer("ack_at"),
+    nextRunAt: integer("next_run_at").notNull(),
+    lastRunAt: integer("last_run_at"),
+    lastScanId: integer("last_scan_id").references((): AnySQLiteColumn => scans.id, {
+      onDelete: "set null",
+    }),
+    lastOutcome: text("last_outcome").$type<ScheduleOutcome>(),
+    /** Son atlamanın kodu (ör. BUDGET_BLOCKED, NEEDS_ACK, PLACES_KEY_MISSING). */
+    lastSkipCode: text("last_skip_code"),
+    /** Son çalışmada birleştirilen (geri oynatılmayan) kaçırılmış çalışma sayısı. */
+    missedRuns: integer("missed_runs").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("scan_schedules_key_uq").on(t.scanKey),
+    index("scan_schedules_due_idx").on(t.enabled, t.nextRunAt),
+    index("scan_schedules_region_idx").on(t.regionId),
+    index("scan_schedules_last_scan_idx").on(t.lastScanId),
+    check("scan_schedules_interval_ck", sql`interval_days IN (7, 14, 30)`),
+    check("scan_schedules_enabled_ck", sql`enabled IN (0, 1)`),
+    check("scan_schedules_strategy_ck", sql`strategy IN ('text', 'nearby')`),
+    check("scan_schedules_profile_ck", sql`field_profile IN ('discovery', 'enrich')`),
+    check(
+      "scan_schedules_json_ck",
+      sql`json_valid(category_set_ids) AND json_type(category_set_ids) = 'array' AND json_valid(custom_keywords) AND json_type(custom_keywords) = 'array'`,
+    ),
+    check("scan_schedules_cost_ck", sql`max_cost_usd IS NULL OR max_cost_usd >= 0`),
+    check(
+      "scan_schedules_ack_ck",
+      sql`(ack_max_usd IS NULL AND ack_at IS NULL) OR (ack_max_usd >= 0 AND ack_at IS NOT NULL)`,
+    ),
+    check(
+      "scan_schedules_outcome_ck",
+      sql`last_outcome IS NULL OR last_outcome IN ('started', 'skipped', 'completed', 'failed')`,
+    ),
+    check(
+      "scan_schedules_skip_code_ck",
+      sql`last_skip_code IS NULL OR (length(last_skip_code) BETWEEN 1 AND 40 AND last_skip_code NOT GLOB '*[^A-Z0-9_]*')`,
+    ),
+    check("scan_schedules_missed_ck", sql`missed_runs >= 0`),
+  ],
+);
+
+export const NOTIFICATION_KINDS = [
+  "scan.done",
+  "scan.failed",
+  "scan.paused",
+  "place.opened",
+  "schedule.skipped",
+  "background.skipped",
+] as const;
+export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
+export type NotificationParams = Record<string, string | number | boolean | null>;
+
+/**
+ * Uygulama içi bildirimler (zil) ve işletim sistemi bildirimi kuyruğu. `dedupe_key` aynı olayın iki kez
+ * bildirilmesini veritabanı düzeyinde engeller; `os_claimed_at` bir bildirimin OS'ta en çok bir kez gösterilmesini sağlar.
+ */
+export const notifications = sqliteTable(
+  "notifications",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").$type<NotificationKind>().notNull(),
+    dedupeKey: text("dedupe_key").notNull(),
+    params: text("params", { mode: "json" })
+      .$type<NotificationParams>()
+      .notNull()
+      .default(sql`'{}'`),
+    /** Uygulama içi yol (`/` ile başlar, `//` ile başlamaz); asla dış adres değildir. */
+    url: text("url").notNull(),
+    entity: text("entity"),
+    entityId: text("entity_id"),
+    createdAt: integer("created_at").notNull(),
+    readAt: integer("read_at"),
+    osClaimedAt: integer("os_claimed_at"),
+  },
+  (t) => [
+    uniqueIndex("notifications_dedupe_uq").on(t.dedupeKey),
+    index("notifications_read_idx").on(t.readAt, t.createdAt),
+    index("notifications_os_pending_idx")
+      .on(t.id)
+      .where(sql`${t.osClaimedAt} IS NULL`),
+    /**
+     * Yalnızca BİÇİM (küçük harf `alan.olay`, en çok 40): izinli türlerin listesi `NOTIFICATION_KINDS` + `notify()` zod
+     * şemasıdır. SQLite'ta CHECK değiştirmek tablo yeniden kurmayı gerektirdiğinden liste veritabanına gömülmez; yeni tür
+     * yalnızca `NOTIFICATION_KINDS`, render.ts ve i18n `notif.*` anahtarlarıyla eklenir (migrasyon gerekmez).
+     */
+    check(
+      "notifications_kind_ck",
+      sql`length(kind) BETWEEN 3 AND 40 AND kind GLOB '[a-z]*.[a-z]*' AND kind NOT GLOB '*[^a-z._]*'`,
+    ),
+    check("notifications_dedupe_ck", sql`length(dedupe_key) BETWEEN 1 AND 200`),
+    check(
+      "notifications_params_ck",
+      sql`json_valid(params) AND json_type(params) = 'object' AND length(params) <= 2000`,
+    ),
+    check(
+      "notifications_url_ck",
+      sql`length(url) BETWEEN 1 AND 500 AND substr(url, 1, 1) = '/' AND substr(url, 1, 2) <> '//'`,
+    ),
+  ],
+);
+
+export type DomainRegistrationStatus =
+  "pending" | "ok" | "no_date" | "not_found" | "unsupported_tld" | "rate_limited" | "error";
+
+/** RDAP önbelleği: kayıtlı alan adı başına kayıt tarihi. Yalnızca tarih ve sunucu; kişisel veri yok. */
+export const domainRegistrations = sqliteTable(
+  "domain_registrations",
+  {
+    /** Küçük harf ASCII/punycode kayıtlı alan adı (ör. `firma.co.uk`). */
+    domain: text("domain").primaryKey(),
+    status: text("status").$type<DomainRegistrationStatus>().notNull(),
+    registeredAt: integer("registered_at"),
+    rdapHost: text("rdap_host"),
+    attempts: integer("attempts").notNull().default(0),
+    /** Kısa hata kodu (ör. `timeout`, `bootstrap_unavailable`); ham yanıt saklanmaz. */
+    lastError: text("last_error"),
+    checkedAt: integer("checked_at"),
+    nextCheckAt: integer("next_check_at").notNull(),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    index("domain_registrations_due_idx").on(t.status, t.nextCheckAt),
+    check(
+      "domain_registrations_status_ck",
+      sql`status IN ('pending', 'ok', 'no_date', 'not_found', 'unsupported_tld', 'rate_limited', 'error')`,
+    ),
+    check(
+      "domain_registrations_domain_ck",
+      sql`length(domain) BETWEEN 3 AND 253 AND domain = lower(domain)`,
+    ),
+    check("domain_registrations_ok_ck", sql`status <> 'ok' OR registered_at IS NOT NULL`),
+    check("domain_registrations_attempts_ck", sql`attempts >= 0`),
+    check(
+      "domain_registrations_error_ck",
+      sql`last_error IS NULL OR length(last_error) BETWEEN 1 AND 64`,
+    ),
+  ],
+);
+
+export type SavedFilterSort = "novelty" | "name" | "recent";
+
+/** Kaydedilmiş keşif süzgeçleri. Ad tekliği Türkçe büyük/küçük harf duyarsız `name_key` ile veritabanında sağlanır. */
+export const savedFilters = sqliteTable(
+  "saved_filters",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    /** `name.trim().normalize('NFC').toLocaleLowerCase('tr')` (servis hesaplar). */
+    nameKey: text("name_key").notNull(),
+    /** Sürümlü süzgeç nesnesi `{v:1, ...}` (zod ile doğrulanır). */
+    payload: text("payload", { mode: "json" }).$type<unknown>().notNull(),
+    sort: text("sort").$type<SavedFilterSort>().notNull().default("novelty"),
+    includeArea: integer("include_area", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    lastUsedAt: integer("last_used_at"),
+  },
+  (t) => [
+    uniqueIndex("saved_filters_name_uq").on(t.nameKey),
+    check("saved_filters_name_ck", sql`length(trim(name)) BETWEEN 1 AND 60`),
+    check("saved_filters_name_key_ck", sql`length(name_key) BETWEEN 1 AND 120`),
+    check(
+      "saved_filters_payload_ck",
+      sql`json_valid(payload) AND json_type(payload) = 'object' AND length(payload) <= 16000`,
+    ),
+    check("saved_filters_sort_ck", sql`sort IN ('novelty', 'name', 'recent')`),
+    check("saved_filters_area_ck", sql`include_area IN (0, 1)`),
   ],
 );

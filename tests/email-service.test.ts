@@ -210,6 +210,13 @@ describe("e-posta bulma (demo web ile, ağ yok)", () => {
     expect(
       states.every((s) => ["done", "blocked", "failed", "no_website"].includes(s.status)),
     ).toBe(true);
+    // Faz 4 (Paket B): başarılı site taraması kayıtlı alan adını yazar (RDAP); diğerleri boş kalır.
+    const done = states.filter((s) => s.status === "done");
+    expect(done.length).toBeGreaterThan(0);
+    expect(done.every((s) => /^[a-z0-9-]+\.example$/.test(s.siteDomain ?? ""))).toBe(true);
+    expect(states.filter((s) => s.status !== "done").every((s) => s.siteDomain === null)).toBe(
+      true,
+    );
     // Demo dağılımı: yaklaşık yarısında kullanılabilir adres (kabul ölçütü %40 gerçek dünya için ayrıca denenecek)
     expect(out.found / 60).toBeGreaterThan(0.4);
     // Birincil: lead başına en fazla bir

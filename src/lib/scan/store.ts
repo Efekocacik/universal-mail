@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { leads, placeSnapshots, places, scanUnits, scans } from "@/lib/db/schema";
 import type {
   BBox,
@@ -12,6 +12,7 @@ import type {
 import { deriveLocation } from "@/lib/geo/cities";
 import { upsertCache } from "@/lib/places/cache";
 import { categoryKeyFor } from "./queries";
+import { statusFlags } from "./status-flags";
 import { chunk } from "@/lib/util";
 
 export type ScanRow = typeof scans.$inferSelect;
@@ -28,6 +29,8 @@ export async function setScanStatus(
   status: ScanStatus,
   extra: {
     pauseReason?: string | null;
+    /** Faz 4: duraklatma nedeninin makine kodu (ör. `APP_STOPPED`); verilmezse temizlenir. */
+    pauseCode?: string | null;
     error?: string | null;
     finishedAt?: number | null;
     startedAt?: number;
@@ -38,6 +41,7 @@ export async function setScanStatus(
     .set({
       status,
       pauseReason: extra.pauseReason ?? null,
+      pauseCode: extra.pauseCode ?? null,
       error: extra.error ?? null,
       ...(extra.finishedAt !== undefined ? { finishedAt: extra.finishedAt } : {}),
       ...(extra.startedAt !== undefined ? { startedAt: extra.startedAt } : {}),
@@ -69,7 +73,7 @@ export function unitBBox(u: Pick<UnitRow, "south" | "west" | "north" | "east">):
 }
 
 export async function insertUnits(
-  db: Db,
+  db: DbExecutor,
   scanId: number,
   units: {
     bbox: BBox;
@@ -134,14 +138,15 @@ export async function persistPlaces(
   await upsertCache(db, unique, now);
 
   const existing = await db
-    .select({ placeId: places.placeId, wasFuture: places.wasFuture })
+    .select({ placeId: places.placeId, wasFuture: places.wasFuture, isClosed: places.isClosed })
     .from(places)
     .where(inArray(places.placeId, ids));
-  const prevFuture = new Map(existing.map((e) => [e.placeId, e.wasFuture]));
-  const flags = (r: PlaceRecord) => ({
-    wasFuture: r.businessStatus === "FUTURE_OPENING",
-    isClosed: r.businessStatus === "CLOSED_PERMANENTLY",
-  });
+  const prev = new Map(existing.map((e) => [e.placeId, e]));
+  // Durum yanıtta yoksa önceki bayraklar korunur; "açıldı" yalnızca FUTURE_OPENING → OPERATIONAL (bkz. status-flags.ts).
+  const flagsById = new Map(
+    unique.map((r) => [r.placeId, statusFlags(r.businessStatus, prev.get(r.placeId))]),
+  );
+  const flags = (r: PlaceRecord) => flagsById.get(r.placeId)!;
 
   await db
     .insert(places)
@@ -152,7 +157,9 @@ export async function persistPlaces(
         lat: r.lat,
         lng: r.lng,
         coordsFetchedAt: now,
-        ...flags(r),
+        wasFuture: flags(r).wasFuture,
+        isClosed: flags(r).isClosed,
+        statusCheckedAt: flags(r).observed ? now : null,
         firstSeenScanId: scanId,
         lastSeenScanId: scanId,
         firstSeenAt: now,
@@ -169,16 +176,17 @@ export async function persistPlaces(
         coordsFetchedAt: sql`excluded.coords_fetched_at`,
         wasFuture: sql`excluded.was_future`,
         isClosed: sql`excluded.is_closed`,
+        statusCheckedAt: sql`coalesce(excluded.status_checked_at, ${places.statusCheckedAt})`,
         lastSeenScanId: sql`excluded.last_seen_scan_id`,
         notFoundInScanId: sql`NULL`,
+        // Aramada yeniden görüldü: kimlik geçerli.
+        goneAt: sql`NULL`,
         updatedAt: sql`excluded.updated_at`,
       },
     });
 
   // FUTURE_OPENING → açıldı geçişi (açılış anı yakalandı).
-  const openedIds = unique
-    .filter((r) => prevFuture.get(r.placeId) === true && !flags(r).wasFuture && !flags(r).isClosed)
-    .map((r) => r.placeId);
+  const openedIds = unique.filter((r) => flags(r).opened).map((r) => r.placeId);
   if (openedIds.length > 0) {
     await db
       .update(places)
@@ -216,7 +224,7 @@ export async function persistPlaces(
       },
     });
 
-  return { inserted: unique.filter((r) => !prevFuture.has(r.placeId)).length, openedIds };
+  return { inserted: unique.filter((r) => !prev.has(r.placeId)).length, openedIds };
 }
 
 export async function countSnapshot(

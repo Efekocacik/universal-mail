@@ -1182,7 +1182,7 @@ describe("ARF (RFC 5965) şikâyet raporları Gmail gelen kutusundan (Aşama 15.
     expect(row).toMatchObject({
       status: "received",
       errorCode: "arf_complaint:no_attestation",
-      classification: "other",
+      classification: "complaint",
     });
     expect(await suppressedCount()).toBe(0);
     expect(await clStatus()).toBe("waiting_next");

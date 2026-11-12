@@ -1,16 +1,16 @@
-import { inArray } from "drizzle-orm";
+import { and, inArray, isNull, notInArray, or } from "drizzle-orm";
 import { z } from "zod";
 import { body, database, HttpError, json, route } from "@/lib/api/http";
-import { parseLeadFilters } from "@/lib/api/filters";
+import { filterQuerySchema, MAX_SELECTION, parseLeadFilters } from "@/lib/api/filters";
 import { monthSkuCalls } from "@/lib/budget";
 import { audit } from "@/lib/db/audit";
-import { leads } from "@/lib/db/schema";
+import { leadEnrichment, leads } from "@/lib/db/schema";
 import { enqueueEmailSearch } from "@/lib/email/enqueue";
 import { websiteStates, type LeadInfo } from "@/lib/email/service";
 import { getEnrichmentMap, upsertEnrichment } from "@/lib/email/store";
 import { getSecret } from "@/lib/secrets/store";
 import { enqueueJob } from "@/lib/jobs/queue";
-import { queryLeadIds } from "@/lib/leads/query";
+import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
 import { marginalCostUsd } from "@/lib/places/pricing";
 import { getSettings } from "@/lib/settings";
 import { chunk, round } from "@/lib/util";
@@ -18,12 +18,21 @@ import { budgetSummary, requireCollectionReady } from "../../scans/guard";
 
 export const dynamic = "force-dynamic";
 
+/** Bu durumlardaki lead'ler için e-posta aranmaz. */
+const OPTED_OUT = ["do_not_contact", "not_interested"] as const;
+/** Sonucu kesinleşmiş tarama durumları (`force` olmadan yeniden taranmaz). */
+const SETTLED = ["done", "no_website", "blocked"] as const;
+
 const schema = z
   .object({
     /** Seçili lead'ler. */
-    leadIds: z.array(z.number().int()).min(1).max(2000).optional(),
-    /** Alternatif: listedeki süzgeçlerin sorgu dizesi (en fazla 2000 lead). */
-    filtersQuery: z.string().max(2000).optional(),
+    leadIds: z.array(z.number().int().positive()).min(1).max(MAX_SELECTION).optional(),
+    /**
+     * Alternatif: listedeki süzgeçlerin sorgu dizesi (ortak 8000 karakter sınırı). Bir seferde HÂLÂ aranması gereken
+     * (taranmamış, iletişim engeli olmayan) en fazla 2000 lead işlenir; fazlası varsa önizleme `capped: true` taşır.
+     * Taranmış olanlar sorguda (LIMIT'ten önce) dışlandığı için arama bitince yeniden çalıştırmak sıradakilere geçer.
+     */
+    filtersQuery: filterQuerySchema.optional(),
     /** Web sitesi adresi önbellekte olmayan işletmeler için önce Google verisini (Place Details Enterprise) yükle. */
     loadGoogle: z.boolean().default(false),
     /** Yerel taramada bulunamayanlar için harici servisi (Hunter) kullan; yalnızca ayarlarda etkinse. */
@@ -44,10 +53,42 @@ export const POST = route(async (req: Request) => {
   await requireCollectionReady(db);
   const input = await body(req, schema);
 
-  const ids = input.leadIds
-    ? [...new Set(input.leadIds)]
-    : await queryLeadIds(db, parseLeadFilters(new URLSearchParams(input.filtersQuery)), 2000);
-  if (ids.length === 0) throw new HttpError(400, "Süzgece uyan işletme yok.");
+  let ids: number[];
+  let matched: number;
+  /** Süzgeç kipinde sınırın dışında kalan (sorguda zaten elenen) atlananlar; önizlemede sayılara eklenir. */
+  let outside = { alreadyDone: 0, optedOut: 0 };
+  /** Süzgeç kipinde: bu seferden sonra hâlâ aranacak lead kaldı mı? */
+  let capped = false;
+  if (input.leadIds) {
+    ids = [...new Set(input.leadIds)];
+    matched = ids.length;
+  } else {
+    const filters = parseLeadFilters(new URLSearchParams(input.filtersQuery));
+    // Yalnızca hâlâ işlenmesi gerekenler (LIMIT'ten ÖNCE): aksi halde ilk 2000 taranınca sonraki çalıştırmalar hep
+    // aynı 2000'i alıp "zaten tarandı" der ve kalanlara hiç ulaşılmazdı.
+    const optedOut = inArray(leads.status, [...OPTED_OUT]);
+    const pending = and(
+      notInArray(leads.status, [...OPTED_OUT]),
+      input.force
+        ? undefined
+        : or(isNull(leadEnrichment.leadId), notInArray(leadEnrichment.status, [...SETTLED])),
+    );
+    let pendingTotal: number;
+    let optedOutTotal: number;
+    [ids, matched, pendingTotal, optedOutTotal] = await Promise.all([
+      queryLeadIds(db, filters, MAX_SELECTION, { where: pending }),
+      countLeadIds(db, filters),
+      countLeadIds(db, filters, { where: pending }),
+      countLeadIds(db, filters, { where: optedOut }),
+    ]);
+    outside = {
+      optedOut: optedOutTotal,
+      alreadyDone: Math.max(0, matched - pendingTotal - optedOutTotal),
+    };
+    capped = pendingTotal > ids.length;
+  }
+  if (matched === 0)
+    throw new HttpError(400, "Süzgece uyan işletme yok.", { code: "NOTHING_MATCHED" });
 
   const infos: LeadInfo[] = [];
   for (const part of chunk(ids, 500))
@@ -68,15 +109,15 @@ export const POST = route(async (req: Request) => {
   const ready: number[] = [];
   const noWebsite: number[] = [];
   const needsGoogle: LeadInfo[] = [];
-  let alreadyDone = 0;
-  let optedOut = 0;
+  let alreadyDone = outside.alreadyDone;
+  let optedOut = outside.optedOut;
   for (const l of infos) {
-    if (l.status === "do_not_contact" || l.status === "not_interested") {
+    if ((OPTED_OUT as readonly string[]).includes(l.status)) {
       optedOut++;
       continue;
     }
     const prev = enrichment.get(l.id);
-    if (prev && ["done", "no_website", "blocked"].includes(prev.status) && !input.force) {
+    if (prev && (SETTLED as readonly string[]).includes(prev.status) && !input.force) {
       alreadyDone++;
       continue;
     }
@@ -101,7 +142,16 @@ export const POST = route(async (req: Request) => {
   const before = await monthSkuCalls(db, provider, "place_details_enterprise");
   const budget = await budgetSummary(db);
   const preview = {
-    leads: infos.length,
+    /**
+     * İncelenen lead'ler: bu seferde ele alınanlar + süzgeç kipinde sorguda zaten elenen (taranmış/temas istemeyen)
+     * olanlar; böylece alt satırların toplamı bu sayıyı verir.
+     */
+    leads: infos.length + outside.alreadyDone + outside.optedOut,
+    /** Seçime/süzgece uyan toplam (taranmış ve engelli olanlar dahil). */
+    matched,
+    /** Bu seferden sonra hâlâ aranacak lead kalıyor; arama bitince yeniden çalıştırmak sıradakilere geçer. */
+    capped,
+    max: MAX_SELECTION,
     ready: ready.length,
     noWebsite: noWebsite.length,
     needsGoogle: googleTargets.length,

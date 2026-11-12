@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label, Select } from "@/components/ui/input";
 import { campaignLeadsApi, type AddLeadsByFilterResult } from "@/lib/client/campaign-leads";
+import { addIdsToCampaign, type AddIdsResult } from "@/lib/client/leads-bulk";
 import { useCampaigns } from "@/lib/client/campaigns";
 import { fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
@@ -24,7 +25,9 @@ import { Notice } from "./parts";
 import { useSafeMutation } from "./use-safe-mutation";
 
 /**
- * Keşif ekranından "Kampanyaya ekle": o anki süzgece uyan lead'leri (en fazla 500, eklendiği andaki görüntü) taslak
+ * Keşif ekranından "Kampanyaya ekle". İki kip:
+ *  - `leadIds` verilirse (toplu seçim): seçilen kimlikler 500'lük parçalarla eklenir; ilerleme gösterilir.
+ *  - aksi halde o anki süzgece uyan lead'leri (en fazla 500, eklendiği andaki görüntü) taslak
  * veya hazır bir kampanyaya ekler. Her lead sunucuda uygunluk denetiminden geçer; uygun olmayanlar gerekçesiyle
  * hariç tutulur. Belirsiz sonuçta istek tekrar gönderilmez (tekrar ekleme zaten sunucuda engellenir).
  * Sayfalama: sunucu kampanyada zaten bulunanları atlar ve kalan sayıyı döndürür; "Sıradaki N işletmeyi ekle" ile
@@ -36,16 +39,35 @@ const MAX_BATCH = 500;
 export function AddToCampaignButton({
   filterQuery,
   total,
+  leadIds,
+  open: openProp,
+  onOpenChange,
+  hideTrigger = false,
+  title,
 }: {
   filterQuery: string;
   total: number;
+  /** Toplu seçim: yalnızca bu kimlikler eklenir (süzgeç yerine). */
+  leadIds?: readonly number[];
+  /** Denetimli kullanım (klavye kısayolu C ve seçim çubuğu pencereyi dışarıdan açar). */
+  open?: boolean;
+  onOpenChange?: (v: boolean) => void;
+  hideTrigger?: boolean;
+  title?: string;
 }) {
   const sp = useSearchParams();
   const router = useRouter();
   const preset = Number(sp.get("campaign")) || null;
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (v: boolean) => {
+    setOpenState(v);
+    onOpenChange?.(v);
+  };
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const byIds = leadIds !== undefined;
   const [campaignId, setCampaignId] = useState<number | null>(preset);
-  const [result, setResult] = useState<AddLeadsByFilterResult | null>(null);
+  const [result, setResult] = useState<AddLeadsByFilterResult | AddIdsResult | null>(null);
   // Sunucu süzgeçli iki liste (yalnızca en son güncellenen 50 kampanya içinde aranmaz).
   const drafts = useCampaigns("draft");
   const ready = useCampaigns("ready");
@@ -60,19 +82,39 @@ export function AddToCampaignButton({
   useEffect(() => {
     if (preset) setCampaignId(preset);
   }, [preset]);
+  // Her açılış yeni bir ekleme başlatır (önceki sonuç gösterilmez).
+  useEffect(() => {
+    if (open) setResult(null);
+  }, [open]);
 
-  const add = useSafeMutation(() => campaignLeadsApi.addByFilter(campaignId!, filterQuery), {
-    onSuccess: (r) => {
-      setResult(r);
-      const target = campaignId;
-      toast.success(t("addToCampaign.toast", { added: fmtNumber(r.added) }), {
-        action: {
-          label: t("addToCampaign.open"),
-          onClick: () => router.push(`/campaigns/${target}/edit?step=leads`),
-        },
-      });
+  const add = useSafeMutation(
+    async () => {
+      if (!byIds) return campaignLeadsApi.addByFilter(campaignId!, filterQuery);
+      try {
+        return await addIdsToCampaign(campaignId!, leadIds, (done, all) =>
+          setProgress({ done, total: all }),
+        );
+      } finally {
+        setProgress(null);
+      }
     },
-  });
+    {
+      onSuccess: (r) => {
+        setResult(r);
+        const target = campaignId;
+        const partial = "error" in r && r.error;
+        (partial ? toast.warning : toast.success)(
+          t("addToCampaign.toast", { added: fmtNumber(r.added) }),
+          {
+            action: {
+              label: t("addToCampaign.open"),
+              onClick: () => router.push(`/campaigns/${target}/edit?step=leads`),
+            },
+          },
+        );
+      },
+    },
+  );
 
   const reasons = new Map<string, number>();
   for (const e of result?.excluded ?? [])
@@ -80,25 +122,27 @@ export function AddToCampaignButton({
 
   return (
     <>
-      <Button
-        size="sm"
-        variant={preset ? "default" : "outline"}
-        onClick={() => {
-          setResult(null);
-          setOpen(true);
-        }}
-      >
-        <Send /> {t("addToCampaign.button")}
-      </Button>
+      {!hideTrigger && (
+        <Button
+          size="sm"
+          variant={preset ? "default" : "outline"}
+          onClick={() => setOpen(true)}
+          title={title}
+        >
+          <Send /> {t("addToCampaign.button")}
+        </Button>
+      )}
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("addToCampaign.title")}</DialogTitle>
             <DialogDescription>
-              {t("addToCampaign.bodyPaged", {
-                n: fmtNumber(Math.min(total, MAX_BATCH)),
-                total: fmtNumber(total),
-              })}
+              {byIds
+                ? t("addToCampaign.bodySelected", { n: fmtNumber(leadIds.length) })
+                : t("addToCampaign.bodyPaged", {
+                    n: fmtNumber(Math.min(total, MAX_BATCH)),
+                    total: fmtNumber(total),
+                  })}
             </DialogDescription>
           </DialogHeader>
           {result ? (
@@ -113,16 +157,29 @@ export function AddToCampaignButton({
                   })}
                 </span>
               </p>
+              {"error" in result && result.error && (
+                <p
+                  className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-[12px]"
+                  role="alert"
+                >
+                  {t("addToCampaign.partial", {
+                    n: fmtNumber(result.remaining),
+                    error: result.error,
+                  })}
+                </p>
+              )}
               {result.reevaluated > 0 && (
                 <p className="text-muted-foreground">
                   {t("addToCampaign.reevaluated", { n: fmtNumber(result.reevaluated) })}
                 </p>
               )}
-              <p className="text-muted-foreground" role="status">
-                {result.remaining > 0
-                  ? t("addToCampaign.remaining", { n: fmtNumber(result.remaining) })
-                  : t("addToCampaign.allDone")}
-              </p>
+              {!byIds && (
+                <p className="text-muted-foreground" role="status">
+                  {result.remaining > 0
+                    ? t("addToCampaign.remaining", { n: fmtNumber(result.remaining) })
+                    : t("addToCampaign.allDone")}
+                </p>
+              )}
               {reasons.size > 0 && (
                 <ul className="space-y-0.5">
                   {[...reasons].map(([code, n]) => (
@@ -154,6 +211,14 @@ export function AddToCampaignButton({
               {!campaignId && (
                 <p className="text-[12px] text-muted-foreground">{t("addToCampaign.pick")}</p>
               )}
+              {progress && (
+                <p className="tabular text-[12px] text-muted-foreground" role="status">
+                  {t("addToCampaign.progress", {
+                    done: fmtNumber(progress.done),
+                    total: fmtNumber(progress.total),
+                  })}
+                </p>
+              )}
             </div>
           )}
           <DialogFooter>
@@ -167,7 +232,12 @@ export function AddToCampaignButton({
                     {t("addToCampaign.open")}
                   </Link>
                 </Button>
-                {result.remaining > 0 && (
+                {byIds && "error" in result && result.error && (
+                  <Button onClick={() => add.mutate(undefined)} loading={add.isPending}>
+                    {t("addToCampaign.retry")}
+                  </Button>
+                )}
+                {!byIds && result.remaining > 0 && (
                   <Button onClick={() => add.mutate(undefined)} loading={add.isPending}>
                     {t("addToCampaign.next", {
                       n: fmtNumber(Math.min(result.remaining, MAX_BATCH)),
@@ -182,7 +252,7 @@ export function AddToCampaignButton({
                 </Button>
                 <Button
                   onClick={() => add.mutate(undefined)}
-                  disabled={!campaignId || total === 0}
+                  disabled={!campaignId || (byIds ? leadIds.length === 0 : total === 0)}
                   loading={add.isPending}
                 >
                   {t("addToCampaign.confirm")}

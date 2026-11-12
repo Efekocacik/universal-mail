@@ -3,17 +3,35 @@
 import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { useEffect, useRef, useState } from "react";
-import { t } from "@/lib/i18n";
-import { regionFromDrag } from "./map-math";
+import { useResolvedTheme, useThemeReady } from "@/components/providers";
+import { getLocale, t } from "@/lib/i18n";
+import { pinClassName, readCamera, regionFromDrag, writeCamera, type Camera } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
 
-const SHAPE_STYLE = {
-  strokeColor: "#14705a",
-  strokeOpacity: 0.95,
-  strokeWeight: 2,
-  fillColor: "#14705a",
-  fillOpacity: 0.08,
+/** Çizim sırasındaki sürükleme şekli (SVG, CSS belirteçleriyle). */
+const DRAG_SHAPE_STYLE = {
+  fill: "var(--map-stroke)",
+  fillOpacity: 0.12,
+  stroke: "var(--map-stroke)",
 } as const;
+
+/**
+ * Bölge şeklinin Google Maps seçenekleri. Maps JS `strokeColor`/`fillColor` CSS değişkeni kabul etmez; renk o anki
+ * temanın `--map-stroke` belirtecinden okunur (bileşenlerde sabit hex yok). Tema değişince `<Map key>` yeniden kurulur, şekil
+ * de yeni renkle oluşur. Okunamazsa Maps kendi varsayılanını kullanır.
+ */
+function shapeStyle() {
+  const color =
+    typeof document === "undefined"
+      ? ""
+      : getComputedStyle(document.documentElement).getPropertyValue("--map-stroke").trim();
+  return {
+    ...(color ? { strokeColor: color, fillColor: color } : {}),
+    strokeOpacity: 0.95,
+    strokeWeight: 2,
+    fillOpacity: 0.08,
+  };
+}
 
 interface PinRef {
   marker: google.maps.marker.AdvancedMarkerElement;
@@ -25,30 +43,51 @@ interface PinRef {
  * `gmp-click` olayıyla (addEventListener) alınır; `addListener("click")` kullanımdan kalkmıştır.
  * İçerik öğelerine kendi referanslarımızdan erişiriz (marker.content özelliği kullanımdan kalkmıştır).
  */
+const NOVELTY_KEYS = [
+  "novelty.future_opening",
+  "novelty.high",
+  "novelty.likely",
+  "novelty.low",
+] as const;
+const CONTACT_KEYS = [null, "map.legend.sent", "map.legend.replied", "map.legend.stopped"] as const;
+
+/** Ekran okuyucu için işaretçi adı: yenilik etiketi ve (varsa) temas durumu. */
+function markerTitle(p: MapPoint): string {
+  const novelty = t(NOVELTY_KEYS[p[3] ?? 3] ?? "novelty.low");
+  const contact = CONTACT_KEYS[p[4] ?? 0];
+  return contact
+    ? t("map.marker.labelContact", { novelty, contact: t(contact) })
+    : t("map.marker.label", { novelty });
+}
+
 function Markers({
   points,
   selectedId,
+  checkedIds,
   onSelect,
-}: Pick<MapViewProps, "points" | "selectedId" | "onSelect">) {
+}: Pick<MapViewProps, "points" | "selectedId" | "checkedIds" | "onSelect">) {
   const map = useMap();
   const markerLib = useMapsLibrary("marker");
   const byId = useRef(new globalThis.Map<number, PinRef>());
   const selectRef = useRef(onSelect);
   const prevSelected = useRef<number | null>(null);
+  const checkedRef = useRef(checkedIds);
+  const prevChecked = useRef<ReadonlySet<number>>(new Set());
   selectRef.current = onSelect;
+  checkedRef.current = checkedIds;
 
   useEffect(() => {
     if (!map || !markerLib) return;
     const index = byId.current;
     const markers = points.map((p: MapPoint) => {
       const el = document.createElement("div");
-      el.className = `um-pin${p[4] !== 0 ? " um-pin--contacted" : ""}`;
+      el.className = pinClassName(p[4], checkedRef.current.has(p[0]!));
       el.style.background = LABEL_COLORS[p[3] ?? 3] ?? LABEL_COLORS[3];
       const marker = new markerLib.AdvancedMarkerElement({
         position: { lat: p[1]!, lng: p[2]! },
         content: el,
         gmpClickable: true,
-        title: t("map.marker"),
+        title: markerTitle(p),
       });
       marker.addEventListener("gmp-click", () => selectRef.current(p[0]!));
       index.set(p[0]!, { marker, el });
@@ -80,8 +119,20 @@ function Markers({
       clusterer.setMap(null);
       index.clear();
       prevSelected.current = null;
+      prevChecked.current = checkedRef.current;
     };
   }, [map, markerLib, points]);
+
+  // Toplu seçim: yalnızca değişen işaretçilere dokunulur (binlerce işaretçide de ucuz).
+  useEffect(() => {
+    const index = byId.current;
+    const prev = prevChecked.current;
+    for (const id of prev)
+      if (!checkedIds.has(id)) index.get(id)?.el.classList.remove("um-pin--checked");
+    for (const id of checkedIds)
+      if (!prev.has(id)) index.get(id)?.el.classList.add("um-pin--checked");
+    prevChecked.current = checkedIds;
+  }, [checkedIds, points]);
 
   useEffect(() => {
     const index = byId.current;
@@ -111,21 +162,38 @@ function ViewReporter({ onBoundsChange }: Pick<MapViewProps, "onBoundsChange">) 
   const map = useMap();
   useEffect(() => {
     if (!map) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const report = () => {
       const b = map.getBounds(); // harita hazır olana kadar undefined olabilir
       if (b) onBoundsChange(bboxOfBounds(b));
+      // Kamera hatırlanır (yeniden açılışta aynı yerden başlar); sık yazmamak için gecikmeli.
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const c = map.getCenter();
+        const z = map.getZoom();
+        if (c && z !== undefined) writeCamera({ lat: c.lat(), lng: c.lng(), zoom: z });
+      }, 500);
     };
     const l = map.addListener("idle", report);
     report();
-    return () => l.remove();
+    return () => {
+      clearTimeout(timer);
+      l.remove();
+    };
   }, [map, onBoundsChange]);
   return null;
 }
 
-function Focuser({ focus }: Pick<MapViewProps, "focus">) {
+function Focuser({
+  focus,
+  applied,
+}: Pick<MapViewProps, "focus"> & { applied: React.RefObject<MapViewProps["focus"]> }) {
   const map = useMap();
   useEffect(() => {
     if (!map || !focus) return;
+    // Tema değişiminde harita yeniden kurulur: aynı odak isteği yeniden uygulanmaz (kullanıcının kaydırması korunur).
+    if (applied.current === focus) return;
+    applied.current = focus;
     if (focus.fit) {
       map.fitBounds(
         {
@@ -140,7 +208,7 @@ function Focuser({ focus }: Pick<MapViewProps, "focus">) {
       map.panTo({ lat: focus.lat, lng: focus.lng });
       if (focus.zoom && (map.getZoom() ?? 0) < focus.zoom) map.setZoom(focus.zoom);
     }
-  }, [map, focus]);
+  }, [map, focus, applied]);
   return null;
 }
 
@@ -162,7 +230,7 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
     const listeners: google.maps.MapsEventListener[] = [];
     if (kind === "circle" && d.circle) {
       const circle = new google.maps.Circle({
-        ...SHAPE_STYLE,
+        ...shapeStyle(),
         map,
         center: { lat: d.circle.lat, lng: d.circle.lng },
         radius: d.circle.radiusM,
@@ -188,7 +256,7 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
       shapeRef.current = circle;
     } else {
       const rect = new google.maps.Rectangle({
-        ...SHAPE_STYLE,
+        ...shapeStyle(),
         map,
         bounds: { south: d.bbox.south, west: d.bbox.west, north: d.bbox.north, east: d.bbox.east },
         editable,
@@ -209,7 +277,6 @@ function RegionShape({ draft, onDraftChange }: Pick<MapViewProps, "draft" | "onD
       shapeRef.current = null;
     };
   }, [map, kind, editable]);
-
   // Dışarıdan gelen değişiklikleri (yarıçap kaydırıcısı vb.) şekle yansıt.
   useEffect(() => {
     const shape = shapeRef.current;
@@ -306,8 +373,7 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
               y={Math.min(drag.y0, drag.y1)}
               width={Math.abs(drag.x1 - drag.x0)}
               height={Math.abs(drag.y1 - drag.y0)}
-              fill="rgba(20,112,90,0.12)"
-              stroke="#14705a"
+              style={DRAG_SHAPE_STYLE}
               strokeWidth={2}
             />
           ) : (
@@ -315,8 +381,7 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
               cx={drag.x0}
               cy={drag.y0}
               r={Math.hypot(drag.x1 - drag.x0, drag.y1 - drag.y0)}
-              fill="rgba(20,112,90,0.12)"
-              stroke="#14705a"
+              style={DRAG_SHAPE_STYLE}
               strokeWidth={2}
             />
           )}
@@ -326,8 +391,19 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
   );
 }
 
+const DEFAULT_CAMERA: Camera = { lat: 50, lng: 10, zoom: 4 };
+
 export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: string }) {
+  const colorScheme = useResolvedTheme() === "dark" ? "DARK" : "LIGHT";
+  // Tema istemcide kesinleşmeden harita kurulmaz: aksi halde koyu sistemde önce açık sonra koyu iki harita yüklenir.
+  const themeReady = useThemeReady();
   const [authError, setAuthError] = useState(false);
+  // Hatırlanan kamera (C) yalnızca ilk açılışta okunur; sonrası kullanıcının hareketidir. `colorScheme` yalnızca kurulumda
+  // okunduğundan tema değişince harita yeniden kurulur (key, D): güncel kamera ve uygulanmış odak isteği bu bileşende
+  // tutulur, yeni harita kullanıcının bıraktığı konum ve yakınlıkta açılır.
+  const [initialCamera] = useState<Camera>(() => readCamera() ?? DEFAULT_CAMERA);
+  const camera = useRef<Camera>(initialCamera);
+  const appliedFocus = useRef<MapViewProps["focus"]>(null);
 
   useEffect(() => {
     // Google, anahtar/faturalandırma/kısıt sorununda bu global işlevi çağırır.
@@ -350,28 +426,45 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
   }
 
   return (
-    <div className="relative size-full">
-      <APIProvider apiKey={props.apiKey} language="tr">
-        <Map
-          mapId={props.mapId}
-          defaultCenter={{ lat: 50, lng: 10 }}
-          defaultZoom={4}
-          gestureHandling="greedy"
-          mapTypeControl={false}
-          streetViewControl={false}
-          fullscreenControl={false}
-          rotateControl={false}
-          tiltInteractionEnabled={false}
-          headingInteractionEnabled={false}
-          clickableIcons={false}
-          className="size-full"
-          onClick={() => props.onSelect(null)}
-        >
-          <Markers points={props.points} selectedId={props.selectedId} onSelect={props.onSelect} />
-          <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
-          <ViewReporter onBoundsChange={props.onBoundsChange} />
-          <Focuser focus={props.focus} />
-        </Map>
+    <div className="relative size-full" data-color-scheme={colorScheme}>
+      <APIProvider apiKey={props.apiKey} language={getLocale()}>
+        {themeReady && (
+          <Map
+            // Faz 4 (10a-1/10a-7): harita teması arayüz temasını izler; colorScheme yalnızca kurulumda okunur → key.
+            key={colorScheme}
+            colorScheme={colorScheme}
+            mapId={props.mapId}
+            defaultCenter={{ lat: camera.current.lat, lng: camera.current.lng }}
+            defaultZoom={camera.current.zoom}
+            onCameraChanged={(ev) => {
+              camera.current = {
+                lat: ev.detail.center.lat,
+                lng: ev.detail.center.lng,
+                zoom: ev.detail.zoom,
+              };
+            }}
+            gestureHandling="greedy"
+            mapTypeControl={false}
+            streetViewControl={false}
+            fullscreenControl={false}
+            rotateControl={false}
+            tiltInteractionEnabled={false}
+            headingInteractionEnabled={false}
+            clickableIcons={false}
+            className="size-full"
+            onClick={() => props.onSelect(null)}
+          >
+            <Markers
+              points={props.points}
+              selectedId={props.selectedId}
+              checkedIds={props.checkedIds}
+              onSelect={props.onSelect}
+            />
+            <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
+            <ViewReporter onBoundsChange={props.onBoundsChange} />
+            <Focuser focus={props.focus} applied={appliedFocus} />
+          </Map>
+        )}
         <DrawOverlay drawMode={props.drawMode} onDrawn={props.onDrawn} />
       </APIProvider>
     </div>

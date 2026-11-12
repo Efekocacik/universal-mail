@@ -13,6 +13,14 @@ import type { PlacesProvider, SearchResult } from "@/lib/places/provider";
 import { typeToQuery } from "@/lib/places/provider";
 import { chunk, errorMessage, sleep as defaultSleep } from "@/lib/util";
 import { recomputeNovelty } from "./novelty-sync";
+import {
+  APP_STOPPED,
+  BUDGET_STOP_CODE,
+  CALL_LIMIT,
+  COST_CAP,
+  providerPauseCode,
+} from "./pause-codes";
+import { onScanCompleted, onScanFailed, onScanPaused } from "./scan-notifications";
 import { canSubdivide } from "./planner";
 import {
   countSnapshot,
@@ -52,15 +60,33 @@ interface RunState {
   unitsFailed: number;
   consecutiveUnitFailures: number;
   newPlaces: number;
+  /** Faz 4: FUTURE_OPENING → OPERATIONAL geçişi görülen yer sayısı (persistPlaces().openedIds). */
+  openedPlaces: number;
   maxCalls: number;
+  /** Zamanlanmış taramanın onaylı toplam maliyet tavanı (`readCostCap`); yoksa null. */
+  costCapUsd: number | null;
   regionCountry: string | null;
 }
 
 const MAX_CONSECUTIVE_UNIT_FAILURES = 5;
+/** Faz 4 duraklatma kodları (`pause-codes.ts`); işçi kurtarması buradan içe aktarır. */
+export { APP_STOPPED, INTERRUPTED } from "./pause-codes";
 
 function readMaxCalls(scan: ScanRow): number {
   const est = scan.estimate as { maxCalls?: number } | null;
   return typeof est?.maxCalls === "number" ? est.maxCalls : 5000;
+}
+
+/**
+ * Zamanlanmış taramanın onaylı TOPLAM maliyet tavanı (USD) ya da `null`. Tavan tarama oluşturulurken yazılır
+ * (schedule.ts `runSchedule`) ve tüm çalıştırmalarda `scans.cost_usd` (birikimli) ile karşılaştırılır: geçici hatadan,
+ * uygulama kapanışından veya bütçe yenilenmesinden sonraki kendiliğinden sürdürmeler (`effectiveMaxCalls` her seferinde
+ * yeni çağrı payı verir) onaylanan tutarı AŞAMAZ. Elle başlatılan taramada tavan yoktur.
+ */
+export function readCostCap(scan: Pick<ScanRow, "origin" | "estimate">): number | null {
+  if (scan.origin !== "schedule") return null;
+  const cap = (scan.estimate as { costCapUsd?: unknown } | null)?.costCapUsd;
+  return typeof cap === "number" && Number.isFinite(cap) && cap >= 0 ? cap : null;
 }
 
 /**
@@ -106,7 +132,9 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     unitsFailed: (await unitCounts(db, scanId)).failed,
     consecutiveUnitFailures: 0,
     newPlaces: 0,
+    openedPlaces: scan.progress?.openedPlaces ?? 0,
     maxCalls: 0,
+    costCapUsd: readCostCap(scan),
     regionCountry:
       (
         await db
@@ -124,6 +152,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     if (deps.shouldStop?.()) {
       await setScanStatus(db, scanId, "paused", {
         pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+        pauseCode: APP_STOPPED,
       });
       return "paused";
     }
@@ -136,7 +165,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     if (result !== "ok") return result;
   }
 
-  return finalizeScan(deps, scanId, state, now);
+  return finalizeScan(deps, scanId, state, now, log);
 }
 
 type UnitResult = "ok" | ScanOutcome;
@@ -178,7 +207,9 @@ async function runUnit(
       await requeue();
       await setScanStatus(db, scan.id, "paused", {
         pauseReason: `Güvenlik sınırı: bu tarama ${state.maxCalls} çağrıyı aştı. Devam etmek için taramayı sürdürün.`,
+        pauseCode: CALL_LIMIT,
       });
+      await onScanPaused(db, scan.id, now(), log);
       return "paused";
     }
 
@@ -191,6 +222,7 @@ async function runUnit(
       await requeue();
       await setScanStatus(db, scan.id, "paused", {
         pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+        pauseCode: APP_STOPPED,
       });
       return "paused";
     }
@@ -198,8 +230,22 @@ async function runUnit(
     const spend = await canSpend(db, provider.id, await deps.getBudgetUsd(), sku, 1);
     if (!spend.ok) {
       await requeue();
-      await setScanStatus(db, scan.id, "budget_stopped", { pauseReason: spend.reason });
+      await setScanStatus(db, scan.id, "budget_stopped", {
+        pauseReason: spend.reason,
+        pauseCode: BUDGET_STOP_CODE,
+      });
+      await onScanPaused(db, scan.id, now(), log);
       return "budget_stopped";
+    }
+    // Zamanlanmış tarama: bir sonraki ücretli çağrı onaylı toplam tutarı aşacaksa çağrı YAPILMAZ.
+    if (state.costCapUsd !== null && state.costUsd + spend.addUsd > state.costCapUsd + 1e-9) {
+      await requeue();
+      await setScanStatus(db, scan.id, "paused", {
+        pauseReason: `Bu zamanlanmış tarama onayladığınız ${state.costCapUsd.toFixed(2)} USD tutarına ulaştı. Devam etmek için taramayı sürdürün; sürdürürseniz bu tavan bu tarama için kalkar.`,
+        pauseCode: COST_CAP,
+      });
+      await onScanPaused(db, scan.id, now(), log);
+      return "paused";
     }
 
     let res: SearchResult;
@@ -235,6 +281,7 @@ async function runUnit(
       regionCountry: state.regionCountry,
     });
     state.newPlaces += saved.inserted;
+    state.openedPlaces += saved.openedIds.length;
     collected += res.places.length;
     token = res.nextPageToken;
 
@@ -291,17 +338,23 @@ async function handleCallError(
     await requeue();
     await setScanStatus(db, scan.id, "failed", { error: message, finishedAt: now() });
     await emitEvent("scan.failed", { scanId: scan.id, error: message });
+    await onScanFailed(db, scan.id, now(), log);
     return "failed";
   }
 
   if (e.isPausable) {
     // Kota, hız sınırı, ağ veya geçici sunucu hatası: tarama duraklatılır, kullanıcı sonra devam ettirir (NFR-04).
+    // Kod (PROVIDER_*) zamanlanmış taramanın bir saat sonra kendiliğinden sürdürülmesini sağlar (schedule.ts).
     await requeue();
-    await setScanStatus(db, scan.id, "paused", { pauseReason: e.message });
+    await setScanStatus(db, scan.id, "paused", {
+      pauseReason: e.message,
+      pauseCode: providerPauseCode(e.kind),
+    });
+    await onScanPaused(db, scan.id, now(), log);
     return "paused";
   }
 
-  if (e.kind === "invalid") {
+  if (e.kind === "invalid" || e.kind === "not_found") {
     // Tek bir sorgu geçersiz (ör. desteklenmeyen tür): yalnızca bu birim başarısız sayılır, tarama sürer.
     await db
       .update(scanUnits)
@@ -313,6 +366,7 @@ async function handleCallError(
     if (state.consecutiveUnitFailures >= MAX_CONSECUTIVE_UNIT_FAILURES) {
       await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
       await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
+      await onScanFailed(db, scan.id, now(), log);
       return "failed";
     }
     return "ok";
@@ -322,6 +376,7 @@ async function handleCallError(
   await requeue();
   await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
   await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
+  await onScanFailed(db, scan.id, now(), log);
   return "failed";
 }
 
@@ -334,6 +389,7 @@ async function syncProgress(db: Db, scanId: number, state: RunState): Promise<vo
     placesFound: snap.total,
     futureOpening: snap.future,
     newPlaces: state.newPlaces,
+    openedPlaces: state.openedPlaces,
     callsTotal: state.callsTotal,
     callsBySku: state.callsBySku,
     costUsd: Math.round(state.costUsd * 10_000) / 10_000,
@@ -360,6 +416,7 @@ async function finalizeScan(
   scanId: number,
   state: RunState,
   now: () => number,
+  log: (m: string) => void,
 ): Promise<ScanOutcome> {
   const { db } = deps;
   const scan = (await loadScan(db, scanId))!;
@@ -428,7 +485,16 @@ async function finalizeScan(
     baseline: comparable && !previous,
     calls: state.callsTotal,
     costUsd: state.costUsd,
+    openedPlaces: state.openedPlaces,
+    origin: scan.origin,
   });
   await emitEvent("scan.completed", { scanId, newPlaces: newDetected, totalPlaces: snap.total });
+  // Bildirimler doğrudan yazılır (olay yolu en iyi çabadır ve hataları yutar); dedupe_key ile tarama başına tek.
+  await onScanCompleted(
+    db,
+    { scanId, newDetected, openedPlaces: state.openedPlaces, compared: !!previous },
+    t,
+    log,
+  );
   return "completed";
 }

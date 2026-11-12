@@ -1,8 +1,9 @@
 import { database } from "@/lib/api/http";
-import { t } from "@/lib/i18n";
+import { DEFAULT_LOCALE, isLocale, t, type Locale } from "@/lib/i18n";
 import { completeAuthorization, getOAuthDeps, OAuthError } from "@/lib/mail/gmail/oauth";
 import { oauthResultText, type OAuthResultLike } from "@/lib/mail/gmail/oauth-messages";
 import { lookupOAuthResult, recordOAuthResult } from "@/lib/mail/gmail/oauth-result";
+import { getSetting } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -19,21 +20,34 @@ function escapeHtml(s: string): string {
     .replaceAll("'", "&#39;");
 }
 
-/** Sistem tarayıcısında gösterilen, uygulamanın geri kalanından bağımsız küçük Türkçe sonuç sayfası. */
-function oauthResultPage(r: OAuthResultLike): string {
-  const text = oauthResultText(r);
+/**
+ * Sayfa dili: kullanıcının arayüz dili (`ui.language`). Sunucu tarafında süreç içi etkin dile güvenilmez (son çizilen
+ * sayfaya göre değişebilir), bu yüzden ayardan okunur ve her `t()` çağrısına açıkça verilir; okunamazsa Türkçe.
+ */
+async function pageLocale(): Promise<Locale> {
+  try {
+    const l = await getSetting(await database(), "ui.language");
+    return isLocale(l) ? l : DEFAULT_LOCALE;
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
+/** Sistem tarayıcısında gösterilen, uygulamanın geri kalanından bağımsız küçük sonuç sayfası (arayüz dilinde). */
+function oauthResultPage(r: OAuthResultLike, locale: Locale): string {
+  const text = oauthResultText(r, locale);
   const color = r.ok ? "#15803d" : "#b91c1c";
-  const lines = [text.message, text.hint, r.ok ? null : t("mbx.oauth.page.retry")]
+  const lines = [text.message, text.hint, r.ok ? null : t("mbx.oauth.page.retry", {}, locale)]
     .filter((x): x is string => !!x)
     .map((x) => `<p>${escapeHtml(x)}</p>`)
     .join("");
   return `<!doctype html>
-<html lang="tr">
+<html lang="${locale}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<title>${escapeHtml(t("mbx.oauth.page.title"))}</title>
+<title>${escapeHtml(t("mbx.oauth.page.title", {}, locale))}</title>
 <style>
 body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#f6f7f9;color:#111827}
 main{max-width:30rem;margin:12vh auto 0;padding:1.5rem;background:#fff;border:1px solid #e5e7eb;border-radius:12px}
@@ -47,14 +61,14 @@ p{margin:.5rem 0;line-height:1.5;font-size:.95rem}
 <main role="main">
 <h1>${escapeHtml(text.title)}</h1>
 ${lines}
-<p class="close">${escapeHtml(t("mbx.oauth.page.close"))}</p>
+<p class="close">${escapeHtml(t("mbx.oauth.page.close", {}, locale))}</p>
 </main>
 </body>
 </html>`;
 }
 
-function page(r: OAuthResultLike): Response {
-  return new Response(oauthResultPage(r), {
+async function page(r: OAuthResultLike): Promise<Response> {
+  return new Response(oauthResultPage(r, await pageLocale()), {
     status: r.ok ? 200 : 400,
     headers: {
       "Content-Type": "text/html; charset=utf-8",

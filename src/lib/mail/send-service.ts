@@ -215,7 +215,36 @@ const isBusy = (e: unknown) =>
 /** Veritabanı başka bir işlemle meşgul mü (aynı süreç: `TRANSACTION_ACTIVE`, başka süreç: `SQLITE_BUSY`)? */
 export const isBusyError = isBusy;
 
-const CONTACTED = ["sending", "sent", "unknown"] as const;
+/**
+ * "Temas kuruldu" sayılan giden ileti durumları (günlük üst sınır ve alan adı/gün kuralı bunlarla sayar). Faz 4: gösterge
+ * paneli sayaçları üst sınır denetimiyle AYNI tanımı kullansın diye dışa açıktır.
+ */
+export const CONTACTED = ["sending", "sent", "unknown"] as const;
+
+/**
+ * Takip iletisinin konuşma bilgisi (saf; 9d). Yalnızca bu dizinin `sent` iletilerinden (adım sırasıyla) türetilir:
+ * `references` bütün önceki Message-ID'ler, `threadId` en son bilinen sağlayıcı konuşması, `subject` ilk adımın
+ * gönderilen konusu (yalnızca adım > 0 için). Adım 0'da hepsi boştur.
+ */
+export function followupThread(
+  previous: readonly {
+    rfc: string | null;
+    stepIndex: number | null;
+    threadId: string | null;
+    subject: string | null;
+  }[],
+  stepIndex: number,
+): { references: string[]; threadId: string | null; subject: string | null } {
+  if (stepIndex <= 0) return { references: [], threadId: null, subject: null };
+  const earlier = previous.filter((p) => p.rfc && (p.stepIndex ?? 0) < stepIndex);
+  const first = earlier.find((p) => p.stepIndex === 0);
+  const threadId = [...earlier].reverse().find((p) => p.threadId)?.threadId ?? null;
+  return {
+    references: earlier.map((p) => p.rfc!),
+    threadId,
+    subject: first?.subject?.trim() ? first.subject.trim() : null,
+  };
+}
 
 interface Reservation {
   rowId: number;
@@ -225,6 +254,8 @@ interface Reservation {
   rfcMessageId: string;
   previousStatus: CampaignLeadStatus;
   provider: MailProvider;
+  /** Takip iletisinin sağlayıcı konuşması (9d); yoksa `undefined`. */
+  threadId?: string;
 }
 
 export async function sendCampaignStep(
@@ -338,24 +369,15 @@ export async function sendCampaignStep(
         }
       }
 
-      const composed = await composeEmail(tx, {
-        templateId: step.templateId,
-        leadId: cl.leadId,
-        mode,
-        purpose: "send",
-        ...(unsubscribe ? { unsubscribeUrl: unsubscribe.url } : {}),
-      });
-      if (!composed.sendable) {
-        throw new Abort({
-          outcome: "not_sendable",
-          code: "compose_failed",
-          errors: composed.errors,
-        });
-      }
-
-      // Takip iletisi: aynı dizinin gönderilmiş adımlarına zincirlenir.
+      // Takip iletisi: aynı dizinin gönderilmiş adımlarına zincirlenir (In-Reply-To/References, Gmail threadId ve
+      // şablon izin veriyorsa ilk e-postanın konusu "Re:" ile; 9d).
       const previous = await tx
-        .select({ rfc: messages.rfcMessageId })
+        .select({
+          rfc: messages.rfcMessageId,
+          stepIndex: messages.stepIndex,
+          threadId: messages.threadId,
+          subject: messages.subjectLogged,
+        })
         .from(messages)
         .where(
           and(
@@ -366,7 +388,25 @@ export async function sendCampaignStep(
           ),
         )
         .orderBy(asc(messages.stepIndex));
-      const references = previous.map((p) => p.rfc!);
+      const thread = followupThread(previous, input.stepIndex);
+
+      const composed = await composeEmail(tx, {
+        templateId: step.templateId,
+        leadId: cl.leadId,
+        mode,
+        purpose: "send",
+        ...(unsubscribe ? { unsubscribeUrl: unsubscribe.url } : {}),
+        ...(thread.subject ? { threadSubject: thread.subject } : {}),
+      });
+      if (!composed.sendable) {
+        throw new Abort({
+          outcome: "not_sendable",
+          code: "compose_failed",
+          errors: composed.errors,
+        });
+      }
+
+      const references = thread.references;
 
       const profile = await getSetting(tx, "company.profile");
       let built;
@@ -442,6 +482,7 @@ export async function sendCampaignStep(
         rfcMessageId: built.messageId,
         previousStatus: cl.status,
         provider,
+        ...(thread.threadId ? { threadId: thread.threadId } : {}),
       };
     });
   } catch (e) {
@@ -639,7 +680,14 @@ async function callProvider(r: Reservation, timeoutMs: number): Promise<Provider
   try {
     const res = await Promise.race([
       r.provider
-        .send({ raw: r.raw, from: r.from, to: r.to, messageId: r.rfcMessageId, signal: ac.signal })
+        .send({
+          raw: r.raw,
+          from: r.from,
+          to: r.to,
+          messageId: r.rfcMessageId,
+          signal: ac.signal,
+          ...(r.threadId ? { threadId: r.threadId } : {}),
+        })
         .catch((): ProviderResult => ({
           status: "unknown",
           code: ac.signal.aborted ? "timeout" : "provider_exception",

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { LanguageSwitch, ThemeSwitch } from "@/components/appearance-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,14 +27,26 @@ import { Progress, Skeleton } from "@/components/ui/misc";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
-import { api } from "@/lib/client/api";
+import { HelpTip } from "@/components/ui/tooltip";
+import { api, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
-import { qk, useBudget, useCategories, useCountries, useSettings } from "@/lib/client/queries";
+import { useUnsavedChanges } from "@/lib/client/locale-switch";
+import {
+  qk,
+  useBudget,
+  useCategories,
+  useConfig,
+  useCountries,
+  useSettings,
+} from "@/lib/client/queries";
 import type { Category, CompanyProfile, GoogleDataSummary, SecretInfo } from "@/lib/client/types";
 import { skuLabel, PRICING_VERIFIED_AT } from "@/lib/places/pricing";
+import { GoogleRetentionCard } from "./google-retention-card";
 import { MailboxSettingsSection } from "./mailbox-section";
+import { NoveltyRdapCard } from "./novelty-rdap-card";
 import { UnsubscribeSettingsSection } from "./unsubscribe-section";
-import { t } from "@/lib/i18n";
+import { getLocale, t, type TrKey } from "@/lib/i18n";
+import { mapIdProblem } from "@/lib/settings/map-id";
 
 function useInvalidateAll() {
   const qc = useQueryClient();
@@ -52,23 +65,29 @@ function useSave() {
       invalidate();
       toast.success(t("common.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
 }
 
 function Section({
   title,
   description,
+  help,
   children,
 }: {
   title: string;
   description?: string;
+  /** "Bu nedir?" balonu (yalnızca karmaşık kavramlarda; docs/07 §FR-UI-07). */
+  help?: TrKey;
   children: React.ReactNode;
 }) {
   return (
     <Card className="um-enter">
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="flex items-center gap-1.5 text-base">
+          {title}
+          {help && <HelpTip>{t(help)}</HelpTip>}
+        </CardTitle>
         {description && <CardDescription>{description}</CardDescription>}
       </CardHeader>
       <CardContent className="space-y-4 pt-3">{children}</CardContent>
@@ -112,6 +131,145 @@ function SaveBar({
   );
 }
 
+/* ----------------------------- Görünüm ve dil ----------------------------- */
+
+/**
+ * Masaüstü (Electron) yetenekleri: tarayıcıda yok. İlk çizimde sunucu ile aynı olsun diye etkiden sonra okunur.
+ * "Oturum açılınca başlat" desteği ana süreçten sorulur (paketsiz geliştirme sürümünde yoktur).
+ */
+function useDesktop() {
+  const [desktop, setDesktop] = useState<{ loginItem: boolean; osNotifications: boolean } | null>(
+    null,
+  );
+  useEffect(() => {
+    const um = window.universalMail;
+    if (!um) return;
+    let alive = true;
+    const osNotifications = !!um.osNotifications;
+    setDesktop({ loginItem: false, osNotifications });
+    void um
+      .getDesktopCaps?.()
+      .then((c) => alive && setDesktop({ loginItem: !!c?.loginItem, osNotifications }))
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return desktop;
+}
+
+type DesktopSettings = { "app.openAtLogin"?: boolean; "notifications.os"?: boolean };
+
+function AppearanceSection() {
+  const { data: config } = useConfig();
+  const { data } = useSettings();
+  const save = useSave();
+  const desktop = useDesktop();
+  const s = data?.settings as (NonNullable<typeof data>["settings"] & DesktopSettings) | undefined;
+  const openAtLogin = s?.["app.openAtLogin"] ?? false;
+  const osNotif = s?.["notifications.os"] ?? true;
+
+  // Masaüstü: kayıtlı "oturum açılınca başlat" tercihini işletim sistemiyle eşitle. Ana süreç işletim sisteminin
+  // GERÇEK durumuyla karşılaştırır; uygulama Oturum Öğeleri'nden kaldırıldıysa veya kayıt kaybolduysa yeniden uygular.
+  const loaded = !!s;
+  useEffect(() => {
+    if (desktop?.loginItem && loaded)
+      void window.universalMail?.setUiPrefs?.({ openAtLogin }).catch(() => undefined);
+  }, [desktop?.loginItem, openAtLogin, loaded]);
+
+  const toggle = (key: keyof DesktopSettings, value: boolean) =>
+    save.mutate(
+      { [key]: value },
+      {
+        onSuccess: () => {
+          if (key === "app.openAtLogin")
+            void window.universalMail?.setUiPrefs?.({ openAtLogin: value }).catch(() => undefined);
+        },
+      },
+    );
+
+  return (
+    <Section title={t("settings.appearance.title")} description={t("settings.appearance.desc")}>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">{t("settings.language")}</p>
+        <LanguageSwitch value={config?.language ?? getLocale()} />
+        <p className="text-[12px] text-muted-foreground">{t("settings.language.hint")}</p>
+      </div>
+      <div className="space-y-1.5">
+        <p className="text-sm font-medium">{t("settings.theme")}</p>
+        <ThemeSwitch />
+        <p className="text-[12px] text-muted-foreground">{t("settings.theme.hint")}</p>
+      </div>
+      <div className="space-y-3 border-t pt-3">
+        <p className="text-sm font-medium">{t("settings.desktop.title")}</p>
+        {desktop ? (
+          <>
+            {desktop.loginItem && (
+              <ToggleRow
+                id="open-at-login"
+                label={t("settings.openAtLogin.label")}
+                hint={t("settings.openAtLogin.hint")}
+                checked={openAtLogin}
+                disabled={!s || save.isPending}
+                onChange={(v) => toggle("app.openAtLogin", v)}
+              />
+            )}
+            {desktop.osNotifications && (
+              <ToggleRow
+                id="os-notifications"
+                label={t("settings.notificationsOs.label")}
+                hint={t("settings.notificationsOs.hint")}
+                checked={osNotif}
+                disabled={!s || save.isPending}
+                onChange={(v) => toggle("notifications.os", v)}
+              />
+            )}
+          </>
+        ) : (
+          <p className="text-[12px] text-muted-foreground">{t("settings.desktop.browserOnly")}</p>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function ToggleRow({
+  id,
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  hint: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <Switch
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onChange}
+        aria-describedby={`${id}-hint`}
+        className="mt-0.5"
+      />
+      <div className="min-w-0">
+        <label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </label>
+        <p id={`${id}-hint`} className="text-[12px] text-muted-foreground">
+          {hint}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /* ----------------------------- Google bağlantısı ----------------------------- */
 
 function SecretRow({
@@ -129,6 +287,7 @@ function SecretRow({
 }) {
   const invalidate = useInvalidateAll();
   const [value, setValue] = useState("");
+  useUnsavedChanges(value.trim() !== "");
   const [shown, setShown] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -142,7 +301,7 @@ function SecretRow({
       invalidate();
       toast.success(t("settings.key.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   const remove = useMutation({
     mutationFn: () => api(`/api/secrets?name=${name}`, { method: "DELETE" }),
@@ -151,13 +310,13 @@ function SecretRow({
       invalidate();
       toast.success(t("settings.key.removed"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   const test = useMutation({
     mutationFn: () =>
       api<{ ok: boolean; message: string }>("/api/setup/test-places", { method: "POST" }),
     onSuccess: setResult,
-    onError: (e: Error) => setResult({ ok: false, message: e.message }),
+    onError: (e: Error) => setResult({ ok: false, message: errorText(e) }),
   });
 
   const trimmed = value.trim();
@@ -277,10 +436,13 @@ function GoogleSection() {
   const save = useSave();
   const [mapId, setMapId] = useState("");
   useEffect(() => setMapId(data?.settings["maps.mapId"] ?? ""), [data?.settings]);
+  useUnsavedChanges(!!data && mapId.trim() !== (data.settings["maps.mapId"] ?? "").trim());
   if (!data) return <Skeleton className="h-64" />;
   const provider = data.settings["places.provider"];
   const savedMapId = data.settings["maps.mapId"] ?? "";
   const mapIdDirty = mapId.trim() !== savedMapId.trim();
+  // Satır içi doğrulama: sunucuyla aynı kural (src/lib/settings/map-id.ts); geçersizken Kaydet kapalı.
+  const mapIdErr = mapIdProblem(mapId);
 
   return (
     <Section title={t("settings.google.title")} description={t("settings.google.desc")}>
@@ -352,10 +514,13 @@ function GoogleSection() {
           className="space-y-2 border-t p-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (mapIdDirty) save.mutate({ "maps.mapId": mapId.trim() });
+            if (mapIdDirty && !mapIdErr) save.mutate({ "maps.mapId": mapId.trim() });
           }}
         >
-          <Label htmlFor="mapId">{t("settings.mapId")}</Label>
+          <Label htmlFor="mapId" className="flex items-center gap-1.5">
+            {t("settings.mapId")}
+            <HelpTip>{t("help.mapId")}</HelpTip>
+          </Label>
           <Input
             id="mapId"
             value={mapId}
@@ -363,9 +528,14 @@ function GoogleSection() {
             placeholder={t("settings.mapId.placeholder")}
             spellCheck={false}
             className="max-w-sm"
+            aria-invalid={!!mapIdErr}
+            aria-describedby={mapIdErr ? "mapId-err" : undefined}
           />
+          {mapIdErr && (
+            <FieldError id="mapId-err">{t(`settings.mapId.err.${mapIdErr}`)}</FieldError>
+          )}
           <p className="text-[12px] text-muted-foreground">{t("settings.mapId.help")}</p>
-          <SaveBar dirty={mapIdDirty} pending={save.isPending} />
+          <SaveBar dirty={mapIdDirty} valid={!mapIdErr} pending={save.isPending} />
         </form>
       </details>
     </Section>
@@ -391,7 +561,7 @@ function DemoTools({ epoch }: { epoch: number }) {
           : t("settings.demo.epoch", { n: r.epoch ?? 0 }),
       );
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   return (
     <div className="space-y-3 rounded-lg border border-dashed border-nov-future/50 bg-nov-future/5 p-3">
@@ -469,9 +639,14 @@ function BudgetSection() {
   const num = Number(value.replace(",", "."));
   const valid = Number.isFinite(num) && value.trim() !== "" && num >= 0 && num <= 100000;
   const dirty = !!data && valid && num !== data.settings["budget.monthlyUsd"];
+  useUnsavedChanges(!!data && value.trim() !== String(data.settings["budget.monthlyUsd"]));
 
   return (
-    <Section title={t("settings.budget.title")} description={t("settings.budget.desc")}>
+    <Section
+      title={t("settings.budget.title")}
+      description={t("settings.budget.desc")}
+      help="help.budget"
+    >
       <form
         className="space-y-3"
         onSubmit={(e) => {
@@ -480,13 +655,15 @@ function BudgetSection() {
         }}
       >
         <div className="space-y-1.5">
-          <Label htmlFor="budget">{t("settings.budget.monthly")}</Label>
+          <Label htmlFor="budget-monthly">{t("settings.budget.monthly")}</Label>
           <div className="flex items-center gap-2">
             <span className="text-sm text-muted-foreground" aria-hidden>
               $
             </span>
             <Input
-              id="budget"
+              // Bölüm çapası `#budget` (gezinme ve /settings#budget bağlantıları) ile çakışmasın; aksi halde etiket
+              // ilk eşleşen öğeye (bölüm kutusuna) bağlanır ve alan erişilebilir adını kaybeder.
+              id="budget-monthly"
               inputMode="decimal"
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -524,7 +701,7 @@ function BudgetSection() {
             }
           />
           {budget.level !== "ok" && (
-            <p className="flex items-center gap-1.5 text-[13px] font-medium text-[#6b5200]">
+            <p className="flex items-center gap-1.5 text-[13px] font-medium text-caution-text">
               <CircleAlert className="size-4 shrink-0" aria-hidden />
               {budget.level === "blocked"
                 ? t("settings.budget.blocked")
@@ -593,6 +770,7 @@ function MarketsSection() {
     !!data &&
     JSON.stringify([...selected].sort()) !==
       JSON.stringify([...(data?.settings["targets.countries"] ?? [])].sort());
+  useUnsavedChanges(dirty);
 
   return (
     <Section title={t("settings.markets.title")} description={t("settings.markets.desc")}>
@@ -691,6 +869,7 @@ function CompanySection() {
   };
   const saved = { ...EMPTY_COMPANY, ...(data?.settings["company.profile"] ?? {}) };
   const dirty = !!data && JSON.stringify(form) !== JSON.stringify(saved);
+  useUnsavedChanges(dirty);
   const valid =
     form.legalName.trim().length >= 2 &&
     form.address.trim().length >= 5 &&
@@ -801,7 +980,7 @@ function EmailSection() {
             ? t("settings.email.quotaUnknown")
             : t("settings.email.quota", { n: fmtNumber(r.remaining) }),
       }),
-    onError: (e: Error) => setQuota({ ok: false, message: e.message }),
+    onError: (e: Error) => setQuota({ ok: false, message: errorText(e) }),
   });
   if (!data) return <Skeleton className="h-48" />;
   const ext = data.settings["enrichment.external"];
@@ -896,10 +1075,15 @@ function NoveltySection() {
     v.newWindowDays <= 365;
   const saved = data?.settings["novelty.thresholds"];
   const dirty = !!saved && JSON.stringify(v) !== JSON.stringify(saved);
+  useUnsavedChanges(dirty);
   const num = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setV({ ...v, [k]: Number(e.target.value) });
   return (
-    <Section title={t("settings.novelty.title")} description={t("settings.novelty.desc")}>
+    <Section
+      title={t("settings.novelty.title")}
+      description={t("settings.novelty.desc")}
+      help="help.noveltyThresholds"
+    >
       <form
         className="space-y-4"
         onSubmit={(e) => {
@@ -951,6 +1135,11 @@ function NoveltySection() {
         {!valid && <FieldError id="novelty-err">{t("settings.novelty.invalid")}</FieldError>}
         <SaveBar dirty={dirty} valid={valid} pending={save.isPending} />
       </form>
+      {data ? (
+        <NoveltyRdapCard youngDays={data.settings["novelty.domainYoungDays"]} />
+      ) : (
+        <Skeleton className="h-40" />
+      )}
     </Section>
   );
 }
@@ -963,12 +1152,13 @@ function CategoryEditor({ c }: { c: Category }) {
   const invalidate = useInvalidateAll();
   const [type, setType] = useState("");
   const [kw, setKw] = useState("");
+  useUnsavedChanges(type.trim() !== "" || kw.trim() !== "");
   const [pendingChip, setPendingChip] = useState<{ kind: ChipKind; tag: string } | null>(null);
   const patch = useMutation({
     mutationFn: (p: Partial<Pick<Category, "enabled" | "keywords" | "placeTypes">>) =>
       api(`/api/categories/${c.id}`, { method: "PATCH", json: p }),
     onSuccess: invalidate,
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   /** Hazır kategoride onay ister; özel kategoride hemen kaldırır ve "Geri al" sunar. */
   const removeChip = async (kind: ChipKind, tag: string) => {
@@ -980,7 +1170,7 @@ function CategoryEditor({ c }: { c: Category }) {
         onClick: () => {
           api(`/api/categories/${c.id}`, { method: "PATCH", json: { [kind]: before } })
             .then(invalidate)
-            .catch((e: Error) => toast.error(e.message));
+            .catch((e: Error) => toast.error(errorText(e)));
         },
       },
     });
@@ -1124,7 +1314,7 @@ function GoogleDataBox() {
         void qc.invalidateQueries({ queryKey: [key] });
       toast.success(t("settings.data.google.cleared"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   return (
     <div className="space-y-2 rounded-lg border p-3">
@@ -1160,6 +1350,7 @@ function DataSection() {
   const save = useSave();
   const [days, setDays] = useState(30);
   useEffect(() => data && setDays(data.settings["google.cacheDays"]), [data]);
+  useUnsavedChanges(!!data && days !== data.settings["google.cacheDays"]);
   if (!data) return <Skeleton className="h-40" />;
   const consent = data.settings.consent;
   const daysValid = Number.isInteger(days) && days >= 1 && days <= 30;
@@ -1216,6 +1407,7 @@ function DataSection() {
         {t("settings.data.googleNote")}
       </p>
       <GoogleDataBox />
+      <GoogleRetentionCard />
       <details className="rounded-lg bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground">
           {t("settings.about.title")}
@@ -1231,6 +1423,7 @@ function DataSection() {
 }
 
 const SECTIONS = [
+  { id: "appearance", key: "settings.nav.appearance" },
   { id: "google", key: "settings.nav.google" },
   { id: "budget", key: "settings.nav.budget" },
   { id: "markets", key: "settings.nav.markets" },
@@ -1354,6 +1547,9 @@ export function SettingsPage() {
               </Card>
             ) : (
               <>
+                <div id="appearance" className="scroll-mt-16 lg:scroll-mt-6">
+                  <AppearanceSection />
+                </div>
                 <div id="google" className="scroll-mt-16 lg:scroll-mt-6">
                   <GoogleSection />
                 </div>

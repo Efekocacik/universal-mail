@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
+import { parseSchematicView } from "./map-math";
 import { LABEL_COLORS, type MapViewProps } from "./map-types";
+
+const VIEW_KEY = "um.explore.schematicView";
+
+/** Temas durumu kodu → halka rengi (FR-UI-02: gönderildi, yanıt verdi, durduruldu ayrı gösterilir). */
+const CONTACT_STROKE = [
+  "var(--pin-border)",
+  "var(--contacted)",
+  "var(--success)",
+  "var(--muted-foreground)",
+] as const;
 
 /**
  * Şematik demo görünümü: arka plan haritası olmayan, koordinatları düzlemde gösteren basit görünüm.
@@ -20,6 +31,7 @@ const DEFAULT_VIEW: View = { cx: 10, cy: -50, scale: 0.05 };
 export function SchematicMapView({
   points,
   selectedId,
+  checkedIds,
   onSelect,
   draft,
   onBoundsChange,
@@ -29,6 +41,15 @@ export function SchematicMapView({
   const [size, setSize] = useState({ w: 800, h: 600 });
   const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [fitted, setFitted] = useState(false);
+  // Hatırlanan görünüm (merkez enlem/boylam + ölçek): ilk veride otomatik sığdırma yerine buna dönülür.
+  const saved = useRef<{ lat: number; lng: number; scale: number } | null | undefined>(undefined);
+  if (saved.current === undefined) {
+    try {
+      saved.current = parseSchematicView(localStorage.getItem(VIEW_KEY));
+    } catch {
+      saved.current = null;
+    }
+  }
   const drag = useRef<{ x: number; y: number; cx: number; cy: number; moved: boolean } | null>(
     null,
   );
@@ -66,10 +87,14 @@ export function SchematicMapView({
     [toWorld, size.w, size.h],
   );
 
-  // İlk anlamlı veri geldiğinde sığdır.
+  // İlk anlamlı veri geldiğinde sığdır (hatırlanan görünüm varsa ona dön).
   useEffect(() => {
     if (fitted || size.w < 50) return;
-    if (points.length > 0) {
+    const s = saved.current;
+    if (s && points.length > 0) {
+      setView({ cx: s.lng * kx, cy: -s.lat, scale: s.scale });
+      setFitted(true);
+    } else if (points.length > 0) {
       const lats = points.map((p) => p[1]!);
       const lngs = points.map((p) => p[2]!);
       fitTo({
@@ -83,7 +108,7 @@ export function SchematicMapView({
       fitTo(draft.bbox);
       setFitted(true);
     }
-  }, [points, draft, fitted, fitTo, size.w]);
+  }, [points, draft, fitted, fitTo, size.w, kx]);
 
   useEffect(() => {
     if (!focus) return;
@@ -105,15 +130,25 @@ export function SchematicMapView({
         north: -(view.cy - halfH),
         south: -(view.cy + halfH),
       });
+      if (fitted) {
+        try {
+          localStorage.setItem(
+            VIEW_KEY,
+            JSON.stringify({ lat: -view.cy, lng: view.cx / kx, scale: view.scale }),
+          );
+        } catch {
+          /* depolama kapalı olabilir */
+        }
+      }
     }, 200);
     return () => clearTimeout(id);
-  }, [view, size, kx, onBoundsChange]);
+  }, [view, size, kx, onBoundsChange, fitted]);
 
   const sx = (x: number) => (x - view.cx) / view.scale + size.w / 2;
   const sy = (y: number) => (y - view.cy) / view.scale + size.h / 2;
 
   const visible = useMemo(() => {
-    const out: { id: number; x: number; y: number; color: string; contacted: boolean }[] = [];
+    const out: { id: number; x: number; y: number; color: string; contact: number }[] = [];
     for (const p of points) {
       const w = toWorld(p[1]!, p[2]!);
       const x = sx(w.x);
@@ -124,7 +159,7 @@ export function SchematicMapView({
         x,
         y,
         color: LABEL_COLORS[p[3] ?? 3] ?? LABEL_COLORS[3],
-        contacted: p[4] !== 0,
+        contact: p[4] ?? 0,
       });
     }
     return out;
@@ -142,7 +177,7 @@ export function SchematicMapView({
   return (
     <div
       ref={ref}
-      className="relative size-full cursor-grab touch-none select-none overflow-hidden bg-[#eef1ec] active:cursor-grabbing"
+      className="relative size-full cursor-grab touch-none select-none overflow-hidden bg-map-bg active:cursor-grabbing"
       onPointerDown={(e) => {
         drag.current = { x: e.clientX, y: e.clientY, cx: view.cx, cy: view.cy, moved: false };
         (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -182,34 +217,53 @@ export function SchematicMapView({
             y={region.y}
             width={region.w}
             height={region.h}
-            fill="rgba(20,112,90,0.08)"
-            stroke="#14705a"
+            style={{ fill: "var(--map-stroke)", fillOpacity: 0.08, stroke: "var(--map-stroke)" }}
             strokeWidth={2}
             strokeDasharray="6 4"
           />
         )}
-        {visible.map((p) => (
-          <circle
-            key={p.id}
-            data-pin="1"
-            cx={p.x}
-            cy={p.y}
-            r={selectedId === p.id ? 9 : 5}
-            fill={p.color}
-            stroke={selectedId === p.id ? "#0d4d3d" : p.contacted ? "#2563eb" : "#fff"}
-            strokeWidth={selectedId === p.id ? 3 : 1.5}
-            className="cursor-pointer"
-            onPointerUp={(e) => {
-              e.stopPropagation();
-              if (!drag.current?.moved) onSelect(p.id);
-              drag.current = null;
-            }}
-          />
-        ))}
+        {visible.map((p) => {
+          const checked = checkedIds.has(p.id);
+          return (
+            <g key={p.id}>
+              {checked && (
+                <circle
+                  cx={p.x}
+                  cy={p.y}
+                  r={selectedId === p.id ? 13 : 9}
+                  fill="none"
+                  strokeWidth={2.5}
+                  style={{ stroke: "var(--foreground)" }}
+                  data-checked="1"
+                  pointerEvents="none"
+                />
+              )}
+              <circle
+                data-pin="1"
+                data-contact={p.contact || undefined}
+                cx={p.x}
+                cy={p.y}
+                r={selectedId === p.id ? 9 : 5}
+                style={{
+                  fill: p.color,
+                  stroke:
+                    selectedId === p.id
+                      ? "var(--map-stroke)"
+                      : (CONTACT_STROKE[p.contact] ?? "var(--pin-border)"),
+                }}
+                strokeWidth={selectedId === p.id ? 3 : p.contact ? 2 : 1.5}
+                strokeDasharray={p.contact === 3 && selectedId !== p.id ? "2 1.5" : undefined}
+                className="cursor-pointer"
+                onPointerUp={(e) => {
+                  e.stopPropagation();
+                  if (!drag.current?.moved) onSelect(p.id);
+                  drag.current = null;
+                }}
+              />
+            </g>
+          );
+        })}
       </svg>
-      <div className="pointer-events-none absolute left-3 top-3 rounded-md bg-card/90 px-2.5 py-1.5 text-[12px] text-muted-foreground shadow-xs ring-1 ring-border">
-        {t("map.schematic.banner")}
-      </div>
     </div>
   );
 }

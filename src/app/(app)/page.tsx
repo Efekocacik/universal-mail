@@ -1,7 +1,38 @@
 import { ExplorePage } from "@/features/explore/explore-page";
+import { parseExploreLink } from "@/features/explore/deep-link";
+import { database } from "@/lib/api/http";
+import { getSetting } from "@/lib/settings";
 
-export default async function Page({ searchParams }: { searchParams: Promise<{ scan?: string }> }) {
-  const { scan } = await searchParams;
-  const id = Number(scan);
-  return <ExplorePage initialScanId={Number.isInteger(id) && id > 0 ? id : undefined} />;
+/** Ayar okunamazsa (ör. ilk kurulum) "yeni" penceresinin varsayılanı. */
+const FALLBACK_WINDOW_DAYS = 60;
+
+async function newWindowDays(): Promise<number> {
+  try {
+    return (await getSetting(await database(), "novelty.thresholds")).newWindowDays;
+  } catch (e) {
+    console.warn(
+      `[explore] "yeni" penceresi okunamadı (${(e as Error).name}); varsayılan kullanılıyor.`,
+    );
+    return FALLBACK_WINDOW_DAYS;
+  }
+}
+
+/**
+ * Keşif. Bağlantı parametreleri (gösterge paneli ve bildirimler kullanır): `scan`, `lifecycle=opened|future|new`
+ * (virgülle birden çok), `detectedSince=<epoch ms>`, `archived=1`. Geçersiz değerler yok sayılır. `opened`/`new`
+ * bağlantısı `detectedSince` taşımıyorsa ayarlardaki "yeni" penceresi (son N gün) uygulanır; bkz. `parseExploreLink`.
+ */
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const sp = await searchParams;
+  const lc = String(sp.lifecycle ?? "");
+  const needsWindow = /\b(opened|new)\b/.test(lc) && !sp.detectedSince;
+  const initial = parseExploreLink(sp, {
+    defaultWindowDays: needsWindow ? await newWindowDays() : undefined,
+  });
+  // Başka bir bağlantıyla (ör. gösterge panelinden) gelinirse keşif durumu o bağlantıyla yeniden kurulur.
+  return <ExplorePage key={JSON.stringify(initial)} initial={initial} />;
 }

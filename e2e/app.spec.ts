@@ -106,7 +106,8 @@ test("süzgeçler: yenilik etiketi listeyi daraltır; temizleyince geri gelir", 
   await page.goto("/");
   const total = page.getByText(/^[\d.]+ işletme$/).first();
   const all = Number((await total.textContent())!.replace(/\D/g, ""));
-  await page.getByRole("button", { name: /^Yenilik/ }).click();
+  // "Yenilik" (skor etiketi) süzgeci; Faz 4'teki "Yenilikler" (yaşam döngüsü) süzgeciyle karışmasın.
+  await page.getByRole("button", { name: /^Yenilik(?!ler)/ }).click();
   await page.getByText("Yakında açılacak").last().click();
   await page.keyboard.press("Escape");
   await expect

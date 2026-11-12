@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { EmptyState } from "@/components/ui/page";
+import { HelpTip } from "@/components/ui/tooltip";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import {
@@ -100,7 +101,12 @@ export function PolicyPanel() {
   const live = q.data.live;
   return (
     <div className="space-y-4">
-      <Notice>{t("policy.note")}</Notice>
+      <Notice>
+        <span className="inline-flex items-start gap-1.5">
+          <span>{t("policy.note")}</span>
+          <HelpTip className="mt-0.5 shrink-0">{t("help.policyMode")}</HelpTip>
+        </span>
+      </Notice>
       <div className="relative max-w-sm">
         <Search
           className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"

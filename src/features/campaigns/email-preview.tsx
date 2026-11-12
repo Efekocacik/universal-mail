@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { PREVIEW_SANDBOX, previewDocument } from "./preview-doc";
+import { PREVIEW_SANDBOX, PREVIEW_TEXT_COLOR, previewDocument } from "./preview-doc";
 
 /** Önizleme çerçevesi; yalıtım kuralları için bkz. `preview-doc.ts`. */
 
@@ -86,7 +86,10 @@ export function EmailPreview({
           className="block h-80 w-full bg-white"
         />
       ) : (
-        <pre className="um-scroll h-80 w-full whitespace-pre-wrap break-words bg-white p-4 font-sans text-[14px] leading-relaxed text-[#1f2328]">
+        <pre
+          className="um-scroll h-80 w-full whitespace-pre-wrap break-words bg-white p-4 font-sans text-[14px] leading-relaxed"
+          style={{ color: PREVIEW_TEXT_COLOR }}
+        >
           {plain}
         </pre>
       )}

@@ -84,12 +84,24 @@ export interface TemplateDraft {
   categoryKey?: string | null;
   subject: string;
   bodyHtml: string;
+  /**
+   * Faz 4 (9d): takip şablonunda ilk e-postanın konusu "Re:" ile kullanılsın mı (varsayılan AÇIK). İlk e-posta
+   * şablonunda anlamsızdır ve yok sayılır.
+   */
+  followupReuseSubject?: boolean;
 }
 
 interface Prepared {
   fields: Pick<
     typeof templates.$inferInsert,
-    "name" | "language" | "kind" | "categoryKey" | "subject" | "bodyHtml" | "bodyText"
+    | "name"
+    | "language"
+    | "kind"
+    | "categoryKey"
+    | "subject"
+    | "bodyHtml"
+    | "bodyText"
+    | "followupReuseSubject"
   >;
   warnings: (TemplateIssue | ContentIssue)[];
 }
@@ -123,6 +135,7 @@ async function prepare(db: Db, draft: TemplateDraft): Promise<Prepared> {
       subject: draft.subject.trim(),
       bodyHtml: v.sanitizedHtml,
       bodyText,
+      followupReuseSubject: draft.followupReuseSubject ?? true,
     },
     warnings: [...v.warnings, ...content.warnings],
   };
@@ -179,6 +192,7 @@ export async function updateTemplate(
     categoryKey: patch.categoryKey === undefined ? current.categoryKey : patch.categoryKey,
     subject: patch.subject ?? current.subject,
     bodyHtml: patch.bodyHtml ?? current.bodyHtml,
+    followupReuseSubject: patch.followupReuseSubject ?? current.followupReuseSubject,
   });
   return db.transaction(async (tx) => {
     await assertNotLocked(tx, id);
@@ -252,6 +266,7 @@ export async function duplicateTemplate(
       categoryKey: src.categoryKey,
       subject: src.subject,
       bodyHtml: src.bodyHtml,
+      followupReuseSubject: src.followupReuseSubject,
     },
     now,
   );
@@ -274,6 +289,8 @@ export interface TemplateListItem {
   builtIn: boolean;
   version: number;
   subject: string;
+  /** Takip şablonunda ilk e-postanın konusu "Re:" ile kullanılır (9d). */
+  followupReuseSubject: boolean;
   archived: boolean;
   updatedAt: number;
   /** Kilitleyen (hazır/çalışan/duraklatılmış) kampanya sayısı; sıfırdan büyükse içerik değiştirilemez. */
@@ -311,6 +328,7 @@ export async function listTemplates(
       builtIn: t.builtIn,
       version: t.version,
       subject: t.subject,
+      followupReuseSubject: t.followupReuseSubject,
       archived: t.archivedAt !== null,
       updatedAt: t.updatedAt,
       lockedBy: lockSets.get(t.id)?.size ?? 0,
@@ -337,6 +355,7 @@ export async function getTemplateDetail(db: DbExecutor, id: number): Promise<Tem
     builtIn: t.builtIn,
     version: t.version,
     subject: t.subject,
+    followupReuseSubject: t.followupReuseSubject,
     archived: t.archivedAt !== null,
     updatedAt: t.updatedAt,
     bodyHtml: t.bodyHtml,
@@ -428,12 +447,36 @@ interface ComposeInput {
    * işaretlidir ve uç nokta doğrulanmadıysa örnek çıkış bağlantısı kullanılır. Kampanya yolu bunu ASLA vermez.
    */
   selfTest?: boolean;
+  /**
+   * Faz 4 (9d): takip iletisinde konuşmanın İLK e-postasının gönderilen konusu. Şablon takip türündeyse ve
+   * `followup_reuse_subject` açıksa konu `Re: <ilk konu>` olur (gönderim tarafı ayrıca In-Reply-To/References ve
+   * sağlayıcının konuşma kimliğini verir). Bu "Re:" yanıltıcı DEĞİLDİR: ileti gerçekten aynı konuşmadaki önceki iletimize yanıttır.
+   * Şablonun kendi konusundaki "Re:" yasağı (`content-check`) aynen geçerlidir.
+   */
+  threadSubject?: string | null;
 }
 
 type ComposeSource = Pick<
   typeof templates.$inferSelect,
   "id" | "version" | "language" | "subject" | "bodyHtml" | "archivedAt"
->;
+> &
+  Partial<Pick<typeof templates.$inferSelect, "kind" | "followupReuseSubject">>;
+
+/** "Re:"/"YNT:" gibi yanıt öneklerini (tekrarlı da olsa) baştan siler. */
+export function stripReplyPrefixes(subject: string): string {
+  let s = subject.trim();
+  for (let i = 0; i < 5; i++) {
+    const next = s.replace(/^\s*(?:re|ynt|aw|sv|vs)\s*(?:\[\d+\])?\s*:\s*/i, "");
+    if (next === s) break;
+    s = next;
+  }
+  return s;
+}
+
+/** Takip iletisinin konusu: ilk e-postanın konusunun yanıt biçimi (en çok 200 karakter). */
+export function threadReplySubject(firstSubject: string): string {
+  return `Re: ${stripReplyPrefixes(firstSubject)}`.slice(0, 200);
+}
 
 async function composeCore(
   db: DbExecutor,
@@ -519,6 +562,12 @@ async function composeCore(
 
   const html = footer ? `${body.html}\n${footer.html}` : body.html;
   const text = footer ? `${body.text}\n\n${footer.text}` : body.text;
+  // Konu devamı (9d): içerik denetimi şablonun kendi konusuyla yapıldıktan SONRA uygulanır.
+  const threadSubject = input.threadSubject?.trim();
+  const subject =
+    threadSubject && tpl.kind === "followup" && tpl.followupReuseSubject === true
+      ? threadReplySubject(threadSubject)
+      : body.subject;
   return {
     sendable: input.purpose === "send" && errors.length === 0,
     errors,
@@ -526,11 +575,11 @@ async function composeCore(
     templateId: tpl.id,
     templateVersion: tpl.version,
     language,
-    subject: body.subject,
-    subjectLogged: body.subject,
+    subject,
+    subjectLogged: subject,
     html,
     text,
-    bodySha256: contentSha256(body.subject, text, html),
+    bodySha256: contentSha256(subject, text, html),
     missing: body.missing,
   };
 }

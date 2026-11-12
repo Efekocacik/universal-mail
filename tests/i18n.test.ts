@@ -1,8 +1,20 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { t } from "@/lib/i18n";
-import { tr } from "@/lib/i18n/tr";
+import {
+  getLocale,
+  hasTranslation,
+  intlLocale,
+  isLocale,
+  onLocaleChange,
+  setLocale,
+  t,
+  type TrKey,
+} from "@/lib/i18n";
+import { enCoverage, formatCoverage } from "@/lib/i18n/coverage";
+import { en, EN_FRAGMENTS } from "@/lib/i18n/en";
+import { tr, TR_FRAGMENTS } from "@/lib/i18n/tr";
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -14,9 +26,9 @@ function walk(dir: string, out: string[] = []): string[] {
 }
 
 const SRC = path.resolve(__dirname, "..", "src");
-const files = walk(SRC).filter(
-  (f) => !f.endsWith(path.join("i18n", "tr.ts")) && !f.endsWith(path.join("i18n", "index.ts")),
-);
+// Sözlük ve dil çalışma zamanı dosyaları (src/lib/i18n/**) taranmaz; yalnızca anahtarı KULLANAN kod taranır.
+const I18N_DIR = path.join(SRC, "lib", "i18n") + path.sep;
+const files = walk(SRC).filter((f) => !f.startsWith(I18N_DIR));
 
 describe("i18n", () => {
   it("kodda kullanılan her sabit çeviri anahtarı sözlükte bulunur", () => {
@@ -90,5 +102,96 @@ describe("i18n", () => {
       expect(v.trim().length, k).toBeGreaterThan(0);
       expect(v.includes("{}"), k).toBe(false);
     }
+  });
+});
+
+describe("i18n: parça düzeni (Faz 4)", () => {
+  it("tr/base.ts DONDURULDU: Faz 4 öncesi tr.ts (5475f05) ile aynı anahtar ve değerler (bilinçli silmeler hariç)", () => {
+    // Özet, bölmeden önceki `git show 5475f05:src/lib/i18n/tr.ts` sözlüğünün aynı yöntemle hesaplanmış özetidir. Faz 4
+    // anahtarları paketin kendi parçasına eklenir; base.ts'te bir metni bilerek düzeltirseniz bu özeti de güncelleyin.
+    // Bilinçli değişiklikler: Faz 4 entegrasyonunda kullanılmayan `sequenceStatus.complaint` kaldırıldı (F'nin
+    // `sequenceStop.*` anahtarları yerini aldı) → 1673'ten 1672'ye.
+    const entries = Object.entries(TR_FRAGMENTS.base as Record<string, string>).sort(([a], [b]) =>
+      a < b ? -1 : a > b ? 1 : 0,
+    );
+    expect(entries).toHaveLength(1672);
+    expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
+      "abca313075fd796f991ebed09c8951ff9c45906db3fb2454641dec0f171f3cdf",
+    );
+  });
+
+  it("bir anahtar yalnızca bir Türkçe parçada bulunur (paketler birbirinin anahtarını ezmez)", () => {
+    const seen = new Map<string, string>();
+    const dupes: string[] = [];
+    for (const [name, frag] of Object.entries(TR_FRAGMENTS))
+      for (const k of Object.keys(frag)) {
+        const prev = seen.get(k);
+        if (prev) dupes.push(`${k}: ${prev} + ${name}`);
+        seen.set(k, name);
+      }
+    expect(dupes).toEqual([]);
+    expect(seen.size).toBe(Object.keys(tr).length);
+  });
+
+  it("her İngilizce parça yalnızca kendi Türkçe parçasının anahtarlarını içerir", () => {
+    expect(Object.keys(EN_FRAGMENTS).sort()).toEqual(Object.keys(TR_FRAGMENTS).sort());
+    const stray: string[] = [];
+    for (const [name, frag] of Object.entries(EN_FRAGMENTS)) {
+      const trFrag = TR_FRAGMENTS[name as keyof typeof TR_FRAGMENTS] as Record<string, string>;
+      for (const k of Object.keys(frag)) if (!(k in trFrag)) stray.push(`${name}: ${k}`);
+    }
+    expect(stray).toEqual([]);
+    for (const [k, v] of Object.entries(en)) expect(String(v).trim().length, k).toBeGreaterThan(0);
+  });
+
+  it("İngilizce kapsam: her parça tam çevrili; yer tutucular Türkçeyle aynı", () => {
+    const rows = enCoverage();
+    // Faz 4 entegrasyonundan beri tüm parçalar tamdır (`en` türü de `Record<TrKey, string>`); eksik artık hatadır.
+    const missing = rows.filter((r) => r.missing.length > 0);
+    expect(
+      missing.map((r) => `${r.fragment}: ${r.missing.slice(0, 5).join(", ")}`),
+      formatCoverage(rows),
+    ).toEqual([]);
+    expect(rows.flatMap((r) => r.placeholderMismatch)).toEqual([]);
+  });
+});
+
+describe("i18n: dil çalışma zamanı", () => {
+  it("varsayılan Türkçe; setLocale geçersiz değeri yok sayar; dinleyiciler bilgilendirilir", () => {
+    expect(getLocale()).toBe("tr");
+    const seen: string[] = [];
+    const off = onLocaleChange((l) => seen.push(l));
+    try {
+      setLocale("xx" as never);
+      expect(getLocale()).toBe("tr");
+      setLocale("en");
+      setLocale("en"); // değişiklik yok → bildirim yok
+      expect(getLocale()).toBe("en");
+      expect(intlLocale()).toBe("en-GB");
+      setLocale("tr");
+      expect(seen).toEqual(["en", "tr"]);
+      expect(intlLocale()).toBe("tr-TR");
+      expect(intlLocale("en")).toBe("en-GB");
+    } finally {
+      off();
+      setLocale("tr");
+    }
+    expect(isLocale("en")).toBe(true);
+    expect(isLocale("de")).toBe(false);
+  });
+
+  it("t(): açık dil parametresi; İngilizcesi olmayan anahtar Türkçeye düşer", () => {
+    expect(t("nav.dashboard", undefined, "en")).toBe("Dashboard");
+    expect(t("nav.dashboard")).toBe("Gösterge paneli");
+    expect(t("notif.scanDone.title", { n: 12 }, "en")).toBe("12 new businesses found");
+    expect(t("notif.scanDone.title", { n: 12 }, "tr")).toBe("12 yeni işletme bulundu");
+    // Sözlük dışı bir dize (ör. sunucudan gelen bilinmeyen kod) İngilizcede de Türkçeye/anahtarın kendisine düşer.
+    const key = "common.save" satisfies TrKey;
+    expect(t(key, undefined, "en")).toBe(en[key]);
+    const unknown = "yok.boyle.bir.anahtar" as TrKey;
+    expect(hasTranslation(unknown, "en")).toBe(false);
+    expect(t(unknown, undefined, "en")).toBe("yok.boyle.bir.anahtar");
+    expect(hasTranslation("nav.dashboard", "en")).toBe(true);
+    expect(hasTranslation("nav.dashboard", "tr")).toBe(true);
   });
 });

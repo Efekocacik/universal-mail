@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, sql } from "drizzle-orm";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { audit } from "@/lib/db/audit";
@@ -12,7 +12,9 @@ import {
   type CampaignLeadStatus,
   type CampaignStatus,
   type SendWindow,
+  type SequenceStopReason,
 } from "@/lib/db/schema";
+import { effectiveStopReasonSql } from "@/lib/mail/inbound/complaint-sql";
 import { isSupportedLanguage } from "@/lib/mail/language";
 import { MIN_GAP_S } from "@/lib/mail/scheduler/throttle";
 import { DEFAULT_SEND_WINDOW, effectiveWindow } from "@/lib/mail/scheduler/window";
@@ -310,17 +312,54 @@ export async function setCampaignSteps(
 
 export type SequenceCounts = Partial<Record<CampaignLeadStatus, number>>;
 
-async function countsFor(db: DbExecutor, ids: number[]): Promise<Map<number, SequenceCounts>> {
-  const out = new Map<number, SequenceCounts>();
+/**
+ * Ayrıntılı dizi sayımı (Aşama 15.10-2, Faz 4 "hata a"): (durum, en az bir kampanya iletisi kabul edildi mi, etkin
+ * durma nedeni) başına dizi sayısı. `contacted` = `last_sent_at` dolu (yalnızca kabul edilmiş gönderim sonrası yazılır).
+ * `stopReason`: `stop_reason` sütunu, boşsa eski `"arf_complaint"` işareti (bkz. `inbound/complaint.ts`).
+ */
+export interface SequenceBreakdownRow {
+  status: CampaignLeadStatus;
+  contacted: boolean;
+  stopReason: SequenceStopReason | null;
+  n: number;
+}
+
+interface CampaignCounts {
+  counts: SequenceCounts;
+  breakdown: SequenceBreakdownRow[];
+}
+
+/**
+ * Tek sorgu, kampanya başına gruplu (campaign_leads_uq öneki: campaign_id). Salt okunur; yeni dizin gerekmez.
+ * `counts` eski biçimdedir (durum başına toplam) — geriye uyumlu.
+ */
+async function countsFor(db: DbExecutor, ids: number[]): Promise<Map<number, CampaignCounts>> {
+  const out = new Map<number, CampaignCounts>();
   if (ids.length === 0) return out;
+  const contacted = sql<number>`(${campaignLeads.lastSentAt} IS NOT NULL)`;
+  const reason = effectiveStopReasonSql();
   const rows = await db
-    .select({ campaignId: campaignLeads.campaignId, status: campaignLeads.status, n: count() })
+    .select({
+      campaignId: campaignLeads.campaignId,
+      status: campaignLeads.status,
+      contacted,
+      stopReason: reason,
+      n: count(),
+    })
     .from(campaignLeads)
     .where(inArray(campaignLeads.campaignId, ids))
-    .groupBy(campaignLeads.campaignId, campaignLeads.status);
+    .groupBy(campaignLeads.campaignId, campaignLeads.status, contacted, reason);
   for (const r of rows) {
-    const c = out.get(r.campaignId) ?? {};
-    c[r.status] = Number(r.n);
+    const c = out.get(r.campaignId) ?? { counts: {}, breakdown: [] };
+    const n = Number(r.n);
+    c.counts[r.status] = (c.counts[r.status] ?? 0) + n;
+    c.breakdown.push({
+      status: r.status,
+      contacted: Number(r.contacted) === 1,
+      stopReason:
+        r.stopReason === "complaint" || r.stopReason === "unsubscribe" ? r.stopReason : null,
+      n,
+    });
     out.set(r.campaignId, c);
   }
   return out;
@@ -338,9 +377,11 @@ export interface CampaignSummary {
   startedAt: number | null;
   finishedAt: number | null;
   counts: SequenceCounts;
+  /** Gönderim ve durma nedeni ayrımlı sayım; düz dille özet `plainCounts` ile hesaplanır. */
+  breakdown: SequenceBreakdownRow[];
 }
 
-function summary(c: CampaignRow, counts: SequenceCounts | undefined): CampaignSummary {
+function summary(c: CampaignRow, counts: CampaignCounts | undefined): CampaignSummary {
   return {
     id: c.id,
     name: c.name,
@@ -352,7 +393,8 @@ function summary(c: CampaignRow, counts: SequenceCounts | undefined): CampaignSu
     updatedAt: c.updatedAt,
     startedAt: c.startedAt,
     finishedAt: c.finishedAt,
-    counts: counts ?? {},
+    counts: counts?.counts ?? {},
+    breakdown: counts?.breakdown ?? [],
   };
 }
 

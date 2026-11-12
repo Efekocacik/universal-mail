@@ -464,8 +464,10 @@ describe("arayüz bağlantısı (DOM'suz kaynak denetimi)", () => {
   it("kuyruk: yeniden denetleme yalnızca taslak/hazır kampanyada ve hariç tutulan varken görünür", () => {
     const src = read("queue-table.tsx");
     expect(src).toMatch(/campaignLeadsApi\.reevaluate\(campaignId\)/);
-    expect(src).toMatch(/editable && excludedCount > 0 && \(/);
-    expect(src).toMatch(/campaignStatus === "draft" \|\| campaignStatus === "ready"/);
+    // Faz 4: görünüm saf modelden gelir (taslak/hazır → düğme; çalışan/duraklatılmış → neden açıklaması).
+    expect(src).toMatch(/reevalView === "button" && \(/);
+    expect(src).toMatch(/reevalView === "closed" && \(/);
+    expect(read("queue-model.ts")).toMatch(/"draft",\s*"ready"/);
     // Kırmızı değil: zararsız, geri alınabilir bir işlem (çerçeveli düğme).
     expect(src).toMatch(/variant="outline"\s+onClick=\{\(\) => reevaluate\.mutate/);
   });

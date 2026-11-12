@@ -1,7 +1,12 @@
 import { database, HttpError, json, route, body } from "@/lib/api/http";
-import { createAndStartScan, listScans } from "@/lib/scan/service";
+import { listScans } from "@/lib/scan/service";
 import { z } from "zod";
-import { checkTargetCountry, requireCollectionReady, requirePaidScanAllowed } from "./guard";
+import {
+  checkTargetCountry,
+  requireCollectionReady,
+  requirePaidScanAllowed,
+  startScanOrThrow,
+} from "./guard";
 import { scanRequestSchema } from "./schema";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +32,8 @@ export const GET = route(async () => {
       createdAt: r.scan.createdAt,
       startedAt: r.scan.startedAt,
       finishedAt: r.scan.finishedAt,
+      origin: r.scan.origin,
+      scheduleId: r.scan.scheduleId,
     })),
   });
 });
@@ -43,7 +50,7 @@ export const POST = route(async (req: Request) => {
   if (country.blocked) throw new HttpError(400, country.message!, { code: "COUNTRY_NOT_TARGETED" });
   await requirePaidScanAllowed(db, request, acknowledgeRisk);
 
-  const created = await createAndStartScan(db, {
+  const created = await startScanOrThrow(db, {
     ...request,
     region: { ...request.region, countryCode: request.region.countryCode ?? country.countryCode },
   });

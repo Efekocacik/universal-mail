@@ -96,6 +96,8 @@ export interface Draft {
   kind: Kind;
   subject: string;
   bodyHtml: string;
+  /** Takip şablonunda ilk e-postanın konusu "Re:" ile kullanılır (9d). İlk e-posta şablonunda etkisizdir. */
+  followupReuseSubject: boolean;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -104,10 +106,12 @@ export const EMPTY_DRAFT: Draft = {
   kind: "initial",
   subject: "",
   bodyHtml: "",
+  followupReuseSubject: true,
 };
 
 export function toDraft(
-  d: Pick<TemplateDetail, "name" | "language" | "kind" | "subject" | "bodyHtml">,
+  d: Pick<TemplateDetail, "name" | "language" | "kind" | "subject" | "bodyHtml"> &
+    Partial<Pick<TemplateDetail, "followupReuseSubject">>,
 ): Draft {
   return {
     name: d.name,
@@ -115,7 +119,15 @@ export function toDraft(
     kind: d.kind,
     subject: d.subject,
     bodyHtml: d.bodyHtml,
+    followupReuseSubject: d.followupReuseSubject ?? true,
   };
+}
+
+/** Konu alanının açıklaması: takip şablonunda konu devamı açıksa şablon konusu yalnızca yedektir (9d). */
+export function subjectHintKey(
+  d: Pick<Draft, "kind" | "followupReuseSubject">,
+): "tplEditor.subject.reuseHint" | null {
+  return d.kind === "followup" && d.followupReuseSubject ? "tplEditor.subject.reuseHint" : null;
 }
 
 /** Yalnızca değişen alanlar (PATCH gövdesi). */

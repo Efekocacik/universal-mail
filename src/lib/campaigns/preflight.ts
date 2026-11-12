@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { evaluateEnrollment, type IneligibleCode } from "@/lib/compliance/eligibility";
-import type { FrequencyLimits } from "@/lib/compliance/frequency";
+import { DEFAULT_FREQUENCY_LIMITS, type FrequencyLimits } from "@/lib/compliance/frequency";
 import { maskEmail } from "@/lib/compliance/suppression";
 import type { DbExecutor } from "@/lib/db/client";
 import {
@@ -216,15 +216,31 @@ export async function computeStartPlan(
   return { campaignId, updatedAt: c.updatedAt, blockers, eligible, ineligible, token };
 }
 
-export interface PreflightPreview {
-  campaignLeadId: number;
-  language: string;
-  recipientMasked: string | null;
+export interface PreflightStepPreview {
+  stepIndex: number;
+  /** Önceki adımdan sonra en az kaç gün (takip adımları; ilk adımda 0). */
+  delayDays: number;
   subject: string;
   text: string;
   html: string;
   missing: string[];
   warnings: string[];
+  /** Birleştirme hataları (ör. `content_blocked`); gönderimde bu adım `compose_failed` olurdu. */
+  errors: string[];
+}
+
+export interface PreflightPreview {
+  campaignLeadId: number;
+  language: string;
+  recipientMasked: string | null;
+  /** İlk adımın konusu/gövdesi (geriye dönük uyum: `steps[0]` ile aynı). */
+  subject: string;
+  text: string;
+  html: string;
+  missing: string[];
+  warnings: string[];
+  /** Faz 4 (9c): bu alıcıya gidecek BÜTÜN adımlar (ilk e-posta + takipler), gönderimdeki konu devamıyla. */
+  steps: PreflightStepPreview[];
 }
 
 export interface PreflightReport {
@@ -235,17 +251,73 @@ export interface PreflightReport {
   blockers: BlockerCode[];
   counts: { pending: number; eligible: number; ineligible: number };
   exclusions: Record<string, number>;
-  estimate: { perDay: number; days: number; earliestSendAt: number | null };
+  estimate: PreflightEstimate;
   previews: PreflightPreview[];
   /**
    * Engellemeyen uyarılar. `tr_identifiers_missing`: kampanyada Türkiye alıcıları var ama profilde MERSİS ve ticaret
    * sicil numaralarının ikisi de yok (gerekliliği hukuki değerlendirme bekler; gönderim engellenmez).
+   * `followup_missing_variables` / `followup_compose_error` (9c): önizlenen alıcılardan `count` tanesinin takip
+   * adımında eksik değişken veya birleştirme hatası var; gönderimde o dizinin takibi `compose_failed` ile biter.
    */
-  advisories: { code: "tr_identifiers_missing"; count: number }[];
+  advisories: {
+    code: "tr_identifiers_missing" | "followup_missing_variables" | "followup_compose_error";
+    count: number;
+  }[];
   confirmToken: string;
 }
 
 export const PREVIEW_COUNT = 5;
+
+export interface PreflightEstimate {
+  /** Günlük geçerli tavan (kampanya ve posta kutusu/ısınma). */
+  perDay: number;
+  /** İlk e-postaların tamamlanacağı gün sayısı (geriye dönük uyum). */
+  days: number;
+  earliestSendAt: number | null;
+  /** Faz 4 (9c): adım sayısı (1 + takip). */
+  stepCount: number;
+  /** En çok gönderilecek e-posta (uygun alıcı × adım; yanıt gelenler için takip gitmez, gerçek sayı daha az olur). */
+  totalMessages: number;
+  /** Son takibin ilk e-postadan en az kaç gün sonra gideceği (takip aralıklarının toplamı). */
+  lastFollowupAfterDays: number;
+  /** Bütün adımlarla yaklaşık toplam süre (gün). */
+  totalDays: number;
+}
+
+/**
+ * Süre tahmini (saf): ilk e-postalar `ceil(uygun / günlük)` günde biter; takipler aynı günlük tavanı paylaşır ve her
+ * biri önceki adımdan en az `max(gecikme, en kısa takip aralığı)` gün sonra gider. Toplam süre, toplam hacmin
+ * gerektirdiği gün ile "son ilk e-posta + takip aralıkları" değerinin büyüğüdür. Pencere ve hafta sonu dışarıda
+ * tutulmuştur (alıcıya göre değişir); arayüz bunu "yaklaşık" olarak gösterir.
+ */
+export function estimateDuration(input: {
+  eligible: number;
+  perDay: number;
+  /** Takip adımlarının gecikmeleri (adım sırasıyla; ilk adım hariç). */
+  followupDelays: readonly number[];
+  minFollowupGapDays: number;
+  earliestSendAt: number | null;
+}): PreflightEstimate {
+  const { eligible, perDay } = input;
+  const stepCount = 1 + input.followupDelays.length;
+  const gaps = input.followupDelays.map((d) => Math.max(d, input.minFollowupGapDays));
+  const lastFollowupAfterDays = gaps.reduce((a, b) => a + b, 0);
+  const totalMessages = eligible * stepCount;
+  const days = perDay > 0 ? Math.ceil(eligible / perDay) : 0;
+  const totalDays =
+    perDay > 0 && eligible > 0
+      ? Math.max(Math.ceil(totalMessages / perDay), days + lastFollowupAfterDays)
+      : 0;
+  return {
+    perDay,
+    days,
+    earliestSendAt: input.earliestSendAt,
+    stepCount,
+    totalMessages,
+    lastFollowupAfterDays,
+    totalDays,
+  };
+}
 
 async function computeAdvisories(
   db: DbExecutor,
@@ -303,14 +375,19 @@ export async function runPreflight(
     }
   }
 
-  // İlk 5 uygun dizinin önizlemesi (yazma yok; demo alt bilgisi).
+  // İlk 5 uygun dizinin BÜTÜN adımlarının önizlemesi (yazma yok; demo alt bilgisi). Takip adımları gönderimdeki gibi
+  // ilk e-postanın konusunu devralır (şablon izin veriyorsa "Re: …").
   const previews: PreflightPreview[] = [];
   const steps = await db
     .select()
     .from(campaignSteps)
-    .where(and(eq(campaignSteps.campaignId, campaignId), eq(campaignSteps.stepIndex, 0)));
+    .where(eq(campaignSteps.campaignId, campaignId))
+    .orderBy(asc(campaignSteps.stepIndex));
+  let followupMissing = 0;
+  let followupErrors = 0;
   for (const e of plan.eligible.slice(0, PREVIEW_COUNT)) {
-    const step = steps.find((s) => s.language === e.language);
+    const own = steps.filter((s) => s.language === e.language);
+    const step = own.find((s) => s.stepIndex === 0);
     if (!step) continue;
     const composed = await composeEmail(db, {
       templateId: step.templateId,
@@ -318,6 +395,44 @@ export async function runPreflight(
       mode: "demo",
       purpose: "preview",
     });
+    const stepPreviews: PreflightStepPreview[] = [
+      {
+        stepIndex: 0,
+        delayDays: 0,
+        subject: composed.subject,
+        text: composed.text,
+        html: composed.html,
+        missing: composed.missing,
+        warnings: composed.warnings.map((w) => w.code),
+        errors: composed.errors.map((x) => x.code).filter((c) => c !== "missing_variables"),
+      },
+    ];
+    let hasMissing = false;
+    let hasError = false;
+    for (const f of own.filter((s) => s.stepIndex > 0)) {
+      const fc = await composeEmail(db, {
+        templateId: f.templateId,
+        leadId: e.leadId,
+        mode: "demo",
+        purpose: "preview",
+        threadSubject: composed.subject,
+      });
+      const errors = fc.errors.map((x) => x.code).filter((c) => c !== "missing_variables");
+      if (fc.missing.length > 0) hasMissing = true;
+      if (errors.length > 0) hasError = true;
+      stepPreviews.push({
+        stepIndex: f.stepIndex,
+        delayDays: f.delayDays,
+        subject: fc.subject,
+        text: fc.text,
+        html: fc.html,
+        missing: fc.missing,
+        warnings: fc.warnings.map((w) => w.code),
+        errors,
+      });
+    }
+    if (hasMissing) followupMissing++;
+    if (hasError) followupErrors++;
     const [row] = await db
       .select({ email: campaignLeads.recipientEmail })
       .from(campaignLeads)
@@ -334,8 +449,23 @@ export async function runPreflight(
       html: composed.html,
       missing: composed.missing,
       warnings: composed.warnings.map((w) => w.code),
+      steps: stepPreviews,
     });
   }
+  const followupAdvisories: PreflightReport["advisories"] = [
+    ...(followupMissing > 0
+      ? [{ code: "followup_missing_variables" as const, count: followupMissing }]
+      : []),
+    ...(followupErrors > 0
+      ? [{ code: "followup_compose_error" as const, count: followupErrors }]
+      : []),
+  ];
+
+  // Adım gecikmeleri: diller aynı adım yapısını kullanır (servis doğrular); ilk dilin takipleri yeterlidir.
+  const firstLanguage = steps.find((s) => s.stepIndex === 0)?.language;
+  const followupDelays = steps
+    .filter((s) => s.stepIndex > 0 && s.language === firstLanguage)
+    .map((s) => s.delayDays);
 
   return {
     campaignId,
@@ -349,13 +479,15 @@ export async function runPreflight(
       ineligible: plan.ineligible.length,
     },
     exclusions,
-    estimate: {
+    estimate: estimateDuration({
+      eligible: plan.eligible.length,
       perDay,
-      days: perDay > 0 ? Math.ceil(plan.eligible.length / perDay) : 0,
+      followupDelays,
+      minFollowupGapDays: (opts.limits ?? DEFAULT_FREQUENCY_LIMITS).minFollowupGapDays,
       earliestSendAt,
-    },
+    }),
     previews,
-    advisories: await computeAdvisories(db, campaignId),
+    advisories: [...(await computeAdvisories(db, campaignId)), ...followupAdvisories],
     confirmToken: plan.token,
   };
 }

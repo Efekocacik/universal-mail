@@ -27,26 +27,57 @@ export function PageHeader({
   );
 }
 
-/** Boş durum: ne olduğunu söyler ve tek net eylem sunar. */
+/**
+ * Boş durum: ne olduğunu söyler ve tek net eylem sunar. `compact`: kart veya açılır menü içinde (simgesiz değilse küçük
+ * simge, sola yaslı, dolgusuz); tam sayfa/liste boşluğunda varsayılan biçim kullanılır.
+ */
 export function EmptyState({
   icon: Icon,
   title,
   body,
   action,
   className,
+  compact = false,
+  testId,
 }: {
   icon?: LucideIcon;
-  title: string;
+  /** Varsayılan biçimde zorunlu sayılır; `compact` biçimde tek cümlelik boşlukta yalnızca `body` yeterlidir. */
+  title?: string;
   body?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
+  compact?: boolean;
+  testId?: string;
 }) {
+  if (compact)
+    return (
+      <div className={cn("flex flex-col items-start gap-2 py-2", className)} data-testid={testId}>
+        <div className="flex items-start gap-2">
+          {Icon && <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />}
+          <div>
+            {title && <p className="text-[13px] font-medium">{title}</p>}
+            {body && (
+              <p
+                className={cn(
+                  "text-muted-foreground",
+                  title ? "mt-0.5 text-[12px]" : "text-[13px]",
+                )}
+              >
+                {body}
+              </p>
+            )}
+          </div>
+        </div>
+        {action}
+      </div>
+    );
   return (
     <div
       className={cn(
         "um-enter flex flex-col items-center justify-center gap-3 p-8 text-center",
         className,
       )}
+      data-testid={testId}
     >
       {Icon && (
         <div className="flex size-12 items-center justify-center rounded-full bg-accent text-accent-foreground">
@@ -54,7 +85,7 @@ export function EmptyState({
         </div>
       )}
       <div>
-        <p className="text-sm font-semibold">{title}</p>
+        {title && <p className="text-sm font-semibold">{title}</p>}
         {body && <p className="mx-auto mt-1 max-w-sm text-[13px] text-muted-foreground">{body}</p>}
       </div>
       {action}

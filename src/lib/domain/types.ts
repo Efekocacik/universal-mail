@@ -47,6 +47,8 @@ export interface NoveltySignal {
   group: string;
   points: number;
   reason: string;
+  /** Faz 4: yerelleştirilmiş gerekçe için parametreler (`novelty.signal.<id>` anahtarı). Eski satırlarda yoktur. */
+  params?: Record<string, string | number>;
 }
 
 export interface ScanQuery {
@@ -63,6 +65,8 @@ export interface ScanProgress {
   callsTotal?: number;
   newPlaces?: number;
   futureOpening?: number;
+  /** Faz 4: bu taramada "yakında açılacak" iken faaliyette görülen (açılan) işletme sayısı. */
+  openedPlaces?: number;
 }
 
 /** Faturalandırma birimi (Google SKU). */
@@ -72,6 +76,7 @@ export type SkuId =
   | "text_search_enterprise"
   | "nearby_search_pro"
   | "nearby_search_enterprise"
+  | "place_details_ids_only"
   | "place_details_essentials"
   | "place_details_pro"
   | "place_details_enterprise";

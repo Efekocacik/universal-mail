@@ -1,0 +1,153 @@
+import type { explore as TrExplore } from "../tr/explore";
+import type { EnFragment } from "../types";
+
+/** Paket C anahtarlarının İngilizcesi. */
+export const explore = {
+  "map.selectInView": "Select visible ({n})",
+  "map.selectInView.hint": "Selects every business currently visible on the map.",
+  "map.onlyThisArea": "List only this area",
+  "map.legend.show": "Show legend",
+  "map.legend.hide": "Hide legend",
+  "map.legend.sent": "In a campaign / sent",
+  "map.legend.replied": "Replied / customer",
+  "map.legend.stopped": "Not interested / do not contact",
+  "map.legend.selected": "Selected",
+  "map.marker.label": "Business: {novelty}",
+  "map.marker.labelContact": "Business: {novelty} · {contact}",
+  "map.schematic.badge": "Schematic demo view",
+  "map.schematic.hint": "Add a Google Maps key in Settings to see the real map.",
+
+  "selection.count": "{n} businesses selected",
+  "selection.hidden": "{n} of them are not in this list",
+  "selection.clear": "Clear selection",
+  "selection.allMatching": "All {n} businesses matching the filters are selected",
+  "selection.view": "{n} businesses in the map area are selected",
+  "selection.invalidated": "The filters changed, so the selection was cleared.",
+  "selection.cap":
+    "You can pick at most {n} businesses one by one. To select more, use “Select all matching”.",
+  "selection.selectAll": "Select all matching ({n})",
+  "list.row.select": "Select: {name}",
+
+  "bulk.toolbar": "Actions for the selected businesses",
+  "help.bulk":
+    "The action applies to all selected businesses. You first see how many will change; archiving can be undone afterwards.",
+  "bulk.more": "More actions",
+  "bulk.archive": "Archive",
+  "bulk.unarchive": "Restore from archive",
+  "bulk.dnc": "Mark as “Do not contact”",
+  "bulk.archive.title": "Archive {n} businesses?",
+  "bulk.archive.body":
+    "Archived businesses are hidden from the list and the map and are left out of filter-based exports; new scans do not bring them back. Sending history is kept. You can restore them any time from “Show archived”.",
+  "bulk.archive.confirm": "Archive",
+  "bulk.unarchive.title": "Restore {n} businesses from the archive?",
+  "bulk.unarchive.body": "The businesses appear in the list and on the map again.",
+  "bulk.unarchive.confirm": "Restore",
+  "bulk.dnc.title": "Mark {n} businesses as “Do not contact”?",
+  "bulk.dnc.body":
+    "No campaign will e-mail these businesses. The mark cannot be removed in bulk; if needed, remove it one by one from the business details.",
+  "bulk.dnc.confirm": "Mark",
+  "bulk.preview.loading": "Counting the affected businesses…",
+  "bulk.preview.changed": "Will change",
+  "bulk.preview.unchanged": "Already in this state",
+  "bulk.preview.activeCampaign": "Skipped, campaign still running",
+  "bulk.preview.notFound": "No longer found",
+  "bulk.preview.capped":
+    "{total} businesses match the filters; at most {max} are changed per run. When it finishes, run it again: businesses already changed are skipped and the next ones are processed.",
+  "bulk.preview.nothing":
+    "Nothing will change; the selected businesses are already in this state or their campaigns are still running.",
+  "bulk.done.archive": "{n} businesses archived.",
+  "bulk.done.unarchive": "{n} businesses restored from the archive.",
+  "bulk.done.do_not_contact": "{n} businesses marked as “Do not contact”.",
+  "bulk.done.skipped":
+    "{n} businesses skipped (already in this state, campaign still running, or no longer exist).",
+  "bulk.undo": "Undo",
+  "bulk.undone": "Undone.",
+  "bulk.export.title": "Export the {n} selected businesses as CSV",
+  "bulk.export.started": "CSV file downloaded.",
+  "bulk.export.failed": "The file could not be prepared. Try again.",
+
+  "filters.archived": "Show archived",
+  "filters.archived.chip": "Archive",
+  "list.archived.banner":
+    "You are viewing archived businesses. To restore, select them and press “Restore from archive”.",
+
+  "filters.lifecycle": "What's new",
+  "lifecycle.opened": "Just opened",
+  "lifecycle.future": "Opening soon",
+  "lifecycle.new": "Newly found",
+  "filters.detected": "Since when",
+  "filters.detected.any": "All time",
+  "filters.detected.7": "Last 7 days",
+  "filters.detected.30": "Last 30 days",
+  "filters.detected.days": "Last {n} days",
+  "filters.detected.since": "Since {date}",
+
+  "savedFilters.button": "Saved filters",
+  "savedFilters.title": "Saved filters",
+  "help.savedFilters":
+    "Keeps the filters you chose (and the map area if you want), not the selected businesses. When applied, the list is rebuilt from current data.",
+  "savedFilters.loadError": "Saved filters could not be loaded.",
+  "savedFilters.empty":
+    "No saved filters yet. Choose some filters and press “Save these filters”; then bring them back with one click.",
+  "savedFilters.save": "Save these filters…",
+  "savedFilters.save.disabled": "Choose at least one filter before saving.",
+  "savedFilters.saveTitle": "Save filters",
+  "savedFilters.saveBody":
+    "Your chosen filters are stored under this name so you can apply them again with one click.",
+  "savedFilters.name": "Name",
+  "savedFilters.name.placeholder": "E.g. London new cafés",
+  "savedFilters.includeArea": "Also save the map area",
+  "savedFilters.includeArea.hint":
+    "If on, applying the filter moves the map to this area and the list shows only this area.",
+  "savedFilters.apply": "Apply: {name}",
+  "savedFilters.rename": "Rename",
+  "savedFilters.renameLabel": "Rename filter {name}",
+  "savedFilters.renameTitle": "Rename filter",
+  "savedFilters.deleteLabel": "Delete filter {name}",
+  "savedFilters.deleteTitle": "Delete the filter “{name}”?",
+  "savedFilters.deleteBody": "Only the saved filter is deleted; businesses are not affected.",
+  "savedFilters.update": "Changed · Update",
+  "savedFilters.updateLabel": "Update “{name}” with the current choices",
+  "savedFilters.updated": "“{name}” updated.",
+  "savedFilters.saved": "“{name}” saved.",
+  "savedFilters.deleted": "“{name}” deleted.",
+  "savedFilters.exists":
+    "A filter with this name already exists. Overwrite it or choose another name.",
+  "savedFilters.overwrite": "Overwrite",
+  "savedFilters.invalid":
+    "This filter can no longer be used (options have changed). You can delete it.",
+  "savedFilters.partial": "Some categories no longer exist; the filter was applied without them.",
+  "savedFilters.active": "Saved filter: {name}",
+  "savedFilters.area": "Area",
+
+  "shortcuts.title": "Keyboard shortcuts",
+  "shortcuts.open": "Keyboard shortcuts",
+  "shortcuts.body": "Shortcuts are off while you type in a text box.",
+  "shortcuts.group.global": "Everywhere",
+  "shortcuts.group.explore": "Explore screen",
+  "shortcuts.next": "Next business",
+  "shortcuts.prev": "Previous business",
+  "shortcuts.search": "Go to search",
+  "shortcuts.select": "Select / unselect business",
+  "shortcuts.findEmails": "Find e-mails",
+  "shortcuts.addToCampaign": "Add to campaign",
+  "shortcuts.fit": "Fit the map to the results",
+  "shortcuts.onlyInView": "List only the map area (on/off)",
+  "shortcuts.escape": "Cancel drawing, clear selection, close details",
+  "shortcuts.help": "Open this help",
+  "shortcuts.or": "or",
+
+  "findEmails.capped":
+    "{matched} businesses match the filters; one run searches at most {max}. When it finishes, start again: businesses already searched are skipped and the next ones are processed.",
+  "addToCampaign.bodySelected":
+    "The {n} selected businesses are added to the campaign. Each one is checked for eligibility; those that are not eligible are excluded with a reason.",
+  "addToCampaign.progress": "Adding: {done} / {total}",
+  "addToCampaign.partial":
+    "Adding stopped partway: {n} businesses were not added ({error}). Try again; businesses already added are not added twice.",
+  "addToCampaign.retry": "Try again",
+
+  "detail.unblock.title": "Remove the “Do not contact” mark?",
+  "detail.unblock.body":
+    "This business was marked because it did not want to be contacted. If you remove the mark it can be added to campaigns again. This change is recorded.",
+  "detail.unblock.confirm": "Remove mark",
+} as const satisfies EnFragment<typeof TrExplore>;

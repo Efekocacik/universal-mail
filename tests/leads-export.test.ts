@@ -1,12 +1,23 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
 import { initDatabase } from "@/lib/db/init";
-import { auditLog, categorySets, leads, places, scans } from "@/lib/db/schema";
+import {
+  auditLog,
+  categorySets,
+  leads,
+  notifications,
+  places,
+  regions,
+  scanSchedules,
+  scans,
+} from "@/lib/db/schema";
+import { notify } from "@/lib/notifications";
 import { CSV_COLUMNS, csvCell, exportLeadsCsv, selectColumns } from "@/lib/export/csv";
 import { bboxFromCenter } from "@/lib/geo/bbox";
 import { getLeadDetail, queryFacets, queryLeads, queryPoints } from "@/lib/leads/query";
+import { runBulk } from "@/lib/leads/bulk";
 import { leadPatchSchema, patchLead, purgeDemoData } from "@/lib/leads/mutations";
 import { MockPlacesProvider } from "@/lib/places/mock";
 import { runScan } from "@/lib/scan/runner";
@@ -271,5 +282,168 @@ describe("demo verilerini temizleme", () => {
     expect(await db.select().from(leads)).toHaveLength(0);
     expect(await db.select().from(scans)).toHaveLength(0);
     expect((await budgetStatus(db, "mock", 30)).totalCalls).toBe(0);
+  });
+
+  it("Faz 4: demo zamanlaması ve bağlı bildirimler silinir; çalışmamış zamanlama ve bölgesi KALIR", async () => {
+    const manualId = await scanLondon(["cafe"]);
+    const manual = (await db.select().from(scans).where(eq(scans.id, manualId)))[0]!;
+    const now = Date.now();
+    const geometry = (await db.select().from(regions).where(eq(regions.id, manual.regionId)))[0]!
+      .geometry;
+    // Taraması olmayan iki bölge: biri zamanlamalı (kalmalı), biri boş (silinmeli)
+    const [scheduledRegion] = await db
+      .insert(regions)
+      .values({ name: "Zamanlanmış", kind: "bbox", geometry, createdAt: now })
+      .returning({ id: regions.id });
+    const [emptyRegion] = await db
+      .insert(regions)
+      .values({ name: "Boş", kind: "bbox", geometry, createdAt: now })
+      .returning({ id: regions.id });
+    const sched = (regionId: number, key: string) => ({
+      regionId,
+      scanKey: key,
+      categorySetIds: manual.categorySetIds,
+      strategy: manual.strategy,
+      fieldProfile: manual.fieldProfile,
+      intervalDays: 14 as const,
+      nextRunAt: now + 86_400_000,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const [demoSchedule, idleSchedule] = await db
+      .insert(scanSchedules)
+      .values([sched(manual.regionId, manual.scanKey), sched(scheduledRegion!.id, "idle-key")])
+      .returning({ id: scanSchedules.id });
+    // Zamanlamanın demo sağlayıcıyla çalışmış bir taraması
+    const { id: _id, ...copy } = manual;
+    const [run] = await db
+      .insert(scans)
+      .values({
+        ...copy,
+        origin: "schedule",
+        scheduleId: demoSchedule!.id,
+        scheduleSlot: now,
+        createdAt: now,
+      })
+      .returning({ id: scans.id });
+    await db
+      .update(scanSchedules)
+      .set({ lastScanId: run!.id, lastOutcome: "completed" })
+      .where(eq(scanSchedules.id, demoSchedule!.id));
+
+    const n = (dedupeKey: string, entity?: string, entityId?: number) =>
+      notify(db, {
+        kind: dedupeKey.startsWith("schedule") ? "schedule.skipped" : "scan.done",
+        dedupeKey,
+        url: "/scans",
+        entity,
+        entityId,
+      });
+    await n(`scan.done:${manualId}`, "scan", manualId);
+    await n(`scan.done:${run!.id}`); // entity yok: anahtardan bulunur
+    await n(
+      `schedule.skipped:${demoSchedule!.id}:NEEDS_ACK:2026-11-01`,
+      "schedule",
+      demoSchedule!.id,
+    );
+    await n(
+      `schedule.skipped:${idleSchedule!.id}:NEEDS_ACK:2026-11-01`,
+      "schedule",
+      idleSchedule!.id,
+    );
+
+    const res = await purgeDemoData(db);
+    expect(res).toMatchObject({ scans: 2, schedules: 1, notifications: 3 });
+    expect(await db.select().from(scans)).toHaveLength(0);
+    expect((await db.select().from(scanSchedules)).map((s) => s.id)).toEqual([idleSchedule!.id]);
+    expect((await db.select().from(notifications)).map((r) => r.dedupeKey)).toEqual([
+      `schedule.skipped:${idleSchedule!.id}:NEEDS_ACK:2026-11-01`,
+    ]);
+    const left = await db
+      .select({ id: regions.id })
+      .from(regions)
+      .where(inArray(regions.id, [manual.regionId, scheduledRegion!.id, emptyRegion!.id]));
+    expect(left.map((r) => r.id)).toEqual([scheduledRegion!.id]);
+    const auditRow = (await db.select().from(auditLog)).find((a) => a.action === "demo.purged");
+    expect(auditRow?.detail).toMatchObject({ schedules: 1, notifications: 3 });
+  });
+
+  it("gerçek sağlayıcıyla en az bir kez çalışmış zamanlama silinmez (taramaları mock olsa bile)", async () => {
+    const manualId = await scanLondon(["cafe"]);
+    const manual = (await db.select().from(scans).where(eq(scans.id, manualId)))[0]!;
+    const now = Date.now();
+    const [s] = await db
+      .insert(scanSchedules)
+      .values({
+        regionId: manual.regionId,
+        scanKey: manual.scanKey,
+        categorySetIds: manual.categorySetIds,
+        strategy: manual.strategy,
+        fieldProfile: manual.fieldProfile,
+        intervalDays: 7,
+        nextRunAt: now,
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: scanSchedules.id });
+    const { id: _id, ...copy } = manual;
+    await db.insert(scans).values([
+      { ...copy, origin: "schedule", scheduleId: s!.id, scheduleSlot: 1, createdAt: now },
+      {
+        ...copy,
+        provider: "google",
+        origin: "schedule",
+        scheduleId: s!.id,
+        scheduleSlot: 2,
+        createdAt: now,
+      },
+    ]);
+    const res = await purgeDemoData(db);
+    expect(res.schedules).toBe(0);
+    expect(await db.select().from(scanSchedules)).toHaveLength(1);
+    // Gerçek tarama ve bölgesi kalır
+    expect((await db.select().from(scans)).map((x) => x.provider)).toEqual(["google"]);
+    expect(await db.select().from(regions).where(eq(regions.id, manual.regionId))).toHaveLength(1);
+  });
+});
+
+describe("arşivlenmiş lead'ler (Faz 4 sözleşmesi)", () => {
+  it("varsayılan liste, sayım ve dışa aktarma arşivlenmişleri gizler; archived:true yalnızca onları gösterir", async () => {
+    await scanLondon(["cafe"]);
+    const all = await queryLeads(db, {}, { limit: 500 });
+    const target = all.rows[0]!.leadId;
+    await db.update(leads).set({ archivedAt: Date.now() }).where(eq(leads.id, target));
+    const visible = await queryLeads(db, {}, { limit: 500 });
+    expect(visible.total).toBe(all.total - 1);
+    expect(visible.rows.some((r) => r.leadId === target)).toBe(false);
+    const archived = await queryLeads(db, { archived: true }, { limit: 500 });
+    expect(archived.rows.map((r) => r.leadId)).toEqual([target]);
+    const csv = await collect(exportLeadsCsv(db, {}, { includeGoogleFields: false }));
+    expect(csv.trim().split("\n")).toHaveLength(all.total); // başlık + (toplam − 1)
+  });
+});
+
+describe("Faz 4 (paket C): arşiv yeniden taramada korunur", () => {
+  it("arşivlenen işletme aynı bölge yeniden taranınca listeye geri dönmez", async () => {
+    await scanLondon(["cafe"]);
+    const before = await queryLeads(db, {});
+    expect(before.total).toBeGreaterThan(1);
+    const target = before.rows[0]!.leadId;
+    const r = await runBulk(
+      db,
+      { action: "archive", selection: { leadIds: [target] } },
+      { now: 1_000 },
+    );
+    expect(r.changed).toBe(1);
+
+    await scanLondon(["cafe"]);
+    const [row] = await db
+      .select({ archivedAt: leads.archivedAt })
+      .from(leads)
+      .where(eq(leads.id, target));
+    expect(row!.archivedAt).toBe(1_000);
+    const after = await queryLeads(db, {});
+    expect(after.rows.some((x) => x.leadId === target)).toBe(false);
+    expect(after.total).toBe(before.total - 1);
   });
 });

@@ -1,14 +1,22 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Mail, Trash2 } from "lucide-react";
+import { Gauge, Mail, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { FieldHint, Input, Label } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { FieldError, FieldHint, Input, Label } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
@@ -18,6 +26,14 @@ import { mailboxApi, mbk, useGmailClient, useOAuthStatus } from "@/lib/client/ma
 import { queryRetryDelay, shouldRetryQuery } from "@/lib/client/retry";
 import { t } from "@/lib/i18n";
 import { oauthResultText, type OAuthResultLike } from "@/lib/mail/gmail/oauth-messages";
+import {
+  CONSUMER_GMAIL_MAX_DAILY,
+  checkLimitsDraft,
+  mailboxLimitBounds,
+  planLimitsChange,
+  warmupPreview,
+  type LimitsDraftIssue,
+} from "@/lib/mail/scheduler/limits";
 
 const INVALIDATE = [ck.mailboxes, mbk.gmailClient] as const;
 
@@ -276,8 +292,187 @@ function GmailAccess({ m, clientReady }: { m: MailboxItem; clientReady: boolean 
   );
 }
 
+/** Kişisel Gmail'de bu değerin üstü hesabın kısıtlanma riskini artırır (uyarı; engel değil). */
+const CONSUMER_RISK_ABOVE = 30;
+
+function issueText(i: LimitsDraftIssue): string {
+  if (i.code === "not_integer") return t("mbx.limits.error.integer");
+  if (i.code === "below_min") return t("mbx.limits.error.min", { min: i.min });
+  return t("mbx.limits.error.aboveMax", { max: i.max });
+}
+
+/**
+ * "Günlük sınır" penceresi (Faz 4, hata c): kutunun günlük tavanı ve haftalık ısınma artışı. Profil üst sınırları
+ * (kişisel Gmail 50 ve +5/hafta, diğerleri 80 ve +10/hafta) formda ve sunucuda ayrıca denetlenir; canlı önizleme
+ * bugünkü ve bir hafta sonraki tavanı gösterir. Kaydetmek gönderim yapmaz.
+ */
+function MailboxLimitsDialog({
+  m,
+  open,
+  onOpenChange,
+}: {
+  m: MailboxItem;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const fallback = mailboxLimitBounds({ address: m.address });
+  const bounds = {
+    maxDailyCap: m.limits?.profileMaxDaily ?? fallback.maxDailyCap,
+    maxWarmupStep: m.limits?.maxWarmupStep ?? fallback.maxWarmupStep,
+  };
+  const initialStep = Math.min(m.warmupStep ?? 0, bounds.maxWarmupStep);
+  const [dailyCap, setDailyCap] = useState(String(Math.min(m.dailyCap, bounds.maxDailyCap)));
+  const [warmupStep, setWarmupStep] = useState(String(initialStep));
+  useEffect(() => {
+    if (!open) return;
+    setDailyCap(String(Math.min(m.dailyCap, bounds.maxDailyCap)));
+    setWarmupStep(String(Math.min(m.warmupStep ?? 0, bounds.maxWarmupStep)));
+  }, [open, m.dailyCap, m.warmupStep, bounds.maxDailyCap, bounds.maxWarmupStep]);
+  const check = checkLimitsDraft({ dailyCap, warmupStep }, bounds);
+  const changed =
+    check.value !== null &&
+    (check.value.dailyCap !== m.dailyCap || check.value.warmupStep !== (m.warmupStep ?? 0));
+  // Önizleme sunucuyla aynı kuralı kullanır: tavan yükselirse ısınma bugünkü tavandan devam eder (rampa atlanmaz).
+  const nowMs = Date.now();
+  const current = {
+    dailyCap: m.dailyCap,
+    warmupStep: m.warmupStep ?? 0,
+    warmupStartedAt: m.warmupStartedAt ?? null,
+    address: m.address,
+  };
+  const plan = check.value ? planLimitsChange(current, check.value, nowMs) : null;
+  const preview =
+    check.value && plan
+      ? warmupPreview(
+          { ...check.value, warmupStartedAt: plan.warmupStartedAt, address: m.address },
+          nowMs,
+        )
+      : null;
+  const save = useSafeMutation(
+    () =>
+      mailboxApi.updateLimits(m.id, {
+        dailyCap: check.value!.dailyCap,
+        warmupStep: check.value!.warmupStep,
+        expected: { dailyCap: m.dailyCap, warmupStep: m.warmupStep ?? 0 },
+      }),
+    {
+      invalidate: INVALIDATE,
+      successMessage: t("mbx.limits.saved"),
+      conflictMessage: t("mbx.limits.conflict"),
+      onSuccess: () => onOpenChange(false),
+    },
+  );
+  const capIssue = check.issues.find((i) => i.field === "dailyCap");
+  const stepIssue = check.issues.find((i) => i.field === "warmupStep");
+  const capNum = Number(dailyCap);
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent data-testid={`mbx-limits-dialog-${m.id}`}>
+        <DialogHeader>
+          <DialogTitle>{t("mbx.limits.title", { label: m.label })}</DialogTitle>
+          <DialogDescription>{t("mbx.limits.desc")}</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (check.value && changed) save.mutate(undefined);
+          }}
+        >
+          <div className="space-y-1.5">
+            <Label htmlFor={`mbx-cap-${m.id}`}>{t("mbx.limits.dailyCap")}</Label>
+            <Input
+              id={`mbx-cap-${m.id}`}
+              inputMode="numeric"
+              value={dailyCap}
+              aria-invalid={capIssue ? true : undefined}
+              aria-describedby={
+                capIssue ? `mbx-cap-hint-${m.id} mbx-cap-err-${m.id}` : `mbx-cap-hint-${m.id}`
+              }
+              onChange={(e) => setDailyCap(e.target.value)}
+            />
+            <FieldHint id={`mbx-cap-hint-${m.id}`}>
+              {t(
+                m.consumerGmail ? "mbx.limits.dailyCap.hintConsumer" : "mbx.limits.dailyCap.hint",
+                {
+                  max: bounds.maxDailyCap,
+                },
+              )}
+            </FieldHint>
+            {capIssue && <FieldError id={`mbx-cap-err-${m.id}`}>{issueText(capIssue)}</FieldError>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor={`mbx-step-${m.id}`}>{t("mbx.limits.warmupStep")}</Label>
+            <Input
+              id={`mbx-step-${m.id}`}
+              inputMode="numeric"
+              value={warmupStep}
+              aria-invalid={stepIssue ? true : undefined}
+              aria-describedby={
+                stepIssue ? `mbx-step-hint-${m.id} mbx-step-err-${m.id}` : `mbx-step-hint-${m.id}`
+              }
+              onChange={(e) => setWarmupStep(e.target.value)}
+            />
+            <FieldHint id={`mbx-step-hint-${m.id}`}>
+              {t("mbx.limits.warmupStep.hint", {
+                base: m.limits?.warmupBase ?? fallback.warmupBase,
+                max: bounds.maxWarmupStep,
+              })}
+            </FieldHint>
+            {stepIssue && (
+              <FieldError id={`mbx-step-err-${m.id}`}>{issueText(stepIssue)}</FieldError>
+            )}
+          </div>
+          {preview && (
+            <p
+              className="rounded-md bg-muted px-3 py-2 text-[13px]"
+              data-testid="mbx-limits-preview"
+            >
+              {preview.weeksToCap === null
+                ? t("mbx.limits.preview.flat", { today: preview.today })
+                : preview.weeksToCap === 0
+                  ? t("mbx.limits.preview.reached", { today: preview.today })
+                  : t("mbx.limits.preview", {
+                      today: preview.today,
+                      week: preview.nextWeek,
+                      weeks: preview.weeksToCap,
+                      target: preview.target,
+                    })}
+            </p>
+          )}
+          {changed && plan?.rebased && (
+            <p className="text-[12px] text-muted-foreground" data-testid="mbx-limits-rebased">
+              {t("mbx.limits.rampContinues", { today: plan.beforeCap })}
+            </p>
+          )}
+          {m.consumerGmail && Number.isFinite(capNum) && capNum > CONSUMER_RISK_ABOVE && (
+            <Notice tone="warning">
+              {t("mbx.limits.consumerWarning", {
+                risk: CONSUMER_RISK_ABOVE,
+                max: CONSUMER_GMAIL_MAX_DAILY,
+              })}
+            </Notice>
+          )}
+          <p className="text-[12px] text-muted-foreground">
+            {t("mbx.limits.rules", { max: bounds.maxDailyCap })}
+          </p>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button type="submit" loading={save.isPending} disabled={!check.value || !changed}>
+              {t("mbx.limits.save")}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function MailboxRow({ m, clientReady }: { m: MailboxItem; clientReady: boolean }) {
   const [confirm, setConfirm] = useState(false);
+  const [limitsOpen, setLimitsOpen] = useState(false);
   const remove = useSafeMutation(() => mailboxApi.remove(m.id), {
     invalidate: INVALIDATE,
     successMessage: t("mbx.removed"),
@@ -305,6 +500,19 @@ function MailboxRow({ m, clientReady }: { m: MailboxItem; clientReady: boolean }
         )}
       </div>
       {statusBadge(m)}
+      {m.limitsEditable && (
+        <>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setLimitsOpen(true)}
+            data-testid={`mbx-limits-edit-${m.id}`}
+          >
+            <Gauge aria-hidden /> {t("mbx.limits.edit")}
+          </Button>
+          <MailboxLimitsDialog m={m} open={limitsOpen} onOpenChange={setLimitsOpen} />
+        </>
+      )}
       {m.editable && (
         <>
           <Button
@@ -506,6 +714,13 @@ export function MailboxSettingsSection() {
           <Skeleton className="h-24 rounded-lg" />
         ) : q.isError || !q.data ? (
           <LoadError error={q.error} onRetry={() => void q.refetch()} />
+        ) : q.data.length === 0 ? (
+          <p
+            className="rounded-lg border border-dashed p-4 text-center text-[13px] text-muted-foreground"
+            data-testid="mbx-empty"
+          >
+            {t("mbx.empty")}
+          </p>
         ) : (
           <ul className="divide-y rounded-lg border" aria-label={t("mbx.title")}>
             {q.data.map((m) => (

@@ -125,6 +125,11 @@ export interface ScanEstimate {
   /** Çalışma sırasında bu sayıyı aşarsa tarama güvenlik gereği duraklatılır. */
   maxCalls: number;
   notes: string[];
+  /**
+   * Faz 4 (H): zamanlanmış taramanın onaylı TOPLAM maliyet tavanı (USD); kendiliğinden sürdürmeler dahil tarama bunu
+   * aşamaz (bkz. runner.ts `readCostCap`). Elle başlatılan taramalarda yoktur.
+   */
+  costCapUsd?: number | null;
 }
 
 export function skuForScan(

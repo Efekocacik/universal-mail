@@ -62,7 +62,7 @@ function StepCard({
     <li className="flex gap-3 p-3">
       <span
         aria-hidden
-        className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold ${done ? "bg-success/12 text-[#166534]" : "bg-muted text-muted-foreground"}`}
+        className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold ${done ? "bg-success/12 text-success-text" : "bg-muted text-muted-foreground"}`}
       >
         {done ? <CheckCircle2 className="size-4" /> : n}
       </span>

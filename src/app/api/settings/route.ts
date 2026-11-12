@@ -6,24 +6,19 @@ import { getSetupState } from "@/lib/app/state";
 import { audit } from "@/lib/db/audit";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { secretStatus } from "@/lib/secrets/store";
-import { getSettings, setSetting, settingSchemas } from "@/lib/settings";
+import {
+  getSettings,
+  setSetting,
+  settingSchemas,
+  USER_SETTING_KEYS,
+  type UserSettingKey,
+} from "@/lib/settings";
+import { mapIdProblem, normalizeMapId } from "@/lib/settings/map-id";
 
 export const dynamic = "force-dynamic";
 
-const KEYS = [
-  "consent",
-  "company.profile",
-  "targets.countries",
-  "budget.monthlyUsd",
-  "places.provider",
-  "maps.mapId",
-  "novelty.thresholds",
-  "google.cacheDays",
-  "mock.epoch",
-  "ui.language",
-  "enrichment.external",
-  "enrichment.concurrency",
-] as const;
+/** Ayarlar ekranının okuduğu anahtarlar: kullanıcının değiştirebildikleri + salt okunur onay ve demo dönemi. */
+const KEYS = ["consent", "mock.epoch", ...USER_SETTING_KEYS] as const;
 
 export const GET = route(async () => {
   const db = await database();
@@ -40,18 +35,21 @@ export const GET = route(async () => {
   });
 });
 
+type PatchShape = { [K in UserSettingKey]: z.ZodOptional<(typeof settingSchemas)[K]> };
+const patchShape = Object.fromEntries(
+  USER_SETTING_KEYS.map((k) => [k, settingSchemas[k].optional()]),
+) as PatchShape;
+
+/**
+ * Değişiklik gövdesi: YALNIZCA kullanıcı anahtarları (`USER_SETTING_KEYS`), her biri kendi ayar şemasıyla; bilinmeyen
+ * veya iç anahtarlar (onay, kurulum, seed, posta güvenlik kayıtları) 400 ile reddedilir. Map ID burada ham metin olarak
+ * alınır ve aşağıda kodlu bir hatayla doğrulanır.
+ */
 const patchSchema = z
   .object({
-    "company.profile": settingSchemas["company.profile"].optional(),
+    ...patchShape,
     "targets.countries": z.array(z.string().length(2)).max(60).optional(),
-    "budget.monthlyUsd": settingSchemas["budget.monthlyUsd"].optional(),
-    "places.provider": settingSchemas["places.provider"].optional(),
-    "maps.mapId": z.string().max(80).optional(),
-    "novelty.thresholds": settingSchemas["novelty.thresholds"].optional(),
-    "google.cacheDays": settingSchemas["google.cacheDays"].optional(),
-    "ui.language": settingSchemas["ui.language"].optional(),
-    "enrichment.external": settingSchemas["enrichment.external"].optional(),
-    "enrichment.concurrency": settingSchemas["enrichment.concurrency"].optional(),
+    "maps.mapId": z.string().max(200).optional(),
   })
   .strict();
 
@@ -66,12 +64,37 @@ export const PUT = route(async (req: Request) => {
   if (thresholds && thresholds.likelyAt >= thresholds.highAt) {
     return json({ error: "'Muhtemel' eşiği 'Yüksek' eşiğinden küçük olmalıdır." }, { status: 400 });
   }
-  for (const [key, value] of Object.entries(patch)) {
-    if (value === undefined) continue;
-    const normalized =
-      key === "targets.countries" ? (value as string[]).map((c) => c.toUpperCase()) : value;
-    await setSetting(db, key as keyof typeof settingSchemas, normalized as never);
+  const mapId = patch["maps.mapId"];
+  if (mapId !== undefined) {
+    const problem = mapIdProblem(mapId);
+    if (problem)
+      return json(
+        {
+          error:
+            "Geçersiz Map ID. Google Cloud Console'daki harita kimliğini girin (yalnızca harf, rakam, '_' ve '-'; e-posta veya adres değil). Boş bırakırsanız demo harita kimliği kullanılır.",
+          code: "MAP_ID_INVALID",
+          reason: problem,
+        },
+        { status: 400 },
+      );
   }
-  await audit(db, "settings.updated", "settings", undefined, { keys: Object.keys(patch) });
+  const entries = Object.entries(patch).filter(([, v]) => v !== undefined);
+  // Boş gövde (`{}`): yazılacak bir şey yok; denetim kaydı da yazılmaz (anlamsız `settings.updated` satırı olmasın).
+  if (entries.length === 0) return json({ ok: true, setup: await getSetupState(db) });
+  // Hepsi ya da hiçbiri: birden çok anahtar tek işlemde yazılır (yarım kalan güncelleme olmaz).
+  await db.transaction(async (tx) => {
+    for (const [key, value] of entries) {
+      const normalized =
+        key === "targets.countries"
+          ? (value as string[]).map((c) => c.toUpperCase())
+          : key === "maps.mapId"
+            ? normalizeMapId(value as string)
+            : value;
+      await setSetting(tx, key as UserSettingKey, normalized as never);
+    }
+    await audit(tx, "settings.updated", "settings", undefined, {
+      keys: entries.map(([k]) => k),
+    });
+  });
   return json({ ok: true, setup: await getSetupState(db) });
 });

@@ -140,7 +140,13 @@ test("otomatik durdurma: sıkılaştırılır, gevşetme reddedilir, görünüm 
 
 test("DNS denetimi: demo kutusunda sorgu yapılmaz", async () => {
   await page.goto("/mail-log?tab=health");
-  await page.getByRole("button", { name: "Kontrol et" }).click();
+  // Başka spec'ler (ör. faz4-e-campaigns) kişisel Gmail kutusu ekleyebilir; o kutunun kartında da "Kontrol et" vardır.
+  // Demo kutusunun formu DKIM seçici alanını taşır.
+  await page
+    .locator("form")
+    .filter({ hasText: "DKIM seçici adı" })
+    .getByRole("button", { name: "Kontrol et" })
+    .click();
   await expect(page.getByText(/DNS sorgusu yapılmadı/)).toBeVisible();
 });
 

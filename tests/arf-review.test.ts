@@ -496,10 +496,16 @@ describe("5) şikâyet ve çıkış ayrı nedenler olarak denetimde ve arayüzde
     );
     const ca = await cl(a);
     const cb = await cl(b);
-    expect(sequenceStatusLabel(ca.status, ca.exclusionReasons)).toBe(
-      "Şikâyet nedeniyle durduruldu",
+    // 15.10-2: nedenler sütundan (ca.stopReason) da, eski işaretten de aynı etikete varır
+    expect(ca.stopReason).toBe("complaint");
+    expect(cb.stopReason).toBe("unsubscribe");
+    expect(sequenceStatusLabel(ca.status, ca.exclusionReasons, ca.stopReason)).toBe(
+      "Şikâyet nedeniyle durdu",
     );
-    expect(sequenceStatusLabel(cb.status, cb.exclusionReasons)).toBe("Listeden çıkmak istedi");
+    expect(sequenceStatusLabel(ca.status, ca.exclusionReasons)).toBe("Şikâyet nedeniyle durdu");
+    expect(sequenceStatusLabel(cb.status, cb.exclusionReasons, cb.stopReason)).toBe(
+      "Listeden çıktı",
+    );
     // durum başka ise işaret etkisizdir
     expect(sequenceStatusLabel("removed", ["arf_complaint"])).not.toMatch(/Şikâyet nedeniyle/);
     // kuyruk API'si işareti taşır
@@ -507,6 +513,8 @@ describe("5) şikâyet ve çıkış ayrı nedenler olarak denetimde ve arayüzde
     const byId = new Map(q.items.map((i) => [i.id, i]));
     expect(byId.get(a.cl)!.exclusionReasons).toEqual(["arf_complaint"]);
     expect(byId.get(b.cl)!.exclusionReasons).toEqual([]);
+    expect(byId.get(a.cl)!.stopReason).toBe("complaint");
+    expect(byId.get(b.cl)!.stopReason).toBe("unsubscribe");
     // gelen iletiler
     const inb = await db.select().from(messages).where(eq(messages.direction, "in"));
     const labels = inb.map((m) => classLabel(m.classification, m.errorCode));

@@ -85,7 +85,7 @@ Google Maps Platform şartlarına göre **yalnızca Place ID süresiz, enlem/boy
 - **Olaylar:** `onEvent("place.enriched", ...)` ile Faz 2 e-posta bulma, zenginleştirme bitince tetiklenir.
 - **Yenilik sinyalleri:** `computeNovelty({ extraSignals })` ile sicil (Faz 5) ve alan adı yaşı sinyalleri eklenir.
 - **Veritabanı:** yeni tablolar yeni migrasyon dosyasıyla eklenir (`npm run db:generate`); uygulama açılışta yedek alıp geçişi uygular.
-- **Arayüz:** gezinme öğeleri `src/components/app-shell.tsx` içindeki `NAV_ITEMS` dizisinde; metinler `src/lib/i18n/tr.ts` içinde (İngilizce Faz 4'te `en.ts`).
+- **Arayüz:** gezinme öğeleri `src/components/app-shell.tsx` içindeki `NAV_ITEMS` dizisinde; metinler `src/lib/i18n/tr/*.ts` parçalarında (birleştirme `src/lib/i18n/tr.ts`; Faz 4 öncesi anahtarlar dondurulmuş `tr/base.ts`, yeni anahtarlar paketin kendi parçasına; İngilizcesi aynı adlı `src/lib/i18n/en/*.ts`).
 - **Uyum kapıları:** veri toplama uç noktaları `requireCollectionReady`, hedef ülke denetimi `checkTargetCountry` ile korunur; Faz 3 gönderim uç noktaları aynı kapıları kullanmalıdır.
 
 ## 7. Çalıştırma

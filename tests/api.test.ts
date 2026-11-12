@@ -368,7 +368,12 @@ describe("tarama uç noktaları: kapılar", () => {
     };
     const res = await scansRoute.POST(req("POST", "/api/scans", big), undefined);
     expect(res.status).toBe(409);
-    expect((await json(res)).code).toBe("NEEDS_ACK");
+    const ack = await json(res);
+    expect(ack.code).toBe("NEEDS_ACK");
+    // Faz 4: tutarlar yapılandırılmış alan olarak da gelir (İngilizce onay metni bunlarla kurulur).
+    expect(typeof ack.highUsd).toBe("number");
+    expect(typeof ack.remainingUsd).toBe("number");
+    expect(ack.highUsd).toBeGreaterThan(ack.remainingUsd);
     expect(
       (
         await scansRoute.POST(
@@ -386,6 +391,17 @@ describe("tarama uç noktaları: kapılar", () => {
       categoryIds: await cafeIds(),
     };
     const { scanId } = await json(await scansRoute.POST(req("POST", "/api/scans", big), undefined));
+    // Faz 4: aynı anahtarla kuyrukta/duraklatılmış tarama varken yeniden tarama 409 ACTIVE_SCAN döner.
+    const active = await rerunRoute.POST(
+      req("POST", `/api/scans/${scanId}/rerun`, { acknowledgeRisk: true }),
+      params(scanId),
+    );
+    expect(active.status).toBe(409);
+    expect((await json(active)).code).toBe("ACTIVE_SCAN");
+    await db
+      .update(scans)
+      .set({ status: "completed", finishedAt: Date.now() })
+      .where(eq(scans.id, scanId));
     await setSetting(db, "budget.monthlyUsd", 0.5);
     await recordUsage(db, "mock", "text_search_pro", 5000);
     const before = (await db.select().from(scans)).length;
@@ -410,6 +426,7 @@ describe("tarama uç noktaları: kapılar", () => {
         )
       ).status,
     ).toBe(201);
+    await db.update(scans).set({ status: "completed" }).where(eq(scans.status, "queued"));
     // Sağlayıcı sonradan Google'a çevrildi ama anahtar yok: ücretli tarama kuyruğa ALINMAZ (kurulum kapısı veya
     // ortak kapının PLACES_KEY_MISSING kontrolü).
     const count = (await db.select().from(scans)).length;

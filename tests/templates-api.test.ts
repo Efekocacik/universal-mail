@@ -8,6 +8,7 @@ import * as previewRoute from "@/app/api/templates/preview/route";
 import * as listRoute from "@/app/api/templates/route";
 import type { Db } from "@/lib/db/client";
 import { auditLog, campaigns, campaignSteps, leads, templates } from "@/lib/db/schema";
+import { BUILTIN_TEMPLATES } from "@/lib/mail/builtin-templates";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
 
 /**
@@ -134,7 +135,8 @@ describe("oluşturma ve giriş doğrulama", () => {
     expect(unsupported.status).toBe(400);
     const misleading = await create({ ...DRAFT, subject: "Re: your order" });
     expect(misleading.status).toBe(400);
-    expect(await db.select().from(templates)).toHaveLength(2); // yalnızca yerleşik TR/EN
+    // Yalnızca yerleşik şablonlar (TR/EN ilk e-posta + Faz 4 takip şablonları).
+    expect(await db.select().from(templates)).toHaveLength(BUILTIN_TEMPLATES.length);
   });
 
   it("kullanım onayı yoksa değişiklik yapılamaz (403); okuma ve önizleme etkilenmez", async () => {
