@@ -4,7 +4,7 @@ import { MarkerClusterer } from "@googlemaps/markerclusterer";
 import { APIProvider, Map, useMap, useMapsLibrary } from "@vis.gl/react-google-maps";
 import { useEffect, useRef, useState } from "react";
 import { t } from "@/lib/i18n";
-import { regionFromDrag } from "./map-math";
+import { pinClassName, readCamera, regionFromDrag, writeCamera, type Camera } from "./map-math";
 import { LABEL_COLORS, type MapPoint, type MapViewProps } from "./map-types";
 
 const SHAPE_STYLE = {
@@ -25,30 +25,51 @@ interface PinRef {
  * `gmp-click` olayıyla (addEventListener) alınır; `addListener("click")` kullanımdan kalkmıştır.
  * İçerik öğelerine kendi referanslarımızdan erişiriz (marker.content özelliği kullanımdan kalkmıştır).
  */
+const NOVELTY_KEYS = [
+  "novelty.future_opening",
+  "novelty.high",
+  "novelty.likely",
+  "novelty.low",
+] as const;
+const CONTACT_KEYS = [null, "map.legend.sent", "map.legend.replied", "map.legend.stopped"] as const;
+
+/** Ekran okuyucu için işaretçi adı: yenilik etiketi ve (varsa) temas durumu. */
+function markerTitle(p: MapPoint): string {
+  const novelty = t(NOVELTY_KEYS[p[3] ?? 3] ?? "novelty.low");
+  const contact = CONTACT_KEYS[p[4] ?? 0];
+  return contact
+    ? t("map.marker.labelContact", { novelty, contact: t(contact) })
+    : t("map.marker.label", { novelty });
+}
+
 function Markers({
   points,
   selectedId,
+  checkedIds,
   onSelect,
-}: Pick<MapViewProps, "points" | "selectedId" | "onSelect">) {
+}: Pick<MapViewProps, "points" | "selectedId" | "checkedIds" | "onSelect">) {
   const map = useMap();
   const markerLib = useMapsLibrary("marker");
   const byId = useRef(new globalThis.Map<number, PinRef>());
   const selectRef = useRef(onSelect);
   const prevSelected = useRef<number | null>(null);
+  const checkedRef = useRef(checkedIds);
+  const prevChecked = useRef<ReadonlySet<number>>(new Set());
   selectRef.current = onSelect;
+  checkedRef.current = checkedIds;
 
   useEffect(() => {
     if (!map || !markerLib) return;
     const index = byId.current;
     const markers = points.map((p: MapPoint) => {
       const el = document.createElement("div");
-      el.className = `um-pin${p[4] !== 0 ? " um-pin--contacted" : ""}`;
+      el.className = pinClassName(p[4], checkedRef.current.has(p[0]!));
       el.style.background = LABEL_COLORS[p[3] ?? 3] ?? LABEL_COLORS[3];
       const marker = new markerLib.AdvancedMarkerElement({
         position: { lat: p[1]!, lng: p[2]! },
         content: el,
         gmpClickable: true,
-        title: t("map.marker"),
+        title: markerTitle(p),
       });
       marker.addEventListener("gmp-click", () => selectRef.current(p[0]!));
       index.set(p[0]!, { marker, el });
@@ -80,8 +101,20 @@ function Markers({
       clusterer.setMap(null);
       index.clear();
       prevSelected.current = null;
+      prevChecked.current = checkedRef.current;
     };
   }, [map, markerLib, points]);
+
+  // Toplu seçim: yalnızca değişen işaretçilere dokunulur (binlerce işaretçide de ucuz).
+  useEffect(() => {
+    const index = byId.current;
+    const prev = prevChecked.current;
+    for (const id of prev)
+      if (!checkedIds.has(id)) index.get(id)?.el.classList.remove("um-pin--checked");
+    for (const id of checkedIds)
+      if (!prev.has(id)) index.get(id)?.el.classList.add("um-pin--checked");
+    prevChecked.current = checkedIds;
+  }, [checkedIds, points]);
 
   useEffect(() => {
     const index = byId.current;
@@ -111,13 +144,24 @@ function ViewReporter({ onBoundsChange }: Pick<MapViewProps, "onBoundsChange">) 
   const map = useMap();
   useEffect(() => {
     if (!map) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const report = () => {
       const b = map.getBounds(); // harita hazır olana kadar undefined olabilir
       if (b) onBoundsChange(bboxOfBounds(b));
+      // Kamera hatırlanır (yeniden açılışta aynı yerden başlar); sık yazmamak için gecikmeli.
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const c = map.getCenter();
+        const z = map.getZoom();
+        if (c && z !== undefined) writeCamera({ lat: c.lat(), lng: c.lng(), zoom: z });
+      }, 500);
     };
     const l = map.addListener("idle", report);
     report();
-    return () => l.remove();
+    return () => {
+      clearTimeout(timer);
+      l.remove();
+    };
   }, [map, onBoundsChange]);
   return null;
 }
@@ -326,8 +370,12 @@ function DrawOverlay({ drawMode, onDrawn }: Pick<MapViewProps, "drawMode" | "onD
   );
 }
 
+const DEFAULT_CAMERA: Camera = { lat: 50, lng: 10, zoom: 4 };
+
 export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: string }) {
   const [authError, setAuthError] = useState(false);
+  // Hatırlanan kamera yalnızca ilk açılışta okunur (harita "denetimsiz": sonrası kullanıcının hareketidir).
+  const [camera] = useState<Camera>(() => readCamera() ?? DEFAULT_CAMERA);
 
   useEffect(() => {
     // Google, anahtar/faturalandırma/kısıt sorununda bu global işlevi çağırır.
@@ -354,8 +402,8 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
       <APIProvider apiKey={props.apiKey} language="tr">
         <Map
           mapId={props.mapId}
-          defaultCenter={{ lat: 50, lng: 10 }}
-          defaultZoom={4}
+          defaultCenter={{ lat: camera.lat, lng: camera.lng }}
+          defaultZoom={camera.zoom}
           gestureHandling="greedy"
           mapTypeControl={false}
           streetViewControl={false}
@@ -367,7 +415,12 @@ export function GoogleMapView(props: MapViewProps & { apiKey: string; mapId: str
           className="size-full"
           onClick={() => props.onSelect(null)}
         >
-          <Markers points={props.points} selectedId={props.selectedId} onSelect={props.onSelect} />
+          <Markers
+            points={props.points}
+            selectedId={props.selectedId}
+            checkedIds={props.checkedIds}
+            onSelect={props.onSelect}
+          />
           <RegionShape draft={props.draft} onDraftChange={props.onDraftChange} />
           <ViewReporter onBoundsChange={props.onBoundsChange} />
           <Focuser focus={props.focus} />

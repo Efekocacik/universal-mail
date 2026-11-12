@@ -3,7 +3,7 @@ import { audit } from "@/lib/db/audit";
 import { placeCache } from "@/lib/db/cache-schema";
 import { leadContacts, leadEmails, leadEnrichment, leads, places } from "@/lib/db/schema";
 import { and, asc, eq, gt, inArray } from "drizzle-orm";
-import { buildWhere, type LeadFilters } from "@/lib/leads/query";
+import { auditFilterSummary, buildWhere, type LeadFilters } from "@/lib/leads/query";
 import { googleMapsUrl } from "@/lib/places/maps-url";
 
 /**
@@ -82,7 +82,7 @@ const iso = (ms: number | null | undefined) => (ms ? new Date(ms).toISOString().
 export async function* exportLeadsCsv(
   db: Db,
   filters: LeadFilters,
-  opts: { includeGoogleFields: boolean },
+  opts: { includeGoogleFields: boolean; selection?: "ids" | "filter" },
 ): AsyncGenerator<string> {
   const cols = selectColumns(opts.includeGoogleFields);
   yield "﻿" + cols.map((c) => csvCell(c.header)).join(",") + "\r\n";
@@ -176,6 +176,8 @@ export async function* exportLeadsCsv(
   await audit(db, "export.leads", "leads", undefined, {
     rows: count,
     includeGoogleFields: opts.includeGoogleFields,
-    filters,
+    // Kimlik listesi ve arama metni yazılmaz (seçimle dışa aktarmada 2000 kimlik olabilir).
+    filters: auditFilterSummary(filters),
+    ...(opts.selection ? { selection: opts.selection } : {}),
   });
 }

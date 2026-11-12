@@ -1,16 +1,22 @@
 "use client";
 
 import { List, Map as MapIcon } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ShortcutsDialog } from "@/components/shortcuts-dialog";
+import { AddToCampaignButton } from "@/features/campaigns/add-to-campaign-button";
 import { cn } from "@/lib/cn";
+import { useLeadsInfinite } from "@/lib/client/queries";
+import { useShortcuts } from "@/lib/client/shortcuts";
 import { t } from "@/lib/i18n";
+import { FindEmailsButton } from "./find-emails-button";
 import { LeadDetail } from "./lead-detail";
 import { LeadFilters } from "./lead-filters";
 import { LeadList } from "./lead-list";
 import { MapPanel } from "./map-panel";
 import { ScanBuilder } from "./scan-builder";
 import { ScanStrip } from "./scan-strip";
-import { ExploreProvider, useExplore } from "./state";
+import { findEmailsTarget, isEmpty, selectionCount } from "./selection";
+import { ExploreProvider, SEARCH_INPUT_ID, useExplore, type InitialExploreState } from "./state";
 
 const MIN_W = 340;
 const MAX_W = 760;
@@ -52,27 +58,96 @@ function usePanelWidth(): [number, (w: number) => void] {
 }
 
 /**
- * Sayfa düzeyinde klavye kısayolları. Liste ekrandan kalksa (ayrıntı açıkken) bile çalışır.
- * Esc: önce çizim modunu kapatır, sonra seçili işletmeyi bırakır. Metin alanları ve diyaloglar etkilenmez.
+ * Sayfa düzeyinde klavye kısayolları (kayıt: `lib/client/shortcuts.ts`; `?` hepsini listeler). Liste ekrandan kalksa
+ * (ayrıntı açıkken) bile çalışır: J/K satırları listeyle AYNI önbellekli sorgudan okur. Eskiden J/K listenin içindeydi
+ * ve bir işletme açılınca liste kalktığı için ikinci basışta çalışmıyordu.
+ * Esc sırası: çizim modu → toplu seçim → açık ayrıntı. Metin alanları ve diyaloglar etkilenmez.
  */
 function GlobalKeys() {
   const ex = useExplore();
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (
-        (e.target as HTMLElement).closest(
-          "input, textarea, select, [contenteditable=true], [role=dialog], [role=listbox]",
-        )
-      )
-        return;
+  const onList = ex.tab === "list";
+  const q = useLeadsInfinite(ex.apiFilters, ex.sort, onList);
+  const rows = useMemo(() => q.data?.pages.flatMap((p) => p.rows) ?? [], [q.data]);
+
+  const move = (delta: number) => {
+    if (!onList || rows.length === 0) return;
+    const cur = rows.findIndex((r) => r.leadId === ex.selectedId);
+    const next = Math.min(rows.length - 1, Math.max(0, cur < 0 ? 0 : cur + delta));
+    // Yüklü satırların sonuna gelindiyse sonraki sayfa istenir; bir sonraki basış oraya geçer.
+    if (next >= rows.length - 2 && q.hasNextPage && !q.isFetchingNextPage) void q.fetchNextPage();
+    const r = rows[next]!;
+    ex.select(r.leadId, { focus: true, lat: r.lat ?? undefined, lng: r.lng ?? undefined });
+  };
+
+  const openDialog = (d: "campaign" | "findEmails") => {
+    if (!onList) return;
+    const hasTarget =
+      !isEmpty(ex.selection) || ex.selectedId !== null || (q.data?.pages[0]?.total ?? 0) > 0;
+    if (hasTarget) ex.openDialog(d);
+  };
+
+  useShortcuts({
+    help: () => ex.setShortcutsOpen(true),
+    next: () => move(1),
+    prev: () => move(-1),
+    search: () => {
+      ex.setTab("list");
+      ex.select(null);
+      // Liste ve süzgeçler bir sonraki çizimde yerleşir; odak ondan sonra verilir.
+      requestAnimationFrame(() => document.getElementById(SEARCH_INPUT_ID)?.focus());
+    },
+    select: () => {
+      if (onList && ex.selectedId !== null) ex.toggleSelect(ex.selectedId);
+    },
+    findEmails: () => openDialog("findEmails"),
+    addToCampaign: () => openDialog("campaign"),
+    fit: () => ex.requestFit(),
+    onlyInView: () => ex.setOnlyInView(!ex.onlyInView),
+    escape: () => {
       if (ex.drawMode) ex.setDrawMode(null);
+      else if (!isEmpty(ex.selection)) ex.clearSelection();
       else if (ex.selectedId !== null) ex.select(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [ex]);
+    },
+  });
   return null;
+}
+
+/**
+ * Kısayolla ve seçim çubuğuyla açılan pencereler. Sayfa düzeyindedir; liste ile ayrıntı arasında geçilse de kapanmaz.
+ * Hedef: toplu seçim varsa o; yoksa açık ayrıntıdaki işletme; o da yoksa listedeki süzgece uyanların tümü.
+ */
+function ExploreDialogs() {
+  const ex = useExplore();
+  const q = useLeadsInfinite(ex.apiFilters, ex.sort, ex.dialog !== null);
+  const total = q.data?.pages[0]?.total ?? 0;
+  if (!ex.dialog) return null;
+  const sel = ex.selection;
+  const onClose = (v: boolean) => {
+    if (!v) ex.openDialog(null);
+  };
+  const single = isEmpty(sel) && ex.selectedId !== null ? [ex.selectedId] : null;
+
+  if (ex.dialog === "findEmails") {
+    const target =
+      findEmailsTarget(sel) ?? (single ? { leadIds: single } : { filtersQuery: ex.filterQuery });
+    return <FindEmailsButton hideTrigger open onOpenChange={onClose} target={target} />;
+  }
+  const leadIds = sel.mode === "ids" && !isEmpty(sel) ? [...sel.ids] : (single ?? undefined);
+  return (
+    <AddToCampaignButton
+      hideTrigger
+      open
+      onOpenChange={onClose}
+      filterQuery={sel.mode === "query" ? sel.filterQuery : ex.filterQuery}
+      total={isEmpty(sel) ? (single ? 1 : total) : selectionCount(sel)}
+      leadIds={leadIds}
+    />
+  );
+}
+
+function ShortcutsHelp() {
+  const ex = useExplore();
+  return <ShortcutsDialog open={ex.shortcutsOpen} onOpenChange={ex.setShortcutsOpen} />;
 }
 
 function LeftPanel() {
@@ -220,11 +295,13 @@ function Layout() {
   );
 }
 
-export function ExplorePage({ initialScanId }: { initialScanId?: number }) {
+export function ExplorePage({ initial }: { initial?: InitialExploreState }) {
   return (
-    <ExploreProvider initialScanId={initialScanId}>
+    <ExploreProvider initial={initial}>
       <GlobalKeys />
       <Layout />
+      <ExploreDialogs />
+      <ShortcutsHelp />
     </ExploreProvider>
   );
 }

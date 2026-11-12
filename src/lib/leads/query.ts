@@ -35,9 +35,57 @@ export interface LeadFilters {
   notFound?: boolean;
   /**
    * Faz 4: arşiv görünümü. Varsayılan (undefined/false) arşivlenmiş lead'leri GİZLER (`LEAD_NOT_ARCHIVED`); `true`
-   * YALNIZCA arşivlenmişleri gösterir. Arşiv yumuşak silmedir; bkz. schema.ts `leads.archivedAt`.
+   * YALNIZCA arşivlenmişleri gösterir. Arşiv yumuşak silmedir; bkz. schema.ts `leads.archivedAt`. `"any"` (yalnızca
+   * sunucu içi, açık `ids` ile): arşiv durumuna bakılmaz; kullanıcının ekranda seçtiği satırlar neyse o işlenir.
    */
-  archived?: boolean;
+  archived?: boolean | "any";
+  /**
+   * Faz 4 (paket C): açık lead kimlikleri (toplu işlemler, seçimle dışa aktarma). Tek bir JSON parametresiyle
+   * `json_each` üzerinden uygulanır; böylece 2000 kimlik SQLite değişken sınırına takılmaz. Diğer süzgeçlerle VE'lenir.
+   */
+  ids?: number[];
+  /**
+   * Faz 4: yaşam döngüsü süzgeci (birden çoğu VEYA'lanır). `opened`: yakında açılacakken açıldığı tespit edilenler,
+   * `future`: hâlâ açılışı beklenenler, `new`: yeni tespit edilenler. Gösterge paneli ve bildirim bağlantıları kullanır.
+   */
+  lifecycle?: LeadLifecycle[];
+  /**
+   * Faz 4: tespit zamanı alt sınırı (epoch ms, dahil). `lifecycle` ile birlikte her değerin kendi tespit zamanına
+   * uygulanır (`opened` → açılış tespiti, `new` → yeni tespiti, `future` → ilk görülme); tek başına "yeni veya açıldı
+   * olarak bu tarihten beri tespit edilenler" demektir.
+   */
+  detectedSince?: number;
+}
+
+/** Süzgeçlerin denetim kaydına yazılacak özeti (kimlik listesi ve arama metni yazılmaz). */
+export function auditFilterSummary(filters: LeadFilters): Record<string, unknown> {
+  const { ids, q, ...rest } = filters;
+  return {
+    ...rest,
+    ...(ids ? { ids: ids.length } : {}),
+    ...(q ? { q: true } : {}),
+  };
+}
+
+export const LEAD_LIFECYCLES = ["opened", "future", "new"] as const;
+export type LeadLifecycle = (typeof LEAD_LIFECYCLES)[number];
+
+/** `lifecycle`/`detectedSince` koşulu (ikisi de yoksa undefined). Tüm değerler parametrelidir. */
+export function lifecycleCondition(
+  lifecycle: readonly LeadLifecycle[] | undefined,
+  since: number | undefined,
+): SQL | undefined {
+  const after = (col: typeof places.openedDetectedAt | typeof places.newDetectedAt) =>
+    since === undefined ? sql`${col} IS NOT NULL` : sql`${col} >= ${since}`;
+  const one = (l: LeadLifecycle): SQL => {
+    if (l === "opened") return after(places.openedDetectedAt);
+    if (l === "new") return after(places.newDetectedAt);
+    const base = sql`(${places.wasFuture} = 1 AND ${places.isClosed} = 0)`;
+    return since === undefined ? base : sql`(${base} AND ${places.firstSeenAt} >= ${since})`;
+  };
+  if (lifecycle?.length) return or(...[...new Set(lifecycle)].map(one));
+  if (since !== undefined) return or(after(places.newDetectedAt), after(places.openedDetectedAt));
+  return undefined;
 }
 
 /**
@@ -151,7 +199,11 @@ function escapeLike(s: string): string {
  */
 export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefined> {
   const conds: (SQL | undefined)[] = [
-    f.archived === true ? sql`${leads.archivedAt} IS NOT NULL` : LEAD_NOT_ARCHIVED,
+    f.archived === "any"
+      ? undefined
+      : f.archived === true
+        ? sql`${leads.archivedAt} IS NOT NULL`
+        : LEAD_NOT_ARCHIVED,
   ];
   if (f.q?.trim()) {
     const pattern = `%${escapeLike(f.q.trim())}%`;
@@ -191,6 +243,15 @@ export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefin
   if (f.notFound === true) conds.push(sql`${places.notFoundInScanId} IS NOT NULL`);
   if (f.notFound === false) conds.push(sql`${places.notFoundInScanId} IS NULL`);
   if (f.emailStatus?.length) conds.push(inArray(EMAIL_STATE, f.emailStatus));
+  if (f.ids) {
+    // Boş kimlik listesi "hiçbiri" demektir (tümü değil).
+    conds.push(
+      f.ids.length
+        ? sql`${leads.id} IN (SELECT value FROM json_each(${JSON.stringify(f.ids)}))`
+        : sql`0`,
+    );
+  }
+  conds.push(lifecycleCondition(f.lifecycle, f.detectedSince));
   const real = conds.filter((c): c is SQL => c !== undefined);
   return real.length ? and(...real) : undefined;
 }
@@ -442,6 +503,12 @@ export interface LeadIdQueryOptions {
   notInCampaignId?: number;
   /** `false`: `excluded` satırı olan lead'ler de atlanır (yalnızca kampanyaya hiç eklenmemiş olanlar). */
   includeExcluded?: boolean;
+  /**
+   * Ek koşul (süzgeçle VE'lenir; `LIMIT`'ten ÖNCE uygulanır). Sınırlı (2000) toplu işlemler bununla yalnızca HÂLÂ
+   * işlenmesi gereken lead'leri seçer; böylece aynı süzgeçle yeniden çalıştırma hep sıradakilere ilerler.
+   * `leads`, `places`, `place_cache` ve `lead_enrichment` (LEFT JOIN) sütunlarına başvurabilir.
+   */
+  where?: SQL;
 }
 
 function campaignMembership(opts: LeadIdQueryOptions): SQL | undefined {
@@ -457,7 +524,7 @@ export async function queryLeadIds(
   limit = 2000,
   opts: LeadIdQueryOptions = {},
 ): Promise<number[]> {
-  const where = and(await buildWhere(db, filters), campaignMembership(opts));
+  const where = and(await buildWhere(db, filters), campaignMembership(opts), opts.where);
   const base = db
     .select({ id: leads.id })
     .from(leads)
@@ -483,7 +550,7 @@ export async function countLeadIds(
   filters: LeadFilters,
   opts: LeadIdQueryOptions = {},
 ): Promise<number> {
-  const where = and(await buildWhere(db, filters), campaignMembership(opts));
+  const where = and(await buildWhere(db, filters), campaignMembership(opts), opts.where);
   const base = db
     .select({ n: sql<number>`count(DISTINCT ${leads.id})` })
     .from(leads)

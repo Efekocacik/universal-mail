@@ -5,6 +5,9 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { toast } from "sonner";
+import { fmtNumber } from "@/lib/client/format";
+import { downloadSelectionCsv, type SelectionTarget } from "@/lib/client/leads-bulk";
 import { t } from "@/lib/i18n";
 
 /**
@@ -19,7 +22,22 @@ export function exportLeadsUrl(filterQuery: string, includeGoogleFields: boolean
   return `/api/export/leads${q ? `?${q}` : ""}`;
 }
 
-export function ExportLeadsButton({ filterQuery }: { filterQuery: string }) {
+/**
+ * `selection` verilirse (toplu seçim) yalnızca seçilenler POST ile indirilir (2000 kimlik adrese sığmaz); aksi halde
+ * listedeki süzgeçle GET.
+ */
+export function ExportLeadsButton({
+  filterQuery,
+  selection,
+  count,
+  label,
+}: {
+  filterQuery?: string;
+  selection?: SelectionTarget;
+  /** Seçimle dışa aktarmada başlıkta gösterilen sayı. */
+  count?: number;
+  label?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [google, setGoogle] = useState(false);
   return (
@@ -32,17 +50,29 @@ export function ExportLeadsButton({ filterQuery }: { filterQuery: string }) {
           setOpen(true);
         }}
       >
-        <Download aria-hidden /> {t("export.leads")}
+        <Download aria-hidden /> {label ?? t("export.leads")}
       </Button>
       <ConfirmDialog
         open={open}
         onOpenChange={setOpen}
         tone="success"
-        title={t("export.leads.title")}
+        title={
+          selection ? t("bulk.export.title", { n: fmtNumber(count ?? 0) }) : t("export.leads.title")
+        }
         description={t("export.leads.body")}
         confirmLabel={t("export.leads.confirm")}
-        onConfirm={() => {
-          window.location.assign(exportLeadsUrl(filterQuery, google));
+        onConfirm={async () => {
+          if (!selection) {
+            window.location.assign(exportLeadsUrl(filterQuery ?? "", google));
+            return;
+          }
+          try {
+            await downloadSelectionCsv(selection, google);
+            toast.success(t("bulk.export.started"));
+          } catch (e) {
+            toast.error((e as Error).message || t("bulk.export.failed"));
+            throw e;
+          }
         }}
       >
         <label

@@ -1,5 +1,6 @@
 import { and, eq, exists, inArray, ne, notExists, sql } from "drizzle-orm";
 import { z } from "zod";
+import { HttpError } from "@/lib/api/http";
 import { purgeDemoCampaignData } from "@/lib/campaigns/purge";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
@@ -7,37 +8,66 @@ import { placeCache } from "@/lib/db/cache-schema";
 import { apiUsage, leads, placeSnapshots, places, scanSchedules, scans } from "@/lib/db/schema";
 import { deleteNotificationsFor } from "@/lib/notifications/service";
 
-export const leadPatchSchema = z.object({
-  status: z
-    .enum([
-      "new",
-      "enriched",
-      "queued",
-      "sent",
-      "replied",
-      "not_interested",
-      "customer",
-      "do_not_contact",
-    ])
-    .optional(),
-  notes: z.string().max(5000).nullable().optional(),
-  tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
-  language: z.string().max(10).nullable().optional(),
-  /** Kendi kaydımız: işletmenin görünen adı (Google adı saklanmadığı için kullanıcı girebilir). */
-  displayName: z.string().trim().max(200).nullable().optional(),
-});
+export const leadPatchSchema = z
+  .object({
+    status: z
+      .enum([
+        "new",
+        "enriched",
+        "queued",
+        "sent",
+        "replied",
+        "not_interested",
+        "customer",
+        "do_not_contact",
+      ])
+      .optional(),
+    notes: z.string().max(5000).nullable().optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+    language: z.string().max(10).nullable().optional(),
+    /** Kendi kaydımız: işletmenin görünen adı (Google adı saklanmadığı için kullanıcı girebilir). */
+    displayName: z.string().trim().max(200).nullable().optional(),
+    /**
+     * Faz 4: "İletişime geçme" kilidini kaldırmak (durumu do_not_contact'tan başka bir değere çevirmek) için açık onay.
+     * Yoksa istek 409 `LEAD_UNBLOCK_CONFIRM` ile reddedilir; arayüz onay penceresi gösterip `true` ile yeniden gönderir.
+     */
+    confirmUnblock: z.literal(true).optional(),
+  })
+  .strict();
 
 export type LeadPatch = z.infer<typeof leadPatchSchema>;
 
-export async function patchLead(db: Db, leadId: number, patch: LeadPatch): Promise<boolean> {
+/**
+ * Tek lead'i günceller. `false`: lead yok. Uyum kilidi: durumu `do_not_contact` olan lead'in durumu ancak
+ * `confirmUnblock: true` ile değiştirilebilir (yoksa 409 `LEAD_UNBLOCK_CONFIRM`); kaldırma ayrıca `lead.unblocked` olarak
+ * denetim kaydına yazılır. Koşul SQL'de de vardır: onay sonrası eşzamanlı bir değişiklik kilidi sessizce açamaz.
+ */
+export async function patchLead(
+  db: Db,
+  leadId: number,
+  patch: LeadPatch,
+  opts: { now?: number } = {},
+): Promise<boolean> {
+  const now = opts.now ?? Date.now();
   const existing = await db
-    .select({ id: leads.id })
+    .select({ id: leads.id, status: leads.status })
     .from(leads)
     .where(eq(leads.id, leadId))
     .limit(1);
   if (!existing[0]) return false;
+  const unblocking =
+    patch.status !== undefined &&
+    patch.status !== "do_not_contact" &&
+    existing[0].status === "do_not_contact";
+  if (unblocking && patch.confirmUnblock !== true) {
+    throw new HttpError(
+      409,
+      "Bu işletme “İletişime geçme” olarak işaretli. Durumunu değiştirmek için onay vermeniz gerekir.",
+      { code: "LEAD_UNBLOCK_CONFIRM" },
+    );
+  }
   const tags = patch.tags ? [...new Set(patch.tags)] : undefined;
-  await db
+  const updated = await db
     .update(leads)
     .set({
       ...(patch.status ? { status: patch.status } : {}),
@@ -47,10 +77,33 @@ export async function patchLead(db: Db, leadId: number, patch: LeadPatch): Promi
       ...(patch.displayName !== undefined
         ? { displayName: patch.displayName?.trim() || null }
         : {}),
-      updatedAt: Date.now(),
+      updatedAt: now,
     })
-    .where(eq(leads.id, leadId));
-  if (patch.status) await audit(db, "lead.status", "lead", leadId, { status: patch.status });
+    .where(
+      unblocking || patch.status === undefined || patch.status === "do_not_contact"
+        ? eq(leads.id, leadId)
+        : // Onaysız durum değişikliği kilitli satıra yazamaz (okuma ile yazma arasındaki yarışa karşı).
+          and(eq(leads.id, leadId), ne(leads.status, "do_not_contact")),
+    )
+    .returning({ id: leads.id });
+  if (updated.length === 0) {
+    // Okumadan sonra lead silindi veya "İletişime geçme" olarak işaretlendi. Hiçbir alan yazılmadı ve denetim kaydı
+    // yazılmaz; arayüz onay penceresini gösterip isteği (notlar dahil) `confirmUnblock` ile yeniden gönderir.
+    const still = await db
+      .select({ id: leads.id })
+      .from(leads)
+      .where(eq(leads.id, leadId))
+      .limit(1);
+    if (!still[0]) return false;
+    throw new HttpError(
+      409,
+      "Bu işletme az önce “İletişime geçme” olarak işaretlendi. Durumunu değiştirmek için onay vermeniz gerekir.",
+      { code: "LEAD_UNBLOCK_CONFIRM" },
+    );
+  }
+  if (unblocking) await audit(db, "lead.unblocked", "lead", leadId, { status: patch.status }, now);
+  else if (patch.status)
+    await audit(db, "lead.status", "lead", leadId, { status: patch.status }, now);
   return true;
 }
 

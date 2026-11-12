@@ -17,6 +17,7 @@ import { notify } from "@/lib/notifications";
 import { CSV_COLUMNS, csvCell, exportLeadsCsv, selectColumns } from "@/lib/export/csv";
 import { bboxFromCenter } from "@/lib/geo/bbox";
 import { getLeadDetail, queryFacets, queryLeads, queryPoints } from "@/lib/leads/query";
+import { runBulk } from "@/lib/leads/bulk";
 import { leadPatchSchema, patchLead, purgeDemoData } from "@/lib/leads/mutations";
 import { MockPlacesProvider } from "@/lib/places/mock";
 import { runScan } from "@/lib/scan/runner";
@@ -419,5 +420,30 @@ describe("arşivlenmiş lead'ler (Faz 4 sözleşmesi)", () => {
     expect(archived.rows.map((r) => r.leadId)).toEqual([target]);
     const csv = await collect(exportLeadsCsv(db, {}, { includeGoogleFields: false }));
     expect(csv.trim().split("\n")).toHaveLength(all.total); // başlık + (toplam − 1)
+  });
+});
+
+describe("Faz 4 (paket C): arşiv yeniden taramada korunur", () => {
+  it("arşivlenen işletme aynı bölge yeniden taranınca listeye geri dönmez", async () => {
+    await scanLondon(["cafe"]);
+    const before = await queryLeads(db, {});
+    expect(before.total).toBeGreaterThan(1);
+    const target = before.rows[0]!.leadId;
+    const r = await runBulk(
+      db,
+      { action: "archive", selection: { leadIds: [target] } },
+      { now: 1_000 },
+    );
+    expect(r.changed).toBe(1);
+
+    await scanLondon(["cafe"]);
+    const [row] = await db
+      .select({ archivedAt: leads.archivedAt })
+      .from(leads)
+      .where(eq(leads.id, target));
+    expect(row!.archivedAt).toBe(1_000);
+    const after = await queryLeads(db, {});
+    expect(after.rows.some((x) => x.leadId === target)).toBe(false);
+    expect(after.total).toBe(before.total - 1);
   });
 });

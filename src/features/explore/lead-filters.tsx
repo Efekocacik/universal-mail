@@ -8,10 +8,22 @@ import { Input, Label } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/cn";
-import { countryLabel, fmtNumber, NOVELTY_ORDER } from "@/lib/client/format";
+import { countryLabel, fmtDate, fmtNumber, NOVELTY_ORDER } from "@/lib/client/format";
 import { useCategories, useFacets } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
-import { useExplore, type UiFilters } from "./state";
+import { LIFECYCLE_OPTIONS } from "@/lib/leads/saved-filter-payload";
+import { SavedFiltersMenu } from "./saved-filters-menu";
+import { SEARCH_INPUT_ID, useExplore, type UiFilters } from "./state";
+
+const DAY_MS = 86_400_000;
+const DETECTED_PERIODS = [7, 30] as const;
+
+/** Tespit dönemi etiketi (saf): son N gün veya bağlantıdan gelen tarih. */
+function detectedLabel(d: NonNullable<UiFilters["detected"]>): string {
+  if (d.days === 7 || d.days === 30) return t(`filters.detected.${d.days}`);
+  if (d.days !== undefined) return t("filters.detected.days", { n: d.days });
+  return t("filters.detected.since", { date: fmtDate(d.since) });
+}
 
 interface Option {
   value: string;
@@ -219,6 +231,24 @@ export function LeadFilters() {
       label: t("filters.hideNotFound"),
       remove: () => setFilters({ hideNotFound: false }),
     });
+  for (const v of filters.lifecycle)
+    chips.push({
+      key: `lc-${v}`,
+      label: t(`lifecycle.${v}`),
+      remove: () => setFilters({ lifecycle: without(filters.lifecycle, v) }),
+    });
+  if (filters.detected)
+    chips.push({
+      key: "det",
+      label: detectedLabel(filters.detected),
+      remove: () => setFilters({ detected: null }),
+    });
+  if (filters.archived)
+    chips.push({
+      key: "arc",
+      label: t("filters.archived.chip"),
+      remove: () => setFilters({ archived: false }),
+    });
   if (filters.scanId !== undefined)
     chips.push({
       key: "scan",
@@ -238,6 +268,7 @@ export function LeadFilters() {
       <div className="relative">
         <Search className="pointer-events-none absolute left-3 top-3 size-4 text-muted-foreground" />
         <Input
+          id={SEARCH_INPUT_ID}
           value={filters.q}
           onChange={(e) => set("q", e.target.value)}
           placeholder={t("filters.search")}
@@ -402,8 +433,62 @@ export function LeadFilters() {
         </FilterButton>
 
         <FilterButton
+          label={t("filters.lifecycle")}
+          active={filters.lifecycle.length > 0 || filters.detected !== null}
+          summary={summaryOf(filters.lifecycle.length + (filters.detected ? 1 : 0))}
+        >
+          <MultiList
+            options={LIFECYCLE_OPTIONS.map((v) => ({ value: v, label: t(`lifecycle.${v}`) }))}
+            selected={filters.lifecycle}
+            onChange={(v) => set("lifecycle", v as UiFilters["lifecycle"])}
+          />
+          <fieldset className="mt-2 border-t px-1 pt-2">
+            <legend className="mb-1 px-1 pt-2 text-[12px] font-medium text-muted-foreground">
+              {t("filters.detected")}
+            </legend>
+            <label className="flex cursor-pointer items-center gap-2 px-1 py-1 text-[13px]">
+              <input
+                type="radio"
+                name="detected"
+                checked={filters.detected === null}
+                onChange={() => set("detected", null)}
+                className="accent-[var(--primary)]"
+              />
+              {t("filters.detected.any")}
+            </label>
+            {DETECTED_PERIODS.map((n) => (
+              <label
+                key={n}
+                className="flex cursor-pointer items-center gap-2 px-1 py-1 text-[13px]"
+              >
+                <input
+                  type="radio"
+                  name="detected"
+                  checked={filters.detected?.days === n}
+                  onChange={() => set("detected", { since: Date.now() - n * DAY_MS, days: n })}
+                  className="accent-[var(--primary)]"
+                />
+                {t(`filters.detected.${n}`)}
+              </label>
+            ))}
+            {filters.detected && filters.detected.days !== 7 && filters.detected.days !== 30 && (
+              <label className="flex cursor-pointer items-center gap-2 px-1 py-1 text-[13px]">
+                <input
+                  type="radio"
+                  name="detected"
+                  checked
+                  readOnly
+                  className="accent-[var(--primary)]"
+                />
+                {detectedLabel(filters.detected)}
+              </label>
+            )}
+          </fieldset>
+        </FilterButton>
+
+        <FilterButton
           label={t("filters.more")}
-          active={filters.hasWebsite !== "any" || filters.hideNotFound}
+          active={filters.hasWebsite !== "any" || filters.hideNotFound || filters.archived}
         >
           <div className="space-y-3 p-1">
             <fieldset>
@@ -433,6 +518,16 @@ export function LeadFilters() {
                 onCheckedChange={(v) => set("hideNotFound", v)}
               />
             </div>
+            <div className="flex items-center justify-between gap-2">
+              <Label htmlFor="show-archived" className="text-[13px] font-normal">
+                {t("filters.archived")}
+              </Label>
+              <Switch
+                id="show-archived"
+                checked={filters.archived}
+                onCheckedChange={(v) => set("archived", v)}
+              />
+            </div>
           </div>
         </FilterButton>
       </div>
@@ -446,6 +541,7 @@ export function LeadFilters() {
           />
           {t("filters.onlyInView")}
         </label>
+        <SavedFiltersMenu />
       </div>
 
       {chips.length > 0 && (

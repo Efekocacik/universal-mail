@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { filterQuerySchema } from "@/lib/api/filters";
 import { CampaignError } from "@/lib/campaigns/errors";
 import type { Db } from "@/lib/db/client";
 import { getSetting } from "@/lib/settings";
@@ -73,7 +74,7 @@ export const stepsSchema = z
 export const addLeadsSchema = z.union([
   z.object({ leadIds: z.array(id).min(1).max(500) }).strict(),
   /** Leads ekranının filtre sorgusu (`/api/leads` ile aynı biçim); eklendiği andaki görüntü alınır. */
-  z.object({ filterQuery: z.string().max(4000) }).strict(),
+  z.object({ filterQuery: filterQuerySchema }).strict(),
 ]);
 
 export const controlSchema = z
