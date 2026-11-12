@@ -3,7 +3,7 @@ import type { FrequencyLimits } from "@/lib/compliance/frequency";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, type CampaignStatus } from "@/lib/db/schema";
-import { scheduleDispatch } from "@/lib/mail/scheduler/job";
+import { wakeDispatchSafely, type WakeOutcome } from "@/lib/mail/scheduler/job";
 import { bumpUpdatedAt, CampaignError } from "./errors";
 import { campaignBlockers, computeStartPlan, type BlockerCode } from "./preflight";
 
@@ -61,6 +61,8 @@ export interface TransitionResult {
   updatedAt: number;
   scheduled?: number;
   excluded?: number;
+  /** Başlatma/devamdan sonra dağıtıcı uyandırma sonucu (gözlemlenebilirlik; gönderim kararı değildir). */
+  wake?: WakeOutcome | "failed";
 }
 
 export interface TransitionOptions {
@@ -198,13 +200,10 @@ export async function transitionCampaign(
     };
   });
 
-  // Başlatılan/devam eden kampanya için dağıtıcıyı uyandır. Başarısız olursa worker bakımı işi yeniden kurar.
+  // Başlatılan/devam eden kampanya için dağıtıcıyı HEMEN uyandır (kuyruktaki iş öne çekilir; ikinci iş eklenmez).
+  // Başarısız olursa worker bakımı işi yeniden kurar. Aralık ve tavanlar gönderim anında yine uygulanır.
   if (result.changed && (action === "start" || action === "resume")) {
-    try {
-      await scheduleDispatch(db, { runAt: now, now });
-    } catch {
-      /* worker'ın periyodik bakımı dağıtım işini planlar */
-    }
+    result.wake = await wakeDispatchSafely(db, { now, env, source: `campaign.${action}` });
   }
   return result;
 }

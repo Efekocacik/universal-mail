@@ -6,7 +6,11 @@ import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { mailboxes } from "@/lib/db/schema";
 import { isConsumerGmailAddress } from "@/lib/mail/consumer-gmail";
 import { createGmailMailbox } from "@/lib/mail/mailbox-service";
-import { effectiveMailboxCap, mailboxLimitProfile } from "@/lib/mail/scheduler/throttle";
+import {
+  effectiveMailboxCap,
+  mailboxLimitBounds,
+  mailboxLimitProfile,
+} from "@/lib/mail/scheduler/throttle";
 import { getSetting } from "@/lib/settings";
 import { requireConsent } from "../campaigns/schema";
 import { createMailboxSchema } from "../mail/schema";
@@ -20,7 +24,8 @@ export const dynamic = "force-dynamic";
  * `editable`: demo olmayan ve bağlı olmayan kutular ad/durum değişikliğine ve silmeye açıktır.
  * `consumerGmail`: adres kişisel Gmail (`@gmail.com`/`@googlemail.com`); DNS Google'ca yönetilir, sınırlar daha sıkıdır.
  * `reauthorizationRequired`: Google yetkisi geçersiz/iptal (ör. `invalid_grant`); kutu yeniden bağlanana kadar bu
- * kutunun kampanya gönderimleri ERTELENİR. `limits`: bugünkü geçerli günlük tavan ve profilin ısınma tabanı/üst sınırı.
+ * kutunun kampanya gönderimleri ERTELENİR. `limits`: bugünkü geçerli günlük tavan ve profilin ısınma tabanı/üst sınırı;
+ * `profileMaxDaily`/`maxWarmupStep` günlük sınır penceresinin üst sınırlarıdır.
  */
 export const GET = domainRoute(async () => {
   const db = await database();
@@ -48,10 +53,15 @@ export const GET = domainRoute(async () => {
       editable: m.provider !== "demo" && m.status !== "connected",
       consumerGmail: m.provider === "gmail" && isConsumerGmailAddress(m.address),
       reauthorizationRequired: m.status === "error" && m.lastError === "reauthorization_required",
+      updatedAt: m.updatedAt,
+      /** Günlük sınır penceresi: demo dışındaki her kutuda (bağlı olsa da) açılabilir. */
+      limitsEditable: m.provider !== "demo",
       limits: {
         todayCap: effectiveMailboxCap(m, now),
         warmupBase: mailboxLimitProfile(m).warmupBase,
         maxDaily: Math.min(mailboxLimitProfile(m).maxDaily, m.dailyCap),
+        profileMaxDaily: mailboxLimitBounds(m).maxDailyCap,
+        maxWarmupStep: mailboxLimitBounds(m).maxWarmupStep,
       },
     })),
   });

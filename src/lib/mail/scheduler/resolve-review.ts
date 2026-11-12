@@ -4,6 +4,7 @@ import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { auditLog, campaignLeads, messages, type CampaignLeadStatus } from "@/lib/db/schema";
 import { advanceAfterSent, reconcileStaleSendingIn, settleIfCancelled } from "../send-service";
+import { wakeDispatchSafely } from "./job";
 
 /**
  * Sonucu kesinleşmemiş (`unknown` veya uzlaştırılmamış eski `sending`) gönderim için kullanıcı kararı (FR-CMP-10).
@@ -74,6 +75,7 @@ export interface ResolveReviewResult {
 
 export interface ResolveReviewOptions {
   confirm?: boolean;
+  env?: Record<string, string | undefined>;
   note?: string | null;
   now?: number;
   limits?: FrequencyLimits;
@@ -143,7 +145,7 @@ export async function resolveUncertainSend(
   const now = opts.now ?? Date.now();
   const limits = opts.limits ?? DEFAULT_FREQUENCY_LIMITS;
 
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx): Promise<ResolveReviewResult> => {
     const load = async () => {
       const [m] = await tx.select().from(messages).where(eq(messages.id, messageId)).limit(1);
       return m;
@@ -266,6 +268,16 @@ export async function resolveUncertainSend(
       alreadyResolved: false,
     };
   });
+  // `mark_not_sent` adımı şimdi uygun yaptı: dağıtıcı beklemeden uyandırılır (işlem kaydedildikten SONRA; idempotent).
+  // Gönderim kararını yine dağıtıcı bütün kapılarla verir.
+  if (
+    decision === "mark_not_sent" &&
+    !result.alreadyResolved &&
+    (result.sequenceStatus === "scheduled" || result.sequenceStatus === "waiting_next")
+  ) {
+    await wakeDispatchSafely(db, { now, env: opts.env, source: "review.mark_not_sent" });
+  }
+  return result;
 }
 
 /**

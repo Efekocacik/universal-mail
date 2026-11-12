@@ -46,6 +46,18 @@ export const updateMailboxSchema = z
   })
   .strict();
 
+/** `PATCH /api/mailboxes/[id]/limits`: profil üst sınırı serviste denetlenir (kişisel Gmail 50/5, diğerleri 80/10). */
+export const mailboxDailyLimitsSchema = z
+  .object({
+    dailyCap: z.number().int().min(1).max(80).optional(),
+    warmupStep: z.number().int().min(0).max(10).optional(),
+    expectedUpdatedAt: z.number().int().min(0),
+  })
+  .strict()
+  .refine((v) => v.dailyCap !== undefined || v.warmupStep !== undefined, {
+    message: "Değiştirilecek bir sınır belirtilmedi.",
+  });
+
 export const gmailClientSchema = z
   .object({ clientId: z.string().max(200), clientSecret: z.string().max(200).optional() })
   .strict();
