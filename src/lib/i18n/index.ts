@@ -44,12 +44,14 @@ export function intlLocale(locale: Locale = current): "tr-TR" | "en-GB" {
 
 /** Anahtarın verilen dilde gerçekten çevrisi var mı (Türkçeye düşme hariç)? */
 export function hasTranslation(key: TrKey, locale: Locale): boolean {
-  return locale === "tr" ? key in tr : en[key] !== undefined;
+  // `en` türü tamdır; çalışma zamanında sözlük dışı bir dize (ör. sunucudan gelen kod) gelebileceği için yine denetlenir.
+  return locale === "tr" ? key in tr : (en as Partial<Record<TrKey, string>>)[key] !== undefined;
 }
 
 export function t(key: TrKey, params?: Record<string, string | number>, locale?: Locale): string {
   const lang = locale ?? current;
-  let text: string = (lang === "en" ? en[key] : undefined) ?? tr[key] ?? key;
+  const enText = lang === "en" ? (en as Partial<Record<TrKey, string>>)[key] : undefined;
+  let text: string = enText ?? tr[key] ?? key;
   if (params) {
     for (const [k, v] of Object.entries(params)) text = text.replaceAll(`{${k}}`, String(v));
   }

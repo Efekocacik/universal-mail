@@ -380,8 +380,7 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
             description={t("detail.unblock.body")}
             confirmLabel={t("detail.unblock.confirm")}
             onConfirm={() => {
-              if (unblockTo)
-                save({ status: unblockTo, confirmUnblock: true } as Parameters<typeof save>[0]);
+              if (unblockTo) save({ status: unblockTo, confirmUnblock: true });
             }}
           />
           <div className="space-y-1.5">

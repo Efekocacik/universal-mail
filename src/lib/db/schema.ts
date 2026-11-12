@@ -686,8 +686,11 @@ export type CampaignLeadStatus =
   | "failed";
 
 /**
- * Dizinin neden durduğu: `status = 'unsubscribed'` iken çıkış talebi ile şikâyet (ARF) ayrımı (Aşama 15.10).
- * Yalnızca `status = 'unsubscribed'` iken anlamlıdır; başka durumlarda yok sayılır (eski sürümler temizlemez).
+ * Dizinin neden durduğu: çıkış talebi ile şikâyet (ARF) ayrımı (Aşama 15.10). `status = 'unsubscribed'` iken ve TB-10'dan
+ * beri `status = 'completed'` iken de anlamlıdır ("Tamamlandı, sonra listeden çıktı / şikâyet etti"; yalnızca olayın
+ * ilgili olduğu dizi işaretlenir). Diğer durumlarda yok sayılır (eski sürümler temizlemez).
+ * 0003 migrasyonundaki ileri koruma ("unsubscribed dışındaki satırda stop_reason yok") YALNIZCA migrasyon anında geçerlidir;
+ * şema CHECK'i durumla birlikte denetlemez.
  */
 export type SequenceStopReason = "unsubscribe" | "complaint";
 
@@ -723,7 +726,10 @@ export const campaignLeads = sqliteTable(
     redactedAt: integer("redacted_at"),
     addedAt: integer("added_at").notNull(),
     updatedAt: integer("updated_at").notNull(),
-    /** Aşama 15.10: durma nedeni (çıkış / şikâyet). Eski satırlarda migrasyonla doldurulur; yeni yazımlar 15.10-2'de. */
+    /**
+     * Aşama 15.10: durma nedeni (çıkış / şikâyet); 'unsubscribed' ve (TB-10) 'completed' satırlarda anlamlı, bkz.
+     * `SequenceStopReason`. Eski satırlarda 0003 migrasyonuyla doldurulur.
+     */
     stopReason: text("stop_reason").$type<SequenceStopReason>(),
   },
   (t) => [

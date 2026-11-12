@@ -794,7 +794,6 @@ export const base = {
   "sequenceStatus.replied": "Replied",
   "sequenceStatus.bounced": "Could not be delivered",
   "sequenceStatus.unsubscribed": "Asked to unsubscribe",
-  "sequenceStatus.complaint": "Stopped because of a complaint",
   "sequenceStatus.removed": "Removed",
   "sequenceStatus.cancelled": "Cancelled",
   "sequenceStatus.failed": "Failed",

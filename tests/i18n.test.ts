@@ -106,15 +106,17 @@ describe("i18n", () => {
 });
 
 describe("i18n: parça düzeni (Faz 4)", () => {
-  it("tr/base.ts DONDURULDU: Faz 4 öncesi tr.ts (5475f05) ile bire bir aynı anahtar ve değerler", () => {
+  it("tr/base.ts DONDURULDU: Faz 4 öncesi tr.ts (5475f05) ile aynı anahtar ve değerler (bilinçli silmeler hariç)", () => {
     // Özet, bölmeden önceki `git show 5475f05:src/lib/i18n/tr.ts` sözlüğünün aynı yöntemle hesaplanmış özetidir. Faz 4
     // anahtarları paketin kendi parçasına eklenir; base.ts'te bir metni bilerek düzeltirseniz bu özeti de güncelleyin.
+    // Bilinçli değişiklikler: Faz 4 entegrasyonunda kullanılmayan `sequenceStatus.complaint` kaldırıldı (F'nin
+    // `sequenceStop.*` anahtarları yerini aldı) → 1673'ten 1672'ye.
     const entries = Object.entries(TR_FRAGMENTS.base as Record<string, string>).sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     );
-    expect(entries).toHaveLength(1673);
+    expect(entries).toHaveLength(1672);
     expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
-      "7fdc70c92b37eba6fc68f934688a032da3cc756dfc12ba1e725fff742a60fe34",
+      "abca313075fd796f991ebed09c8951ff9c45906db3fb2454641dec0f171f3cdf",
     );
   });
 
@@ -142,22 +144,15 @@ describe("i18n: parça düzeni (Faz 4)", () => {
     for (const [k, v] of Object.entries(en)) expect(String(v).trim().length, k).toBeGreaterThan(0);
   });
 
-  it("İngilizce kapsam raporu: eksikler görünür; yer tutucular Türkçeyle aynı", () => {
+  it("İngilizce kapsam: her parça tam çevrili; yer tutucular Türkçeyle aynı", () => {
     const rows = enCoverage();
-    const missing = rows.reduce((n, r) => n + r.missing.length, 0);
-    // Paket D çevirene kadar eksikler hata değil, rapordur. UM_I18N_STRICT_EN=1 ile katı moda alınır.
-    console.info(`[i18n] İngilizce kapsam: ${formatCoverage(rows)} (eksik ${missing})`);
-    for (const r of rows.filter((x) => x.missing.length > 0))
-      console.info(
-        `[i18n] ${r.fragment}: ${r.missing.length} eksik, ör. ${r.missing.slice(0, 5).join(", ")}`,
-      );
+    // Faz 4 entegrasyonundan beri tüm parçalar tamdır (`en` türü de `Record<TrKey, string>`); eksik artık hatadır.
+    const missing = rows.filter((r) => r.missing.length > 0);
+    expect(
+      missing.map((r) => `${r.fragment}: ${r.missing.slice(0, 5).join(", ")}`),
+      formatCoverage(rows),
+    ).toEqual([]);
     expect(rows.flatMap((r) => r.placeholderMismatch)).toEqual([]);
-    if (process.env.UM_I18N_STRICT_EN === "1") expect(rows.flatMap((r) => r.missing)).toEqual([]);
-    // P0'ın eklediği parçalar tam çevrilidir.
-    for (const r of rows.filter(
-      (x) => x.fragment === "notifications" || x.fragment === "dashboard",
-    ))
-      expect(r.missing, r.fragment).toEqual([]);
   });
 });
 
@@ -190,9 +185,12 @@ describe("i18n: dil çalışma zamanı", () => {
     expect(t("nav.dashboard")).toBe("Gösterge paneli");
     expect(t("notif.scanDone.title", { n: 12 }, "en")).toBe("12 new businesses found");
     expect(t("notif.scanDone.title", { n: 12 }, "tr")).toBe("12 yeni işletme bulundu");
-    // base parçası henüz çevrilmedi: Türkçe metin döner
+    // Sözlük dışı bir dize (ör. sunucudan gelen bilinmeyen kod) İngilizcede de Türkçeye/anahtarın kendisine düşer.
     const key = "common.save" satisfies TrKey;
-    expect(t(key, undefined, "en")).toBe(hasTranslation(key, "en") ? en[key] : tr[key]);
+    expect(t(key, undefined, "en")).toBe(en[key]);
+    const unknown = "yok.boyle.bir.anahtar" as TrKey;
+    expect(hasTranslation(unknown, "en")).toBe(false);
+    expect(t(unknown, undefined, "en")).toBe("yok.boyle.bir.anahtar");
     expect(hasTranslation("nav.dashboard", "en")).toBe(true);
     expect(hasTranslation("nav.dashboard", "tr")).toBe(true);
   });

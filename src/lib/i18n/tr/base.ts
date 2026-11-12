@@ -833,7 +833,6 @@ export const base = {
   "sequenceStatus.replied": "Yanıtladı",
   "sequenceStatus.bounced": "Teslim edilemedi",
   "sequenceStatus.unsubscribed": "Listeden çıkmak istedi",
-  "sequenceStatus.complaint": "Şikâyet nedeniyle durduruldu",
   "sequenceStatus.removed": "Çıkarıldı",
   "sequenceStatus.cancelled": "İptal edildi",
   "sequenceStatus.failed": "Başarısız",

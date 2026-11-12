@@ -33,7 +33,7 @@ export function NotificationBell() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data: status } = useStatus();
-  const unread = (status as { unreadNotifications?: number } | undefined)?.unreadNotifications;
+  const unread = status?.unreadNotifications;
   const { data: config } = useConfig();
   const osEnabled = config?.notificationsOs !== false;
 
