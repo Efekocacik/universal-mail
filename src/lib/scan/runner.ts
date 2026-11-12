@@ -13,6 +13,7 @@ import type { PlacesProvider, SearchResult } from "@/lib/places/provider";
 import { typeToQuery } from "@/lib/places/provider";
 import { chunk, errorMessage, sleep as defaultSleep } from "@/lib/util";
 import { recomputeNovelty } from "./novelty-sync";
+import { onScanCompleted, onScanFailed } from "./scan-notifications";
 import { canSubdivide } from "./planner";
 import {
   countSnapshot,
@@ -52,6 +53,8 @@ interface RunState {
   unitsFailed: number;
   consecutiveUnitFailures: number;
   newPlaces: number;
+  /** Faz 4: FUTURE_OPENING → OPERATIONAL geçişi görülen yer sayısı (persistPlaces().openedIds). */
+  openedPlaces: number;
   maxCalls: number;
   regionCountry: string | null;
 }
@@ -106,6 +109,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     unitsFailed: (await unitCounts(db, scanId)).failed,
     consecutiveUnitFailures: 0,
     newPlaces: 0,
+    openedPlaces: scan.progress?.openedPlaces ?? 0,
     maxCalls: 0,
     regionCountry:
       (
@@ -136,7 +140,7 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     if (result !== "ok") return result;
   }
 
-  return finalizeScan(deps, scanId, state, now);
+  return finalizeScan(deps, scanId, state, now, log);
 }
 
 type UnitResult = "ok" | ScanOutcome;
@@ -235,6 +239,7 @@ async function runUnit(
       regionCountry: state.regionCountry,
     });
     state.newPlaces += saved.inserted;
+    state.openedPlaces += saved.openedIds.length;
     collected += res.places.length;
     token = res.nextPageToken;
 
@@ -291,6 +296,7 @@ async function handleCallError(
     await requeue();
     await setScanStatus(db, scan.id, "failed", { error: message, finishedAt: now() });
     await emitEvent("scan.failed", { scanId: scan.id, error: message });
+    await onScanFailed(db, scan.id, now(), log);
     return "failed";
   }
 
@@ -301,7 +307,7 @@ async function handleCallError(
     return "paused";
   }
 
-  if (e.kind === "invalid") {
+  if (e.kind === "invalid" || e.kind === "not_found") {
     // Tek bir sorgu geçersiz (ör. desteklenmeyen tür): yalnızca bu birim başarısız sayılır, tarama sürer.
     await db
       .update(scanUnits)
@@ -313,6 +319,7 @@ async function handleCallError(
     if (state.consecutiveUnitFailures >= MAX_CONSECUTIVE_UNIT_FAILURES) {
       await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
       await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
+      await onScanFailed(db, scan.id, now(), log);
       return "failed";
     }
     return "ok";
@@ -322,6 +329,7 @@ async function handleCallError(
   await requeue();
   await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
   await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
+  await onScanFailed(db, scan.id, now(), log);
   return "failed";
 }
 
@@ -334,6 +342,7 @@ async function syncProgress(db: Db, scanId: number, state: RunState): Promise<vo
     placesFound: snap.total,
     futureOpening: snap.future,
     newPlaces: state.newPlaces,
+    openedPlaces: state.openedPlaces,
     callsTotal: state.callsTotal,
     callsBySku: state.callsBySku,
     costUsd: Math.round(state.costUsd * 10_000) / 10_000,
@@ -360,6 +369,7 @@ async function finalizeScan(
   scanId: number,
   state: RunState,
   now: () => number,
+  log: (m: string) => void,
 ): Promise<ScanOutcome> {
   const { db } = deps;
   const scan = (await loadScan(db, scanId))!;
@@ -428,7 +438,16 @@ async function finalizeScan(
     baseline: comparable && !previous,
     calls: state.callsTotal,
     costUsd: state.costUsd,
+    openedPlaces: state.openedPlaces,
+    origin: scan.origin,
   });
   await emitEvent("scan.completed", { scanId, newPlaces: newDetected, totalPlaces: snap.total });
+  // Bildirimler doğrudan yazılır (olay yolu en iyi çabadır ve hataları yutar); dedupe_key ile tarama başına tek.
+  await onScanCompleted(
+    db,
+    { scanId, newDetected, openedPlaces: state.openedPlaces, compared: !!previous },
+    t,
+    log,
+  );
   return "completed";
 }

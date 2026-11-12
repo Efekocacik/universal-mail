@@ -21,6 +21,7 @@ import { getDb, recoverDbConnection } from "@/lib/db/client";
 import { createProvider } from "@/lib/places/factory";
 import { enrichPlaces } from "@/lib/scan/enrich";
 import { runScan } from "@/lib/scan/runner";
+import { onScanFailed } from "@/lib/scan/scan-notifications";
 import { scanStatusOf, setScanStatus } from "@/lib/scan/store";
 import { errorMessage } from "@/lib/util";
 import { getSetting } from "@/lib/settings";
@@ -75,6 +76,7 @@ export function registerCoreHandlers(): void {
       const message = errorMessage(e);
       if ((await scanStatusOf(ctx.db, scanId)) === "running") {
         await setScanStatus(ctx.db, scanId, "failed", { error: message, finishedAt: Date.now() });
+        await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
       }
       throw e;
     }

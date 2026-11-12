@@ -73,6 +73,16 @@ export const SKU_PRICING: Readonly<Record<SkuId, SkuPricing>> = {
       { upTo: INF, perThousandUsd: 2.63 },
     ],
   },
+  /**
+   * Faz 4: yalnızca `id` alanı istenen Place Details (place_id tazeleme). Google bunu ayrı ve ÜCRETSİZ "IDs Only" birimiyle
+   * faturalar (https://developers.google.com/maps/documentation/places/web-service/usage-and-billing#id-details);
+   * Essentials kotasından düşülmez. Canlıya geçmeden fiyat sayfasında yeniden doğrulayın.
+   */
+  place_details_ids_only: {
+    label: "Place Details (yalnızca ID)",
+    freeMonthly: INF,
+    bands: [{ upTo: INF, perThousandUsd: 0 }],
+  },
   place_details_essentials: {
     label: "Place Details Essentials",
     freeMonthly: 10_000,

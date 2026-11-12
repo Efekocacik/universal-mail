@@ -63,7 +63,9 @@ describe("alan maskeleri ve SKU", () => {
   it("yalnızca id istenirse Text Search ücretsiz sınıfta", () => {
     expect(skuFor("text", ["id"])).toBe("text_search_ids");
     expect(skuFor("nearby", ["id"])).toBe("nearby_search_pro");
-    expect(skuFor("details", ["id"])).toBe("place_details_essentials");
+    // Faz 4: yalnızca id istenen Details ücretsiz "IDs Only" birimidir (Essentials kotasından düşmez).
+    expect(skuFor("details", ["id"])).toBe("place_details_ids_only");
+    expect(marginalCostUsd("place_details_ids_only", 1_000_000, 500)).toBe(0);
   });
 
   it("bilinmeyen alan hata verir (yanlışlıkla pahalı alan eklenmesin)", () => {

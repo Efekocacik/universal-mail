@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { budgetStatus, monthSkuCalls } from "@/lib/budget";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import {
   categorySets,
@@ -9,11 +9,13 @@ import {
   scans,
   scanUnits,
   type RegionGeometry,
+  type ScanOrigin,
 } from "@/lib/db/schema";
 import type {
   FieldProfile,
   ProviderId,
   RegionInput,
+  ScanQuery,
   SearchStrategy,
   SkuId,
 } from "@/lib/domain/types";
@@ -29,6 +31,7 @@ import {
   type PlanInput,
   type ScanEstimate,
 } from "./planner";
+import { ACTIVE_SCAN_MESSAGE, ScanGateError } from "./gate-error";
 import { insertUnits, loadScan, setScanStatus } from "./store";
 
 export { PlanError };
@@ -70,7 +73,7 @@ export async function estimateForRequest(
   return { estimate: estimateScan(input, { monthCallsBySku }), queries: queries.length };
 }
 
-async function findOrCreateRegion(db: Db, r: RegionInput, now: number): Promise<number> {
+async function findOrCreateRegion(db: DbExecutor, r: RegionInput, now: number): Promise<number> {
   const geometry: RegionGeometry = {
     bbox: roundBBox(r.bbox, 5),
     circle: r.circle,
@@ -101,49 +104,126 @@ export interface CreatedScan {
   estimate: ScanEstimate;
 }
 
-/** Taramayı oluşturur ve kuyruğa alır. Kullanıcı tahmini onayladıktan sonra çağrılır. */
-export async function createAndStartScan(
-  db: Db,
-  req: ScanRequest,
-  now: number = Date.now(),
-): Promise<CreatedScan> {
+/** Bir taramayı başlatmadan önce yalnızca OKUYARAK hazırlanan plan (işlem dışında hesaplanır). */
+export interface PreparedScan {
+  req: ScanRequest;
+  input: PlanInput;
+  queries: ScanQuery[];
+  units: ReturnType<typeof planUnits>["units"];
+  estimate: ScanEstimate;
+  provider: ProviderId;
+  scanKey: string;
+}
+
+/** Plan, tahmin ve tarama anahtarı. Kayıt oluşturmaz; `PlanError` fırlatabilir. */
+export async function prepareScan(db: Db, req: ScanRequest): Promise<PreparedScan> {
   const { input, queries } = await resolvePlan(db, req);
   const { units } = planUnits(input); // doğrulama + birim üretimi (PlanError fırlatabilir)
   const { estimate } = await estimateForRequest(db, req);
-  const provider = await getSetting(db, "places.provider");
-  const regionId = await findOrCreateRegion(db, req.region, now);
+  const provider = (await getSetting(db, "places.provider")) as ProviderId;
   const scanKey = computeScanKey({
     bbox: input.bbox,
     circle: input.circle,
     queries,
     strategy: input.strategy,
   });
+  return { req, input, queries, units, estimate, provider, scanKey };
+}
 
-  const inserted = await db
+export const ACTIVE_SCAN_STATUSES = ["queued", "running", "paused", "budget_stopped"] as const;
+
+/** Aynı tarama anahtarıyla sürmekte, kuyrukta veya duraklatılmış tarama (varsa kimliği). */
+export async function activeScanForKey(db: DbExecutor, scanKey: string): Promise<number | null> {
+  const rows = await db
+    .select({ id: scans.id })
+    .from(scans)
+    .where(and(eq(scans.scanKey, scanKey), inArray(scans.status, [...ACTIVE_SCAN_STATUSES])))
+    .limit(1);
+  return rows[0]?.id ?? null;
+}
+
+export interface StartScanOptions {
+  origin?: ScanOrigin;
+  scheduleId?: number | null;
+  /** Zamanlamanın çalışma anı (eski `next_run_at`); (schedule_id, slot) tekil indeksle korunur. */
+  scheduleSlot?: number | null;
+  /** İş önceliği: elle 10 (önce), zamanlanmış 5. */
+  priority?: number;
+}
+
+/**
+ * Hazırlanmış taramayı TEK İŞLEMDE kaydeder: bölge, tarama, birimler ve iş birlikte yazılır ya da hiçbiri yazılmaz
+ * (önceden ara bir çöküş birimsiz "kuyrukta" tarama bırakabiliyordu; o tarama 0 yerle "tamamlanıp" önceki yerleri
+ * "bulunamadı" işaretliyordu). Aynı anahtarla etkin tarama varsa `ScanGateError('ACTIVE_SCAN')` fırlatır.
+ * Çağıran bir işlem içindeyse `tx` olarak onu verir (zamanlayıcının CAS'ı ile aynı işlem).
+ */
+export async function insertPreparedScan(
+  tx: DbExecutor,
+  p: PreparedScan,
+  opts: StartScanOptions = {},
+  now: number = Date.now(),
+): Promise<CreatedScan> {
+  if ((await activeScanForKey(tx, p.scanKey)) !== null)
+    throw new ScanGateError("ACTIVE_SCAN", ACTIVE_SCAN_MESSAGE);
+  const regionId = await findOrCreateRegion(tx, p.req.region, now);
+  const origin = opts.origin ?? "manual";
+  const inserted = await tx
     .insert(scans)
     .values({
       regionId,
-      scanKey,
-      categorySetIds: req.categoryIds,
-      queries,
-      strategy: input.strategy,
-      fieldProfile: input.fieldProfile,
-      provider: provider as ProviderId,
+      scanKey: p.scanKey,
+      categorySetIds: p.req.categoryIds,
+      queries: p.queries,
+      strategy: p.input.strategy,
+      fieldProfile: p.input.fieldProfile,
+      provider: p.provider,
       status: "queued",
-      estimate,
-      progress: { unitsTotal: units.length, unitsDone: 0, placesFound: 0, callsTotal: 0 },
+      estimate: p.estimate,
+      progress: { unitsTotal: p.units.length, unitsDone: 0, placesFound: 0, callsTotal: 0 },
       createdAt: now,
+      origin,
+      scheduleId: origin === "schedule" ? (opts.scheduleId ?? null) : null,
+      scheduleSlot: origin === "schedule" ? (opts.scheduleSlot ?? now) : null,
     })
     .returning({ id: scans.id });
   const scanId = inserted[0]!.id;
-  await insertUnits(db, scanId, units, now);
-  await enqueueScanJob(db, scanId);
-  await audit(db, "scan.created", "scan", scanId, {
-    region: req.region.name,
-    queries: queries.length,
-    estimate: estimate.calls,
+  await insertUnits(tx, scanId, p.units, now);
+  await tx.insert(jobs).values({
+    type: "scan.run",
+    payload: { scanId },
+    status: "queued",
+    priority: opts.priority ?? (origin === "schedule" ? 5 : 10),
+    maxAttempts: 1,
+    runAt: now,
+    createdAt: now,
+    updatedAt: now,
   });
-  return { scanId, estimate };
+  await audit(
+    tx,
+    "scan.created",
+    "scan",
+    scanId,
+    {
+      region: p.req.region.name,
+      queries: p.queries.length,
+      estimate: p.estimate.calls,
+      origin,
+      ...(opts.scheduleId ? { scheduleId: opts.scheduleId } : {}),
+    },
+    now,
+  );
+  return { scanId, estimate: p.estimate };
+}
+
+/** Taramayı oluşturur ve kuyruğa alır. Kullanıcı tahmini onayladıktan sonra çağrılır. */
+export async function createAndStartScan(
+  db: Db,
+  req: ScanRequest,
+  now: number = Date.now(),
+  opts: StartScanOptions = {},
+): Promise<CreatedScan> {
+  const prepared = await prepareScan(db, req);
+  return db.transaction((tx) => insertPreparedScan(tx, prepared, opts, now));
 }
 
 async function hasActiveJob(db: Db, scanId: number): Promise<boolean> {
