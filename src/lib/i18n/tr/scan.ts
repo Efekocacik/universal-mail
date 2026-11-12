@@ -52,6 +52,11 @@ export const scan = {
   "schedules.missed": "Uygulama kapalıyken {n} çalışma kaçırıldı; tek taramada birleştirildi.",
   "schedules.cap.user": "Tarama başına onaylanan üst sınır: {usd}",
   "schedules.cap.auto": "Tarama başına onaylanan tutar (otomatik): en çok {usd}",
+  "schedules.cap.none":
+    "Bu zamanlama için onaylanmış bir tutar yok (ör. Google'a geçildi). Arka planda çalışması için aşağıdan bir üst sınır onaylayın.",
+  "schedules.cap.edit": "Tarama başına üst sınır (USD)",
+  "schedules.cap.save": "Onayla",
+  "schedules.cap.saved": "Üst sınır onaylandı.",
   "schedules.toggle": "Düzenli taramayı aç/kapat",
   "schedules.on": "Açık",
   "schedules.off": "Kapalı",

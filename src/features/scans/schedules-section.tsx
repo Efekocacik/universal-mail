@@ -1,12 +1,12 @@
 "use client";
 
 import { CalendarClock, CircleAlert, Play, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { toast } from "sonner";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { FieldHint, Label, Select } from "@/components/ui/input";
+import { FieldError, FieldHint, Input, Label, Select } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/page";
 import { Switch } from "@/components/ui/switch";
 import { HelpTip } from "@/components/ui/tooltip";
@@ -14,6 +14,8 @@ import { ApiError, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtUsd } from "@/lib/client/format";
 import {
   INTERVALS,
+  parseCostCap,
+  scheduleControlName,
   scheduleViewModel,
   useDeleteSchedule,
   useRunScheduleNow,
@@ -39,6 +41,8 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [ack, setAck] = useState<string | null>(null);
   const vm = scheduleViewModel(s, Date.now(), { dateTime: fmtDateTime, usd: fmtUsd });
+  const titleId = `schedule-${s.id}-title`;
+  const named = (label: string) => scheduleControlName(label, vm.title);
 
   const patch = (p: { intervalDays?: IntervalDays; enabled?: boolean }) =>
     update.mutate(
@@ -61,10 +65,10 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
   };
 
   return (
-    <li className="rounded-lg border bg-card p-3">
+    <li className="rounded-lg border bg-card p-3" aria-labelledby={titleId}>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <p className="truncate text-sm font-semibold" title={vm.title}>
+          <p id={titleId} className="truncate text-sm font-semibold" title={vm.title}>
             {vm.title}
           </p>
           <p className="text-[13px] text-muted-foreground">
@@ -97,7 +101,15 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
               {vm.skipReason}
             </p>
           )}
-          {vm.capLabel && <FieldHint>{vm.capLabel}</FieldHint>}
+          {vm.capLabel &&
+            (vm.capRevoked ? (
+              <p className="rounded-md bg-nov-likely/15 px-2.5 py-1.5 text-[12px] text-caution-text">
+                {vm.capLabel}
+              </p>
+            ) : (
+              <FieldHint>{vm.capLabel}</FieldHint>
+            ))}
+          <CapEditor s={s} title={vm.title} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <label className="flex items-center gap-2 text-[13px]">
@@ -105,12 +117,12 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
               checked={s.enabled}
               disabled={update.isPending}
               onCheckedChange={(enabled) => patch({ enabled })}
-              aria-label={t("schedules.toggle")}
+              aria-label={named(t("schedules.toggle"))}
             />
             {s.enabled ? t("schedules.on") : t("schedules.off")}
           </label>
           <Label className="sr-only" htmlFor={`interval-${s.id}`}>
-            {t("schedules.field.interval")}
+            {named(t("schedules.field.interval"))}
           </Label>
           <Select
             id={`interval-${s.id}`}
@@ -130,6 +142,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
             variant="outline"
             loading={runNow.isPending}
             onClick={() => void start(false)}
+            aria-label={named(t("schedules.runNow"))}
           >
             <Play /> {t("schedules.runNow")}
           </Button>
@@ -137,7 +150,7 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
             size="sm"
             variant="dangerOutline"
             onClick={() => setConfirmDelete(true)}
-            aria-label={t("schedules.delete")}
+            aria-label={named(t("schedules.delete"))}
           >
             <Trash2 />
           </Button>
@@ -170,6 +183,67 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
         onConfirm={() => start(true)}
       />
     </li>
+  );
+}
+
+/**
+ * Tarama başına onaylı üst sınır (M5 ön onayı). NEEDS_ACK ile atlanan ya da onayı geri alınan (Google'a geçiş) bir
+ * zamanlama buradan yeniden onaylanır; boş bırakılırsa bugünkü liste fiyatlı yüksek tahmin onaylanır (oluşturucuyla
+ * aynı kural, `parseCostCap`). Sunucu yeni tutarı denetim kaydıyla yazar.
+ */
+function CapEditor({ s, title }: { s: ScheduleItem; title: string }) {
+  const id = useId();
+  const update = useUpdateSchedule();
+  const initial = s.maxCostUsd === null ? "" : String(s.maxCostUsd);
+  const [text, setText] = useState(initial);
+  const cap = parseCostCap(text);
+  return (
+    <form
+      className="space-y-1 pt-1"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!cap.ok) return;
+        update.mutate(
+          { id: s.id, maxCostUsd: cap.value },
+          {
+            onSuccess: () => toast.success(t("schedules.cap.saved")),
+            onError: (err: Error) => toast.error(errorText(err)),
+          },
+        );
+      }}
+    >
+      {/* Görünür etiket; ekran okuyucu için satır başlığı da eklenir (birden çok zamanlamada hangisi?). */}
+      <Label htmlFor={`${id}-cap`} className="block text-[12px] font-normal text-muted-foreground">
+        {t("schedules.cap.edit")}
+        <span className="sr-only">: {title}</span>
+      </Label>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          id={`${id}-cap`}
+          inputMode="decimal"
+          className="h-8 w-44"
+          placeholder={t("schedules.field.cap.placeholder")}
+          value={text}
+          aria-invalid={cap.ok ? undefined : true}
+          aria-describedby={cap.ok ? undefined : `${id}-cap-error`}
+          onChange={(e) => setText(e.target.value)}
+          data-testid="schedule-cap-input"
+        />
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={!cap.ok}
+          loading={update.isPending}
+          aria-label={scheduleControlName(t("schedules.cap.save"), title)}
+        >
+          {t("schedules.cap.save")}
+        </Button>
+      </div>
+      {!cap.ok && (
+        <FieldError id={`${id}-cap-error`}>{t("schedules.field.cap.invalid")}</FieldError>
+      )}
+    </form>
   );
 }
 

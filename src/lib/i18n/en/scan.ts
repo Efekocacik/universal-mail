@@ -52,6 +52,11 @@ export const scan = {
     "{n} runs were missed while the app was closed; they were combined into one scan.",
   "schedules.cap.user": "Approved limit per scan: {usd}",
   "schedules.cap.auto": "Approved amount per scan (automatic): up to {usd}",
+  "schedules.cap.none":
+    "No amount is approved for this schedule (for example after switching to Google). Approve a limit below so it can run in the background.",
+  "schedules.cap.edit": "Limit per scan (USD)",
+  "schedules.cap.save": "Approve",
+  "schedules.cap.saved": "Limit approved.",
   "schedules.toggle": "Turn the recurring scan on or off",
   "schedules.on": "On",
   "schedules.off": "Off",
