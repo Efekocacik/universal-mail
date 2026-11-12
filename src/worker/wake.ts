@@ -44,3 +44,22 @@ export function createWakeGate(clock: () => number = Date.now): () => boolean {
     return true;
   };
 }
+
+/**
+ * İşçinin IPC ileti işleyicisi (Electron ana süreci ↔ işçi sözleşmesi; saf, sınanır):
+ *  - `"shutdown"` → güvenli kapanış;
+ *  - `{type:'wake'}` → kapı izin verirse `handleWake` (hata günlüğe düşer, süreç çökmez);
+ *  - diğer her şey yok sayılır.
+ * Ters yön (`{type:'notify'}`, işçi → ana süreç) `nudgeOsNotifications` ile gönderilir (src/lib/scan/scan-notifications.ts).
+ */
+export function createWorkerMessageHandler(deps: {
+  shutdown: () => void;
+  wake: () => Promise<unknown>;
+  gate: () => boolean;
+  onError: (e: unknown) => void;
+}): (m: unknown) => void {
+  return (m) => {
+    if (m === "shutdown") deps.shutdown();
+    else if (isWakeMessage(m) && deps.gate()) deps.wake().catch(deps.onError);
+  };
+}

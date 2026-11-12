@@ -28,7 +28,13 @@ import {
   MasterKeyQuit,
   SECRETS_FILENAME,
 } from "./master-key";
-import { joinAppPath, NotificationPoller, type OsToast } from "./notify";
+import {
+  createWakeSignal,
+  isNotifyMessage,
+  joinAppPath,
+  NotificationPoller,
+  type OsToast,
+} from "./notify";
 import {
   loginItemSupported,
   parseStoredPrefs,
@@ -288,12 +294,38 @@ function writeWorkerStatus(entry: { restarts: number; code: number | null } | nu
   }
 }
 
+/**
+ * İşçi veya web süreci yeni bir bildirim eklediğinde `{type:'notify'}` gönderir: işletim sistemi bildirimi 30 sn'lik
+ * yoklamayı beklemeden gösterilir. Gösterimi atomik `os-claim` belirler (aynı bildirim iki kez gösterilmez).
+ */
+function listenForNotify(child: ChildProcess): void {
+  child.on("message", (m: unknown) => {
+    if (isNotifyMessage(m)) poller?.nudge();
+  });
+}
+
+/**
+ * İşçiye `{type:'wake'}`: bilgisayar uykudan uyanınca, ekran kilidi açılınca ve pencere öne gelince (odak en çok
+ * dakikada bir). İşçi kaçırılan zamanlanmış taramaları ve bekleyen gönderimi hemen değerlendirir (src/worker/wake.ts).
+ */
+const wake = createWakeSignal({
+  sendWake: () => {
+    const w = children.get("worker");
+    if (!w?.connected) return false;
+    try {
+      return w.send({ type: "wake" });
+    } catch (e) {
+      log("main", `İşçiye uyandırma gönderilemedi: ${(e as Error).message}`);
+      return false;
+    }
+  },
+  nudge: () => poller?.nudge(),
+  now: () => Date.now(),
+});
+
 function startWorker(env: NodeJS.ProcessEnv): void {
   const w = spawnChild("worker", "worker.cjs", env);
-  // İşçi yeni bir bildirim eklediğinde `{type:'notify'}` gönderir: işletim sistemi bildirimi beklemeden gösterilir.
-  w.on("message", (m: unknown) => {
-    if ((m as { type?: unknown } | null)?.type === "notify") poller?.nudge();
-  });
+  listenForNotify(w);
   const startedAt = Date.now();
   const healthyTimer = setTimeout(() => {
     if (w.exitCode !== null) return;
@@ -335,7 +367,7 @@ async function startBackend(): Promise<string> {
     throw new Error(`Veritabanı hazırlanamadı (kod=${code}). Ayrıntı için günlük dosyasına bakın.`);
 
   // 2) web sunucusu
-  spawnChild("server", "server.js", env);
+  listenForNotify(spawnChild("server", "server.js", env));
   const url = `http://127.0.0.1:${port}`;
   await waitForHealth(url);
 
@@ -697,12 +729,11 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
         return { loginItem: false, openAtLogin: null };
       return { loginItem: loginItemAvailable(), openAtLogin: osOpenAtLogin() };
     });
-    // Bilgisayar uykudan uyanınca: işçi kaçırılan zamanlanmış işleri hemen değerlendirsin, bildirimler yoklansın.
-    powerMonitor.on("resume", () => {
-      const w = children.get("worker");
-      if (w?.connected) w.send({ type: "wake" });
-      poller?.nudge();
-    });
+    // Bilgisayar uykudan uyanınca / ekran kilidi açılınca / pencere öne gelince: işçi kaçırılan zamanlanmış işleri
+    // hemen değerlendirsin; uyku ve kilit sonrası bildirimler de hemen yoklansın (bkz. createWakeSignal).
+    powerMonitor.on("resume", () => wake("resume"));
+    powerMonitor.on("unlock-screen", () => wake("unlock"));
+    app.on("browser-window-focus", () => wake("focus"));
     buildMenu();
 
     try {

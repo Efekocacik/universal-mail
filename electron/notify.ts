@@ -248,4 +248,53 @@ export class NotificationPoller {
   }
 }
 
+/* ------------------------- işçi ↔ ana süreç IPC sözleşmesi ------------------------- */
+
+/**
+ * İşçi (veya web süreci) yeni bir bildirim yazdığında `{type:'notify'}` gönderir (src/lib/scan/scan-notifications.ts
+ * `nudgeOsNotifications`). Ana süreç bununla yoklayıcıyı dürter; gösterimi yine atomik `os-claim` belirler, bu yüzden
+ * dürtme ile 30 sn'lik düzenli yoklama aynı bildirimi iki kez göstermez.
+ */
+export const isNotifyMessage = (m: unknown): boolean =>
+  typeof m === "object" && m !== null && (m as { type?: unknown }).type === "notify";
+
+export type WakeReason = "focus" | "resume" | "unlock";
+
+/** Pencere odağı sık gelir (her Alt+Tab); işçiye en çok bu aralıkta bir uyandırma gider. */
+export const FOCUS_WAKE_MIN_MS = 60_000;
+
+export interface WakeSignalDeps {
+  /** İşçiye `{type:'wake'}` gönderir; işçi bağlı değilse `false` (sessizce geçilir, işçi açılışta zaten tick kurar). */
+  sendWake: () => boolean;
+  /** İşletim sistemi bildirimi yoklayıcısını dürter. */
+  nudge: () => void;
+  now: () => number;
+}
+
+/**
+ * Uyandırma sinyali (saf; tests/electron-notify.test.ts). Bilgisayar uykudan uyandığında veya ekran kilidi açıldığında
+ * işçi HER ZAMAN uyandırılır ve bildirimler hemen yoklanır (uykuda kaçırılanlar). Pencere odağında yalnızca işçi
+ * uyandırılır ve bu `FOCUS_WAKE_MIN_MS` ile sınırlanır. İşçi tarafı ayrıca 30 sn'lik kapıyla tekilleştirir
+ * (src/worker/wake.ts); uyandırma idempotenttir (kuyruktaki tick/gönderim işi öne çekilir, yenisi çoğaltılmaz).
+ * Dönen değer: işçiye ileti gönderildi mi.
+ */
+export function createWakeSignal(
+  deps: WakeSignalDeps,
+  opts: { focusMinMs?: number } = {},
+): (reason: WakeReason) => boolean {
+  const focusMinMs = opts.focusMinMs ?? FOCUS_WAKE_MIN_MS;
+  let lastFocusWake = -Infinity;
+  return (reason) => {
+    if (reason === "focus") {
+      const now = deps.now();
+      if (now - lastFocusWake < focusMinMs) return false;
+      lastFocusWake = now;
+      return deps.sendWake();
+    }
+    deps.nudge();
+    lastFocusWake = deps.now(); // hemen ardından gelen odak olayı ikinci bir uyandırma göndermez
+    return deps.sendWake();
+  };
+}
+
 export { joinAppPath };

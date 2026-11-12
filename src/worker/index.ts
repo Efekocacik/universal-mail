@@ -19,7 +19,7 @@ import {
 import { registerScanBackgroundHandlers } from "./background";
 import { runHousekeeping, startHousekeepingLoop } from "./housekeeping";
 import { Worker } from "./loop";
-import { createWakeGate, handleWake, isWakeMessage } from "./wake";
+import { createWakeGate, createWorkerMessageHandler, handleWake } from "./wake";
 
 /** Geliştirme: `.env.local` dosyasını yükle (üretimde Electron ortam değişkenlerini verir). */
 function loadDevEnv(): void {
@@ -102,14 +102,17 @@ async function main(): Promise<void> {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   // Electron ana süreci IPC ile de kapanış bildirebilir.
-  process.on("message", (m) => {
-    if (m === "shutdown") shutdown();
-    // Faz 4: bilgisayar uykudan uyandı → kaçırılan zamanlamalar ve bekleyen gönderim hemen değerlendirilir.
-    else if (isWakeMessage(m) && wakeGate())
-      handleWake(db, { now: Date.now(), mailEnabled: mailScheduler.enabled }).catch((e) =>
-        console.error("[worker] uyandırma işlenemedi:", e),
-      );
-  });
+  // Faz 4: bilgisayar uykudan uyandı / ekran kilidi açıldı / pencere öne geldi → kaçırılan zamanlamalar ve bekleyen
+  // gönderim hemen değerlendirilir.
+  process.on(
+    "message",
+    createWorkerMessageHandler({
+      shutdown,
+      gate: wakeGate,
+      wake: () => handleWake(db, { now: Date.now(), mailEnabled: mailScheduler.enabled }),
+      onError: (e) => console.error("[worker] uyandırma işlenemedi:", e),
+    }),
+  );
 
   await worker.run();
   process.exit(0);

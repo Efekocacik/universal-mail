@@ -24,7 +24,13 @@ import {
   type HousekeepingResult,
 } from "@/worker/housekeeping";
 import { Worker } from "@/worker/loop";
-import { createWakeGate, handleWake, isWakeMessage, WAKE_DEBOUNCE_MS } from "@/worker/wake";
+import {
+  createWakeGate,
+  createWorkerMessageHandler,
+  handleWake,
+  isWakeMessage,
+  WAKE_DEBOUNCE_MS,
+} from "@/worker/wake";
 import { createTestDb, type TestDb } from "./helpers/db";
 
 const DAY = 86_400_000;
@@ -210,6 +216,48 @@ describe("uyandırma", () => {
     expect(gate()).toBe(false);
     clock += 2;
     expect(gate()).toBe(true);
+  });
+});
+
+describe("işçi IPC sözleşmesi (Electron ana süreci → işçi)", () => {
+  it("'shutdown' kapatır; {type:'wake'} kapıdan geçerse gerçek uyandırmayı çalıştırır; diğerleri yok sayılır", async () => {
+    let clock = 5_000_000;
+    const shutdown = vi.fn();
+    const errors: unknown[] = [];
+    const wakes: Awaited<ReturnType<typeof handleWake>>[] = [];
+    const onMessage = createWorkerMessageHandler({
+      shutdown,
+      gate: createWakeGate(() => clock),
+      wake: async () => {
+        const r = await handleWake(db, { now: clock, mailEnabled: true });
+        wakes.push(r);
+        return r;
+      },
+      onError: (e) => errors.push(e),
+    });
+    // Ana sürecin gönderdiği biçim (electron/main.ts createWakeSignal → w.send({type:"wake"})).
+    onMessage({ type: "wake" });
+    onMessage({ type: "wake" }); // aynı dakikada ikinci uyandırma kapıda düşer
+    onMessage({ type: "notify" }); // ters yönün iletisi işçide anlamsızdır
+    onMessage("wake");
+    onMessage(null);
+    await vi.waitFor(() => expect(wakes).toHaveLength(1));
+    expect(wakes[0]).toEqual({ tickInserted: true, mail: "inserted" });
+    expect(await db.select().from(jobs).where(eq(jobs.type, MAIL_SEND_JOB))).toHaveLength(1);
+    expect(shutdown).not.toHaveBeenCalled();
+    onMessage("shutdown");
+    expect(shutdown).toHaveBeenCalledTimes(1);
+
+    // Uyandırma hatası süreci çökertmez; günlüğe düşer.
+    clock += WAKE_DEBOUNCE_MS;
+    const failing = createWorkerMessageHandler({
+      shutdown,
+      gate: () => true,
+      wake: () => Promise.reject(new Error("TRANSACTION_ACTIVE")),
+      onError: (e) => errors.push(e),
+    });
+    failing({ type: "wake" });
+    await vi.waitFor(() => expect(errors).toHaveLength(1));
   });
 });
 
