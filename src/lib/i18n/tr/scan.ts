@@ -31,6 +31,8 @@ export const scan = {
     "Google Places API anahtarı olmadığı için atlandı. Anahtarı Ayarlar'dan ekleyin.",
   "schedules.skip.SETUP_REQUIRED":
     "Kurulum veya kullanım onayı eksik olduğu için atlandı. Kurulum sihirbazını tamamlayın.",
+  "schedules.warning.COUNTRY_NOT_TARGETED":
+    "Zamanlama kaydedildi ama bu bölgenin ülkesi hedef pazarlarınız arasında değil; ekleyene kadar çalışmaz. Ayarlar > Hedef pazarlar bölümünden ekleyin.",
   "schedules.skip.COUNTRY_NOT_TARGETED":
     "Bölgenin ülkesi artık hedef ülkeleriniz arasında olmadığı için atlandı. Ayarlar > Hedef pazarlar'dan ekleyin.",
   "schedules.skip.ACTIVE_SCAN":

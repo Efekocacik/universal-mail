@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { t, type TrKey } from "@/lib/i18n";
-import { api } from "./api";
+import { getLocale, hasTranslation, t, type Locale, type TrKey } from "@/lib/i18n";
+import { api, localizeApiError } from "./api";
 
 /**
  * Zamanlanmış taramalar istemcisi (Paket B).
@@ -172,6 +172,20 @@ export interface CreateScheduleInput {
   fromScanId: number;
   intervalDays: IntervalDays;
   maxCostUsd?: number | null;
+}
+
+/**
+ * Zamanlama oluşturulduğunda dönen uyarının (ör. ülke hedef pazarlarda değil) kullanıcı dilindeki metni. Sunucunun
+ * `message` alanı Türkçedir; koda göre yerelleştirilir (`schedules.warning.<KOD>`; yoksa `apiError.<KOD>`, o da yoksa
+ * Türkçede sunucu metni, İngilizcede genel metin). Böylece İngilizce arayüzde Türkçe uyarı görünmez.
+ */
+export function scheduleWarningText(
+  w: { code: string; message?: string },
+  locale: Locale = getLocale(),
+): string {
+  const key = `schedules.warning.${w.code}` as TrKey;
+  if (hasTranslation(key, "tr")) return t(key, {}, locale);
+  return localizeApiError(200, { code: w.code, error: w.message }, locale).message;
 }
 
 export function useCreateSchedule() {

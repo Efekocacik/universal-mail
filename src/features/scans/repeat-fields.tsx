@@ -4,11 +4,12 @@ import { useId, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldError, FieldHint, Input, Label, Select } from "@/components/ui/input";
-import { ApiError } from "@/lib/client/api";
+import { ApiError, errorText } from "@/lib/client/api";
 import { fmtDateTime } from "@/lib/client/format";
 import {
   INTERVALS,
   parseCostCap,
+  scheduleWarningText,
   useCreateSchedule,
   type IntervalDays,
 } from "@/lib/client/schedules";
@@ -90,14 +91,14 @@ export function useRepeatScan() {
           maxCostUsd: cap.value,
         });
         toast.success(t("schedules.created", { at: fmtDateTime(r.nextRunAt) }));
-        if (r.warning) toast.warning(r.warning.message);
+        if (r.warning) toast.warning(scheduleWarningText(r.warning));
         return true;
       } catch (e) {
         if (e instanceof ApiError && e.code === "SCHEDULE_EXISTS") {
           toast.info(t("schedules.exists"));
           return true;
         }
-        toast.error((e as Error).message);
+        toast.error(errorText(e));
         return false;
       }
     },

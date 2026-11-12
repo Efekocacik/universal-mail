@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseCostCap,
   scheduleControlName,
+  scheduleWarningText,
   scheduleViewModel,
   SKIP_CODES,
   type ScheduleItem,
@@ -65,6 +66,19 @@ describe("zamanlama kartı görünüm modeli", () => {
     expect(vm.missedNote).toMatch(/3 çalışma/);
     expect(vm.capLabel).toBe("Tarama başına onaylanan üst sınır: $2.00");
     expect(scheduleViewModel({ ...base, ackMaxUsd: null }, NOW, fmt).capLabel).toBeNull();
+  });
+
+  it("inceleme: zamanlama uyarısı koda göre yerelleşir; İngilizce arayüzde sunucunun Türkçe metni görünmez", () => {
+    const w = {
+      code: "COUNTRY_NOT_TARGETED",
+      message: "Birleşik Krallık hedef pazarlarınız arasında değil.",
+    };
+    expect(scheduleWarningText(w, "en")).toMatch(/schedule is saved.*target markets/);
+    expect(scheduleWarningText(w, "tr")).toMatch(/^Zamanlama kaydedildi/);
+    // Bilinmeyen kod: Türkçede sunucu metni, İngilizcede genel metin (asla ham Türkçe değil).
+    const other = { code: "SOMETHING_NEW", message: "Türkçe sunucu iletisi" };
+    expect(scheduleWarningText(other, "tr")).toBe("Türkçe sunucu iletisi");
+    expect(scheduleWarningText(other, "en")).not.toMatch(/Türkçe/);
   });
 
   it("inceleme a11y: satır denetimlerinin adları görünür etiketle başlar ve bölgeyi taşır", () => {

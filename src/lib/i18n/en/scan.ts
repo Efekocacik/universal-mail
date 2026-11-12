@@ -30,6 +30,8 @@ export const scan = {
     "Skipped because there is no Google Places API key. Add the key in Settings.",
   "schedules.skip.SETUP_REQUIRED":
     "Skipped because setup or the usage consent is incomplete. Finish the setup wizard.",
+  "schedules.warning.COUNTRY_NOT_TARGETED":
+    "The schedule is saved, but this area's country is not one of your target markets, so it won't run until you add it under Settings > Target markets.",
   "schedules.skip.COUNTRY_NOT_TARGETED":
     "Skipped because the area's country is no longer one of your target countries. Add it under Settings > Target markets.",
   "schedules.skip.ACTIVE_SCAN":
