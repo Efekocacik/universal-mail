@@ -10,6 +10,8 @@ import {
   fetchBootstrap,
   lookupDomain,
   nextCheckAt,
+  rateLimitDelayMs,
+  rdapHostFor,
   type RdapBootstrap,
   type RdapOutcome,
 } from "./rdap";
@@ -71,6 +73,10 @@ export interface RdapRunResult {
   moreDue?: boolean;
   /** Devam turu kuyruğa alındıysa iş kimliği. */
   continuedJobId?: number | null;
+  /** Hız sınırına takılan sunucu yüzünden bu turda sorgulanmadan ertelenen alan adı sayısı. */
+  deferred?: number;
+  /** Bu turda 429 veren sunucular ve ne zamana kadar sorgulanmayacakları. */
+  rateLimited?: Record<string, number>;
 }
 
 async function loadBootstrap(deps: RdapDeps, now: number): Promise<RdapBootstrap | null> {
@@ -117,16 +123,38 @@ export async function runRdapBatch(
     return res;
   }
 
+  // 429 veren sunucu bu turda bir daha sorgulanmaz: o sunucunun kalan alan adları `Retry-After` sonrasına ertelenir
+  // (deneme sayısı artmaz; hız sınırı alan adının hatası değildir) ve devam turu da en erken o ana kurulur.
+  const throttled = new Map<string, number>();
   for (const row of due) {
     if (deps.shouldStop?.()) {
       res.skippedReason = "stopped";
       break;
     }
     const t = clock();
+    const host = demo ? null : rdapHostFor(row.domain, bootstrap!);
+    const until = host ? throttled.get(host) : undefined;
+    if (until !== undefined) {
+      await db
+        .update(domainRegistrations)
+        .set({ nextCheckAt: until, updatedAt: t })
+        .where(eq(domainRegistrations.domain, row.domain));
+      res.deferred = (res.deferred ?? 0) + 1;
+      continue;
+    }
     const out: RdapOutcome = demo
       ? demoRdap(row.domain, t)
-      : await lookupDomain(row.domain, bootstrap!, deps.fetch);
-    const attempts = out.status === "error" || out.status === "rate_limited" ? row.attempts + 1 : 0;
+      : await lookupDomain(row.domain, bootstrap!, deps.fetch, t);
+    const limited = out.status === "rate_limited";
+    const attempts = out.status === "error" ? row.attempts + 1 : limited ? row.attempts : 0;
+    let next = nextCheckAt(out.status, attempts, t);
+    if (limited) {
+      next = t + rateLimitDelayMs(out.retryAfterMs);
+      if (host) throttled.set(host, next);
+      deps.log?.(
+        `RDAP: ${host ?? "?"} hız sınırı (429); bu sunucu ${Math.round((next - t) / 60_000)} dk sorgulanmayacak.`,
+      );
+    }
     await db
       .update(domainRegistrations)
       .set({
@@ -136,7 +164,7 @@ export async function runRdapBatch(
         attempts,
         lastError: out.error,
         checkedAt: t,
-        nextCheckAt: nextCheckAt(out.status, attempts, t),
+        nextCheckAt: next,
         updatedAt: t,
       })
       .where(eq(domainRegistrations.domain, row.domain));
@@ -144,9 +172,10 @@ export async function runRdapBatch(
     if (out.status === "ok") {
       res.ok++;
       res.domains.push(row.domain);
-    } else if (out.status === "error" || out.status === "rate_limited") res.failed++;
+    } else if (out.status === "error" || limited) res.failed++;
     if (!demo) await sleep(deps.minIntervalMs ?? 500);
   }
+  if (throttled.size > 0) res.rateLimited = Object.fromEntries(throttled);
   if (res.checked > 0)
     await audit(
       db,
@@ -162,18 +191,22 @@ export async function runRdapBatch(
       .from(domainRegistrations)
       .where(lte(domainRegistrations.nextCheckAt, clock()))
       .limit(1);
-    res.moreDue = left.length > 0;
+    // Hız sınırı yüzünden ertelenenler de kalan iş sayılır: devam turu sınır kalkınca onları sorgular.
+    res.moreDue = left.length > 0 || (res.deferred ?? 0) > 0;
     if (res.moreDue && deps.continueAfterJobId !== undefined) {
       const t = clock();
+      // Bir sunucu hız sınırı verdiyse devam turu hemen değil, en erken sınırın kalktığı anda (kuyruktaki sıra
+      // nextCheckAt'e göre olduğundan aynı sunucuya ertesi turda yine ilk sırada gidilmesin).
+      const earliest = throttled.size > 0 ? Math.min(...throttled.values()) : 0;
       res.continuedJobId = await enqueueRdap(db, {
-        runAt: t + RDAP_CONTINUE_DELAY_MS,
+        runAt: Math.max(t + RDAP_CONTINUE_DELAY_MS, earliest),
         now: t,
         exceptJobId: deps.continueAfterJobId,
       });
     }
   }
   deps.log?.(
-    `RDAP: ${res.checked} alan adı denetlendi, ${res.ok} tarih bulundu, ${res.failed} hata${res.moreDue ? "; kalanlar için devam turu" : ""}`,
+    `RDAP: ${res.checked} alan adı denetlendi, ${res.ok} tarih bulundu, ${res.failed} hata${res.deferred ? `, ${res.deferred} ertelendi (hız sınırı)` : ""}${res.moreDue ? "; kalanlar için devam turu" : ""}`,
   );
   return res;
 }

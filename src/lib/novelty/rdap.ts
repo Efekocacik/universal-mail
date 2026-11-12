@@ -107,6 +107,35 @@ export interface RdapOutcome {
   rdapHost: string | null;
   /** Kısa hata kodu (en çok 64 karakter). */
   error: string | null;
+  /** Yalnızca `rate_limited`: sunucunun `Retry-After` başlığından bekleme (ms); başlık yoksa/okunamazsa `null`. */
+  retryAfterMs?: number | null;
+}
+
+/** 429 yanıtında `Retry-After` yoksa aynı RDAP sunucusuna bu kadar süre sorgu gönderilmez. */
+export const RDAP_RATE_LIMIT_DEFAULT_MS = 15 * 60_000;
+/** Sunucunun istediği bekleme bu aralığa sıkıştırılır (aşırı uzun/kısa değerler kuyruğu kilitlemesin). */
+export const RDAP_RATE_LIMIT_MIN_MS = 60_000;
+export const RDAP_RATE_LIMIT_MAX_MS = 6 * 3_600_000;
+
+/** `Retry-After` (saniye ya da HTTP tarihi) → ms. Geçersizse `null`. */
+export function parseRetryAfter(value: string | undefined, now: number): number | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (/^\d+$/.test(v)) return Number(v) * 1000;
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - now) : null;
+}
+
+/** Hız sınırına takılan sunucu için bekleme süresi (ms): `Retry-After` ya da varsayılan, sınırlar içinde. */
+export function rateLimitDelayMs(retryAfterMs: number | null | undefined): number {
+  const ms = retryAfterMs ?? RDAP_RATE_LIMIT_DEFAULT_MS;
+  return Math.min(RDAP_RATE_LIMIT_MAX_MS, Math.max(RDAP_RATE_LIMIT_MIN_MS, ms));
+}
+
+/** Alan adının sorgulanacağı RDAP sunucusu (önyüklemede uzantı yoksa `null`). */
+export function rdapHostFor(domain: string, bootstrap: RdapBootstrap): string | null {
+  const base = bootstrap.map[tldOf(domain)];
+  return base ? new URL(base).hostname : null;
 }
 
 /** RDAP alan adı yanıtından kayıt tarihi (`events[].eventAction = "registration"`). */
@@ -128,6 +157,7 @@ export async function lookupDomain(
   domain: string,
   bootstrap: RdapBootstrap,
   fetchFn: FetchFn = safeFetch,
+  now: number = Date.now(),
 ): Promise<RdapOutcome> {
   const base = bootstrap.map[tldOf(domain)];
   if (!base) return { status: "unsupported_tld", registeredAt: null, rdapHost: null, error: null };
@@ -144,7 +174,13 @@ export async function lookupDomain(
     if (res.status === 404)
       return { status: "not_found", registeredAt: null, rdapHost: host, error: null };
     if (res.status === 429)
-      return { status: "rate_limited", registeredAt: null, rdapHost: host, error: "http_429" };
+      return {
+        status: "rate_limited",
+        registeredAt: null,
+        rdapHost: host,
+        error: "http_429",
+        retryAfterMs: parseRetryAfter(res.headers?.["retry-after"], now),
+      };
     if (res.status !== 200 || !res.body)
       return { status: "error", registeredAt: null, rdapHost: host, error: `http_${res.status}` };
     let body: unknown;
