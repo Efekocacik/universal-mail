@@ -1,15 +1,18 @@
-export type PlacesErrorKind =
-  | "auth"
-  | "billing"
-  | "disabled"
-  | "quota"
-  | "rate"
-  | "invalid"
+/** Places hata türleri; API yanıtında `PLACES_<TÜR>` koduna çevrilir (tests/api-error-text.test.ts metinleri denetler). */
+export const PLACES_ERROR_KINDS = [
+  "auth",
+  "billing",
+  "disabled",
+  "quota",
+  "rate",
+  "invalid",
   /** Faz 4: yer kimliği Google'da yok (eskimiş/silinmiş place_id). Taramayı durdurmaz; yer `gone_at` ile işaretlenir. */
-  | "not_found"
-  | "network"
-  | "server"
-  | "unknown";
+  "not_found",
+  "network",
+  "server",
+  "unknown",
+] as const;
+export type PlacesErrorKind = (typeof PLACES_ERROR_KINDS)[number];
 
 export class PlacesApiError extends Error {
   readonly kind: PlacesErrorKind;

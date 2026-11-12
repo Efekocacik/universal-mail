@@ -3,9 +3,9 @@
  * bu koddan yerelleştirir (`apiError.<KOD>` anahtarları, src/lib/i18n/{tr,en}/core.ts). Kodlar sürümler arasında
  * değişmez: istemciler bunlara göre dallanır. Bu dosya istemci paketine de girer (sunucu bağımlılığı yok).
  *
- * `API_ERROR_CODES`, arayüzün özel metin gösterdiği kodlardır; listede olmayan bir kod da gelebilir (alan hataları:
- * kampanya, posta kutusu…) ve İngilizce arayüzde genel metne düşer. Her listedeki kodun iki dilde de anahtarı olduğu
- * tests/error-codes.test.ts ile denetlenir.
+ * `API_ERROR_CODES`, arayüzün özel metin gösterdiği kodlardır. Her listedeki kodun iki dilde de anahtarı olduğu
+ * tests/error-codes.test.ts ile; API'nin döndürebileceği TÜM kodların (alan hatası eşlemeleri ve uçlardaki sabit kodlar)
+ * iki dilde metni olduğu tests/api-error-text.test.ts ile denetlenir.
  */
 export const API_ERROR_CODES = [
   // HTTP durumundan türetilen genel kodlar
@@ -117,6 +117,33 @@ export const API_ERROR_CODES = [
   "CHANNEL_BAD_RESPONSE",
   "CHANNEL_NETWORK",
   "CHANNEL_TIMEOUT",
+  // Faz 4 paketleri (keşif, zamanlama, posta kutusu sınırları, kampanya, inceleme); tam kapsam
+  // tests/api-error-text.test.ts ile kaynak taraması üzerinden denetlenir.
+  "PLACES_NOT_FOUND",
+  "FILTER_INVALID",
+  "INVALID_QUERY",
+  "NOTHING_MATCHED",
+  "LEAD_UNBLOCK_CONFIRM",
+  "RDAP_DISABLED",
+  "SAVED_FILTER_NOT_FOUND",
+  "SAVED_FILTER_EXISTS",
+  "SAVED_FILTER_LIMIT",
+  "SCHEDULE_NOT_FOUND",
+  "SCAN_NOT_FOUND",
+  "SCAN_NOT_STARTED",
+  "SCHEDULE_EXISTS",
+  "RACE",
+  "CAP_ABOVE_PROVIDER_MAX",
+  "WARMUP_STEP_ABOVE_MAX",
+  "INVALID_STEPS",
+  "INVALID_TRANSITION",
+  "LIVE_DISABLED",
+  "SCHEDULER_DISABLED",
+  "PREFLIGHT_FAILED",
+  "PREFLIGHT_STALE",
+  "ALREADY_RESOLVED",
+  "NOT_UNCERTAIN",
+  "NO_SEQUENCE",
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
 

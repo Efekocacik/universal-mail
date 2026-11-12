@@ -7,14 +7,21 @@ import { EN_FRAGMENTS } from "@/lib/i18n/en";
 import { TR_FRAGMENTS } from "@/lib/i18n/tr";
 
 /**
- * Paket D (10a-2): İngilizce arayüz eşliği. `base` ve `core` parçaları TAM çevrilidir (eksik/fazla anahtar yok);
+ * Paket D (10a-2) + Faz 4 entegrasyonu: İngilizce arayüz eşliği. TÜM parçalar (B/C/D/E/F'nin ekledikleri dahil) TAM
+ * çevrilidir (eksik/fazla anahtar yok, Türkçe harf kalmaz);
  * tüm parçalarda yer tutucular Türkçeyle aynıdır; "Bu nedir?" balonları kısa kalır; modül düzeyinde `t()` çağrısı yoktur
  * (dil değişince yeniden hesaplanmaz, ilk yüklemedeki dilde donar).
  */
 const placeholders = (s: string) => [...s.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((m) => m[1]).sort();
 
 describe("i18n: İngilizce eşlik (Paket D)", () => {
-  it.each(["base", "core"] as const)("%s parçası eksiksiz ve fazlasız çevrilidir", (name) => {
+  const ALL = Object.keys(TR_FRAGMENTS) as (keyof typeof TR_FRAGMENTS)[];
+
+  it("Türkçe ve İngilizce aynı parçalardan oluşur", () => {
+    expect(Object.keys(EN_FRAGMENTS).sort()).toEqual([...ALL].sort());
+  });
+
+  it.each(ALL)("%s parçası eksiksiz ve fazlasız çevrilidir", (name) => {
     const trFrag = TR_FRAGMENTS[name] as Record<string, string>;
     const enFrag = EN_FRAGMENTS[name] as Record<string, string>;
     const missing = Object.keys(trFrag).filter((k) => !(k in enFrag));
@@ -41,12 +48,12 @@ describe("i18n: İngilizce eşlik (Paket D)", () => {
     expect(bad).toEqual([]);
   });
 
-  it("İngilizce base/core metninde Türkçe harf kalmaz (dil adlarının kendi yazımı hariç)", () => {
+  it("İngilizce metinde (TÜM parçalar) Türkçe harf kalmaz (dil adlarının kendi yazımı hariç)", () => {
     const allowed = new Set(["uiLang.tr"]);
     const leftovers: string[] = [];
-    for (const name of ["base", "core"] as const)
+    for (const name of ALL)
       for (const [k, v] of Object.entries(EN_FRAGMENTS[name] as Record<string, string>))
-        if (!allowed.has(k) && /[ğışĞİŞ]/.test(v)) leftovers.push(`${k}: ${v}`);
+        if (!allowed.has(k) && /[ğışĞİŞçÇöÖüÜ]/.test(v)) leftovers.push(`${name}/${k}: ${v}`);
     expect(leftovers).toEqual([]);
   });
 

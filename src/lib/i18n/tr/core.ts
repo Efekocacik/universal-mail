@@ -186,7 +186,8 @@ export const core = {
   "apiError.RESERVED_DOMAIN": "Bu alan adı ayrılmış bir alan adı. Gerçek bir alan adı kullanın.",
   "apiError.INVALID_CLIENT": "İstemci kimliği veya istemci sırrı geçerli biçimde değil.",
   "apiError.LIMIT": "Posta kutusu sınırına ulaşıldı.",
-  "apiError.NOT_EDITABLE": "Demo posta kutusu değiştirilemez veya silinemez.",
+  "apiError.NOT_EDITABLE":
+    "Bu kayıt şu anki durumunda değiştirilemez (ör. demo posta kutusu veya başlamış bir kampanya).",
   "apiError.INVALID_STATUS": "Posta kutusu bu işlem için uygun durumda değil.",
   "apiError.MAILBOX_NOT_FOUND": "Posta kutusu bulunamadı.",
   "apiError.MAILBOX_NOT_READY": "Posta kutusu hazır değil.",
@@ -226,6 +227,45 @@ export const core = {
   "apiError.CHANNEL_BAD_RESPONSE": "Çıkış sunucusundan beklenmeyen bir yanıt geldi.",
   "apiError.CHANNEL_NETWORK": "Çıkış sunucusuna ulaşılamadı.",
   "apiError.CHANNEL_TIMEOUT": "Çıkış sunucusu zamanında yanıt vermedi.",
+  // Faz 4 entegrasyonu: paketlerin eklediği kodlar (tests/api-error-text.test.ts hepsini denetler)
+  "apiError.PLACES_NOT_FOUND": "Bu işletme Google'da artık bulunamıyor. Kaydınız silinmedi.",
+  "apiError.FILTER_INVALID":
+    "Süzgeç değerlerinden biri geçersiz. Süzgeçleri temizleyip yeniden seçin.",
+  "apiError.INVALID_QUERY": "Gösterge paneli isteği geçersiz. Sayfayı yenileyin.",
+  "apiError.NOTHING_MATCHED":
+    "Seçimde işlenecek işletme kalmadı. Liste değişmiş olabilir; sayfayı yenileyip yeniden seçin.",
+  "apiError.LEAD_UNBLOCK_CONFIRM":
+    "Bu işletme “İletişime geçme” olarak işaretli. Durumunu değiştirmek için onay vermeniz gerekir.",
+  "apiError.RDAP_DISABLED": "Alan adı yaşı denetimi kapalı. Ayarlar > Yenilik bölümünden açın.",
+  "apiError.SAVED_FILTER_NOT_FOUND": "Kayıtlı süzgeç bulunamadı. Silinmiş olabilir.",
+  "apiError.SAVED_FILTER_EXISTS": "Bu adla kayıtlı bir süzgeç zaten var. Başka bir ad seçin.",
+  "apiError.SAVED_FILTER_LIMIT": "Kayıtlı süzgeç sınırına ulaşıldı. Kullanmadığınız birini silin.",
+  "apiError.SAVED_FILTER_LIMIT.detail":
+    "En çok {limit} süzgeç kaydedilebilir. Kullanmadığınız birini silip yeniden deneyin.",
+  "apiError.SCHEDULE_NOT_FOUND": "Zamanlama bulunamadı. Silinmiş olabilir.",
+  "apiError.SCAN_NOT_FOUND": "Tarama bulunamadı.",
+  "apiError.SCAN_NOT_STARTED": "Henüz başlatılmamış bir tarama düzenli tekrarlanamaz.",
+  "apiError.SCHEDULE_EXISTS": "Bu bölge ve kategoriler için zaten bir zamanlama var.",
+  "apiError.RACE":
+    "Zamanlama şu anda başka bir çalışma tarafından güncellendi. Birkaç saniye sonra yeniden deneyin.",
+  "apiError.CAP_ABOVE_PROVIDER_MAX": "Günlük sınır bu posta kutusu türünün üst sınırını aşıyor.",
+  "apiError.CAP_ABOVE_PROVIDER_MAX.detail":
+    "Bu posta kutusu için günlük sınır en çok {max} olabilir.",
+  "apiError.WARMUP_STEP_ABOVE_MAX": "Haftalık artış bu posta kutusu türünün üst sınırını aşıyor.",
+  "apiError.WARMUP_STEP_ABOVE_MAX.detail":
+    "Bu posta kutusu için haftalık artış en çok {max} olabilir.",
+  "apiError.INVALID_STEPS": "Kampanya adımlarında bir sorun var. Adımları kontrol edip kaydedin.",
+  "apiError.INVALID_TRANSITION": "Kampanya bu durumdayken bu işlem yapılamaz. Sayfayı yenileyin.",
+  "apiError.LIVE_DISABLED": "Gerçek gönderim kapalı. Kampanya yalnızca demo modunda çalışabilir.",
+  "apiError.SCHEDULER_DISABLED":
+    "Gönderim zamanlayıcısı kapalı. Kampanyayı başlatmak için önce zamanlayıcıyı açın.",
+  "apiError.PREFLIGHT_FAILED":
+    "Kampanya henüz hazır değil. Ön denetim listesindeki eksikleri giderip yeniden deneyin.",
+  "apiError.PREFLIGHT_STALE":
+    "Ön denetimden sonra kampanya değişti. Ön denetimi yeniden çalıştırın.",
+  "apiError.ALREADY_RESOLVED": "Bu gönderim için daha önce farklı bir karar verilmiş.",
+  "apiError.NOT_UNCERTAIN": "Bu gönderimin sonucu zaten kesin; karar gerekmiyor.",
+  "apiError.NO_SEQUENCE": "Bu gönderim bir kampanya dizisine bağlı değil.",
 
   // Google işletme türleri (format.ts typeLabel)
   "placeType.cafe": "Kafe",

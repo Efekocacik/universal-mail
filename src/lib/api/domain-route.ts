@@ -139,7 +139,10 @@ export function mapDomainError(e: unknown): Mapped | null {
     };
   }
   if (e instanceof ArfConfigError) {
-    return { status: 400, body: { error: e.message, code: e.code.toUpperCase() } };
+    return {
+      status: ARF_CONFIG_CODES[e.code],
+      body: { error: e.message, code: e.code.toUpperCase() },
+    };
   }
   if (e instanceof ChannelError) {
     // Aktarıcı kanalı: yalnızca güvenli kod ve (varsa) aktarıcının HTTP durumu döner; adres/gövde sızdırılmaz.
@@ -154,6 +157,12 @@ export function mapDomainError(e: unknown): Mapped | null {
   }
   return null;
 }
+
+/** `ArfConfigError` kodları (hepsi 400); `satisfies` yeni kodun buraya eklenmesini zorunlu kılar. */
+const ARF_CONFIG_CODES = { invalid_domain: 400, too_many: 400 } satisfies Record<
+  ArfConfigError["code"],
+  400
+>;
 
 const ENDPOINT_STATUS: Record<EndpointError["code"], number> = {
   invalid_url: 400,
@@ -240,6 +249,31 @@ const OAUTH_STATUS: Record<OAuthError["kind"], number> = {
   transient: 503,
   unconfirmed: 400,
 };
+
+/**
+ * `mapDomainError`'ın üretebileceği TÜM `code` değerleri (eşleme tablolarından türetilir; elle tutulan liste yok).
+ * tests/api-error-text.test.ts her birinin iki dilde `apiError.<KOD>` metni olduğunu denetler.
+ */
+export function domainErrorCodes(): string[] {
+  const up = (m: object, prefix = "") => Object.keys(m).map((k) => `${prefix}${k.toUpperCase()}`);
+  return [
+    ...new Set([
+      ...up(TEMPLATE),
+      ...up(POLICY_STATUS),
+      ...up(SUPPRESSION_STATUS),
+      ...up(AUTO_STOP_STATUS),
+      ...up(REVIEW_STATUS),
+      ...up(ERASURE_STATUS),
+      ...up(OAUTH_STATUS),
+      ...up(MAILBOX_SERVICE_STATUS),
+      ...up(MAILBOX_HEALTH_STATUS),
+      ...up(TEST_SEND_STATUS),
+      ...up(ENDPOINT_STATUS),
+      ...up(ARF_CONFIG_CODES),
+      ...up(CHANNEL_MESSAGE, "CHANNEL_"),
+    ]),
+  ];
+}
 
 /** `route()` + alan hatası eşlemesi. */
 export function domainRoute<C = unknown>(handler: Handler<C>): Handler<C> {

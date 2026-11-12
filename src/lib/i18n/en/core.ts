@@ -185,7 +185,8 @@ export const core = {
   "apiError.RESERVED_DOMAIN": "This is a reserved domain. Use a real domain.",
   "apiError.INVALID_CLIENT": "The client ID or client secret is not in a valid format.",
   "apiError.LIMIT": "The mailbox limit has been reached.",
-  "apiError.NOT_EDITABLE": "The demo mailbox cannot be changed or deleted.",
+  "apiError.NOT_EDITABLE":
+    "This can't be changed in its current state (for example, a demo mailbox or a campaign that has started).",
   "apiError.INVALID_STATUS": "The mailbox is not in a state that allows this.",
   "apiError.MAILBOX_NOT_FOUND": "Mailbox not found.",
   "apiError.MAILBOX_NOT_READY": "The mailbox is not ready.",
@@ -225,6 +226,49 @@ export const core = {
   "apiError.CHANNEL_BAD_RESPONSE": "An unexpected response came from the unsubscribe server.",
   "apiError.CHANNEL_NETWORK": "The unsubscribe server could not be reached.",
   "apiError.CHANNEL_TIMEOUT": "The unsubscribe server did not respond in time.",
+  // Faz 4 integration: codes added by the packages (tests/api-error-text.test.ts checks all of them)
+  "apiError.PLACES_NOT_FOUND":
+    "This business can no longer be found on Google. Your record was kept.",
+  "apiError.FILTER_INVALID":
+    "One of the filter values is invalid. Clear the filters and choose again.",
+  "apiError.INVALID_QUERY": "The dashboard request is invalid. Reload the page.",
+  "apiError.NOTHING_MATCHED":
+    "None of the selected businesses can be processed. The list may have changed; reload and select again.",
+  "apiError.LEAD_UNBLOCK_CONFIRM":
+    "This business is marked “Do not contact”. Confirm to change its status.",
+  "apiError.RDAP_DISABLED": "Domain age checks are off. Turn them on in Settings > Novelty.",
+  "apiError.SAVED_FILTER_NOT_FOUND": "Saved filter not found. It may have been deleted.",
+  "apiError.SAVED_FILTER_EXISTS":
+    "A saved filter with this name already exists. Choose another name.",
+  "apiError.SAVED_FILTER_LIMIT":
+    "You have reached the saved filter limit. Delete one you no longer use.",
+  "apiError.SAVED_FILTER_LIMIT.detail":
+    "You can save up to {limit} filters. Delete one you no longer use and try again.",
+  "apiError.SCHEDULE_NOT_FOUND": "Schedule not found. It may have been deleted.",
+  "apiError.SCAN_NOT_FOUND": "Scan not found.",
+  "apiError.SCAN_NOT_STARTED": "A scan that has not started yet cannot be repeated on a schedule.",
+  "apiError.SCHEDULE_EXISTS": "A schedule already exists for this region and these categories.",
+  "apiError.RACE": "The schedule was just updated by another run. Try again in a few seconds.",
+  "apiError.CAP_ABOVE_PROVIDER_MAX": "The daily limit is above the maximum for this mailbox type.",
+  "apiError.CAP_ABOVE_PROVIDER_MAX.detail":
+    "The daily limit for this mailbox can be at most {max}.",
+  "apiError.WARMUP_STEP_ABOVE_MAX":
+    "The weekly increase is above the maximum for this mailbox type.",
+  "apiError.WARMUP_STEP_ABOVE_MAX.detail":
+    "The weekly increase for this mailbox can be at most {max}.",
+  "apiError.INVALID_STEPS": "There is a problem with the campaign steps. Check the steps and save.",
+  "apiError.INVALID_TRANSITION":
+    "This action is not possible in the campaign's current state. Reload the page.",
+  "apiError.LIVE_DISABLED": "Live sending is off. The campaign can only run in demo mode.",
+  "apiError.SCHEDULER_DISABLED":
+    "The sending scheduler is off. Turn it on before starting the campaign.",
+  "apiError.PREFLIGHT_FAILED":
+    "The campaign is not ready yet. Fix the items in the pre-flight check and try again.",
+  "apiError.PREFLIGHT_STALE":
+    "The campaign changed after the pre-flight check. Run the check again.",
+  "apiError.ALREADY_RESOLVED": "A different decision was already recorded for this send.",
+  "apiError.NOT_UNCERTAIN": "The result of this send is already known; no decision is needed.",
+  "apiError.NO_SEQUENCE": "This send is not part of a campaign sequence.",
 
   "placeType.cafe": "Café",
   "placeType.coffee_shop": "Coffee shop",
