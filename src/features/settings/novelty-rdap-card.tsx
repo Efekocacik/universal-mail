@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button";
 import { FieldError, FieldHint, Input, Label } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { Switch } from "@/components/ui/switch";
-import { api } from "@/lib/client/api";
+import { HelpTip } from "@/components/ui/tooltip";
+import { api, errorText } from "@/lib/client/api";
 import { fmtDateTime } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import {
@@ -19,7 +20,7 @@ import {
 } from "@/lib/novelty/rdap-view";
 
 /**
- * Ayarlar > Yenilik: alan adı yaşı (RDAP) kartı (Paket B; Ayarlar sayfasına Paket D yerleştirir).
+ * Ayarlar > Yenilik: alan adı yaşı (RDAP) kartı (Paket B; Ayarlar > Gelişmiş > Yenilik bölümünde, settings-page.tsx).
  * Açık/kapalı, "genç alan adı" penceresi, durum ve "Şimdi denetle". Gizlilik notu: yalnızca alan adı gönderilir.
  */
 export function NoveltyRdapCard({ youngDays }: { youngDays: number }) {
@@ -39,7 +40,7 @@ export function NoveltyRdapCard({ youngDays }: { youngDays: number }) {
       void qc.invalidateQueries({ queryKey: ["settings"] });
       toast.success(t("rdap.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   const check = useMutation({
     mutationFn: () =>
@@ -48,7 +49,7 @@ export function NoveltyRdapCard({ youngDays }: { youngDays: number }) {
       void qc.invalidateQueries({ queryKey: ["rdap-status"] });
       toast.success(r.queued ? t("rdap.check.queued") : t("rdap.check.already"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
 
   if (isLoading || !data) return <Skeleton className="h-40" />;
@@ -60,7 +61,10 @@ export function NoveltyRdapCard({ youngDays }: { youngDays: number }) {
         <div className="flex items-start gap-2">
           <Globe className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
           <div>
-            <p className="text-[13px] font-medium">{t("rdap.title")}</p>
+            <p className="flex items-center gap-1.5 text-[13px] font-medium">
+              {t("rdap.title")}
+              <HelpTip>{t("help.rdap")}</HelpTip>
+            </p>
             <p className="text-[12px] text-muted-foreground">{t("rdap.desc")}</p>
           </div>
         </div>

@@ -59,6 +59,10 @@ export const core = {
     'Puan bu eşiklerin üstündeyse işletme "Yüksek" ya da "Muhtemel" olarak etiketlenir. Eşikleri düşürmek daha çok ama daha az kesin sonuç verir.',
   "help.budget":
     "Google aramalarına bu ay harcanabilecek en yüksek tutar. Sınıra gelince taramalar kendiliğinden durur; kesin tutar Google faturanızdır.",
+  "help.retention":
+    "Google, bazı verileri yalnızca sınırlı süre saklamaya izin verir. Uygulama bu süreleri kendisi uygular; buradan türetilmiş işaretlerin süresini seçebilirsiniz.",
+  "help.rdap":
+    "Web sitesinin alan adı yakın zamanda alındıysa işletme büyük olasılıkla yenidir. Denetim için yalnızca alan adı gönderilir.",
   "help.mapId":
     "Google haritasının görünümünü (ör. koyu stil) belirleyen kod. Boş bırakırsanız Google'ın varsayılan haritası kullanılır.",
   "help.leadStatus":

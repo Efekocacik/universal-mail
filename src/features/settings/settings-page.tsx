@@ -41,7 +41,9 @@ import {
 } from "@/lib/client/queries";
 import type { Category, CompanyProfile, GoogleDataSummary, SecretInfo } from "@/lib/client/types";
 import { skuLabel, PRICING_VERIFIED_AT } from "@/lib/places/pricing";
+import { GoogleRetentionCard } from "./google-retention-card";
 import { MailboxSettingsSection } from "./mailbox-section";
+import { NoveltyRdapCard } from "./novelty-rdap-card";
 import { UnsubscribeSettingsSection } from "./unsubscribe-section";
 import { getLocale, t, type TrKey } from "@/lib/i18n";
 import { mapIdProblem } from "@/lib/settings/map-id";
@@ -1133,6 +1135,11 @@ function NoveltySection() {
         {!valid && <FieldError id="novelty-err">{t("settings.novelty.invalid")}</FieldError>}
         <SaveBar dirty={dirty} valid={valid} pending={save.isPending} />
       </form>
+      {data ? (
+        <NoveltyRdapCard youngDays={data.settings["novelty.domainYoungDays"]} />
+      ) : (
+        <Skeleton className="h-40" />
+      )}
     </Section>
   );
 }
@@ -1400,6 +1407,7 @@ function DataSection() {
         {t("settings.data.googleNote")}
       </p>
       <GoogleDataBox />
+      <GoogleRetentionCard />
       <details className="rounded-lg bg-muted/60 px-3 py-2 text-[12px] text-muted-foreground">
         <summary className="cursor-pointer font-medium text-foreground">
           {t("settings.about.title")}

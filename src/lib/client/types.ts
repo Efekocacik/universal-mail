@@ -207,6 +207,8 @@ export interface SettingsResponse {
     "ui.language": "tr" | "en";
     "enrichment.external": { enabled: boolean; provider: "hunter" };
     "enrichment.concurrency": number;
+    /** Faz 4 (Paket B): RDAP "genç alan adı" penceresi (gün, 30–730). */
+    "novelty.domainYoungDays": number;
   };
   secrets: { placesKey: SecretInfo; mapsKey: SecretInfo; hunterKey: SecretInfo };
   setup: SetupState;

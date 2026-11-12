@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FieldHint, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
-import { api } from "@/lib/client/api";
+import { HelpTip } from "@/components/ui/tooltip";
+import { api, errorText } from "@/lib/client/api";
 import { fmtNumber } from "@/lib/client/format";
 import { t, type TrKey } from "@/lib/i18n";
 import {
@@ -28,7 +29,7 @@ const SOURCES: { href: string; key: TrKey }[] = [
 ];
 
 /**
- * Ayarlar > Veri: Google verisi saklama politikası kartı (Paket B; Ayarlar sayfasına Paket D yerleştirir).
+ * Ayarlar > Veri: Google verisi saklama politikası kartı (Paket B; Ayarlar > Veri bölümünde, settings-page.tsx).
  * Alan sınıfına göre ne kadar veri tutulduğunu, kuralını ve kaynağını gösterir; türetilmiş bayrak süresini ayarlatır ve
  * yer kimliği yenilemesini elle başlatır.
  */
@@ -46,7 +47,7 @@ export function GoogleRetentionCard() {
       void qc.invalidateQueries({ queryKey: ["settings"] });
       toast.success(t("retention.saved"));
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
   const refresh = useMutation({
     mutationFn: () =>
@@ -55,7 +56,7 @@ export function GoogleRetentionCard() {
       r.queued
         ? toast.success(t("retention.refresh.queued"))
         : toast.info(t("retention.refresh.already")),
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: Error) => toast.error(errorText(e)),
   });
 
   if (isLoading || !data) return <Skeleton className="h-48" />;
@@ -66,7 +67,10 @@ export function GoogleRetentionCard() {
       <div className="flex items-start gap-2">
         <ShieldCheck className="mt-0.5 size-4 text-muted-foreground" aria-hidden />
         <div>
-          <p className="text-[13px] font-medium">{t("retention.title")}</p>
+          <p className="flex items-center gap-1.5 text-[13px] font-medium">
+            {t("retention.title")}
+            <HelpTip>{t("help.retention")}</HelpTip>
+          </p>
           <p className="text-[12px] text-muted-foreground">{t("retention.desc")}</p>
         </div>
       </div>

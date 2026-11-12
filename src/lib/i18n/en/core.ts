@@ -54,6 +54,10 @@ export const core = {
     'If the score is above these thresholds, the business is labelled "High" or "Likely". Lower thresholds give more but less certain results.',
   "help.budget":
     "The most that can be spent on Google searches this month. Scans stop by themselves at the limit; the exact amount is on your Google bill.",
+  "help.retention":
+    "Google allows some data to be kept only for a limited time. The app applies these limits itself; here you can choose how long derived flags are kept.",
+  "help.rdap":
+    "If a website's domain was registered recently, the business is probably new. Only the domain name is sent for the check.",
   "help.mapId":
     "A code that sets how the Google map looks (for example a dark style). Leave it empty to use Google's default map.",
   "help.leadStatus":
