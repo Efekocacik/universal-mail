@@ -14,6 +14,14 @@ import { errorMessage } from "@/lib/util";
 /** M3: bitmiş iş kayıtları bu kadar gün tutulur (gün anahtarlı tekilleştirme yalnızca o günü kapsar). */
 export const FINISHED_JOB_RETENTION_MS = 7 * 86_400_000;
 export const HOUSEKEEPING_INTERVAL_MS = 6 * 3_600_000;
+/**
+ * Başarısız tur/adım için kısa yeniden deneme. Veritabanı istemcisi tek bağlantılıdır: aynı süreçte açık bir işlem
+ * (ör. iş döngüsünün iş sahiplenmesi) sürerken bakım sorgusu libsql `TRANSACTION_ACTIVE` ile reddedilir. Bu geçicidir;
+ * 6 saat beklemek yerine kısa süre sonra yeniden denenir. Kalıcı hatalı bir adım düzenli tura kadar en çok
+ * `HOUSEKEEPING_MAX_RETRIES` ek tur üretir.
+ */
+export const HOUSEKEEPING_RETRY_MS = 60_000;
+export const HOUSEKEEPING_MAX_RETRIES = 3;
 
 export interface HousekeepingResult {
   coordinates: number;
@@ -108,4 +116,74 @@ export async function runHousekeeping(
     await scheduleTick(db, { runAt: now + FIRST_TICK_DELAY_MS, now });
   });
   return res;
+}
+
+export interface HousekeepingLoopDeps {
+  run: () => Promise<HousekeepingResult>;
+  /** Tur bütünüyle fırlattığında (ör. ayarlar okunamadı). */
+  onError: (e: unknown) => void;
+  log?: (m: string) => void;
+  setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  clearTimer?: (t: ReturnType<typeof setTimeout>) => void;
+}
+
+/**
+ * Bakım turu döngüsü: hemen ve `HOUSEKEEPING_INTERVAL_MS`'de bir çalışır. Tur fırlatırsa ya da bir adımı başarısız
+ * olursa `HOUSEKEEPING_RETRY_MS` sonra yeniden denenir (adımlar idempotent; düzenli turlar arasında en çok
+ * `HOUSEKEEPING_MAX_RETRIES` kez). Turlar üst üste binmez: biri sürerken gelen tetik atlanır.
+ */
+export function startHousekeepingLoop(deps: HousekeepingLoopDeps): {
+  stop: () => void;
+  /** Test için: bekleyen turun bitmesini bekler. */
+  idle: () => Promise<void>;
+} {
+  const setTimer = deps.setTimer ?? setTimeout;
+  const clearTimer = deps.clearTimer ?? clearTimeout;
+  let stopped = false;
+  let current: Promise<void> | null = null;
+  let retries = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  let intervalTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const turn = (kind: "regular" | "retry") => {
+    if (stopped || current) return;
+    if (kind === "regular") retries = 0;
+    if (retryTimer) {
+      clearTimer(retryTimer);
+      retryTimer = null;
+    }
+    current = (async () => {
+      let failed = false;
+      try {
+        failed = (await deps.run()).errors.length > 0;
+      } catch (e) {
+        failed = true;
+        deps.onError(e);
+      }
+      if (failed && !stopped && retries < HOUSEKEEPING_MAX_RETRIES) {
+        retries += 1;
+        deps.log?.(
+          `bakım turu ${HOUSEKEEPING_RETRY_MS / 1000} sn sonra yeniden denenecek (${retries}/${HOUSEKEEPING_MAX_RETRIES}).`,
+        );
+        retryTimer = setTimer(() => turn("retry"), HOUSEKEEPING_RETRY_MS);
+      }
+    })().finally(() => {
+      current = null;
+    });
+  };
+  const regular = () => {
+    turn("regular");
+    if (!stopped) intervalTimer = setTimer(regular, HOUSEKEEPING_INTERVAL_MS);
+  };
+  regular();
+  return {
+    stop: () => {
+      stopped = true;
+      if (retryTimer) clearTimer(retryTimer);
+      if (intervalTimer) clearTimer(intervalTimer);
+    },
+    idle: async () => {
+      while (current) await current;
+    },
+  };
 }

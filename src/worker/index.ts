@@ -17,7 +17,7 @@ import {
   registerMailHandlers,
 } from "./handlers";
 import { registerScanBackgroundHandlers } from "./background";
-import { HOUSEKEEPING_INTERVAL_MS, runHousekeeping } from "./housekeeping";
+import { runHousekeeping, startHousekeepingLoop } from "./housekeeping";
 import { Worker } from "./loop";
 import { createWakeGate, handleWake, isWakeMessage } from "./wake";
 
@@ -71,16 +71,14 @@ async function main(): Promise<void> {
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 
   // Faz 4 bakım turu (Google saklama politikası, yenilik skorları, M3 iş/bildirim temizliği, arka plan işleri ve
-  // zamanlama tick zinciri). Açılışta ve 6 saatte bir; adımlar birbirinden bağımsız ve idempotenttir.
-  const housekeeping = async () => {
-    try {
-      await runHousekeeping(db, { now: Date.now(), log: (m) => console.log(`[worker] ${m}`) });
-    } catch (e) {
-      console.error("[worker] bakım turu başarısız:", e);
-    }
-  };
-  void housekeeping();
-  const interval = setInterval(housekeeping, HOUSEKEEPING_INTERVAL_MS);
+  // zamanlama tick zinciri). Açılışta ve 6 saatte bir; adımlar birbirinden bağımsız ve idempotenttir. Başarısız tur
+  // (ör. açılışta aynı süreçteki işlem tek bağlantıyı tutarken) kısa süre sonra yeniden denenir.
+  const hkLog = (m: string) => console.log(`[worker] ${m}`);
+  const housekeeping = startHousekeepingLoop({
+    run: () => runHousekeeping(db, { now: Date.now(), log: hkLog }),
+    onError: (e) => console.error("[worker] bakım turu başarısız:", e),
+    log: hkLog,
+  });
   // Zamanlanmış taramalar: ilk tick açılıştan 60 sn sonra (tekil; kuyrukta varsa eklenmez).
   await scheduleTick(db, { runAt: Date.now() + FIRST_TICK_DELAY_MS, now: Date.now() });
   const wakeGate = createWakeGate();
@@ -97,7 +95,7 @@ async function main(): Promise<void> {
     console.log("[worker] kapanış isteği alındı; iş güvenle durduruluyor...");
     worker.stop();
     mailScheduler.stop();
-    clearInterval(interval);
+    housekeeping.stop();
     clearInterval(rearmDrain);
     setTimeout(() => process.exit(0), 20_000).unref();
   };

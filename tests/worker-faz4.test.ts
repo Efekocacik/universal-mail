@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordUsage } from "@/lib/budget";
 import type { Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
@@ -14,7 +14,15 @@ import { createAndStartScan } from "@/lib/scan/service";
 import { persistPlaces } from "@/lib/scan/store";
 import { setSetting } from "@/lib/settings";
 import { registerScanBackgroundHandlers } from "@/worker/background";
-import { FINISHED_JOB_RETENTION_MS, runHousekeeping } from "@/worker/housekeeping";
+import {
+  FINISHED_JOB_RETENTION_MS,
+  HOUSEKEEPING_INTERVAL_MS,
+  HOUSEKEEPING_MAX_RETRIES,
+  HOUSEKEEPING_RETRY_MS,
+  runHousekeeping,
+  startHousekeepingLoop,
+  type HousekeepingResult,
+} from "@/worker/housekeeping";
 import { Worker } from "@/worker/loop";
 import { createWakeGate, handleWake, isWakeMessage, WAKE_DEBOUNCE_MS } from "@/worker/wake";
 import { createTestDb, type TestDb } from "./helpers/db";
@@ -297,5 +305,71 @@ describe("recover (M9 ve zamanlanmış taramalar)", () => {
     const r = await new Worker({ db, workerId: "w", log: () => undefined }).recover();
     expect(r.resumedScheduled).toBe(0);
     expect((await db.select().from(scans).where(eq(scans.id, sched)))[0]!.status).toBe("paused");
+  });
+});
+
+describe("bakım turu döngüsü", () => {
+  const ok = (errors: string[] = []): HousekeepingResult => ({
+    coordinates: 0,
+    cacheRows: 0,
+    derivedFlags: 0,
+    noveltyUpdated: 0,
+    notificationsPruned: 0,
+    enqueued: [],
+    errors,
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("açılıştaki geçici hata (TRANSACTION_ACTIVE) kısa süre sonra yeniden denenir; 6 saat beklenmez", async () => {
+    vi.useFakeTimers();
+    const busy = Object.assign(new Error("tx"), { code: "TRANSACTION_ACTIVE" });
+    const run = vi.fn<() => Promise<HousekeepingResult>>().mockRejectedValueOnce(busy);
+    run.mockResolvedValue(ok());
+    const errors: unknown[] = [];
+    const loop = startHousekeepingLoop({ run, onError: (e) => errors.push(e) });
+    await loop.idle();
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(errors).toEqual([busy]);
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_RETRY_MS);
+    await loop.idle();
+    expect(run).toHaveBeenCalledTimes(2);
+    // Başarılı turdan sonra yeniden deneme yok; sonraki tur düzenli aralıkta.
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_RETRY_MS * 5);
+    expect(run).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_INTERVAL_MS);
+    await loop.idle();
+    expect(run).toHaveBeenCalledTimes(3);
+    loop.stop();
+  });
+
+  it("kalıcı hatalı adım düzenli turlar arasında en çok N kez yeniden denenir; durdurunca tur çalışmaz", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn(async () => ok(["novelty"]));
+    const loop = startHousekeepingLoop({ run, onError: () => undefined });
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_RETRY_MS * (HOUSEKEEPING_MAX_RETRIES + 3));
+    await loop.idle();
+    expect(run).toHaveBeenCalledTimes(1 + HOUSEKEEPING_MAX_RETRIES);
+    loop.stop();
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_INTERVAL_MS * 2);
+    expect(run).toHaveBeenCalledTimes(1 + HOUSEKEEPING_MAX_RETRIES);
+  });
+
+  it("turlar üst üste binmez: sürmekte olan tur varken düzenli tetik atlanır", async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const run = vi.fn(
+      () =>
+        new Promise<HousekeepingResult>((r) => {
+          release = () => r(ok());
+        }),
+    );
+    const loop = startHousekeepingLoop({ run, onError: () => undefined });
+    await vi.advanceTimersByTimeAsync(HOUSEKEEPING_INTERVAL_MS);
+    expect(run).toHaveBeenCalledTimes(1);
+    release();
+    await loop.idle();
+    loop.stop();
   });
 });
