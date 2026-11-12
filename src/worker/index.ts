@@ -2,7 +2,6 @@ import fs from "node:fs";
 import path from "node:path";
 import { getDb } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { purgeExpiredGoogleData } from "@/lib/places/cache";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import { isMailSchedulerEnabled, startMailScheduler } from "@/lib/mail/scheduler/job";
 import { isDemoInboxEnabled, startInboxScheduler } from "@/lib/mail/scheduler/inbox-job";
@@ -10,15 +9,17 @@ import {
   scheduleUnsubscribeDrainIfActive,
   startUnsubscribeDrain,
 } from "@/lib/unsubscribe/drain-job";
-import { getSetting } from "@/lib/settings";
-import { recomputeNovelty } from "@/lib/scan/novelty-sync";
+import { FIRST_TICK_DELAY_MS, scheduleTick } from "@/lib/scan/schedule";
 import {
   bindEmailEvents,
   registerCoreHandlers,
   registerEmailHandlers,
   registerMailHandlers,
 } from "./handlers";
+import { registerScanBackgroundHandlers } from "./background";
+import { HOUSEKEEPING_INTERVAL_MS, runHousekeeping } from "./housekeeping";
 import { Worker } from "./loop";
+import { createWakeGate, handleWake, isWakeMessage } from "./wake";
 
 /** Geliştirme: `.env.local` dosyasını yükle (üretimde Electron ortam değişkenlerini verir). */
 function loadDevEnv(): void {
@@ -40,6 +41,7 @@ async function main(): Promise<void> {
 
   registerCoreHandlers();
   registerEmailHandlers();
+  registerScanBackgroundHandlers();
   bindEmailEvents();
   const db = await getDb();
   // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim
@@ -68,33 +70,20 @@ async function main(): Promise<void> {
     );
   const worker = new Worker({ db, workerId: `worker-${process.pid}` });
 
-  // Zamanla sona eren yenilik sinyallerini (ör. "son 60 gün") düzenli yenile.
-  const refreshNovelty = async () => {
-    try {
-      const n = await recomputeNovelty(db, await getSetting(db, "novelty.thresholds"));
-      if (n > 0) console.log(`[worker] ${n} lead'in yenilik skoru güncellendi.`);
-    } catch (e) {
-      console.error("[worker] yenilik yenilemesi başarısız:", e);
-    }
-  };
-  // Google şartları gereği süresi dolan konumlar ve önbellek satırları düzenli silinir.
-  const purgeGoogle = async () => {
-    try {
-      const r = await purgeExpiredGoogleData(db, await getSetting(db, "google.cacheDays"));
-      if (r.coordinates + r.cacheRows > 0)
-        console.log(
-          `[worker] süresi dolan Google verisi silindi (${r.coordinates} konum, ${r.cacheRows} önbellek satırı).`,
-        );
-    } catch (e) {
-      console.error("[worker] Google veri temizliği başarısız:", e);
-    }
-  };
+  // Faz 4 bakım turu (Google saklama politikası, yenilik skorları, M3 iş/bildirim temizliği, arka plan işleri ve
+  // zamanlama tick zinciri). Açılışta ve 6 saatte bir; adımlar birbirinden bağımsız ve idempotenttir.
   const housekeeping = async () => {
-    await purgeGoogle();
-    await refreshNovelty();
+    try {
+      await runHousekeeping(db, { now: Date.now(), log: (m) => console.log(`[worker] ${m}`) });
+    } catch (e) {
+      console.error("[worker] bakım turu başarısız:", e);
+    }
   };
   void housekeeping();
-  const interval = setInterval(housekeeping, 6 * 3_600_000);
+  const interval = setInterval(housekeeping, HOUSEKEEPING_INTERVAL_MS);
+  // Zamanlanmış taramalar: ilk tick açılıştan 60 sn sonra (tekil; kuyrukta varsa eklenmez).
+  await scheduleTick(db, { runAt: Date.now() + FIRST_TICK_DELAY_MS, now: Date.now() });
+  const wakeGate = createWakeGate();
   // Çıkış olayı çekme zinciri kendini yeniden planlar; beklenmedik bir kopmaya karşı (ör. iş başarısız işaretlendi)
   // düzenli olarak yeniden kurulur. İdempotent: kuyrukta/çalışan tur varsa yenisi eklenmez; iş kapalıysa veya adres
   // yoksa veritabanına yazmaz.
@@ -117,6 +106,11 @@ async function main(): Promise<void> {
   // Electron ana süreci IPC ile de kapanış bildirebilir.
   process.on("message", (m) => {
     if (m === "shutdown") shutdown();
+    // Faz 4: bilgisayar uykudan uyandı → kaçırılan zamanlamalar ve bekleyen gönderim hemen değerlendirilir.
+    else if (isWakeMessage(m) && wakeGate())
+      handleWake(db, { now: Date.now(), mailEnabled: mailScheduler.enabled }).catch((e) =>
+        console.error("[worker] uyandırma işlenemedi:", e),
+      );
   });
 
   await worker.run();

@@ -16,10 +16,12 @@ import {
 } from "@/lib/unsubscribe/drain-job";
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
+import { enqueueRdap } from "@/lib/novelty/rdap-job";
 import { onEvent } from "@/lib/events";
 import { getDb, recoverDbConnection } from "@/lib/db/client";
 import { createProvider } from "@/lib/places/factory";
 import { enrichPlaces } from "@/lib/scan/enrich";
+import { loadNoveltyConfig } from "@/lib/scan/novelty-sync";
 import { runScan } from "@/lib/scan/runner";
 import { onScanFailed } from "@/lib/scan/scan-notifications";
 import { scanStatusOf, setScanStatus } from "@/lib/scan/store";
@@ -56,7 +58,7 @@ async function sharedDeps(db: Db) {
     db,
     provider: await createProvider(db),
     getBudgetUsd: () => getSetting(db, "budget.monthlyUsd"),
-    getNoveltyConfig: () => getSetting(db, "novelty.thresholds"),
+    getNoveltyConfig: () => loadNoveltyConfig(db),
   };
 }
 
@@ -115,6 +117,9 @@ export function registerEmailHandlers(): void {
         await enqueueEmailSearch(ctx.db, ids, { runAt, useExternal, markQueued: false });
       },
     });
+    // Faz 4: başarılı site taramaları alan adı yazdı; RDAP açıksa alan adı yaşı ayrı (tekil) işte sorgulanır.
+    if (res.processed > 0 && (await getSetting(ctx.db, "novelty.rdap")).enabled)
+      await enqueueRdap(ctx.db, { runAt: Date.now(), now: Date.now() });
     ctx.log(
       `E-posta bulma: ${res.processed} site sonucu, ${res.found} lead'de adres bulundu, ${res.notFound} bulunamadı, ` +
         `${res.blocked} engelli, ${res.failed} hata (${res.retryScheduled} yeniden deneme), ` +
