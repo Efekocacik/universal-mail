@@ -86,6 +86,8 @@ export interface BulkResult {
   /** Süzgeç seçiminde eşleşen toplam (sınırlamadan önce). */
   matchedTotal: number;
   dryRun: boolean;
+  /** Gerçekten değişen lead kimlikleri ("Geri al" bunlarla yapılır; dryRun'da boş). */
+  changedIds: number[];
 }
 
 async function activeCampaignIds(tx: DbExecutor, ids: number[]): Promise<Set<number>> {
@@ -137,7 +139,7 @@ export async function runBulk(
       input.action === "archive" ? await activeCampaignIds(tx, sel.ids) : new Set<number>();
     const eligible = sel.ids.filter((id) => !blocked.has(id));
     let pending = 0;
-    let changed = 0;
+    const changedIds: number[] = [];
     for (const part of chunk(eligible, 500)) {
       const where = and(inArray(leads.id, part), pendingCondition(input.action));
       if (dryRun) {
@@ -152,10 +154,10 @@ export async function runBulk(
           .set(updateSet(input.action, now))
           .where(where)
           .returning({ id: leads.id });
-        changed += rows.length;
+        changedIds.push(...rows.map((r) => r.id));
       }
     }
-    const done = dryRun ? pending : changed;
+    const done = dryRun ? pending : changedIds.length;
     const out: BulkResult = {
       action: input.action,
       matched: sel.ids.length,
@@ -168,6 +170,7 @@ export async function runBulk(
       capped: sel.capped,
       matchedTotal: sel.matchedTotal,
       dryRun,
+      changedIds,
     };
     if (!dryRun) {
       await audit(

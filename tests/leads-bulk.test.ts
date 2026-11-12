@@ -202,7 +202,7 @@ describe("toplu işlemler (runBulk)", () => {
       { action: "archive", selection: { leadIds: pick }, dryRun: true },
       { now: T },
     );
-    expect(dry).toMatchObject({ matched: 3, changed: 3, dryRun: true });
+    expect(dry).toMatchObject({ matched: 3, changed: 3, dryRun: true, changedIds: [] });
     expect(await archivedOf(pick[0]!)).toBeNull(); // dryRun hiçbir şey yazmaz
     expect(await db.select().from(auditLog).where(eq(auditLog.action, "lead.bulk"))).toHaveLength(
       0,
@@ -210,6 +210,8 @@ describe("toplu işlemler (runBulk)", () => {
 
     const r = await runBulk(db, { action: "archive", selection: { leadIds: pick } }, { now: T });
     expect(r).toMatchObject({ matched: 3, changed: 3, skipped: { unchanged: 0 }, capped: false });
+    // "Geri al" yalnızca gerçekten değişen kimlikleri kullanır.
+    expect([...r.changedIds].sort((a, b) => a - b)).toEqual([...pick].sort((a, b) => a - b));
     expect(await archivedOf(pick[0]!)).toBe(T);
 
     expect((await queryLeads(db, {})).total).toBe(2);
@@ -232,7 +234,12 @@ describe("toplu işlemler (runBulk)", () => {
       { action: "archive", selection: { leadIds: pick } },
       { now: T + 1 },
     );
-    expect(again).toMatchObject({ matched: 3, changed: 0, skipped: { unchanged: 3 } });
+    expect(again).toMatchObject({
+      matched: 3,
+      changed: 0,
+      skipped: { unchanged: 3 },
+      changedIds: [],
+    });
     expect(await archivedOf(pick[0]!)).toBe(T);
 
     const undo = await runBulk(
