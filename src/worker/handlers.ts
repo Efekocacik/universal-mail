@@ -17,6 +17,7 @@ import {
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
 import { enqueueRdap } from "@/lib/novelty/rdap-job";
+import { registerRegistryJobs } from "@/lib/registry/jobs";
 import { onEvent } from "@/lib/events";
 import { getDb, recoverDbConnection } from "@/lib/db/client";
 import { createProvider } from "@/lib/places/factory";
@@ -160,6 +161,14 @@ export function registerMailHandlers(opts: {
     }),
   );
   return dispatcher;
+}
+
+/**
+ * Faz 5 iş kayıtları. Her paket kendi `register…Jobs()` işlevini doldurur (bu dosya P0'dan sonra dondurulmuştur):
+ * paket R → `registry.fetch`, `registry.match`.
+ */
+export function registerFaz5Handlers(): void {
+  registerRegistryJobs();
 }
 
 let emailEventsBound = false;

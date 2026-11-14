@@ -32,6 +32,12 @@ export const GET = route(async () => {
       placesKey: await secretStatus("google.placesKey"),
       mapsKey: await secretStatus("google.mapsKey"),
       hunterKey: await secretStatus("hunter.apiKey"),
+      // Faz 5: yalnızca maskeli durum (değer asla döndürülmez).
+      companiesHouseKey: await secretStatus("registry.companiesHouseKey"),
+      inseeKey: await secretStatus("registry.inseeKey"),
+      anthropicKey: await secretStatus("anthropic.apiKey"),
+      snovClientId: await secretStatus("snov.clientId"),
+      snovClientSecret: await secretStatus("snov.clientSecret"),
     },
     setup: await getSetupState(db),
     app: { version: pkg.version, dataDir: dataDir() },

@@ -27,6 +27,8 @@ import { GoogleLoadButton } from "./google-load-button";
 import { LeadCampaigns } from "./lead-campaigns";
 import { LeadEmails } from "./lead-emails";
 import { useExplore } from "./state";
+import { LeadIntroPanel } from "@/features/ai/lead-intro-panel";
+import { RegistryMatchBadge } from "@/features/registry/registry-match-badge";
 
 const LEAD_STATUSES = [
   "new",
@@ -166,7 +168,170 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
     setTag("");
   };
 
-  if (!place) return <p className="p-4 text-sm text-muted-foreground">{t("detail.noPlace")}</p>;
+  const manage = (
+    <Section
+      title={t("detail.manage")}
+      hint={
+        <span
+          className="ml-auto flex items-center gap-1 text-[12px] font-medium text-success"
+          aria-live="polite"
+        >
+          {saved && (
+            <span className="um-enter inline-flex items-center gap-1">
+              <Check className="size-3.5" aria-hidden /> {t("common.saved")}
+            </span>
+          )}
+        </span>
+      }
+    >
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="lead-display-name" className="flex items-center gap-1">
+            {t("detail.displayName")}
+            <HelpTip>{t("detail.displayName.help")}</HelpTip>
+          </Label>
+          <Input
+            id="lead-display-name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            onBlur={commitDisplayName}
+            onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
+            maxLength={200}
+            placeholder={t("detail.displayName.placeholder")}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <Label htmlFor="lead-status">{t("detail.status")}</Label>
+            <HelpTip>{t("help.leadStatus")}</HelpTip>
+          </div>
+          <Select
+            id="lead-status"
+            value={lead.status}
+            onChange={(e) =>
+              lead.status === "do_not_contact" && e.target.value !== "do_not_contact"
+                ? setUnblockTo(e.target.value)
+                : save({ status: e.target.value })
+            }
+          >
+            {LEAD_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {t(`leadStatus.${s}`)}
+              </option>
+            ))}
+          </Select>
+        </div>
+        <ConfirmDialog
+          open={unblockTo !== null}
+          onOpenChange={(v) => !v && setUnblockTo(null)}
+          tone="warning"
+          title={t("detail.unblock.title")}
+          description={t("detail.unblock.body")}
+          confirmLabel={t("detail.unblock.confirm")}
+          onConfirm={() => {
+            if (unblockTo) save({ status: unblockTo, confirmUnblock: true });
+          }}
+        />
+        <div className="space-y-1.5">
+          <Label htmlFor="lead-tag">{t("detail.tags")}</Label>
+          <div className="flex flex-wrap gap-1.5">
+            {lead.tags.map((x) => (
+              <Badge key={x} variant="default" className="gap-1 pr-1">
+                {x}
+                <button
+                  type="button"
+                  aria-label={t("detail.removeTag", { tag: x })}
+                  onClick={() => save({ tags: lead.tags.filter((y) => y !== x) })}
+                  className="rounded-full p-0.5 transition-colors hover:bg-destructive/15 hover:text-destructive"
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+          <Input
+            id="lead-tag"
+            value={tag}
+            placeholder={t("detail.tagPlaceholder")}
+            onChange={(e) => setTag(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addTag();
+              }
+            }}
+            maxLength={40}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="lead-notes">{t("detail.notes")}</Label>
+          <Textarea
+            id="lead-notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            onBlur={commitNotes}
+            maxLength={5000}
+            placeholder={t("detail.notesPlaceholder")}
+          />
+        </div>
+      </div>
+    </Section>
+  );
+
+  // Faz 5: yer kaydı olmayan lead (içe aktarma / sicil). Google alanları yoktur; kendi verimiz gösterilir.
+  if (!place)
+    return (
+      <>
+        <div className="um-enter mx-4 mt-4 space-y-2 rounded-xl border bg-card p-4 shadow-xs">
+          <div className="flex items-start gap-2">
+            <h2
+              className={`min-w-0 flex-1 text-lg font-semibold leading-snug ${lead.displayName ? "" : "text-muted-foreground"}`}
+            >
+              {lead.displayName ?? t("detail.unnamed")}
+            </h2>
+            {(lead.source === "import" || lead.source === "registry") && (
+              <Badge variant="outline">{t(`detail.source.${lead.source}`)}</Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <NoveltyBadge label={lead.noveltyLabel} score={lead.noveltyScore} showScore />
+            <RegistryMatchBadge leadId={lead.id} />
+          </div>
+          <p className="flex items-start gap-1.5 text-[13px] text-muted-foreground">
+            <MapPin className="mt-0.5 size-3.5 shrink-0" />
+            <span>
+              {[lead.city, countryLabel(lead.countryCode)].filter(Boolean).join(" · ") || "—"}
+            </span>
+          </p>
+          <p className="flex items-start gap-1.5 rounded-md bg-muted px-2.5 py-2 text-[12px] text-muted-foreground">
+            <CircleAlert className="mt-0.5 size-3.5 shrink-0" />
+            {t("detail.placeless")}
+          </p>
+        </div>
+        <Section title={t("detail.info")}>
+          <dl>
+            <Fact label={t("detail.website")}>
+              {safeHttpUrl(lead.website) ? (
+                <a
+                  href={safeHttpUrl(lead.website)!}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-primary hover:underline"
+                >
+                  <Globe className="size-3.5" /> {new URL(safeHttpUrl(lead.website)!).hostname}
+                </a>
+              ) : (
+                <span className="text-muted-foreground">{t("detail.none")}</span>
+              )}
+            </Fact>
+          </dl>
+        </Section>
+        <LeadEmails data={data} />
+        <LeadIntroPanel leadId={lead.id} countryCode={lead.countryCode} />
+        <LeadCampaigns leadId={lead.id} />
+        {manage}
+      </>
+    );
 
   const g = data.google;
   const mapsUrl = safeHttpUrl(place.mapsUrl) ?? "https://www.google.com/maps";
@@ -202,6 +367,8 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
               {t("detail.gone")}
             </Badge>
           )}
+          {/* Faz 5 bağlantı yuvası (paket R): eşleşen sicil kaydı rozeti. */}
+          <RegistryMatchBadge leadId={lead.id} />
         </div>
         <p className="flex items-start gap-1.5 text-[13px] text-muted-foreground">
           <MapPin className="mt-0.5 size-3.5 shrink-0" />
@@ -321,115 +488,12 @@ function DetailBody({ data }: { data: LeadDetailResponse }) {
 
       <LeadEmails data={data} />
 
+      {/* Faz 5 bağlantı yuvası (paket A): onaylı kişisel giriş paneli. */}
+      <LeadIntroPanel leadId={lead.id} countryCode={lead.countryCode} />
+
       <LeadCampaigns leadId={lead.id} />
 
-      <Section
-        title={t("detail.manage")}
-        hint={
-          <span
-            className="ml-auto flex items-center gap-1 text-[12px] font-medium text-success"
-            aria-live="polite"
-          >
-            {saved && (
-              <span className="um-enter inline-flex items-center gap-1">
-                <Check className="size-3.5" aria-hidden /> {t("common.saved")}
-              </span>
-            )}
-          </span>
-        }
-      >
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-display-name" className="flex items-center gap-1">
-              {t("detail.displayName")}
-              <HelpTip>{t("detail.displayName.help")}</HelpTip>
-            </Label>
-            <Input
-              id="lead-display-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              onBlur={commitDisplayName}
-              onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-              maxLength={200}
-              placeholder={t("detail.displayName.placeholder")}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="lead-status">{t("detail.status")}</Label>
-              <HelpTip>{t("help.leadStatus")}</HelpTip>
-            </div>
-            <Select
-              id="lead-status"
-              value={lead.status}
-              onChange={(e) =>
-                lead.status === "do_not_contact" && e.target.value !== "do_not_contact"
-                  ? setUnblockTo(e.target.value)
-                  : save({ status: e.target.value })
-              }
-            >
-              {LEAD_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {t(`leadStatus.${s}`)}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <ConfirmDialog
-            open={unblockTo !== null}
-            onOpenChange={(v) => !v && setUnblockTo(null)}
-            tone="warning"
-            title={t("detail.unblock.title")}
-            description={t("detail.unblock.body")}
-            confirmLabel={t("detail.unblock.confirm")}
-            onConfirm={() => {
-              if (unblockTo) save({ status: unblockTo, confirmUnblock: true });
-            }}
-          />
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-tag">{t("detail.tags")}</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {lead.tags.map((x) => (
-                <Badge key={x} variant="default" className="gap-1 pr-1">
-                  {x}
-                  <button
-                    type="button"
-                    aria-label={t("detail.removeTag", { tag: x })}
-                    onClick={() => save({ tags: lead.tags.filter((y) => y !== x) })}
-                    className="rounded-full p-0.5 transition-colors hover:bg-destructive/15 hover:text-destructive"
-                  >
-                    <X className="size-3" />
-                  </button>
-                </Badge>
-              ))}
-            </div>
-            <Input
-              id="lead-tag"
-              value={tag}
-              placeholder={t("detail.tagPlaceholder")}
-              onChange={(e) => setTag(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTag();
-                }
-              }}
-              maxLength={40}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="lead-notes">{t("detail.notes")}</Label>
-            <Textarea
-              id="lead-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              onBlur={commitNotes}
-              maxLength={5000}
-              placeholder={t("detail.notesPlaceholder")}
-            />
-          </div>
-        </div>
-      </Section>
+      {manage}
 
       <Section title={t("detail.timeline")}>
         <ol className="space-y-2 border-l pl-4">

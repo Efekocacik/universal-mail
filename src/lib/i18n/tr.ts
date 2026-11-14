@@ -5,6 +5,11 @@ import { explore } from "./tr/explore";
 import { notifications } from "./tr/notifications";
 import { outreach } from "./tr/outreach";
 import { scan } from "./tr/scan";
+import { sources } from "./tr/sources";
+import { registry } from "./tr/registry";
+import { variants } from "./tr/variants";
+import { ai } from "./tr/ai";
+import { imports } from "./tr/imports";
 
 /**
  * Türkçe sözlük (birincil dil). Paket başına PARÇA dosyalarından birleştirilir; böylece paralel çalışan Faz 4 paketleri
@@ -17,6 +22,11 @@ import { scan } from "./tr/scan";
  *   tr/explore.ts        C: harita, seçim, kayıtlı süzgeçler, toplu işlemler, kısayollar
  *   tr/outreach.ts       E: gönderim, kampanya, takip
  *   tr/dashboard.ts      E (P0 başlattı): gösterge paneli
+ *   tr/sources.ts        Faz 5 P0: kaynak alt gezinmesi, ayar bölüm adları, ortak etiketler, anahtar alan adları
+ *   tr/registry.ts       Faz 5 R (P0 başlattı): resmî siciller ve eşleştirme
+ *   tr/variants.ts       Faz 5 T (P0 başlattı): şablon dilleri, A/B konu, kategori varyantı, açılma izleme
+ *   tr/ai.ts             Faz 5 A (P0 başlattı): Claude kişisel giriş, Hunter/Snov
+ *   tr/imports.ts        Faz 5 I (P0 başlattı): CSV/XLSX içe aktarma
  *
  * Bir anahtar iki parçada birden olamaz (`tests/i18n.test.ts`). Her Türkçe parçanın İngilizce karşılığı `en/<aynı ad>.ts`.
  */
@@ -28,6 +38,11 @@ export const tr = {
   ...explore,
   ...outreach,
   ...dashboard,
+  ...sources,
+  ...registry,
+  ...variants,
+  ...ai,
+  ...imports,
 } as const;
 
 /** Parça adı → parça (kapsam raporu ve çakışma testi için). */
@@ -39,6 +54,11 @@ export const TR_FRAGMENTS = {
   explore,
   outreach,
   dashboard,
+  sources,
+  registry,
+  variants,
+  ai,
+  imports,
 } as const;
 export type FragmentName = keyof typeof TR_FRAGMENTS;
 export type TrKey = keyof typeof tr;

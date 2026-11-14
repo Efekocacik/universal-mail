@@ -28,8 +28,11 @@ export class ExternalProviderError extends Error {
   }
 }
 
+/** Faz 5: Hunter.io veya Snov.io (ayar `enrichment.external.provider`). */
+export type ExternalProviderId = "hunter" | "snov";
+
 export interface ExternalEmailProvider {
-  readonly id: "hunter";
+  readonly id: ExternalProviderId;
   search(domain: string): Promise<ExternalHit[]>;
   quota(): Promise<ExternalQuota>;
 }
@@ -116,6 +119,32 @@ export function createHunterProvider(
       const remaining =
         typeof credits === "number" ? credits : typeof searches === "number" ? searches : null;
       return { remaining, resetDate: typeof data.reset_date === "string" ? data.reset_date : null };
+    },
+  };
+}
+
+/** Faz 5 sözleşmesindeki ad: harici zenginleştirme sağlayıcısı (Hunter/Snov) = `ExternalEmailProvider`. */
+export type EnrichmentProvider = ExternalEmailProvider;
+
+/** Demo kotası: ağsız sınama ucunun döndürdüğü sabit değer. */
+export const DEMO_EXTERNAL_QUOTA: ExternalQuota = { remaining: 25, resetDate: null };
+
+/**
+ * Demo harici sağlayıcı (Faz 5 P0; sahibi: paket A). Ağa çıkmaz: yalnızca ayrılmış `.example` alan adları için
+ * belirlenimci `contact@<alan>` (güven 60) döndürür; gerçek alan adlarında sonuç yoktur.
+ */
+export function createDemoExternalProvider(
+  id: ExternalProviderId = "hunter",
+): ExternalEmailProvider {
+  return {
+    id,
+    async search(domain: string): Promise<ExternalHit[]> {
+      const d = domain.trim().toLowerCase();
+      if (!/^[a-z0-9-]+(\.[a-z0-9-]+)*\.example$/.test(d)) return [];
+      return [{ email: `contact@${d}`, confidence: 60, sourceUrl: null }];
+    },
+    async quota(): Promise<ExternalQuota> {
+      return { ...DEMO_EXTERNAL_QUOTA };
     },
   };
 }

@@ -111,6 +111,10 @@ describe("Google verisi saklama kuralı", () => {
       ),
     );
     expect(secrets.length).toBeGreaterThan(10);
+    // Zenginleştirme Google sitesini kalıcı `leads.website` sütununa kopyalamaz.
+    expect((await db.select({ w: leads.website }).from(leads)).filter((r) => r.w !== null)).toEqual(
+      [],
+    );
 
     const main = await rawBytes(t.path, "main");
     const cacheFile = cacheDbPathFor(t.path);
@@ -139,12 +143,15 @@ describe("Google verisi saklama kuralı", () => {
       "primary_type",
       "types",
     ];
+    // Faz 5 (0005): `leads.website` yalnızca kullanıcının verdiği siteyi taşır (içe aktarma, sicil, elle);
+    // Google sitesi asla yazılmaz — yukarıdaki bayt testi zenginleştirmeden sonra ana dosyada siteyi arar.
+    const allowed = new Set(["leads.website"]);
     for (const table of ["places", "leads", "place_snapshots", "scan_units"]) {
       const cols = (await db.all(sql.raw(`PRAGMA main.table_info(${table})`))) as {
         name: string;
       }[];
       expect(cols.length).toBeGreaterThan(0);
-      for (const f of forbidden)
+      for (const f of forbidden.filter((c) => !allowed.has(`${table}.${c}`)))
         expect(
           cols.map((c) => c.name),
           `${table}.${f}`,

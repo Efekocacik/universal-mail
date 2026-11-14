@@ -132,6 +132,8 @@ export interface LeadDetailResponse {
     noveltyLabel: NoveltyLabel;
     noveltySignals: NoveltySignal[];
     status: LeadStatus;
+    /** Faz 5: kullanıcının verdiği web sitesi (içe aktarma/elle; Google DEĞİL). */
+    website?: string | null;
     notes: string | null;
     tags: string[];
     language: string | null;
@@ -217,15 +219,51 @@ export interface SettingsResponse {
     "google.cacheDays": number;
     "mock.epoch": number;
     "ui.language": "tr" | "en";
-    "enrichment.external": { enabled: boolean; provider: "hunter" };
+    "enrichment.external": { enabled: boolean; provider: ExternalEmailProviderId };
     "enrichment.concurrency": number;
     /** Faz 4 (Paket B): RDAP "genç alan adı" penceresi (gün, 30–730). */
     "novelty.domainYoungDays": number;
+    /* Faz 5 (P0): paketler bu anahtarları yalnızca mevcut ayarlar API'si üzerinden okur/yazar. */
+    "registry.companiesHouse": { enabled: boolean; sicCodes: string[]; windowDays: number };
+    "registry.insee": {
+      enabled: boolean;
+      nafCodes: string[];
+      windowDays: number;
+      scheme: "NAFRev2" | "NAF2025";
+    };
+    "ai.intro": { enabled: boolean; model: AiIntroModel; costAckAt: number | null };
+    "tracking.opens": { enabled: boolean; ackAt: number | null };
   };
-  secrets: { placesKey: SecretInfo; mapsKey: SecretInfo; hunterKey: SecretInfo };
+  secrets: {
+    placesKey: SecretInfo;
+    mapsKey: SecretInfo;
+    hunterKey: SecretInfo;
+    companiesHouseKey: SecretInfo;
+    inseeKey: SecretInfo;
+    anthropicKey: SecretInfo;
+    snovClientId: SecretInfo;
+    snovClientSecret: SecretInfo;
+  };
   setup: SetupState;
   app: { version: string; dataDir: string };
 }
+
+/** Faz 5: harici e-posta sağlayıcısı. */
+export type ExternalEmailProviderId = "hunter" | "snov";
+/** Faz 5: kişisel giriş modeli (ayar). */
+export type AiIntroModel = "claude-opus-5-5" | "claude-haiku-5-5";
+/** `/api/secrets` ucunun kabul ettiği adlar (sunucudaki `SECRET_NAMES` ile aynı; tests/faz5-p0.test.ts denetler). */
+export const PUBLIC_SECRET_NAMES = [
+  "google.placesKey",
+  "google.mapsKey",
+  "hunter.apiKey",
+  "registry.companiesHouseKey",
+  "registry.inseeKey",
+  "anthropic.apiKey",
+  "snov.clientId",
+  "snov.clientSecret",
+] as const;
+export type PublicSecretName = (typeof PUBLIC_SECRET_NAMES)[number];
 
 export interface SecretInfo {
   set: boolean;

@@ -6,6 +6,11 @@ import { explore } from "./en/explore";
 import { notifications } from "./en/notifications";
 import { outreach } from "./en/outreach";
 import { scan } from "./en/scan";
+import { sources } from "./en/sources";
+import { registry } from "./en/registry";
+import { variants } from "./en/variants";
+import { ai } from "./en/ai";
+import { imports } from "./en/imports";
 
 /**
  * İngilizce sözlük (NFR-09). Türkçe parçalarla aynı adlı parçalardan birleştirilir. Faz 4 entegrasyonundan beri TÜM
@@ -20,6 +25,11 @@ export const en: Record<TrKey, string> = {
   ...explore,
   ...outreach,
   ...dashboard,
+  ...sources,
+  ...registry,
+  ...variants,
+  ...ai,
+  ...imports,
 };
 
 /** Parça adı → İngilizce parça (kapsam raporu için). */
@@ -31,4 +41,9 @@ export const EN_FRAGMENTS = {
   explore,
   outreach,
   dashboard,
+  sources,
+  registry,
+  variants,
+  ai,
+  imports,
 } as const;

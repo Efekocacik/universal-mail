@@ -13,7 +13,17 @@ import { dataDir } from "@/lib/config/paths";
  *  - Geliştirmede: `.data/master.key` dosyası (yalnızca sahibi okur). Üretimde kullanılmaz.
  */
 
-export const SECRET_NAMES = ["google.placesKey", "google.mapsKey", "hunter.apiKey"] as const;
+export const SECRET_NAMES = [
+  "google.placesKey",
+  "google.mapsKey",
+  "hunter.apiKey",
+  /* Faz 5: resmî siciller, Claude ve Snov. Ortam yedekleri ÖNEKLİDİR (UM_…): geliştiricinin ortamdaki anahtarı alınmaz. */
+  "registry.companiesHouseKey",
+  "registry.inseeKey",
+  "anthropic.apiKey",
+  "snov.clientId",
+  "snov.clientSecret",
+] as const;
 /**
  * Gmail OAuth istemci sırrı (Aşama 15.2). Genel `/api/secrets` ucunun listesinde (SECRET_NAMES) DEĞİLDİR: yalnızca
  * posta kutusu servisi yazar; maskeli değer bile döndürülmez, ortam değişkeninden de okunmaz.
@@ -73,6 +83,12 @@ const ENV_FALLBACKS: Record<(typeof SECRET_NAMES)[number], string[]> = {
   "google.placesKey": ["GOOGLE_PLACES_API_KEY"],
   "google.mapsKey": ["GOOGLE_MAPS_BROWSER_KEY", "NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY"],
   "hunter.apiKey": ["HUNTER_API_KEY"],
+  "registry.companiesHouseKey": ["UM_COMPANIES_HOUSE_API_KEY"],
+  "registry.inseeKey": ["UM_INSEE_API_KEY"],
+  // Bilinçli olarak `ANTHROPIC_API_KEY` DEĞİL: geliştiricinin kendi Claude anahtarı uygulamaya sızmaz.
+  "anthropic.apiKey": ["UM_ANTHROPIC_API_KEY"],
+  "snov.clientId": ["UM_SNOV_CLIENT_ID"],
+  "snov.clientSecret": ["UM_SNOV_CLIENT_SECRET"],
 };
 
 interface SecretFile {

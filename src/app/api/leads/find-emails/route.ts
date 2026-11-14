@@ -99,6 +99,7 @@ export const POST = route(async (req: Request) => {
           placeId: leads.placeId,
           status: leads.status,
           countryCode: leads.countryCode,
+          website: leads.website,
         })
         .from(leads)
         .where(inArray(leads.id, part))),

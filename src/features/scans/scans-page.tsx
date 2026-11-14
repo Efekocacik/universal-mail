@@ -30,6 +30,7 @@ import type { ScanListItem, ScanStatus } from "@/lib/client/types";
 import { skuLabel } from "@/lib/places/pricing";
 import { t } from "@/lib/i18n";
 import { RepeatScanDialog } from "./repeat-fields";
+import { ScansSubnav } from "./scans-subnav";
 import { SchedulesSection } from "./schedules-section";
 
 const STATUS_VARIANT: Record<ScanStatus, BadgeProps["variant"]> = {
@@ -350,6 +351,7 @@ export function ScansPage() {
   return (
     <div className="um-scroll min-h-0 flex-1">
       <div className="um-enter mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+        <ScansSubnav />
         <PageHeader
           title={t("scans.title")}
           description={t("scans.subtitle")}
