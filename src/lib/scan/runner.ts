@@ -3,7 +3,7 @@ import { canSpend, recordUsage } from "@/lib/budget";
 import type { Db } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
 import { places, regions, scanUnits, scans } from "@/lib/db/schema";
-import type { SkuId } from "@/lib/domain/types";
+import type { ScanStatus, SkuId } from "@/lib/domain/types";
 import { emitEvent } from "@/lib/events";
 import { splitBBox, bboxCircumCircle } from "@/lib/geo/bbox";
 import type { NoveltyConfig } from "@/lib/novelty/score";
@@ -119,7 +119,8 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
       : "paused";
   }
 
-  await setScanStatus(db, scanId, "running", { startedAt: scan.startedAt ?? now() });
+  const lost = await transition(db, scanId, "running", { startedAt: scan.startedAt ?? now() });
+  if (lost) return lost;
   await db
     .update(scanUnits)
     .set({ status: "queued", updatedAt: now() })
@@ -150,11 +151,12 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
     const current = await scanStatusOf(db, scanId);
     if (current === "paused" || current === "cancelled") return current;
     if (deps.shouldStop?.()) {
-      await setScanStatus(db, scanId, "paused", {
-        pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
-        pauseCode: APP_STOPPED,
-      });
-      return "paused";
+      return (
+        (await transition(db, scanId, "paused", {
+          pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+          pauseCode: APP_STOPPED,
+        })) ?? "paused"
+      );
     }
 
     const unit = await nextQueuedUnit(db, scanId);
@@ -169,6 +171,31 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
 }
 
 type UnitResult = "ok" | ScanOutcome;
+
+/** Çalıştırıcının kendi geçişleri yalnızca bu durumlardan yapılır (kullanıcı iptali/duraklatması ezilmez). */
+const RUNNER_FROM = ["queued", "running"] as const;
+
+/** Taramanın şu anki durumunu çalıştırıcı sonucuna çevirir (geçiş yapılamadığında). */
+async function currentOutcome(db: Db, scanId: number): Promise<ScanOutcome> {
+  const s = await scanStatusOf(db, scanId);
+  return s === "completed" || s === "failed" || s === "cancelled" || s === "budget_stopped"
+    ? s
+    : "paused";
+}
+
+/**
+ * Çalıştırıcı geçişi (CAS): durum hâlâ `queued/running` ise yazar ve `null` döner; kullanıcı arada iptal etti ya da
+ * duraklattıysa hiçbir şey yazmaz ve güncel sonucu döner (çağıran bildirim/denetim kaydı yazmadan çıkar).
+ */
+async function transition(
+  db: Db,
+  scanId: number,
+  status: ScanStatus,
+  extra: Parameters<typeof setScanStatus>[3] = {},
+): Promise<ScanOutcome | null> {
+  const ok = await setScanStatus(db, scanId, status, { ...extra, from: RUNNER_FROM });
+  return ok ? null : currentOutcome(db, scanId);
+}
 
 async function runUnit(
   deps: RunnerDeps,
@@ -205,10 +232,11 @@ async function runUnit(
     // Güvenlik: tahminin çok üstüne çıkan taramayı duraklat.
     if (state.callsTotal >= state.maxCalls) {
       await requeue();
-      await setScanStatus(db, scan.id, "paused", {
+      const lost = await transition(db, scan.id, "paused", {
         pauseReason: `Güvenlik sınırı: bu tarama ${state.maxCalls} çağrıyı aştı. Devam etmek için taramayı sürdürün.`,
         pauseCode: CALL_LIMIT,
       });
+      if (lost) return lost;
       await onScanPaused(db, scan.id, now(), log);
       return "paused";
     }
@@ -220,30 +248,33 @@ async function runUnit(
     }
     if (deps.shouldStop?.()) {
       await requeue();
-      await setScanStatus(db, scan.id, "paused", {
-        pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
-        pauseCode: APP_STOPPED,
-      });
-      return "paused";
+      return (
+        (await transition(db, scan.id, "paused", {
+          pauseReason: "Uygulama kapatıldı; devam edebilirsiniz.",
+          pauseCode: APP_STOPPED,
+        })) ?? "paused"
+      );
     }
 
     const spend = await canSpend(db, provider.id, await deps.getBudgetUsd(), sku, 1);
     if (!spend.ok) {
       await requeue();
-      await setScanStatus(db, scan.id, "budget_stopped", {
+      const lost = await transition(db, scan.id, "budget_stopped", {
         pauseReason: spend.reason,
         pauseCode: BUDGET_STOP_CODE,
       });
+      if (lost) return lost;
       await onScanPaused(db, scan.id, now(), log);
       return "budget_stopped";
     }
     // Zamanlanmış tarama: bir sonraki ücretli çağrı onaylı toplam tutarı aşacaksa çağrı YAPILMAZ.
     if (state.costCapUsd !== null && state.costUsd + spend.addUsd > state.costCapUsd + 1e-9) {
       await requeue();
-      await setScanStatus(db, scan.id, "paused", {
+      const lost = await transition(db, scan.id, "paused", {
         pauseReason: `Bu zamanlanmış tarama onayladığınız ${state.costCapUsd.toFixed(2)} USD tutarına ulaştı. Devam etmek için taramayı sürdürün; sürdürürseniz bu tavan bu tarama için kalkar.`,
         pauseCode: COST_CAP,
       });
+      if (lost) return lost;
       await onScanPaused(db, scan.id, now(), log);
       return "paused";
     }
@@ -336,7 +367,8 @@ async function handleCallError(
     const message = errorMessage(e);
     log(`Beklenmeyen hata: ${message}`);
     await requeue();
-    await setScanStatus(db, scan.id, "failed", { error: message, finishedAt: now() });
+    const lost = await transition(db, scan.id, "failed", { error: message, finishedAt: now() });
+    if (lost) return lost;
     await emitEvent("scan.failed", { scanId: scan.id, error: message });
     await onScanFailed(db, scan.id, now(), log);
     return "failed";
@@ -346,10 +378,11 @@ async function handleCallError(
     // Kota, hız sınırı, ağ veya geçici sunucu hatası: tarama duraklatılır, kullanıcı sonra devam ettirir (NFR-04).
     // Kod (PROVIDER_*) zamanlanmış taramanın bir saat sonra kendiliğinden sürdürülmesini sağlar (schedule.ts).
     await requeue();
-    await setScanStatus(db, scan.id, "paused", {
+    const lost = await transition(db, scan.id, "paused", {
       pauseReason: e.message,
       pauseCode: providerPauseCode(e.kind),
     });
+    if (lost) return lost;
     await onScanPaused(db, scan.id, now(), log);
     return "paused";
   }
@@ -364,7 +397,11 @@ async function handleCallError(
     state.consecutiveUnitFailures++;
     log(`Birim ${unit.id} (${unit.term}) reddedildi: ${e.message}`);
     if (state.consecutiveUnitFailures >= MAX_CONSECUTIVE_UNIT_FAILURES) {
-      await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
+      const lost = await transition(db, scan.id, "failed", {
+        error: e.message,
+        finishedAt: now(),
+      });
+      if (lost) return lost;
       await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
       await onScanFailed(db, scan.id, now(), log);
       return "failed";
@@ -374,7 +411,8 @@ async function handleCallError(
 
   // auth, billing, disabled, unknown: devam etmek anlamsız.
   await requeue();
-  await setScanStatus(db, scan.id, "failed", { error: e.message, finishedAt: now() });
+  const lost = await transition(db, scan.id, "failed", { error: e.message, finishedAt: now() });
+  if (lost) return lost;
   await emitEvent("scan.failed", { scanId: scan.id, error: e.message });
   await onScanFailed(db, scan.id, now(), log);
   return "failed";
@@ -466,7 +504,7 @@ async function finalizeScan(
   await recomputeNovelty(db, await deps.getNoveltyConfig(), { scanId, now: t });
 
   const snap = await countSnapshot(db, scanId);
-  await db
+  const completed = await db
     .update(scans)
     .set({
       status: "completed",
@@ -476,7 +514,10 @@ async function finalizeScan(
       isBaseline: comparable && !previous,
       comparedToScanId: previous?.id ?? null,
     })
-    .where(eq(scans.id, scanId));
+    .where(and(eq(scans.id, scanId), inArray(scans.status, [...RUNNER_FROM])))
+    .returning({ id: scans.id });
+  // Kullanıcı sonlandırma sırasında iptal ettiyse/duraklattıysa "tamamlandı" yazılmaz, bildirim de gitmez.
+  if (completed.length === 0) return currentOutcome(db, scanId);
   await syncProgress(db, scanId, { ...state, newPlaces: previous ? newDetected : state.newPlaces });
   await db.update(regions).set({ lastScanAt: t }).where(eq(regions.id, scan.regionId));
   await audit(db, "scan.completed", "scan", scanId, {

@@ -24,7 +24,7 @@ import { enrichPlaces } from "@/lib/scan/enrich";
 import { loadNoveltyConfig } from "@/lib/scan/novelty-sync";
 import { runScan } from "@/lib/scan/runner";
 import { onScanFailed } from "@/lib/scan/scan-notifications";
-import { scanStatusOf, setScanStatus } from "@/lib/scan/store";
+import { setScanStatus } from "@/lib/scan/store";
 import { errorMessage } from "@/lib/util";
 import { getSetting } from "@/lib/settings";
 import type { Db } from "@/lib/db/client";
@@ -78,11 +78,12 @@ export function registerCoreHandlers(): void {
     } catch (e) {
       // Beklenmeyen hata: tarama "çalışıyor"/"kuyrukta" görünmeye devam etmesin (iş tek denemelik).
       const message = errorMessage(e);
-      const status = await scanStatusOf(ctx.db, scanId);
-      if (status === "running" || status === "queued") {
-        await setScanStatus(ctx.db, scanId, "failed", { error: message, finishedAt: Date.now() });
-        await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
-      }
+      const failed = await setScanStatus(ctx.db, scanId, "failed", {
+        error: message,
+        finishedAt: Date.now(),
+        from: ["running", "queued"], // CAS: arada gelen kullanıcı iptali/duraklatması ezilmez
+      });
+      if (failed) await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
       throw e;
     }
   });
