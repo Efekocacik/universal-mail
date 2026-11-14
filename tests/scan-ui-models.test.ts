@@ -7,8 +7,10 @@ import {
   scheduleWarningText,
   scheduleViewModel,
   SKIP_CODES,
+  startScheduleRun,
   type ScheduleItem,
 } from "@/lib/client/schedules";
+import { ApiError, localizeApiError } from "@/lib/client/api";
 import { retentionRows, type GoogleRetentionSummary } from "@/lib/scan/google-data-view";
 import { rdapSummary } from "@/lib/novelty/rdap-view";
 import { hasTranslation, setLocale, t, type TrKey } from "@/lib/i18n";
@@ -201,5 +203,69 @@ describe("ayarlar kartları görünüm modeli", () => {
     expect(text).toBe(
       "5 alan adının kayıt tarihi biliniyor · 3 sırada · 3 tarih yok · 2 yeniden denenecek",
     );
+  });
+});
+
+describe("şimdi çalıştır akışı (startScheduleRun)", () => {
+  const needsAck = (locale: "tr" | "en") => {
+    const body = {
+      error: "Yüksek tahmin (2.40 USD) kalan bütçenizi (0.01 USD) aşabilir.",
+      code: "NEEDS_ACK",
+      highUsd: 2.4,
+      remainingUsd: 0.01,
+    };
+    const { message, code } = localizeApiError(409, body, locale);
+    return new ApiError(message, 409, code, body);
+  };
+  const harness = (fail: (ack: boolean) => unknown) => {
+    const calls: boolean[] = [];
+    const ev: string[] = [];
+    const run = async (p: { id: number; acknowledgeRisk: boolean }) => {
+      calls.push(p.acknowledgeRisk);
+      const e = fail(p.acknowledgeRisk);
+      if (e) throw e;
+      return { scanId: 42 };
+    };
+    const on = {
+      started: (id: number) => ev.push(`started:${id}`),
+      needsAck: (m: string) => ev.push(`ack:${m}`),
+      failed: (e: unknown) => ev.push(`failed:${(e as Error).message}`),
+    };
+    return { calls, ev, run, on };
+  };
+
+  it("NEEDS_ACK: onay penceresi açılır, istek kendiliğinden onaylı TEKRARLANMAZ", async () => {
+    setLocale("en");
+    try {
+      const h = harness(() => needsAck("en"));
+      await startScheduleRun(h.run, 7, false, h.on);
+      expect(h.calls).toEqual([false]);
+      expect(h.ev).toHaveLength(1);
+      // İngilizce arayüz tutarları yapılandırılmış alanlardan kurar (sunucunun Türkçe metni gösterilmez).
+      expect(h.ev[0]).toMatch(/^ack:/);
+      expect(h.ev[0]).toContain("$2.40");
+      expect(h.ev[0]).not.toContain("Yüksek tahmin");
+    } finally {
+      setLocale("tr");
+    }
+  });
+
+  it("onaylı çağrı başarılı: başlatıldı; başarısızsa hata yeniden fırlatılır (pencere hatayı gösterir)", async () => {
+    const ok = harness(() => null);
+    await startScheduleRun(ok.run, 7, true, ok.on);
+    expect(ok.calls).toEqual([true]);
+    expect(ok.ev).toEqual(["started:42"]);
+
+    const bad = harness(() => new ApiError("Bütçe doldu", 409, "BUDGET_BLOCKED"));
+    await expect(startScheduleRun(bad.run, 7, true, bad.on)).rejects.toBeInstanceOf(ApiError);
+    expect(bad.calls).toEqual([true]);
+    expect(bad.ev).toEqual(["failed:Bütçe doldu"]);
+  });
+
+  it("onaysız çağrıda diğer hatalar fırlatılmaz, bildirim olarak gösterilir", async () => {
+    const h = harness(() => new ApiError("Etkin tarama var", 409, "ACTIVE_SCAN"));
+    await startScheduleRun(h.run, 7, false, h.on);
+    expect(h.calls).toEqual([false]);
+    expect(h.ev).toEqual(["failed:Etkin tarama var"]);
   });
 });

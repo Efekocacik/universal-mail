@@ -632,6 +632,36 @@ describe("HTTP: /api/schedules", () => {
     ).toBe(404);
   });
 
+  it("şimdi çalıştır NEEDS_ACK: 409 yapılandırılmış tutarlarla, tarama yok; onayla 201 ve onaylı tavan", async () => {
+    const { id } = await makeSchedule(7);
+    await recordUsage(db, "mock", "text_search_pro", 5000); // ücretsiz kota bitti: her çağrı ücretli
+    await setSetting(db, "budget.monthlyUsd", 0.01);
+    const before = (await db.select().from(scans)).length;
+    const r = await runNowRoute.POST(req("POST", `/api/schedules/${id}/run-now`), params(id));
+    expect(r.status).toBe(409);
+    const body = await json(r);
+    expect(body.code).toBe("NEEDS_ACK");
+    // İngilizce arayüz onay metnini (apiError.NEEDS_ACK.detail) bu alanlarla kurar; "Yeniden tara" ile aynı biçim.
+    expect(typeof body.highUsd).toBe("number");
+    expect(body.remainingUsd).toBe(0.01);
+    expect(body.highUsd).toBeGreaterThan(body.remainingUsd);
+    expect((await db.select().from(scans)).length).toBe(before);
+
+    const ok = await runNowRoute.POST(
+      req("POST", `/api/schedules/${id}/run-now`, { acknowledgeRisk: true }),
+      params(id),
+    );
+    expect(ok.status).toBe(201);
+    const { scanId } = await json(ok);
+    const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+    const est = scan!.estimate as { costUsd: { high: number }; costCapUsd: number };
+    // Tavan: zamanlamanın önceden onaylı tutarı ile kullanıcının şimdi onayladığı yüksek tahminin büyüğü.
+    expect(est.costCapUsd).toBe(
+      approvedCostCap((await getSchedule(db, id)).ackMaxUsd, body.highUsd),
+    );
+    expect(est.costCapUsd).toBeGreaterThanOrEqual(est.costUsd.high);
+  });
+
   it("sil: 204, zamanlama bildirimleri silinir, geçmiş taramalar kalır", async () => {
     const { id, nextRunAt } = await makeSchedule(7);
     await setSetting(db, "budget.monthlyUsd", 0.5);

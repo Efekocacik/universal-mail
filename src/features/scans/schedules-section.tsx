@@ -10,13 +10,14 @@ import { FieldError, FieldHint, Input, Label, Select } from "@/components/ui/inp
 import { EmptyState } from "@/components/ui/page";
 import { Switch } from "@/components/ui/switch";
 import { HelpTip } from "@/components/ui/tooltip";
-import { ApiError, errorText } from "@/lib/client/api";
+import { errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtUsd } from "@/lib/client/format";
 import {
   INTERVALS,
   parseCostCap,
   scheduleControlName,
   scheduleViewModel,
+  startScheduleRun,
   useDeleteSchedule,
   useRunScheduleNow,
   useSchedules,
@@ -52,17 +53,15 @@ function ScheduleRow({ s }: { s: ScheduleItem }) {
         onError: (e: Error) => toast.error(errorText(e)),
       },
     );
-  const start = async (acknowledgeRisk: boolean) => {
-    try {
-      const r = await runNow.mutateAsync({ id: s.id, acknowledgeRisk });
-      toast.success(t("builder.started", { id: r.scanId }));
-      setAck(null);
-    } catch (e) {
-      if (e instanceof ApiError && e.code === "NEEDS_ACK") setAck(e.message);
-      else toast.error(errorText(e));
-      if (acknowledgeRisk) throw e;
-    }
-  };
+  const start = (acknowledgeRisk: boolean) =>
+    startScheduleRun(runNow.mutateAsync, s.id, acknowledgeRisk, {
+      started: (scanId) => {
+        toast.success(t("builder.started", { id: scanId }));
+        setAck(null);
+      },
+      needsAck: setAck,
+      failed: (e) => toast.error(errorText(e)),
+    });
 
   return (
     <li className="rounded-lg border bg-card p-3" aria-labelledby={titleId}>
