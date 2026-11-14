@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/misc";
 import { api } from "@/lib/client/api";
 import { fmtNumber } from "@/lib/client/format";
+import { pauseReasonText } from "@/lib/client/pause-reason";
 import { qk, useStatus } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
 
@@ -29,6 +30,7 @@ export function ScanStrip() {
 
   const p = scan.progress;
   const pct = p.unitsTotal ? Math.round(((p.unitsDone ?? 0) / p.unitsTotal) * 100) : 0;
+  const pauseText = pauseReasonText(scan);
   const running = scan.status === "running" || scan.status === "queued";
 
   return (
@@ -79,9 +81,7 @@ export function ScanStrip() {
           future: fmtNumber(p.futureOpening ?? 0),
         })}
       </p>
-      {!running && scan.pauseReason && (
-        <p className="text-[12px] text-muted-foreground">{scan.pauseReason}</p>
-      )}
+      {!running && pauseText && <p className="text-[12px] text-muted-foreground">{pauseText}</p>}
     </div>
   );
 }

@@ -487,20 +487,29 @@ describe("tarama uç noktaları: kapılar", () => {
     );
     const post = (action: string) =>
       controlRoute.POST(req("POST", `/api/scans/${scanId}/control`, { action }), params(scanId));
+    // Hata yanıtları kararlı kod taşır (İngilizce arayüz Türkçe sunucu metnini göstermez).
+    const fail = async (r: Response, status: number, code: string) => {
+      expect(r.status).toBe(status);
+      expect((await json(r)).code).toBe(code);
+    };
     expect((await post("pause")).status).toBe(200);
-    expect((await db.select().from(scans))[0]!.status).toBe("paused");
-    expect((await post("pause")).status).toBe(409); // zaten duraklatılmış
+    expect((await db.select().from(scans))[0]).toMatchObject({
+      status: "paused",
+      pauseCode: "USER_PAUSED",
+    });
+    await fail(await post("pause"), 409, "SCAN_NOT_PAUSABLE"); // zaten duraklatılmış
     expect((await post("resume")).status).toBe(200);
     expect((await post("cancel")).status).toBe(200);
-    expect((await post("resume")).status).toBe(409);
-    expect(
-      (
-        await controlRoute.POST(
-          req("POST", "/api/scans/9999/control", { action: "pause" }),
-          params(9999),
-        )
-      ).status,
-    ).toBe(409);
+    await fail(await post("resume"), 409, "SCAN_NOT_RESUMABLE");
+    await fail(await post("cancel"), 409, "SCAN_FINISHED");
+    await fail(
+      await controlRoute.POST(
+        req("POST", "/api/scans/9999/control", { action: "pause" }),
+        params(9999),
+      ),
+      404,
+      "SCAN_NOT_FOUND",
+    );
     expect(
       (await controlRoute.POST(req("POST", "/api/scans/1/control", { action: "sil" }), params(1)))
         .status,

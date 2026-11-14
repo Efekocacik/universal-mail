@@ -6,7 +6,8 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
  * içe aktarma olmadan).
  *
  *  pause_code            neden                                   zamanlanmış taramada kendiliğinden sürer mi?
- *  null                  kullanıcı duraklattı (veya eski kayıt)  hayır (kullanıcının kararı)
+ *  USER_PAUSED           kullanıcı duraklattı                    hayır (kullanıcının kararı)
+ *  null                  eski kayıt (Faz 5 öncesi kullanıcı)     hayır
  *  CALL_LIMIT            güvenlik çağrı sınırı aşıldı            hayır (maliyet kontrolü; kullanıcı onaylar)
  *  COST_CAP              zamanlanmış taramanın onaylı toplam      hayır (kullanıcı sürdürürse tavan kalkar)
  *                        maliyet tavanına ulaşıldı
@@ -16,6 +17,8 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
  *  BUDGET_BLOCKED        (status = budget_stopped) bütçe doldu   evet, bütçe yeniden izin verince
  *  PROVIDER_CHANGED      yer sağlayıcısı değişti (ör. demo→Google) hayır; sürdürülemez (eski onay/tahmin geçersiz)
  */
+/** Kullanıcı "Duraklat"a bastı (Faz 5; önceden kodsuz yazılırdı). Arayüz metni `scans.pause.USER_PAUSED`. */
+export const USER_PAUSED = "USER_PAUSED";
 export const APP_STOPPED = "APP_STOPPED";
 export const INTERRUPTED = "INTERRUPTED";
 export const CALL_LIMIT = "CALL_LIMIT";

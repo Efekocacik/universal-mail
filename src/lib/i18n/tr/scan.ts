@@ -5,6 +5,23 @@
 export const scan = {
   // Taramalar sayfası ve zamanlamalar
   "scans.origin.schedule": "Zamanlanmış",
+  "scans.pause.USER_PAUSED": "Siz duraklattınız.",
+  "scans.pause.APP_STOPPED": "Uygulama kapatıldı; devam edebilirsiniz.",
+  "scans.pause.INTERRUPTED": "Tarama beklenmedik şekilde durdu; devam edebilirsiniz.",
+  "scans.pause.CALL_LIMIT":
+    "Güvenlik sınırı: bu tarama izin verilen çağrı sayısını aştı. Devam etmek için taramayı sürdürün.",
+  "scans.pause.COST_CAP":
+    "Bu zamanlanmış tarama onayladığınız tutara ulaştı. Sürdürürseniz bu tavan bu tarama için kalkar.",
+  "scans.pause.BUDGET_BLOCKED":
+    "Aylık bütçe sınırına ulaşıldı. Ayarlar'dan bütçeyi artırın veya gelecek ayı bekleyin.",
+  "scans.pause.PROVIDER_CHANGED":
+    "Yer sağlayıcısı değişti; bu tarama sürdürülemez. Yeni bir tarama başlatın.",
+  "scans.pause.PROVIDER_QUOTA": "Google Places kotası doldu. Daha sonra sürdürebilirsiniz.",
+  "scans.pause.PROVIDER_RATE": "Google Places hız sınırına takıldı. Biraz sonra sürdürebilirsiniz.",
+  "scans.pause.PROVIDER_NETWORK": "Ağ bağlantısı kesildi. Bağlantı gelince sürdürebilirsiniz.",
+  "scans.pause.PROVIDER_SERVER":
+    "Google Places geçici bir hata verdi. Biraz sonra sürdürebilirsiniz.",
+  "scans.pause.unknown": "Tarama duraklatıldı.",
   "schedules.title": "Düzenli taramalar",
   "schedules.stalled.title": "Düzenli taramalar şu anda çalışmıyor",
   "schedules.stalled.body":

@@ -48,6 +48,8 @@ export interface StatusScan {
   status: ScanStatus;
   progress: ScanProgress;
   pauseReason: string | null;
+  /** Duraklatma nedeninin makine kodu (`scans.pause.<KOD>` metni; bkz. pauseReasonText). */
+  pauseCode: string | null;
   provider: "google" | "mock";
 }
 
@@ -99,6 +101,8 @@ export interface ScanListItem {
   countryCode: string | null;
   status: ScanStatus;
   pauseReason: string | null;
+  /** Duraklatma nedeninin makine kodu (`scans.pause.<KOD>` metni; bkz. pauseReasonText). */
+  pauseCode: string | null;
   error: string | null;
   provider: "google" | "mock";
   strategy: "text" | "nearby";

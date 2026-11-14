@@ -21,6 +21,7 @@ export const GET = route(async () => {
       countryCode: r.countryCode,
       status: r.scan.status,
       pauseReason: r.scan.pauseReason,
+      pauseCode: r.scan.pauseCode,
       error: r.scan.error,
       provider: r.scan.provider,
       strategy: r.scan.strategy,

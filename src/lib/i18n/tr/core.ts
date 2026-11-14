@@ -247,6 +247,13 @@ export const core = {
   "apiError.SAVED_FILTER_LIMIT.detail":
     "En çok {limit} süzgeç kaydedilebilir. Kullanmadığınız birini silip yeniden deneyin.",
   "apiError.SCHEDULE_NOT_FOUND": "Zamanlama bulunamadı. Silinmiş olabilir.",
+  "apiError.SCAN_NOT_PAUSABLE": "Yalnızca sürmekte olan tarama duraklatılabilir.",
+  "apiError.SCAN_NOT_RESUMABLE":
+    "Yalnızca duraklatılmış veya bütçe nedeniyle durmuş tarama sürdürülebilir.",
+  "apiError.SCAN_PROVIDER_CHANGED":
+    "Yer sağlayıcısı değiştiği için bu tarama sürdürülemez. Yeni bir tarama başlatın.",
+  "apiError.SCAN_CHANGED": "Tarama bu sırada değişti. Sayfayı yenileyip yeniden deneyin.",
+  "apiError.SCAN_FINISHED": "Tarama zaten bitmiş.",
   "apiError.SCAN_NOT_FOUND": "Tarama bulunamadı.",
   "apiError.SCAN_NOT_STARTED": "Henüz başlatılmamış bir tarama düzenli tekrarlanamaz.",
   "apiError.SCHEDULE_EXISTS": "Bu bölge ve kategoriler için zaten bir zamanlama var.",

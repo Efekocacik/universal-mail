@@ -33,7 +33,7 @@ import {
   type ScanEstimate,
 } from "./planner";
 import { ACTIVE_SCAN_MESSAGE, ScanGateError } from "./gate-error";
-import { COST_CAP, PROVIDER_CHANGED } from "./pause-codes";
+import { COST_CAP, PROVIDER_CHANGED, USER_PAUSED } from "./pause-codes";
 import { insertUnits, loadScan, setScanStatus } from "./store";
 
 export { PlanError };
@@ -334,24 +334,47 @@ export async function requeueOrphanScans(
   return out;
 }
 
-export type ControlResult = { ok: true } | { ok: false; error: string };
+/**
+ * Duraklat/sürdür/iptal hata kodları → HTTP durumu (control rotası). Her kodun TR+EN `apiError.<KOD>` metni vardır
+ * (tests/api-error-text.test.ts); İngilizce arayüz Türkçe sunucu metnini göstermez.
+ */
+export const SCAN_CONTROL_STATUS = {
+  SCAN_NOT_FOUND: 404,
+  SCAN_NOT_PAUSABLE: 409,
+  SCAN_NOT_RESUMABLE: 409,
+  SCAN_PROVIDER_CHANGED: 409,
+  BUDGET_BLOCKED: 409,
+  SCAN_CHANGED: 409,
+  SCAN_FINISHED: 409,
+} as const;
+export type ScanControlCode = keyof typeof SCAN_CONTROL_STATUS;
+
+export type ControlResult = { ok: true } | { ok: false; error: string; code: ScanControlCode };
 
 export async function pauseScan(db: Db, scanId: number): Promise<ControlResult> {
   const scan = await loadScan(db, scanId);
-  if (!scan) return { ok: false, error: "Tarama bulunamadı." };
+  if (!scan) return { ok: false, error: "Tarama bulunamadı.", code: "SCAN_NOT_FOUND" };
   if (scan.status !== "queued" && scan.status !== "running")
-    return { ok: false, error: "Yalnızca sürmekte olan tarama duraklatılabilir." };
-  await setScanStatus(db, scanId, "paused", { pauseReason: "Siz duraklattınız." });
+    return {
+      ok: false,
+      error: "Yalnızca sürmekte olan tarama duraklatılabilir.",
+      code: "SCAN_NOT_PAUSABLE",
+    };
+  await setScanStatus(db, scanId, "paused", {
+    pauseReason: "Siz duraklattınız.",
+    pauseCode: USER_PAUSED,
+  });
   return { ok: true };
 }
 
 export async function resumeScan(db: Db, scanId: number): Promise<ControlResult> {
   const scan = await loadScan(db, scanId);
-  if (!scan) return { ok: false, error: "Tarama bulunamadı." };
+  if (!scan) return { ok: false, error: "Tarama bulunamadı.", code: "SCAN_NOT_FOUND" };
   if (scan.status !== "paused" && scan.status !== "budget_stopped") {
     return {
       ok: false,
       error: "Yalnızca duraklatılmış veya bütçe nedeniyle durmuş tarama sürdürülebilir.",
+      code: "SCAN_NOT_RESUMABLE",
     };
   }
   if (
@@ -361,6 +384,7 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
     return {
       ok: false,
       error: "Yer sağlayıcısı değiştiği için bu tarama sürdürülemez. Yeni bir tarama başlatın.",
+      code: "SCAN_PROVIDER_CHANGED",
     };
   }
   const budget = await budgetStatus(db, scan.provider, await getSetting(db, "budget.monthlyUsd"));
@@ -369,6 +393,7 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
       ok: false,
       error:
         "Aylık bütçe sınırına ulaşıldı. Ayarlar'dan bütçeyi artırın veya gelecek ayı bekleyin.",
+      code: "BUDGET_BLOCKED",
     };
   }
   // Onaylı maliyet tavanında duran zamanlanmış taramayı kullanıcı ELLE sürdürüyorsa bu açık bir onaydır: tavan kalkar
@@ -407,6 +432,7 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
     return {
       ok: false,
       error: "Tarama bu sırada değişti. Sayfayı yenileyip yeniden deneyin.",
+      code: "SCAN_CHANGED",
     };
   return { ok: true };
 }
@@ -417,9 +443,9 @@ export async function cancelScan(
   now: number = Date.now(),
 ): Promise<ControlResult> {
   const scan = await loadScan(db, scanId);
-  if (!scan) return { ok: false, error: "Tarama bulunamadı." };
+  if (!scan) return { ok: false, error: "Tarama bulunamadı.", code: "SCAN_NOT_FOUND" };
   if (["completed", "failed", "cancelled"].includes(scan.status))
-    return { ok: false, error: "Tarama zaten bitmiş." };
+    return { ok: false, error: "Tarama zaten bitmiş.", code: "SCAN_FINISHED" };
   await setScanStatus(db, scanId, "cancelled", { finishedAt: now });
   return { ok: true };
 }
