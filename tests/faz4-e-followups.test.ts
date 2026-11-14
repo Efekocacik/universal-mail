@@ -20,6 +20,7 @@ import { BUILTIN_TEMPLATES } from "@/lib/mail/builtin-templates";
 import { checkContent } from "@/lib/mail/content-check";
 import { gmailSendBody } from "@/lib/mail/gmail/provider";
 import { FakeMailProvider } from "@/lib/mail/provider/fake-provider";
+import type { MailProvider } from "@/lib/mail/provider/provider";
 import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
 import { seedBuiltinTemplates, TEMPLATE_SEED_VERSION } from "@/lib/mail/seed";
 import { followupThread, sendCampaignStep } from "@/lib/mail/send-service";
@@ -272,6 +273,75 @@ describe("9d: takip aynı konuşmada gider", () => {
     const raw = p.outbox[1]!.raw;
     expect(raw).toContain(`In-Reply-To: ${out[0]!.rfcMessageId}`);
     expect(raw).toMatch(/References: /);
+  });
+
+  it("9d uçtan uca: ilk adımın sağlayıcı konuşması (threadId) takip gönderiminde sağlayıcıya iletilir", async () => {
+    // Kaydedici sağlayıcı: demo sağlayıcıya devreder, gelen threadId'yi kaydeder; ilk kabulde konuşma kimliği döner.
+    const inner = new FakeMailProvider({ now: () => T0 });
+    const seen: Array<string | undefined> = [];
+    const recording = (threadIds: Array<string | undefined>): MailProvider => ({
+      id: "demo",
+      send: async (input) => {
+        seen.push(input.threadId);
+        const res = await inner.send(input);
+        const tid = threadIds[seen.length - 1];
+        return res.status === "accepted" && tid ? { ...res, threadId: tid } : res;
+      },
+    });
+    const campaignId = await createCampaign(db, { steps: 2 });
+    await db
+      .update(campaignSteps)
+      .set({ templateId: (await builtinFollowup("en", 1)).id })
+      .where(and(eq(campaignSteps.campaignId, campaignId), eq(campaignSteps.stepIndex, 1)));
+    const s = await addSequence(db, campaignId);
+    const p = recording(["thrA1"]);
+    expect(
+      (
+        await sendCampaignStep(
+          db,
+          { campaignLeadId: s.cl, stepIndex: 0 },
+          { provider: p, now: () => T0 },
+        )
+      ).outcome,
+    ).toBe("sent");
+    expect(
+      (
+        await sendCampaignStep(
+          db,
+          { campaignLeadId: s.cl, stepIndex: 1 },
+          { provider: p, now: () => T0 + 7 * DAY },
+        )
+      ).outcome,
+    ).toBe("sent");
+    expect(seen).toEqual([undefined, "thrA1"]);
+    const out = await db
+      .select({ step: messages.stepIndex, threadId: messages.threadId })
+      .from(messages)
+      .where(and(eq(messages.campaignLeadId, s.cl), eq(messages.direction, "out")))
+      .orderBy(messages.id);
+    expect(out).toEqual([
+      { step: 0, threadId: "thrA1" },
+      { step: 1, threadId: null },
+    ]);
+  });
+
+  it("9d: önceki adımın konuşma kimliği yoksa takipte threadId gönderilmez (yalnızca başlıklarla zincir)", async () => {
+    const { cl, p } = await afterFirstStep();
+    const seen: Array<string | undefined> = [];
+    const spy: MailProvider = {
+      id: "demo",
+      send: async (input) => {
+        seen.push(input.threadId);
+        return p.send(input);
+      },
+    };
+    const r = await sendCampaignStep(
+      db,
+      { campaignLeadId: cl, stepIndex: 1 },
+      { provider: spy, now: () => T0 + 7 * DAY },
+    );
+    expect(r.outcome).toBe("sent");
+    expect(seen).toEqual([undefined]);
   });
 
   it("ayar kapalıysa takip kendi konusuyla gider", async () => {
