@@ -85,7 +85,7 @@ export const imports = {
   "imports.reason.no_name": "Business name is empty",
   "imports.reason.no_country": "Country is empty and no default country is set",
   "imports.reason.bad_country":
-    "Country not recognised (European countries and Türkiye are supported)",
+    "Country not recognised (European countries and Turkey are supported)",
   "imports.reason.bad_website": "Website is not a valid http(s) address",
   "imports.reason.bad_email": "Email address is not valid",
   "imports.history.title": "Previous imports",

@@ -294,11 +294,14 @@ export async function loadExistingKeys(
       .innerJoin(leads, eq(leads.id, leadEnrichment.leadId))
       .where(and(notArchived, sql`${leadEnrichment.siteDomain} IN ${jsonList(probe.domains)}`));
     for (const r of crawled) if (r.d) domains.add(r.d);
-    // Kullanıcının verdiği siteler (yalnızca içe aktarma/sicil lead'leri; Google lead'lerinde bu sütun hep boştur).
+    // Kullanıcının verdiği siteler: yalnızca içe aktarma/sicil lead'leri (Google lead'lerinde bu sütun hep boştur);
+    // `leads_source_idx` ile tüm tablo taranmaz. Alan adı saklanmadığı için karşılaştırma bellekte yapılır.
     const own = await tx
       .select({ w: leads.website })
       .from(leads)
-      .where(and(notArchived, isNotNull(leads.website)));
+      .where(
+        and(notArchived, inArray(leads.source, ["import", "registry"]), isNotNull(leads.website)),
+      );
     for (const r of own) {
       const d = websiteDomain(r.w);
       if (d) domains.add(d);
