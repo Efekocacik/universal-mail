@@ -6,6 +6,7 @@ import { getSetupState } from "@/lib/app/state";
 import { audit } from "@/lib/db/audit";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { secretStatus } from "@/lib/secrets/store";
+import { skipOsBacklog } from "@/lib/notifications/service";
 import { holdScansForProviderChange, revokeScheduleAcks } from "@/lib/scan/schedule-service";
 import {
   getSetting,
@@ -97,6 +98,9 @@ export const PUT = route(async (req: Request) => {
         await holdScansForProviderChange(tx, { from: prev, to: nextProvider });
       }
     }
+    // Masaüstü bildirimleri açılıyorsa kapalıyken biriken bildirimler masaüstünde topluca gösterilmez (zilde kalır).
+    if (patch["notifications.os"] === true && !(await getSetting(tx, "notifications.os")))
+      await skipOsBacklog(tx);
     for (const [key, value] of entries) {
       const normalized =
         key === "targets.countries"
