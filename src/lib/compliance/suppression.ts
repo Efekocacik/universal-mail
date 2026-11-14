@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { domainToASCII } from "node:url";
-import { and, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or } from "drizzle-orm";
 import { parse as parseHost } from "tldts";
 import { z } from "zod";
 import type { Db, DbExecutor } from "@/lib/db/client";
@@ -714,6 +714,13 @@ function parseSuppressionCsv(text: string): ParsedCsv {
  * Geçerli satırları verilen işlem içinde yazar ve sonucu sayar (denetim özeti hariç). Önizleme ve gerçek içe aktarma
  * bu AYNI kodu kullanır; böylece önizleme sayıları içe aktarmayla birebir aynıdır.
  */
+/**
+ * CSV satırlarını uygular (önizleme ve gerçek içe aktarma AYNI kod). Toplu: etkin kayıtlar dosya için bir kez
+ * (500'lük parçalarla) okunur, satırlar sırayla bellek içi haritaya karşı değerlendirilir (dosya içi tekrarlar
+ * `addEmailInTx`/`addDomainInTx` ile aynı sonucu verir: ilk satır ekler, sonraki aynı/daha zayıf neden kopya, daha
+ * güçlü neden güçlendirir), sonra yazımlar çok satırlı INSERT ve neden başına tek UPDATE ile yapılır. Denetim
+ * satırları satır sırasıyla, aynı ayrıntılarla yazılır. 20.000 satırlık dosyada ~60.000 ifade yerine birkaç yüz.
+ */
 async function applyCsvRows(tx: Tx, parsed: ParsedCsv, now: number): Promise<CsvImportPreview> {
   const out: CsvImportPreview = {
     dryRun: false,
@@ -726,27 +733,106 @@ async function applyCsvRows(tx: Tx, parsed: ParsedCsv, now: number): Promise<Csv
     irreversible: 0,
     irreversibleDomains: 0,
   };
+
+  // Hedef: var olan etkin kayıt (kimlik) ya da bu içe aktarmada eklenecek satır (sıra numarası).
+  type Ref = { existing: number } | { added: number };
+  type Active = { ref: Ref; reason: SuppressionReason };
+  const emailKey = (h: string) => `e:${h}`;
+  const domainKey = (d: string) => `d:${d}`;
+  const active = new Map<string, Active>();
+  const hashes = new Set<string>();
+  const domains = new Set<string>();
   for (const v of parsed.valid) {
-    const r =
-      v.kind === "email"
-        ? await addEmailInTx(
-            tx,
-            v.parsed,
-            { email: v.parsed.email, reason: v.reason, source: "csv", note: v.note },
-            now,
-          )
-        : await addDomainInTx(
-            tx,
-            v.domain,
-            { domain: v.domain, reason: v.reason, source: "csv", note: v.note },
-            now,
-          );
-    if (r.outcome === "existing") {
+    if (v.kind === "email") hashes.add(hashEmail(v.parsed.email));
+    else domains.add(v.domain);
+  }
+  const load = async (scope: SuppressionScope, keys: string[]) => {
+    for (let i = 0; i < keys.length; i += 500) {
+      const part = keys.slice(i, i + 500);
+      const rows = await tx
+        .select({
+          id: suppressions.id,
+          reason: suppressions.reason,
+          emailHash: suppressions.emailHash,
+          domain: suppressions.domain,
+        })
+        .from(suppressions)
+        .where(
+          and(
+            eq(suppressions.scope, scope),
+            scope === "email"
+              ? inArray(suppressions.emailHash, part)
+              : inArray(suppressions.domain, part),
+            isNull(suppressions.liftedAt),
+          ),
+        )
+        .orderBy(asc(suppressions.id));
+      for (const r of rows) {
+        const key = scope === "email" ? emailKey(r.emailHash!) : domainKey(r.domain);
+        if (!active.has(key)) active.set(key, { ref: { existing: r.id }, reason: r.reason });
+      }
+    }
+  };
+  await load("email", [...hashes]);
+  await load("domain", [...domains]);
+
+  const inserts: (typeof suppressions.$inferInsert)[] = [];
+  /** Var olan kayıtların son nedeni (güçlendirme). */
+  const strengthen = new Map<number, SuppressionReason>();
+  const audits: { action: string; ref: Ref; detail: Record<string, unknown> }[] = [];
+
+  for (const v of parsed.valid) {
+    const key = v.kind === "email" ? emailKey(hashEmail(v.parsed.email)) : domainKey(v.domain);
+    const scope: SuppressionScope = v.kind;
+    const domainDetail = v.kind === "domain" ? { domain: v.domain } : {};
+    const cur = active.get(key);
+    if (cur && SUPPRESSION_REASON_STRENGTH[v.reason] <= SUPPRESSION_REASON_STRENGTH[cur.reason]) {
       out.duplicates++;
       continue;
     }
-    if (r.outcome === "added") out.added++;
-    else out.strengthened++;
+    if (cur) {
+      if ("existing" in cur.ref) strengthen.set(cur.ref.existing, v.reason);
+      else inserts[cur.ref.added]!.reason = v.reason;
+      audits.push({
+        action: "suppression.strengthened",
+        ref: cur.ref,
+        detail: { scope, ...domainDetail, from: cur.reason, to: v.reason, source: "csv" },
+      });
+      cur.reason = v.reason;
+      out.strengthened++;
+    } else {
+      const ref: Ref = { added: inserts.length };
+      inserts.push(
+        v.kind === "email"
+          ? {
+              scope: "email",
+              emailHash: hashEmail(v.parsed.email),
+              hashAlg: SUPPRESSION_HASH_ALG,
+              emailMasked: maskEmail(v.parsed.local, v.parsed.domain),
+              domain: v.parsed.domain,
+              reason: v.reason,
+              source: "csv",
+              messageId: null,
+              note: v.note ?? null,
+              addedAt: now,
+            }
+          : {
+              scope: "domain",
+              domain: v.domain,
+              reason: v.reason,
+              source: "csv",
+              note: v.note ?? null,
+              addedAt: now,
+            },
+      );
+      active.set(key, { ref, reason: v.reason });
+      audits.push({
+        action: "suppression.added",
+        ref,
+        detail: { scope, ...domainDetail, reason: v.reason, source: "csv" },
+      });
+      out.added++;
+    }
     out.byReason[v.reason] = (out.byReason[v.reason] ?? 0) + 1;
     out.byScope[v.kind]++;
     if (PROTECTED_REASONS.has(v.reason)) {
@@ -754,6 +840,34 @@ async function applyCsvRows(tx: Tx, parsed: ParsedCsv, now: number): Promise<Csv
       if (v.kind === "domain") out.irreversibleDomains++;
     }
   }
+
+  // Yazım: eklemeler (kimlikler ekleme sırasıyla artar), neden başına güçlendirme, denetim satırları sırayla.
+  const newIds: number[] = [];
+  for (let i = 0; i < inserts.length; i += 50) {
+    const rows = await tx
+      .insert(suppressions)
+      .values(inserts.slice(i, i + 50))
+      .returning({ id: suppressions.id });
+    newIds.push(...rows.map((r) => r.id).sort((a, b) => a - b));
+  }
+  const byReason = new Map<SuppressionReason, number[]>();
+  for (const [id, reason] of strengthen)
+    byReason.set(reason, [...(byReason.get(reason) ?? []), id]);
+  for (const [reason, ids] of byReason)
+    for (let i = 0; i < ids.length; i += 500)
+      await tx
+        .update(suppressions)
+        .set({ reason })
+        .where(inArray(suppressions.id, ids.slice(i, i + 500)));
+  const auditRows = audits.map((a) => ({
+    at: now,
+    action: a.action,
+    entity: "suppression",
+    entityId: String("existing" in a.ref ? a.ref.existing : newIds[a.ref.added]!),
+    detail: a.detail,
+  }));
+  for (let i = 0; i < auditRows.length; i += 200)
+    await tx.insert(auditLog).values(auditRows.slice(i, i + 200));
   return out;
 }
 
