@@ -1,17 +1,10 @@
 import crypto from "node:crypto";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
-import { evaluateEnrollment, type IneligibleCode } from "@/lib/compliance/eligibility";
+import { prepareEnrollmentBatch, type IneligibleCode } from "@/lib/compliance/eligibility";
 import { DEFAULT_FREQUENCY_LIMITS, type FrequencyLimits } from "@/lib/compliance/frequency";
 import { maskEmail } from "@/lib/compliance/suppression";
 import type { DbExecutor } from "@/lib/db/client";
-import {
-  campaignLeads,
-  campaigns,
-  campaignSteps,
-  leadEmails,
-  mailboxes,
-  templates,
-} from "@/lib/db/schema";
+import { campaignLeads, campaigns, campaignSteps, mailboxes, templates } from "@/lib/db/schema";
 import { pickTemplateLanguage, suggestLanguage } from "@/lib/mail/language";
 import { isMailSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
@@ -26,7 +19,7 @@ import { assertSendableMailbox } from "./service";
  *
  * - Kampanya geneli engeller: kullanım onayı, gönderen profili, gönderime uygun posta kutusu (demo; canlı kapı açıksa
  *   gönderim izinli Gmail), adımlar, pencere, zamanlayıcı (demo bayrağı veya canlı kapı), en az bir uygun dizi.
- * - Her `pending` dizi `evaluateEnrollment` ile yeniden denetlenir (dizinin kendisi "zaten kampanyada" sayılmaz);
+ * - Her `pending` dizi `evaluateEnrollment` kurallarıyla (toplu: `prepareEnrollmentBatch`) yeniden denetlenir (dizinin kendisi "zaten kampanyada" sayılmaz);
  *   alıcı adresi eklendiği andan sonra değiştiyse dizi uygun sayılmaz.
  * - `confirmToken`: kampanyanın sürümü, adımlar ve uygun/uygunsuz dizilerden türetilir. Başlatma bu belirteci ister;
  *   arada herhangi biri değiştiyse başlatma reddedilir ve özet yeniden alınmalıdır.
@@ -155,21 +148,21 @@ export async function computeStartPlan(
 
   const eligible: StartPlan["eligible"] = [];
   const ineligible: StartPlan["ineligible"] = [];
+  // Toplu denetim: sorgu sayısı dizi sayısından bağımsız (eskiden dizi başına ~15-18 sorgu ve kampanyanın bütün
+  // dizilerinin her seferinde okunması; başlatmada bu, yazma işlemi boyunca kilidi tutuyordu).
+  const batch = await prepareEnrollmentBatch(
+    db,
+    campaignId,
+    pending.map((r) => r.leadId),
+    { now: opts.now, limits: opts.limits },
+  );
   for (const row of pending) {
-    const verdict = await evaluateEnrollment(
-      db,
-      { campaignId, leadId: row.leadId },
-      { now: opts.now, limits: opts.limits, ignoreCampaignLeadId: row.id },
-    );
+    const verdict = batch.evaluate({ leadId: row.leadId, ignoreCampaignLeadId: row.id });
     const reasons = new Set(
       verdict.reasons.map((r) => r.code).filter((code) => !GLOBAL_CODES.has(code)),
     ) as Set<string>;
     // Alıcı, eklendiği andaki görüntüyle aynı olmalı (gönderim anında da aynı denetim yapılır).
-    const [primary] = await db
-      .select()
-      .from(leadEmails)
-      .where(and(eq(leadEmails.leadId, row.leadId), eq(leadEmails.isPrimary, true)))
-      .limit(1);
+    const primary = batch.primaryOf(row.leadId);
     if (!primary || primary.id !== row.emailId || primary.email !== row.recipientEmail) {
       reasons.add("recipient_mismatch");
     }

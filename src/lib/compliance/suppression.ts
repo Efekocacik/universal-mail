@@ -157,6 +157,74 @@ export async function checkSuppression(db: DbExecutor, email: string): Promise<S
   return { suppressed: rows.length > 0, invalidAddress: false, matches: rows };
 }
 
+/**
+ * `checkSuppression`'ın toplu sürümü (kampanyaya ekleme/başlatma denetimi): adresler 500'lük parçalarla iki sorguda
+ * (adres özeti ve alan adı adayları) denetlenir. Sonuç girişteki her adres için aynı biçimdedir; eşleşmeler kimlik
+ * sırasındadır.
+ */
+export async function checkSuppressionBatch(
+  db: DbExecutor,
+  emails: readonly string[],
+): Promise<Map<string, SuppressionCheck>> {
+  const out = new Map<string, SuppressionCheck>();
+  const parsed = new Map<string, { hash: string; candidates: string[] }>();
+  for (const e of new Set(emails)) {
+    const p = parseEmail(e);
+    if (!p) out.set(e, { suppressed: true, invalidAddress: true, matches: [] });
+    else parsed.set(e, { hash: hashEmail(p.email), candidates: domainCandidates(p.domain) });
+  }
+  const hashes = [...new Set([...parsed.values()].map((p) => p.hash))];
+  const domains = [...new Set([...parsed.values()].flatMap((p) => p.candidates))];
+  const byHash = new Map<string, SuppressionMatch[]>();
+  const byDomain = new Map<string, SuppressionMatch[]>();
+  const cols = {
+    id: suppressions.id,
+    scope: suppressions.scope,
+    reason: suppressions.reason,
+    domain: suppressions.domain,
+    emailHash: suppressions.emailHash,
+  };
+  for (let i = 0; i < hashes.length; i += 500) {
+    const rows = await db
+      .select(cols)
+      .from(suppressions)
+      .where(
+        and(
+          isNull(suppressions.liftedAt),
+          eq(suppressions.scope, "email"),
+          inArray(suppressions.emailHash, hashes.slice(i, i + 500)),
+        ),
+      );
+    for (const { emailHash, ...m } of rows)
+      if (emailHash) byHash.set(emailHash, [...(byHash.get(emailHash) ?? []), m]);
+  }
+  for (let i = 0; i < domains.length; i += 500) {
+    const rows = await db
+      .select(cols)
+      .from(suppressions)
+      .where(
+        and(
+          isNull(suppressions.liftedAt),
+          eq(suppressions.scope, "domain"),
+          inArray(suppressions.domain, domains.slice(i, i + 500)),
+        ),
+      );
+    for (const { emailHash: _h, ...m } of rows)
+      byDomain.set(m.domain, [...(byDomain.get(m.domain) ?? []), m]);
+  }
+  for (const [e, p] of parsed) {
+    const seen = new Set<number>();
+    const matches = [
+      ...(byHash.get(p.hash) ?? []),
+      ...p.candidates.flatMap((d) => byDomain.get(d) ?? []),
+    ]
+      .filter((m) => !seen.has(m.id) && seen.add(m.id))
+      .sort((a, b) => a.id - b.id);
+    out.set(e, { suppressed: matches.length > 0, invalidAddress: false, matches });
+  }
+  return out;
+}
+
 /** Alan adı engeli kontrolü (adres bilinmeden, ör. web sitesi alan adı için). */
 export async function isDomainSuppressed(db: DbExecutor, rawDomain: string): Promise<boolean> {
   const domain = normalizeDomain(rawDomain);
