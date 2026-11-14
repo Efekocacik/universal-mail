@@ -15,6 +15,7 @@ import {
   refreshLeadSummary,
   saveContacts,
   saveEmails,
+  requeueRunningEnrichment,
   upsertEnrichment,
   type NewEmail,
 } from "./store";
@@ -412,11 +413,11 @@ export async function findEmailsForLeads(
   result.stopped = !!deps.shouldStop?.();
   if (result.stopped) {
     // Durdurulduğunda işlenmeyenler "çalışıyor" görünmesin.
-    for (const t of targets) {
-      const row = (await getEnrichmentMap(db, [t.lead.id])).get(t.lead.id);
-      if (row?.status === "running")
-        await upsertEnrichment(db, t.lead.id, { status: "queued" }, now());
-    }
+    await requeueRunningEnrichment(
+      db,
+      targets.map((t) => t.lead.id),
+      now(),
+    );
   }
 
   if (retryLeads.length > 0 && opts.scheduleRetry)

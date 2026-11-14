@@ -3,7 +3,7 @@ import type { Db } from "@/lib/db/client";
 import { leadEnrichment, leads } from "@/lib/db/schema";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { chunk } from "@/lib/util";
-import { upsertEnrichment } from "./store";
+import { markEnrichmentQueued } from "./store";
 
 export const EMAIL_JOB = "enrich.email";
 /** Bir işte işlenen lead sayısı: ilerleme görünür kalsın ve durdurma hızlı olsun. */
@@ -24,20 +24,7 @@ export async function enqueueEmailSearch(
   const ids = [...new Set(leadIds)];
   if (ids.length === 0) return 0;
   const now = Date.now();
-  for (const part of opts.markQueued === false ? [] : chunk(ids, 500)) {
-    const existing = new Set(
-      (
-        await db
-          .select({ id: leadEnrichment.leadId, status: leadEnrichment.status })
-          .from(leadEnrichment)
-          .where(inArray(leadEnrichment.leadId, part))
-      )
-        .filter((r) => r.status === "running")
-        .map((r) => r.id),
-    );
-    for (const id of part)
-      if (!existing.has(id)) await upsertEnrichment(db, id, { status: "queued" }, now);
-  }
+  if (opts.markQueued !== false) await markEnrichmentQueued(db, ids, now);
   let jobs = 0;
   for (const part of chunk(ids, EMAIL_JOB_CHUNK)) {
     const payload: EmailJobPayload = {

@@ -7,7 +7,7 @@ import { audit } from "@/lib/db/audit";
 import { leadEnrichment, leads } from "@/lib/db/schema";
 import { enqueueEmailSearch } from "@/lib/email/enqueue";
 import { websiteStates, type LeadInfo } from "@/lib/email/service";
-import { getEnrichmentMap, upsertEnrichment } from "@/lib/email/store";
+import { getEnrichmentMap, markEnrichmentQueued } from "@/lib/email/store";
 import { getSecret } from "@/lib/secrets/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
@@ -183,7 +183,10 @@ export const POST = route(async (req: Request) => {
 
   if (input.loadGoogle && googleTargets.length > 0) {
     const placeIds = googleTargets.map((l) => l.placeId!);
-    for (const l of googleTargets) await upsertEnrichment(db, l.id, { status: "queued" });
+    await markEnrichmentQueued(
+      db,
+      googleTargets.map((l) => l.id),
+    );
     for (const part of chunk(placeIds, 100)) {
       await enqueueJob(
         db,
