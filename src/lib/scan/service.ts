@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { budgetStatus, monthSkuCalls } from "@/lib/budget";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
@@ -242,7 +242,7 @@ export async function createAndStartScan(
   return db.transaction((tx) => insertPreparedScan(tx, prepared, opts, now));
 }
 
-async function hasActiveJob(db: Db, scanId: number): Promise<boolean> {
+async function hasActiveJob(db: DbExecutor, scanId: number): Promise<boolean> {
   const rows = await db
     .select({ n: sql<number>`count(*)` })
     .from(jobs)
@@ -259,6 +259,79 @@ async function hasActiveJob(db: Db, scanId: number): Promise<boolean> {
 export async function enqueueScanJob(db: Db, scanId: number): Promise<void> {
   if (await hasActiveJob(db, scanId)) return;
   await enqueueJob(db, "scan.run", { scanId }, { maxAttempts: 1, priority: 10 });
+}
+
+/** İşlem içinde: tarama için kuyrukta/çalışan `scan.run` işi yoksa ekler (denetim ve ekleme aynı işlemde). */
+async function enqueueScanJobTx(
+  tx: DbExecutor,
+  scanId: number,
+  now: number,
+  priority = 10,
+): Promise<boolean> {
+  if (await hasActiveJob(tx, scanId)) return false;
+  await tx.insert(jobs).values({
+    type: "scan.run",
+    payload: { scanId },
+    status: "queued",
+    priority,
+    maxAttempts: 1,
+    runAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+  return true;
+}
+
+/** Kuyrukta (`queued`) olup işi kaybolmuş taramanın kendiliğinden yeniden kuyruğa alınması için bekleme süresi. */
+export const ORPHAN_SCAN_GRACE_MS = 2 * 60_000;
+
+/**
+ * Öksüz tarama onarımı (zamanlama turunda çalışır): `queued` durumda olup kuyrukta/çalışan `scan.run` işi olmayan ve
+ * son işi (yoksa oluşturulması) `ORPHAN_SCAN_GRACE_MS`'den eski taramalar yeniden kuyruğa alınır. Böyle tarama eski
+ * sürümlerdeki atomik olmayan sürdürme ya da iş eklenmeden çöken bir süreçten kalabilir; aksi halde sonsuza dek
+ * "Sırada" görünür ve zamanlaması PREVIOUS_RUN_ACTIVE ile atlanırdı. Durum ve iş denetimi ekleme ile aynı işlemdedir.
+ */
+export async function requeueOrphanScans(
+  db: Db,
+  now: number,
+  log?: (m: string) => void,
+  limit = 20,
+): Promise<number[]> {
+  const lastJobAt = sql<number | null>`(select max(${jobs.updatedAt}) from ${jobs}
+    where ${jobs.type} = 'scan.run' and json_extract(${jobs.payload}, '$.scanId') = ${scans.id})`;
+  const candidates = await db
+    .select({ id: scans.id })
+    .from(scans)
+    .where(
+      and(
+        eq(scans.status, "queued"),
+        sql`not exists (select 1 from ${jobs} where ${jobs.type} = 'scan.run'
+          and ${jobs.status} in ('queued', 'running')
+          and json_extract(${jobs.payload}, '$.scanId') = ${scans.id})`,
+        sql`coalesce(${lastJobAt}, ${scans.createdAt}) <= ${now - ORPHAN_SCAN_GRACE_MS}`,
+      ),
+    )
+    .orderBy(scans.id)
+    .limit(limit);
+  const out: number[] = [];
+  for (const { id } of candidates) {
+    const done = await db.transaction(async (tx) => {
+      const still = await tx
+        .select({ id: scans.id })
+        .from(scans)
+        .where(and(eq(scans.id, id), eq(scans.status, "queued")))
+        .limit(1);
+      if (still.length === 0) return false;
+      if (!(await enqueueScanJobTx(tx, id, now))) return false;
+      await audit(tx, "scan.requeued_orphan", "scan", id, {}, now);
+      return true;
+    });
+    if (done) {
+      out.push(id);
+      log?.(`tarama #${id}: işi kaybolmuştu, yeniden kuyruğa alındı`);
+    }
+  }
+  return out;
 }
 
 export type ControlResult = { ok: true } | { ok: false; error: string };
@@ -300,15 +373,41 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
   }
   // Onaylı maliyet tavanında duran zamanlanmış taramayı kullanıcı ELLE sürdürüyorsa bu açık bir onaydır: tavan kalkar
   // (tarama elle başlatılmış gibi sürer; güvenlik çağrı sınırı ve aylık bütçe yine geçerlidir).
-  if (scan.pauseCode === COST_CAP && scan.estimate && typeof scan.estimate === "object") {
-    await db
+  const liftCap =
+    scan.pauseCode === COST_CAP && !!scan.estimate && typeof scan.estimate === "object";
+  // Tek işlem + karşılaştır-ve-yaz: durum geçişi, tavanın kaldırılması, denetim kaydı ve iş ekleme birlikte olur ya da
+  // hiç olmaz. Aksi halde iş eklenemeden bir hata `queued` ama işi olmayan (sonsuza dek "Sırada") tarama bırakırdı;
+  // eşzamanlı iki sürdürme de çift iş/denetim yazamaz. Okumadan sonra değişen tarama (ör. sağlayıcı değişti →
+  // PROVIDER_CHANGED, kullanıcı iptal etti) sürdürülmez.
+  const now = Date.now();
+  const moved = await db.transaction(async (tx) => {
+    const rows = await tx
       .update(scans)
-      .set({ estimate: { ...(scan.estimate as object), costCapUsd: null } })
-      .where(eq(scans.id, scanId));
-    await audit(db, "scan.cost_cap_lifted", "scan", scanId, {});
-  }
-  await setScanStatus(db, scanId, "queued");
-  await enqueueScanJob(db, scanId);
+      .set({
+        status: "queued",
+        pauseReason: null,
+        pauseCode: null,
+        error: null,
+        ...(liftCap ? { estimate: { ...(scan.estimate as object), costCapUsd: null } } : {}),
+      })
+      .where(
+        and(
+          eq(scans.id, scanId),
+          eq(scans.status, scan.status),
+          scan.pauseCode === null ? isNull(scans.pauseCode) : eq(scans.pauseCode, scan.pauseCode),
+        ),
+      )
+      .returning({ id: scans.id });
+    if (rows.length === 0) return false;
+    if (liftCap) await audit(tx, "scan.cost_cap_lifted", "scan", scanId, {}, now);
+    await enqueueScanJobTx(tx, scanId, now);
+    return true;
+  });
+  if (!moved)
+    return {
+      ok: false,
+      error: "Tarama bu sırada değişti. Sayfayı yenileyip yeniden deneyin.",
+    };
   return { ok: true };
 }
 
