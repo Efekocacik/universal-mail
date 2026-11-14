@@ -192,10 +192,13 @@ describe("9a: incelemede bekleyen yanıt varken takip bekler", () => {
 
 describe("9b: TR/EN takip şablonları (seed v2)", () => {
   it("temiz kurulum: 2 ilk + 4 takip; ikinci çalıştırma eklemez", async () => {
-    expect(TEMPLATE_SEED_VERSION).toBe(2);
+    // Faz 5 sürümü 3'e çıkardı (yeni diller); TR/EN takipleri değişmedi.
+    expect(TEMPLATE_SEED_VERSION).toBe(3);
     const all = await db.select().from(templates).where(eq(templates.builtIn, true));
     expect(all).toHaveLength(BUILTIN_TEMPLATES.length);
-    expect(all.filter((t) => t.kind === "followup")).toHaveLength(4);
+    expect(
+      all.filter((t) => t.kind === "followup" && ["en", "tr"].includes(t.language)),
+    ).toHaveLength(4);
     expect(await seedBuiltinTemplates(db, T0 + 1)).toBe(0);
   });
 
@@ -207,16 +210,18 @@ describe("9b: TR/EN takip şablonları (seed v2)", () => {
       .set({ value: { templates: 1, demoMailbox: 1 } })
       .where(eq(settings.key, "seed.faz3"));
     expect((await getSetting(db, "seed.faz3")).templates).toBe(1);
-    expect(await seedBuiltinTemplates(db, T0 + 1)).toBe(4);
+    // v1'den yükseltme: silinen bütün takipler (TR/EN 4 + Faz 5 dillerinin 7'si) geri gelir; ilk e-postalar aynen.
+    const followups = BUILTIN_TEMPLATES.filter((t) => t.kind === "followup").length;
+    expect(await seedBuiltinTemplates(db, T0 + 1)).toBe(followups);
     expect(await seedBuiltinTemplates(db, T0 + 2)).toBe(0);
     const initial = await db.select().from(templates).where(eq(templates.kind, "initial"));
     expect(initial.every((t) => t.subject === "Kendi konum")).toBe(true);
-    expect((await getSetting(db, "seed.faz3")).templates).toBe(2);
+    expect((await getSetting(db, "seed.faz3")).templates).toBe(TEMPLATE_SEED_VERSION);
   });
 
   it("takip şablonları içerik denetiminden geçer ve konuları 'Re:' ile başlamaz", () => {
     for (const t of BUILTIN_TEMPLATES.filter((x) => x.kind === "followup")) {
-      expect(t.since).toBe(2);
+      expect(t.since).toBe(["en", "tr"].includes(t.language) ? 2 : 3);
       expect(checkContent({ subject: t.subject, body: t.bodyText }).errors).toEqual([]);
       expect(stripReplyPrefixes(t.subject)).toBe(t.subject.trim());
     }

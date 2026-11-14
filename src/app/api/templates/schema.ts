@@ -14,6 +14,11 @@ const draftShape = {
   bodyHtml: z.string().max(100_000),
   /** Faz 4 (9d): takip şablonunda ilk e-postanın konusunu "Re:" ile kullan (varsayılan açık). */
   followupReuseSubject: z.boolean().optional(),
+  /**
+   * Faz 5: A/B ikinci konusu (yalnızca ilk e-posta şablonunda saklanır). null veya boş = A/B yok. `infoOnly`
+   * istemciden YAZILAMAZ (strict şema reddeder); dilden türetilir.
+   */
+  subjectB: z.string().max(500).nullable().optional(),
 };
 
 export const templateDraftSchema = z.object(draftShape).strict();
@@ -29,6 +34,7 @@ export const updateTemplateSchema = z
     subject: draftShape.subject.optional(),
     bodyHtml: draftShape.bodyHtml.optional(),
     followupReuseSubject: draftShape.followupReuseSubject,
+    subjectB: draftShape.subjectB,
   })
   .strict()
   .refine((v) => Object.keys(v).some((k) => k !== "expectedVersion"), {
@@ -45,5 +51,7 @@ export const previewSchema = z
   .object({
     draft: templateDraftSchema,
     leadId: z.number().int().positive(),
+    /** Faz 5: önizlenecek konu ("b" için taslakta B konusu olmalı → 400 `TEMPLATE_NO_VARIANT_B`). */
+    variant: z.enum(["a", "b"]).optional(),
   })
   .strict();

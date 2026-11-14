@@ -67,7 +67,18 @@ export interface BuildEmailInput {
    * doğrulanmadı) ileti `List-Unsubscribe` başlığı OLMADAN oluşturulur; verildiyse kampanyadaki kurallar aynen geçerlidir.
    */
   selfTest?: boolean;
+  /**
+   * Faz 5: açılma pikseli (yalnızca DEMO; `open-tracking.ts`). Gövde temizlendikten SONRA `<body>` sonuna eklenir
+   * (temizleyici görselleri siler). Canlı iletide verilirse ileti OLUŞTURULMAZ: canlı açılma izleme bu sürümde yok.
+   */
+  openPixelUrl?: string;
 }
+
+/** Demo iletisindeki açılma pikselinin adresi (RFC 2606 `.invalid`: hiçbir sunucuya çözülmez). */
+export const DEMO_OPEN_PIXEL_BASE = "https://open.invalid/demo/o/";
+
+/** Piksel adresi yalnızca demo tabanı + belirteç karakterleri olabilir (HTML'e kaçışsız girer). */
+const PIXEL_URL_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 export interface BuiltEmail extends MimeMessage {
   messageId: string;
@@ -75,9 +86,16 @@ export interface BuiltEmail extends MimeMessage {
   to: string;
 }
 
-export function wrapHtmlDocument(fragment: string, language: string | null): string {
+export function wrapHtmlDocument(
+  fragment: string,
+  language: string | null,
+  openPixelUrl?: string,
+): string {
   const lang = language && /^[a-z]{2,3}$/.test(language) ? ` lang="${escapeHtml(language)}"` : "";
-  const body = sanitizeEmailHtml(fragment).html;
+  const pixel = openPixelUrl
+    ? `<img src="${escapeHtml(openPixelUrl)}" width="1" height="1" alt="" style="display:block;border:0">`
+    : "";
+  const body = sanitizeEmailHtml(fragment).html + pixel;
   return [
     "<!DOCTYPE html>",
     `<html${lang}>`,
@@ -126,6 +144,17 @@ export function buildEmailMessage(
       "Test iletisi yalnızca posta kutusunun kendi adresine gönderilebilir.",
     );
   }
+  if (input.openPixelUrl !== undefined) {
+    const token = input.openPixelUrl.startsWith(DEMO_OPEN_PIXEL_BASE)
+      ? input.openPixelUrl.slice(DEMO_OPEN_PIXEL_BASE.length)
+      : "";
+    if (input.mode !== "demo" || selfTest || !PIXEL_URL_RE.test(token)) {
+      throw new MessageBuildError(
+        "scope_mismatch",
+        "Açılma pikseli yalnızca demo kampanya iletisine eklenebilir.",
+      );
+    }
+  }
   const omitUnsubscribe = selfTest && !input.unsubscribe?.url;
   if (input.mode === "live" && !omitUnsubscribe) {
     // Başlıktaki bağlantı, alıcının gördüğü alt bilgi bağlantısıyla aynı olmalı.
@@ -159,7 +188,7 @@ export function buildEmailMessage(
         references: input.references,
         language: input.composed.language,
         text: input.composed.text,
-        html: wrapHtmlDocument(input.composed.html, input.composed.language),
+        html: wrapHtmlDocument(input.composed.html, input.composed.language, input.openPixelUrl),
         unsubscribeHeaders,
       },
       random,

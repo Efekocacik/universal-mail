@@ -28,6 +28,8 @@ import {
   progressTone,
   statusStats,
 } from "./model";
+import { CampaignStatsCard } from "./campaign-stats-card";
+import { hasAbSubject } from "./category-variants";
 import { CampaignStatusBadge, DemoBadge, LoadError, Notice, Stat } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { MessagesTable, QueueTable } from "./queue-table";
@@ -134,6 +136,17 @@ function Overview({ c }: { c: CampaignDetail }) {
           ))}
         </div>
       </div>
+      <CampaignStatsCard
+        campaignId={c.id}
+        running={c.status === "running"}
+        abConfigured={c.steps.some(
+          (st) =>
+            st.stepIndex === 0 &&
+            [st.templateId, ...(st.categoryTemplates ?? []).map((x) => x.templateId)].some((id) =>
+              hasAbSubject(templates.data ?? [], id),
+            ),
+        )}
+      />
       <dl className="grid gap-3 rounded-lg border bg-card p-4 text-[13px] sm:grid-cols-2">
         <div>
           <dt className="text-muted-foreground">{t("wizard.window")}</dt>

@@ -3,7 +3,16 @@ import * as cheerio from "cheerio";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
 import type { Db, DbExecutor } from "@/lib/db/client";
-import { auditLog, campaigns, campaignSteps, categorySets, templates } from "@/lib/db/schema";
+import {
+  auditLog,
+  campaigns,
+  campaignSteps,
+  campaignStepTemplates,
+  categorySets,
+  templates,
+  type SubjectVariant,
+} from "@/lib/db/schema";
+import { isInfoOnlyLanguage } from "./builtin-templates";
 import { checkContent, type ContentIssue } from "./content-check";
 import { buildFooter, FooterError, type FooterMode } from "./footer";
 import { htmlToText } from "./html";
@@ -40,7 +49,7 @@ export type TemplateServiceErrorKind =
 export class TemplateServiceError extends Error {
   constructor(
     readonly kind: TemplateServiceErrorKind,
-    readonly issues: (TemplateIssue | ContentIssue)[] = [],
+    readonly issues: TemplateSaveIssue[] = [],
     /** Kişisel veri İÇERMEYEN makine bilgisi (ör. kilitleyen kampanyalar, güncel sürüm). */
     readonly detail: Record<string, unknown> = {},
   ) {
@@ -57,16 +66,26 @@ export interface TemplateCampaignRef {
   status: string;
 }
 
-/** Şablonu adımlarında kullanan kampanyalar (kimliğe göre). */
+/**
+ * Şablonu adımlarında veya adımların kategori varyantlarında (Faz 5, `campaign_step_templates`) kullanan kampanyalar
+ * (kimliğe göre, tekrarsız).
+ */
 async function campaignsUsing(db: DbExecutor, templateId: number): Promise<TemplateCampaignRef[]> {
-  const rows = await db
-    .select({ id: campaigns.id, name: campaigns.name, status: campaigns.status })
+  const cols = { id: campaigns.id, name: campaigns.name, status: campaigns.status };
+  const direct = await db
+    .select(cols)
     .from(campaignSteps)
     .innerJoin(campaigns, eq(campaigns.id, campaignSteps.campaignId))
-    .where(eq(campaignSteps.templateId, templateId))
-    .orderBy(asc(campaigns.id));
+    .where(eq(campaignSteps.templateId, templateId));
+  const variant = await db
+    .select(cols)
+    .from(campaignStepTemplates)
+    .innerJoin(campaigns, eq(campaigns.id, campaignStepTemplates.campaignId))
+    .where(eq(campaignStepTemplates.templateId, templateId));
   const seen = new Set<number>();
-  return rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+  return [...direct, ...variant]
+    .sort((a, b) => a.id - b.id)
+    .filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true)));
 }
 
 /** Kilitleyen bir kampanya varsa `in_use` fırlatır. Güncelleme/arşivleme işleminin İÇİNDE çağrılır (yarışa karşı). */
@@ -89,7 +108,21 @@ export interface TemplateDraft {
    * şablonunda anlamsızdır ve yok sayılır.
    */
   followupReuseSubject?: boolean;
+  /**
+   * Faz 5: A/B denemesinin ikinci konusu. Yalnızca ilk e-posta şablonunda saklanır (takip şablonunda yok sayılır);
+   * boş metin = A/B yok. Birinci konuyla aynı doğrulama ve içerik denetiminden geçer.
+   */
+  subjectB?: string | null;
 }
+
+/** B konusundaki sorun (alan adı `subjectB`); şablon/içerik sorunlarıyla aynı biçimde gösterilir. */
+export interface SubjectBIssue {
+  field: "subjectB";
+  code: string;
+  detail?: string;
+}
+
+export type TemplateSaveIssue = TemplateIssue | ContentIssue | SubjectBIssue;
 
 interface Prepared {
   fields: Pick<
@@ -102,8 +135,33 @@ interface Prepared {
     | "bodyHtml"
     | "bodyText"
     | "followupReuseSubject"
+    | "subjectB"
+    | "infoOnly"
   >;
-  warnings: (TemplateIssue | ContentIssue)[];
+  warnings: TemplateSaveIssue[];
+}
+
+/**
+ * B konusunu birinci konuyla aynı kurallarla denetler (değişken söz dizimi, uzunluk, satır sonu, yanıltıcı "Re:").
+ * Sorunlar `subjectB` alanıyla döner. Boşsa null (A/B yok).
+ */
+function prepareSubjectB(
+  draft: TemplateDraft,
+  bodyText: string,
+): { value: string | null; errors: SubjectBIssue[]; warnings: SubjectBIssue[] } {
+  const raw = draft.subjectB?.trim() ?? "";
+  if (draft.kind !== "initial" || raw === "") return { value: null, errors: [], warnings: [] };
+  const v = validateTemplate({ ...draft, subject: raw });
+  const asB = (i: { code: string; detail?: string }): SubjectBIssue => ({
+    field: "subjectB",
+    code: i.code,
+    ...(i.detail ? { detail: i.detail } : {}),
+  });
+  const errors = v.errors.filter((i) => i.field === "subject").map(asB);
+  const content = checkContent({ subject: raw, body: bodyText });
+  errors.push(...content.errors.filter((i) => i.where === "subject").map(asB));
+  const warnings = content.warnings.filter((i) => i.where === "subject").map(asB);
+  return { value: raw, errors, warnings };
 }
 
 async function prepare(db: Db, draft: TemplateDraft): Promise<Prepared> {
@@ -116,6 +174,9 @@ async function prepare(db: Db, draft: TemplateDraft): Promise<Prepared> {
     links: hrefs(v.sanitizedHtml),
   });
   if (content.errors.length > 0) throw new TemplateServiceError("invalid_template", content.errors);
+  const subjectB = prepareSubjectB(draft, bodyText);
+  if (subjectB.errors.length > 0)
+    throw new TemplateServiceError("invalid_template", subjectB.errors);
 
   const categoryKey = draft.categoryKey?.trim() || null;
   if (categoryKey) {
@@ -136,8 +197,11 @@ async function prepare(db: Db, draft: TemplateDraft): Promise<Prepared> {
       bodyHtml: v.sanitizedHtml,
       bodyText,
       followupReuseSubject: draft.followupReuseSubject ?? true,
+      subjectB: subjectB.value,
+      // Bilgi amaçlı dil (DE): istemciden yazılamaz, dilden türetilir; gönderimde ve kampanya adımında reddedilir.
+      infoOnly: isInfoOnlyLanguage(draft.language),
     },
-    warnings: [...v.warnings, ...content.warnings],
+    warnings: [...v.warnings, ...content.warnings, ...subjectB.warnings],
   };
 }
 
@@ -152,7 +216,7 @@ export async function createTemplate(
   db: Db,
   draft: TemplateDraft,
   now = Date.now(),
-): Promise<{ id: number; version: number; warnings: (TemplateIssue | ContentIssue)[] }> {
+): Promise<{ id: number; version: number; warnings: TemplateSaveIssue[] }> {
   const p = await prepare(db, draft);
   return db.transaction(async (tx) => {
     const [row] = await tx
@@ -177,7 +241,7 @@ export async function updateTemplate(
   now = Date.now(),
   /** `expectedVersion`: istemcinin ekranda gördüğü sürüm. Farklıysa başkasının değişikliği ezilmez (`conflict`). */
   opts: { expectedVersion?: number } = {},
-): Promise<{ version: number; warnings: (TemplateIssue | ContentIssue)[] }> {
+): Promise<{ version: number; warnings: TemplateSaveIssue[] }> {
   const [current] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
   if (!current) throw new TemplateServiceError("not_found");
   if (current.archivedAt !== null) throw new TemplateServiceError("archived");
@@ -193,6 +257,7 @@ export async function updateTemplate(
     subject: patch.subject ?? current.subject,
     bodyHtml: patch.bodyHtml ?? current.bodyHtml,
     followupReuseSubject: patch.followupReuseSubject ?? current.followupReuseSubject,
+    subjectB: patch.subjectB === undefined ? current.subjectB : patch.subjectB,
   });
   return db.transaction(async (tx) => {
     await assertNotLocked(tx, id);
@@ -252,7 +317,7 @@ export async function duplicateTemplate(
   db: Db,
   id: number,
   now = Date.now(),
-): Promise<{ id: number; version: number; warnings: (TemplateIssue | ContentIssue)[] }> {
+): Promise<{ id: number; version: number; warnings: TemplateSaveIssue[] }> {
   const [src] = await db.select().from(templates).where(eq(templates.id, id)).limit(1);
   if (!src) throw new TemplateServiceError("not_found");
   if (src.archivedAt !== null) throw new TemplateServiceError("archived");
@@ -267,6 +332,7 @@ export async function duplicateTemplate(
       subject: src.subject,
       bodyHtml: src.bodyHtml,
       followupReuseSubject: src.followupReuseSubject,
+      subjectB: src.subjectB,
     },
     now,
   );
@@ -291,6 +357,10 @@ export interface TemplateListItem {
   subject: string;
   /** Takip şablonunda ilk e-postanın konusu "Re:" ile kullanılır (9d). */
   followupReuseSubject: boolean;
+  /** Faz 5: A/B ikinci konusu (yoksa null). */
+  subjectB: string | null;
+  /** Faz 5: yalnızca bilgi amaçlı (DE); gönderimde kullanılamaz. */
+  infoOnly: boolean;
   archived: boolean;
   updatedAt: number;
   /** Kilitleyen (hazır/çalışan/duraklatılmış) kampanya sayısı; sıfırdan büyükse içerik değiştirilemez. */
@@ -306,11 +376,18 @@ export async function listTemplates(
     .select()
     .from(templates)
     .orderBy(asc(templates.language), asc(templates.kind), asc(templates.id));
-  const locks = await db
+  const locking = inArray(campaigns.status, [...TEMPLATE_LOCKING_STATUSES]);
+  const stepLocks = await db
     .select({ templateId: campaignSteps.templateId, campaignId: campaigns.id })
     .from(campaignSteps)
     .innerJoin(campaigns, eq(campaigns.id, campaignSteps.campaignId))
-    .where(inArray(campaigns.status, [...TEMPLATE_LOCKING_STATUSES]));
+    .where(locking);
+  const variantLocks = await db
+    .select({ templateId: campaignStepTemplates.templateId, campaignId: campaigns.id })
+    .from(campaignStepTemplates)
+    .innerJoin(campaigns, eq(campaigns.id, campaignStepTemplates.campaignId))
+    .where(locking);
+  const locks = [...stepLocks, ...variantLocks];
   const lockSets = new Map<number, Set<number>>();
   for (const l of locks) {
     const set = lockSets.get(l.templateId) ?? new Set<number>();
@@ -329,6 +406,8 @@ export async function listTemplates(
       version: t.version,
       subject: t.subject,
       followupReuseSubject: t.followupReuseSubject,
+      subjectB: t.subjectB,
+      infoOnly: t.infoOnly,
       archived: t.archivedAt !== null,
       updatedAt: t.updatedAt,
       lockedBy: lockSets.get(t.id)?.size ?? 0,
@@ -356,6 +435,8 @@ export async function getTemplateDetail(db: DbExecutor, id: number): Promise<Tem
     version: t.version,
     subject: t.subject,
     followupReuseSubject: t.followupReuseSubject,
+    subjectB: t.subjectB,
+    infoOnly: t.infoOnly,
     archived: t.archivedAt !== null,
     updatedAt: t.updatedAt,
     bodyHtml: t.bodyHtml,
@@ -379,7 +460,9 @@ export type ComposeErrorCode =
   | "unsubscribe_link_required"
   | "live_sending_disabled"
   | "missing_variables"
-  | "content_blocked";
+  | "content_blocked"
+  /** Faz 5: yalnızca bilgi amaçlı şablon (DE) gönderimde kullanılamaz (kampanya duraklar; API ayrıca reddeder). */
+  | "template_info_only";
 
 export interface ComposeIssue {
   code: ComposeErrorCode;
@@ -419,6 +502,8 @@ export interface ComposedEmail {
   /** İçerik kanıtı (`messages.body_sha256`, tanım: `CONTENT_HASH_VERSION`); gövde saklanmaz. */
   bodySha256: string | null;
   missing: string[];
+  /** Faz 5: kullanılan A/B konusu; şablonda B konusu yoksa veya takip iletisinde null. */
+  subjectVariant: SubjectVariant | null;
 }
 
 /**
@@ -454,13 +539,20 @@ interface ComposeInput {
    * Şablonun kendi konusundaki "Re:" yasağı (`content-check`) aynen geçerlidir.
    */
   threadSubject?: string | null;
+  /**
+   * Faz 5: A/B konusu. "b" yalnızca şablonun B konusu varsa uygulanır; yoksa A kullanılır ve `subjectVariant` null
+   * döner. Takip iletisinin konusu (`threadSubject`) varyanttan bağımsızdır.
+   */
+  subjectVariant?: SubjectVariant;
 }
 
 type ComposeSource = Pick<
   typeof templates.$inferSelect,
   "id" | "version" | "language" | "subject" | "bodyHtml" | "archivedAt"
 > &
-  Partial<Pick<typeof templates.$inferSelect, "kind" | "followupReuseSubject">>;
+  Partial<
+    Pick<typeof templates.$inferSelect, "kind" | "followupReuseSubject" | "subjectB" | "infoOnly">
+  >;
 
 /** "Re:"/"YNT:" gibi yanıt öneklerini (tekrarlı da olsa) baştan siler. */
 export function stripReplyPrefixes(subject: string): string {
@@ -498,6 +590,7 @@ async function composeCore(
     text: "",
     bodySha256: null,
     missing: [],
+    subjectVariant: null,
   };
 
   if (input.mode === "live" && !isLiveSendingPermitted() && !input.selfTest)
@@ -508,6 +601,8 @@ async function composeCore(
     return empty;
   }
   if (tpl.archivedAt !== null) errors.push({ code: "template_archived" });
+  if (tpl.infoOnly === true && input.purpose === "send")
+    errors.push({ code: "template_info_only" });
   if (!isSupportedLanguage(tpl.language)) {
     errors.push({ code: "unsupported_language" });
     return { ...empty, templateVersion: tpl.version };
@@ -540,10 +635,19 @@ async function composeCore(
     errors.push({ code: e.kind });
   }
 
+  // A/B: B konusu yalnızca şablonda varsa ve ilk e-posta konusu kullanılacaksa (takipte konu devamı önceliklidir).
+  const useB = input.subjectVariant === "b" && !!tpl.subjectB?.trim();
+  const variant: SubjectVariant | null = tpl.subjectB?.trim()
+    ? useB
+      ? "b"
+      : input.subjectVariant === "a"
+        ? "a"
+        : null
+    : null;
   let body;
   try {
     body = renderTemplate(
-      { subject: tpl.subject, bodyHtml: tpl.bodyHtml },
+      { subject: useB ? tpl.subjectB!.trim() : tpl.subject, bodyHtml: tpl.bodyHtml },
       { ...ctx.values, cikis_linki: footer?.unsubscribeUrl ?? null },
       { markMissing: input.purpose === "preview" },
     );
@@ -581,6 +685,7 @@ async function composeCore(
     text,
     bodySha256: contentSha256(subject, text, html),
     missing: body.missing,
+    subjectVariant: variant,
   };
 }
 
@@ -597,9 +702,16 @@ export async function previewTemplateDraft(
   db: DbExecutor,
   draft: TemplateDraft,
   leadId: number,
+  /** Faz 5: hangi konuyla önizlensin ("b" için taslakta B konusu olmalı; rota bunu ayrıca denetler). */
+  variant: SubjectVariant = "a",
 ): Promise<DraftPreview> {
   const v = validateTemplate(draft);
   if (!v.ok) return { ok: false, errors: v.errors, warnings: v.warnings };
+  const subjectB = variant === "b" ? draft.subjectB?.trim() || null : null;
+  if (subjectB !== null) {
+    const vb = validateTemplate({ ...draft, subject: subjectB });
+    if (!vb.ok) return { ok: false, errors: vb.errors, warnings: vb.warnings };
+  }
   const composed = await composeCore(
     db,
     {
@@ -609,8 +721,55 @@ export async function previewTemplateDraft(
       subject: draft.subject.trim(),
       bodyHtml: v.sanitizedHtml,
       archivedAt: null,
+      kind: draft.kind as "initial" | "followup",
+      subjectB,
     },
-    { templateId: 0, leadId, mode: "demo", purpose: "preview" },
+    {
+      templateId: 0,
+      leadId,
+      mode: "demo",
+      purpose: "preview",
+      ...(subjectB ? { subjectVariant: "b" as const } : {}),
+    },
   );
   return { ok: true, composed, warnings: v.warnings, variables: v.variables };
+}
+
+/* ------------------------------------------------------------------------------------------------
+ * Faz 5: adım şablonunun kategoriye göre çözümlenmesi ve A/B ataması
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * Bir dizinin (kampanya, adım, dil) için kullanılacak şablon: lead'in kategorisine özel bir varyant
+ * (`campaign_step_templates`) varsa o, yoksa adımın kendi şablonu. Adım yoksa null. Tek sorgu (birincil anahtar
+ * öneki ve bileşik FK üzerinden); yazma yapmaz.
+ */
+export async function resolveStepTemplateId(
+  db: DbExecutor,
+  input: { campaignId: number; stepIndex: number; language: string; categoryKey: string | null },
+  stepTemplateId: number,
+): Promise<number> {
+  const key = input.categoryKey?.trim();
+  if (!key) return stepTemplateId;
+  const [row] = await db
+    .select({ templateId: campaignStepTemplates.templateId })
+    .from(campaignStepTemplates)
+    .where(
+      and(
+        eq(campaignStepTemplates.campaignId, input.campaignId),
+        eq(campaignStepTemplates.stepIndex, input.stepIndex),
+        eq(campaignStepTemplates.language, input.language),
+        eq(campaignStepTemplates.categoryKey, key),
+      ),
+    )
+    .limit(1);
+  return row?.templateId ?? stepTemplateId;
+}
+
+/**
+ * A/B konu ataması: deterministik ve dengeli (kampanya alıcısı numarası çiftse A, tekse B). Yeniden deneme ve
+ * idempotency aynı varyantı verir; ardışık eklenen alıcılar dönüşümlü dağılır.
+ */
+export function assignSubjectVariant(campaignLeadId: number): SubjectVariant {
+  return campaignLeadId % 2 === 0 ? "a" : "b";
 }
