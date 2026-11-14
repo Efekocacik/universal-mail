@@ -33,7 +33,7 @@ import {
   type ScanEstimate,
 } from "./planner";
 import { ACTIVE_SCAN_MESSAGE, ScanGateError } from "./gate-error";
-import { COST_CAP } from "./pause-codes";
+import { COST_CAP, PROVIDER_CHANGED } from "./pause-codes";
 import { insertUnits, loadScan, setScanStatus } from "./store";
 
 export { PlanError };
@@ -279,6 +279,15 @@ export async function resumeScan(db: Db, scanId: number): Promise<ControlResult>
     return {
       ok: false,
       error: "Yalnızca duraklatılmış veya bütçe nedeniyle durmuş tarama sürdürülebilir.",
+    };
+  }
+  if (
+    scan.pauseCode === PROVIDER_CHANGED ||
+    scan.provider !== (await getSetting(db, "places.provider"))
+  ) {
+    return {
+      ok: false,
+      error: "Yer sağlayıcısı değiştiği için bu tarama sürdürülemez. Yeni bir tarama başlatın.",
     };
   }
   const budget = await budgetStatus(db, scan.provider, await getSetting(db, "budget.monthlyUsd"));

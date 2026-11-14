@@ -18,6 +18,7 @@ import {
   BUDGET_STOP_CODE,
   CALL_LIMIT,
   COST_CAP,
+  PROVIDER_CHANGED,
   providerPauseCode,
 } from "./pause-codes";
 import { onScanCompleted, onScanFailed, onScanPaused } from "./scan-notifications";
@@ -119,6 +120,21 @@ export async function runScan(deps: RunnerDeps, scanId: number): Promise<ScanOut
       : "paused";
   }
 
+  // Tarama başka bir sağlayıcıyla oluşturuldu (ör. demo iken kuyruğa alındı, sonra Google'a geçildi): onayı ve tahmini
+  // o sağlayıcı içindi; yeni sağlayıcıda (ücretli) tek çağrı bile yapılmaz.
+  if (scan.provider !== deps.provider.id) {
+    const lostHold = await transition(db, scanId, "paused", {
+      pauseReason:
+        "Yer sağlayıcısı değişti; bu tarama önceki sağlayıcının tahmini ve onayıyla oluşturulduğu için sürdürülemez. Yeni bir tarama başlatın.",
+      pauseCode: PROVIDER_CHANGED,
+    });
+    if (lostHold) return lostHold;
+    log(
+      `Tarama ${scanId}: sağlayıcı değişti (${scan.provider} → ${deps.provider.id}); duraklatıldı.`,
+    );
+    await onScanPaused(db, scanId, now(), log);
+    return "paused";
+  }
   const lost = await transition(db, scanId, "running", { startedAt: scan.startedAt ?? now() });
   if (lost) return lost;
   await db

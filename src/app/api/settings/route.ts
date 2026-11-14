@@ -6,7 +6,7 @@ import { getSetupState } from "@/lib/app/state";
 import { audit } from "@/lib/db/audit";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { secretStatus } from "@/lib/secrets/store";
-import { revokeScheduleAcks } from "@/lib/scan/schedule-service";
+import { holdScansForProviderChange, revokeScheduleAcks } from "@/lib/scan/schedule-service";
 import {
   getSetting,
   getSettings,
@@ -86,10 +86,16 @@ export const PUT = route(async (req: Request) => {
   // Hepsi ya da hiçbiri: birden çok anahtar tek işlemde yazılır (yarım kalan güncelleme olmaz).
   await db.transaction(async (tx) => {
     // Sağlayıcı Google'a geçiyorsa demo/önceki sağlayıcıyla verilmiş zamanlama ön onayları geri alınır (aynı işlem).
+    // Sağlayıcı değiştiyse eski sağlayıcıyla oluşturulmuş bitmemiş taramalar PROVIDER_CHANGED ile duraklatılır:
+    // demo döneminin tahmini/onayıyla kuyruktaki veya kendiliğinden sürdürülecek tarama ücretli Google'da çalışmaz.
     const nextProvider = patch["places.provider"];
-    if (nextProvider === "google") {
+    if (nextProvider !== undefined) {
       const prev = await getSetting(tx, "places.provider");
-      if (prev !== nextProvider) await revokeScheduleAcks(tx, { from: prev, to: nextProvider });
+      if (prev !== nextProvider) {
+        if (nextProvider === "google")
+          await revokeScheduleAcks(tx, { from: prev, to: nextProvider });
+        await holdScansForProviderChange(tx, { from: prev, to: nextProvider });
+      }
     }
     for (const [key, value] of entries) {
       const normalized =

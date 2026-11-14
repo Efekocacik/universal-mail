@@ -1,4 +1,4 @@
-import { desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
@@ -11,6 +11,7 @@ import {
 } from "@/lib/db/schema";
 import { deleteNotificationsFor } from "@/lib/notifications";
 import { uniqueViolationOn } from "./db-errors";
+import { PROVIDER_CHANGED } from "./pause-codes";
 import { DAY_MS, DEFAULT_INTERVAL_DAYS, scheduleRequest, type ScheduleRow } from "./schedule";
 import { estimateForRequest, prepareScan } from "./service";
 
@@ -339,4 +340,42 @@ export async function revokeScheduleAcks(
       now,
     );
   return revoked.length;
+}
+
+/**
+ * Yer sağlayıcısı değişince bitmemiş taramalar (kuyrukta, çalışıyor, duraklı, bütçede durmuş) eski sağlayıcıyla
+ * oluşturulmuşsa `PROVIDER_CHANGED` koduyla duraklatılır: zamanlanmış taramanın kendiliğinden sürdürülmesi (tick,
+ * işçi kurtarması) veya kuyruktaki işi, demo döneminin tahmin ve onayıyla YENİ sağlayıcıda (ücretli Google) çalışmaz.
+ * Ayarların yazıldığı işlemin içinde çağrılır. Etkilenen tarama sayısı döner.
+ */
+export async function holdScansForProviderChange(
+  tx: DbExecutor,
+  reason: { from: string; to: string },
+  now: number = Date.now(),
+): Promise<number> {
+  const held = await tx
+    .update(scans)
+    .set({
+      status: "paused",
+      pauseCode: PROVIDER_CHANGED,
+      pauseReason:
+        "Yer sağlayıcısı değişti; bu tarama önceki sağlayıcının tahmini ve onayıyla oluşturulduğu için sürdürülemez. Yeni bir tarama başlatın.",
+    })
+    .where(
+      and(
+        ne(scans.provider, reason.to as "google" | "mock"),
+        inArray(scans.status, ["queued", "running", "paused", "budget_stopped"]),
+      ),
+    )
+    .returning({ id: scans.id });
+  if (held.length > 0)
+    await audit(
+      tx,
+      "scan.provider_changed",
+      "scan",
+      undefined,
+      { scanIds: held.map((h) => h.id), providerFrom: reason.from, providerTo: reason.to },
+      now,
+    );
+  return held.length;
 }
