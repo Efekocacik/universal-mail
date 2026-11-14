@@ -22,5 +22,7 @@ export default defineConfig({
     reuseExistingServer: false,
     timeout: 120_000,
     env: { E2E_PORT: port },
+    // SIGTERM: serve.mjs sunucu ve işçiyi kapatıp geçici veri klasörünü siler (SIGKILL'de klasör kalırdı).
+    gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
   },
 });
