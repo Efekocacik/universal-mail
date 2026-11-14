@@ -5,6 +5,11 @@ import type { EnFragment } from "../types";
 export const scan = {
   "scans.origin.schedule": "Scheduled",
   "schedules.title": "Recurring scans",
+  "schedules.stalled.title": "Recurring scans are not running right now",
+  "schedules.stalled.body":
+    "A scan is due but the background round has stopped. Restart it; the scan starts within a few minutes under the usual approval and budget rules.",
+  "schedules.stalled.action": "Restart",
+  "schedules.stalled.done": "Recurring scans restarted.",
   "help.schedules":
     "Rescans the chosen area automatically at the interval you set. A run can never cost more than the amount you approved; if it would, it pauses and asks you.",
   "schedules.loadError": "Recurring scans could not be loaded.",

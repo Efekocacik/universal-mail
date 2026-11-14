@@ -117,6 +117,31 @@ test("Taramalar sayfası: düzenli tarama bölümü, aralık değişimi ve şimd
   await expect(page.getByText("Zamanlanmış").first()).toBeVisible();
 });
 
+test("tur zinciri kopuksa uyarı görünür; 'Yeniden başlat' zinciri kurar", async () => {
+  // Kopuk zincir (10 dk'dan uzun süredir tick'siz bekleyen zamanlama) saat ilerletmeden kurulamaz: durum yanıtı
+  // yalnızca `stalled` alanı için değiştirilir; düğme GERÇEK /api/schedules/rearm ucunu çağırır.
+  let stalled = true;
+  await page.route("**/api/status", async (route) => {
+    const res = await route.fetch();
+    const body = await res.json();
+    body.schedules = { ...body.schedules, stalled, tickArmed: !stalled };
+    await route.fulfill({ response: res, json: body });
+  });
+  const rearm = page.waitForResponse(
+    (r) => r.url().endsWith("/api/schedules/rearm") && r.request().method() === "POST",
+  );
+  await page.goto("/scans");
+  const banner = page.getByTestId("schedules-stalled");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("Düzenli taramalar şu anda çalışmıyor");
+  stalled = false;
+  await banner.getByRole("button", { name: "Yeniden başlat" }).click();
+  expect((await rearm).status()).toBe(200);
+  await expect(page.getByText("Düzenli taramalar yeniden başlatıldı.")).toBeVisible();
+  await expect(banner).toBeHidden();
+  await page.unroute("**/api/status");
+});
+
 test("zamanlama kapatılır ve silinir; geçmiş taramalar kalır", async () => {
   const section = page.getByRole("region", { name: "Düzenli taramalar" });
   const row = section.getByRole("listitem").filter({ hasText: "Amsterdam" });

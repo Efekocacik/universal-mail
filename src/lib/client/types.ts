@@ -60,7 +60,15 @@ export interface AppStatus {
   /** Faz 4: okunmamış bildirim sayısı (zil rozeti). */
   unreadNotifications: number;
   /** Faz 4: etkin zamanlama sayısı, zamanı gelmiş olanlar ve en yakın çalışma anı. */
-  schedules: { total: number; due: number; nextRunAt: number | null };
+  schedules: {
+    total: number;
+    due: number;
+    nextRunAt: number | null;
+    /** Kuyrukta ya da çalışan zamanlama turu (tick) var mı. */
+    tickArmed: boolean;
+    /** Zamanı gelmiş zamanlama uzun süredir bekliyor ve tur zinciri kopuk: arayüz "Yeniden başlat" önerir. */
+    stalled: boolean;
+  };
 }
 
 export interface CityResult {

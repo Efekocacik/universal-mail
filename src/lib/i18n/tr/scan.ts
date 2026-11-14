@@ -6,6 +6,11 @@ export const scan = {
   // Taramalar sayfası ve zamanlamalar
   "scans.origin.schedule": "Zamanlanmış",
   "schedules.title": "Düzenli taramalar",
+  "schedules.stalled.title": "Düzenli taramalar şu anda çalışmıyor",
+  "schedules.stalled.body":
+    "Zamanı gelmiş bir tarama bekliyor ama arka plan turu durmuş. Yeniden başlatın; tarama birkaç dakika içinde normal onay ve bütçe kurallarıyla başlar.",
+  "schedules.stalled.action": "Yeniden başlat",
+  "schedules.stalled.done": "Düzenli taramalar yeniden başlatıldı.",
   "help.schedules":
     "Seçtiğiniz bölgeyi belirlediğiniz aralıkla kendiliğinden yeniden tarar. Bir çalışma onayladığınız tutarı aşamaz; aşacaksa durur ve size sorar.",
   "schedules.loadError": "Düzenli taramalar yüklenemedi.",

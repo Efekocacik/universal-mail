@@ -12,10 +12,12 @@ import { Switch } from "@/components/ui/switch";
 import { HelpTip } from "@/components/ui/tooltip";
 import { errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtUsd } from "@/lib/client/format";
+import { useStatus } from "@/lib/client/queries";
 import {
   INTERVALS,
   parseCostCap,
   scheduleControlName,
+  useRearmSchedules,
   scheduleViewModel,
   startScheduleRun,
   useDeleteSchedule,
@@ -250,8 +252,42 @@ function CapEditor({ s, title }: { s: ScheduleItem; title: string }) {
  * Taramalar sayfasının üstündeki "Düzenli taramalar" bölümü. Zamanlama yoksa yalnızca kısa bir açıklama gösterilir;
  * liste yüklenemezse boş liste gibi davranmaz ("henüz yok" demek yanıltıcı olur), hata ve "Yeniden dene" gösterilir.
  */
+/**
+ * Tur zinciri kopuk (`schedules.stalled`): zamanı gelmiş zamanlamalar çalışmıyor. Kullanıcı tek tıkla zinciri yeniden
+ * kurar (idempotent; ücretli çağrı yapmaz, çalışmalar normal kapılardan geçer).
+ */
+function StalledBanner() {
+  const rearm = useRearmSchedules();
+  return (
+    <div
+      role="status"
+      data-testid="schedules-stalled"
+      className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-caution-text"
+    >
+      <div className="min-w-0">
+        <p className="font-medium">{t("schedules.stalled.title")}</p>
+        <p>{t("schedules.stalled.body")}</p>
+      </div>
+      <Button
+        size="sm"
+        variant="outline"
+        loading={rearm.isPending}
+        onClick={() =>
+          rearm.mutate(undefined, {
+            onSuccess: () => toast.success(t("schedules.stalled.done")),
+            onError: (e: Error) => toast.error(errorText(e)),
+          })
+        }
+      >
+        {!rearm.isPending && <RefreshCw />} {t("schedules.stalled.action")}
+      </Button>
+    </div>
+  );
+}
+
 export function SchedulesSection() {
   const { data, isLoading, isError, refetch, isFetching } = useSchedules();
+  const stalled = useStatus().data?.schedules.stalled === true;
   if (isLoading) return null;
   const list = data ?? [];
   return (
@@ -270,6 +306,7 @@ export function SchedulesSection() {
           )}
         </div>
       </div>
+      {stalled && list.length > 0 && <StalledBanner />}
       {isError && !data ? (
         <EmptyState
           compact

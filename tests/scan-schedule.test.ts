@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as schedulesRoute from "@/app/api/schedules/route";
 import * as scheduleRoute from "@/app/api/schedules/[id]/route";
 import * as runNowRoute from "@/app/api/schedules/[id]/run-now/route";
+import * as rearmRoute from "@/app/api/schedules/rearm/route";
 import * as settingsRoute from "@/app/api/settings/route";
 import * as statusRoute from "@/app/api/status/route";
 import { recordUsage } from "@/lib/budget";
@@ -710,6 +711,37 @@ describe("HTTP: /api/schedules", () => {
     });
     const st = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
     expect(st.schedules).toMatchObject({ total: 1 });
+  });
+
+  it("yeniden başlat: kopuk zincirde tick şimdiye kurulur; tekrar çağrı ikinci tick eklemez", async () => {
+    const { nextRunAt } = await makeSchedule(7);
+    await db.delete(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+    vi.useFakeTimers({ now: nextRunAt + TICK_STALL_MS, toFake: ["Date"] });
+    try {
+      const before = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
+      expect(before.schedules).toMatchObject({ tickArmed: false, stalled: true });
+      const r = await rearmRoute.POST(req("POST", "/api/schedules/rearm"), undefined);
+      expect(r.status).toBe(200);
+      expect(await json(r)).toEqual({ armed: true });
+      const ticks = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+      expect(ticks).toHaveLength(1);
+      expect(ticks[0]).toMatchObject({ status: "queued", runAt: nextRunAt + TICK_STALL_MS });
+      // Kuyruktaki ileri tarihli tick şimdiye çekilir; yenisi eklenmez.
+      await db
+        .update(jobs)
+        .set({ runAt: nextRunAt + TICK_STALL_MS + 60 * 60_000 })
+        .where(eq(jobs.id, ticks[0]!.id));
+      expect((await rearmRoute.POST(req("POST", "/api/schedules/rearm"), undefined)).status).toBe(
+        200,
+      );
+      const again = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+      expect(again).toHaveLength(1);
+      expect(again[0]!.runAt).toBe(nextRunAt + TICK_STALL_MS);
+      const after = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
+      expect(after.schedules).toMatchObject({ tickArmed: true, stalled: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

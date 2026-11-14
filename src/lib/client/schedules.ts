@@ -10,6 +10,7 @@ import { api, ApiError, localizeApiError } from "./api";
  *  POST   /api/schedules {fromScanId, intervalDays?, maxCostUsd?} → 201 {id, nextRunAt, ackMaxUsd, warning?}
  *  PATCH  /api/schedules/:id {intervalDays?, enabled?, maxCostUsd?} → {schedule}
  *  DELETE /api/schedules/:id                     → 204
+ *  POST   /api/schedules/rearm                   → {armed: true} (kopmuş tur zincirini yeniden kurar)
  *  POST   /api/schedules/:id/run-now {acknowledgeRisk?} → 201 {scanId}
  */
 export type IntervalDays = 7 | 14 | 30;
@@ -225,6 +226,15 @@ export function useDeleteSchedule() {
   const done = useInvalidate();
   return useMutation({
     mutationFn: (id: number) => api(`/api/schedules/${id}`, { method: "DELETE" }),
+    onSuccess: done,
+  });
+}
+
+/** Kopmuş zamanlama zincirini yeniden kurar (POST /api/schedules/rearm; idempotent). */
+export function useRearmSchedules() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: () => api<{ armed: true }>("/api/schedules/rearm", { method: "POST", json: {} }),
     onSuccess: done,
   });
 }
