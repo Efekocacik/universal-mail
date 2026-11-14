@@ -536,7 +536,7 @@ describe.skipIf(unsafeTmp)("0003: kayıpsız geri alma", () => {
     expect([r4, r8, r6]).toEqual([
       { stopped: [], annotated: [4] },
       { stopped: [8], annotated: [] },
-      { stopped: [6], businessDomain: null },
+      { stopped: [6], pendingIds: [], businessDomain: null },
     ]);
     // Yeni sürümün gelen ARF satırları (sınıf + işaret)
     for (const [id, err] of [

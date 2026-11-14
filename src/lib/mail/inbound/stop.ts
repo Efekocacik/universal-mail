@@ -109,6 +109,11 @@ export async function stopSequences(
 /** TB-11(d) sonucu: durdurulan dizi kimlikleri ve eşleşmede kullanılan işletme alan adı. */
 export interface BusinessStopResult {
   stopped: number[];
+  /**
+   * Gönderim ortasındaki (`in_flight`) diziler: durumları değişmez, `exclusion_reasons`'a `business_complaint` yazılır;
+   * gönderim sonucu kaydedilince `settleIfBusinessComplaint` onları durdurur (sonraki adım gönderilmez).
+   */
+  pendingIds: number[];
   businessDomain: string | null;
 }
 
@@ -130,7 +135,7 @@ export async function stopBusinessSequences(
   now: number,
 ): Promise<BusinessStopResult> {
   const reg = businessDomainOf(business.recipientDomain);
-  const none: BusinessStopResult = { stopped: [], businessDomain: reg };
+  const none: BusinessStopResult = { stopped: [], pendingIds: [], businessDomain: reg };
   const scope: SQL[] = [];
   if (business.leadId !== null) scope.push(eq(campaignLeads.leadId, business.leadId));
   if (reg) {
@@ -143,18 +148,32 @@ export async function stopBusinessSequences(
       id: campaignLeads.id,
       leadId: campaignLeads.leadId,
       domain: campaignLeads.recipientDomain,
+      status: campaignLeads.status,
     })
     .from(campaignLeads)
-    .where(and(inArray(campaignLeads.status, [...STOPPABLE]), or(...scope)));
+    .where(and(inArray(campaignLeads.status, [...STOPPABLE, "in_flight"]), or(...scope)));
   // SQL ön süzgecinden sonra kesin eşleşme (LIKE yalnızca alt alan adı adayı bulur).
-  const ids = candidates
-    .filter(
-      (r) =>
-        (business.leadId !== null && r.leadId === business.leadId) ||
-        (reg !== null && businessDomainOf(r.domain) === reg),
-    )
-    .map((r) => r.id);
-  if (ids.length === 0) return none;
+  const matched = candidates.filter(
+    (r) =>
+      (business.leadId !== null && r.leadId === business.leadId) ||
+      (reg !== null && businessDomainOf(r.domain) === reg),
+  );
+  const ids = matched.filter((r) => r.status !== "in_flight").map((r) => r.id);
+  const flightIds = matched.filter((r) => r.status === "in_flight").map((r) => r.id);
+  // Gönderim ortasındaki dizi: durum korunur, işaret düşülür; sonuç kaydedilince durur (send-service).
+  const pending =
+    flightIds.length === 0
+      ? []
+      : await tx
+          .update(campaignLeads)
+          .set({
+            exclusionReasons: appendReasonsSql([BUSINESS_COMPLAINT_CODE]),
+            updatedAt: now,
+          })
+          .where(and(inArray(campaignLeads.id, flightIds), eq(campaignLeads.status, "in_flight")))
+          .returning({ id: campaignLeads.id });
+  const pendingIds = pending.map((r) => r.id);
+  if (ids.length === 0) return { ...none, pendingIds };
   const rows = await tx
     .update(campaignLeads)
     .set({
@@ -166,5 +185,34 @@ export async function stopBusinessSequences(
     })
     .where(and(inArray(campaignLeads.id, ids), inArray(campaignLeads.status, [...STOPPABLE])))
     .returning({ id: campaignLeads.id });
-  return { stopped: rows.map((r) => r.id), businessDomain: reg };
+  return { stopped: rows.map((r) => r.id), pendingIds, businessDomain: reg };
+}
+
+/**
+ * TB-11(d) tamamlayıcısı: şikâyet geldiğinde gönderim ortasında olan (`in_flight`) ve `business_complaint` işareti
+ * düşülen dizi, gönderim sonucu kaydedilip süren bir duruma (`scheduled`/`waiting_next`/`pending`) döndüğünde durur:
+ * `unsubscribed` + `stop_reason='complaint'` (+ `arf_complaint` çift yazımı). Böylece şikâyet eden işletmenin başka
+ * adresine sonraki takip adımı gönderilmez. `settleIfCancelled` ile aynı yerlerde çağrılır.
+ */
+export async function settleIfBusinessComplaint(
+  tx: DbExecutor,
+  campaignLeadId: number,
+  now: number,
+): Promise<void> {
+  await tx
+    .update(campaignLeads)
+    .set({
+      status: "unsubscribed",
+      stopReason: "complaint",
+      nextSendAt: null,
+      updatedAt: now,
+      exclusionReasons: appendReasonsSql([ARF_COMPLAINT_CODE, BUSINESS_COMPLAINT_CODE]),
+    })
+    .where(
+      and(
+        eq(campaignLeads.id, campaignLeadId),
+        inArray(campaignLeads.status, [...STOPPABLE]),
+        sql`json_valid(${campaignLeads.exclusionReasons}) AND EXISTS (SELECT 1 FROM json_each(${campaignLeads.exclusionReasons}) WHERE value = ${BUSINESS_COMPLAINT_CODE})`,
+      ),
+    );
 }

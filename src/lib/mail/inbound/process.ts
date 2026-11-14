@@ -585,6 +585,8 @@ async function applyEffect(
         annotatedIds: auditIds(res.annotated),
         businessStopped: business.stopped.length,
         businessStoppedIds: auditIds(business.stopped),
+        businessPending: business.pendingIds.length,
+        businessPendingIds: auditIds(business.pendingIds),
         businessDomain: business.businessDomain,
       },
       now,

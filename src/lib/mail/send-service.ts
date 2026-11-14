@@ -56,6 +56,7 @@ import {
   type MailProvider,
   type ProviderResult,
 } from "./provider/provider";
+import { settleIfBusinessComplaint } from "./inbound/stop";
 import { retryDelayMs } from "./scheduler/retry";
 import { effectiveMailboxCap, gapMs, nextUtcDayStart, warmupCeiling } from "./scheduler/throttle";
 import {
@@ -775,6 +776,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -808,6 +810,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -849,6 +852,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -915,6 +919,7 @@ export async function advanceAfterSent(
     })
     .where(eq(leads.id, cl!.leadId));
   await settleIfCancelled(tx, p.campaignLeadId, now);
+  await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
   // Isınma, kutunun ilk başarılı gönderimiyle başlar.
   await tx
     .update(mailboxes)
