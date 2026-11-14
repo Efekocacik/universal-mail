@@ -229,7 +229,7 @@ Son kapıdan önce güvenlik, şema ve olay (incident) odaklı denetim yedi bulg
 | P2 | Uyanmada tick hatası gönderim uyandırmasını engelliyor, 30 sn kapısını tüketiyordu | **Düzeltildi** (bkz. 2.8). Test: `worker-faz4` |
 | P2 | OS bildirimi: gösterim hatası kalanları düşürüyor, yoklama reddi işlenmiyor, dil okuması sahiplenmeden sonra 500 verebiliyordu | **Düzeltildi** (bkz. 2.8). Test: `electron-notify` |
 
-**Ertelenen (izleme):** `stalled` bayrağı ve "işsiz kuyrukta tarama" durumu henüz arayüzde uyarı olarak gösterilmiyor; tükenen bakım turu yeniden denemeleri yalnızca günlükte. Kök nedenler düzeltildiği için bunlar uyarı katmanı olarak sonraki fazın izleme işine bırakıldı. **Çalışma kılavuzu:** zamanlamalar çalışmıyorsa `/api/status` → `schedules.stalled`; işçiyi yeniden başlatmak (açılış tick zincirini kurar) yeterlidir. Uzun süre "kuyrukta" kalan tarama için işçiyi yeniden başlatın; açılış toparlaması onu duraklatır veya sürdürür.
+**Ertelenenler Faz 5'te kapandı:** `schedules.stalled` Taramalar sayfasında TR/EN uyarı olarak gösterilir; "Yeniden başlat" düğmesi `POST /api/schedules/rearm` ile zinciri kurar (idempotent; kuyruktaki tick şimdiye çekilir). "İşsiz kuyrukta tarama" iki yoldan kapandı: elle sürdürme (`resumeScan`) durum geçişi, tavan kaldırma, denetim kaydı ve iş eklemeyi tek işlemde ve CAS ile yapar; zamanlama turu 2 dakikadan uzun süredir işsiz `queued` taramaları yeniden kuyruğa alır (`scan.requeued_orphan`). Tükenen bakım turu yeniden denemeleri hâlâ yalnızca günlükte. **Çalışma kılavuzu:** zamanlamalar çalışmıyorsa Taramalar sayfasındaki uyarıdan "Yeniden başlat"; işçi çalışmıyorsa uygulamayı yeniden başlatın.
 
 ## 7. Kabul ölçütü ve kanıtı
 
@@ -261,13 +261,13 @@ Son kapıdan önce güvenlik, şema ve olay (incident) odaklı denetim yedi bulg
 
 ## 9. Bilinen sınırlar ve açık kalanlar (kod)
 
-- **Tek veritabanı bağlantısı:** işçi açılışında `recover()` artık bakım turundan önce çalışır; bakım turu yine de aynı süreçte açık bir işlem varken `TRANSACTION_ACTIVE` ile düşebilir ve 60 sn sonra (en çok 3 kez) yeniden denenir. Kalıcı çözüm bağlantı düzeyinde kuyruk/kilittir. Next sunucusunda bir `db.transaction` sürerken eşzamanlı istekler 503 `DB_BUSY` alabilir (mevcut tasarım).
-- **TB-11(d):** gönderimi o anda süren (`in_flight`) dizi durdurulmaz; sonraki adımı yine adres engeline tabidir.
+- **Tek veritabanı bağlantısı (Faz 5'te çözüldü, süreç içi):** `src/lib/db/client.ts` süreç içi işlem kapısı kurar: bir işlem bağlantıyı tutarken aynı süreçteki sorgu ve işlemler `TRANSACTION_ACTIVE` ile reddedilmek yerine sırasını bekler (`DB_TX_WAIT_MS` = 15 sn; aşılırsa yine `TRANSACTION_ACTIVE` → 503 `DB_BUSY`). İşlem geri çağrısının içinden işlem DIŞI bağlantıyla yapılan sorgu kilitlenme yerine hemen hata verir. Kalan: süreçler arası (Next sunucusu ↔ işçi) yazma çakışması SQLite `busy_timeout` ile beklenir; bakım turunun 60 sn'lik yeniden denemesi bu durum için korunur.
+- **TB-11(d) `in_flight` (Faz 5'te çözüldü):** şikâyet anında gönderimi süren dizi `business_complaint` gerekçesiyle işaretlenir (`pendingIds`, `inbound.complaint` denetiminde `businessPendingIds`); gönderim sonucu kaydedilince dizi `unsubscribed` / `stop_reason = 'complaint'` olur ve sonraki adım gitmez. Varsayılan sıklık kuralları (30 gün işletme bekleme, `unresolved_delivery`) bu yarışı zaten pratikte erişilemez kılıyordu; düzeltme savunma derinliğidir.
 - **Son inceleme turunun bulguları kapandı:** eksik yardım balonları, her sayfada "?" kısayolu, İngilizcede tekil biçim ("1 business"), zamanlama uyarısının arayüz dilinde gösterilmesi ve gösterge paneli bağlantıları düzeltildi (testli). Son denetimin ertelenen izleme işleri için bkz. 6.1.
-- Tarama duraklama nedeni metinleri (`COST_CAP` dahil) yalnızca Türkçe. Küçük harfli şablon denetim kodlarının İngilizce `apiError` metni yok (genel metin gösterilir).
-- `notifications.os` kapalıyken birikmiş bildirimler sahiplenilmez; yeniden açılınca 24 saate kadar eski bildirimler görünebilir.
+- Tarama duraklama nedeni (Faz 5): kullanıcı duraklatması `USER_PAUSED` koduyla yazılır; İngilizce arayüz `pause_code`'dan `scans.pause.<KOD>` metnini gösterir (kodsuz eski kayıtta genel metin), Türkçe arayüz sunucunun ayrıntılı metnini. İngilizce `CALL_LIMIT`/`COST_CAP` metinleri sayı içermez. Duraklat/sürdür/iptal rotası kod döner (`SCAN_NOT_FOUND` 404; `SCAN_NOT_PAUSABLE`, `SCAN_NOT_RESUMABLE`, `SCAN_PROVIDER_CHANGED`, `BUDGET_BLOCKED`, `SCAN_CHANGED`, `SCAN_FINISHED` 409). Küçük harfli şablon denetim kodlarının İngilizce `apiError` metni yok (genel metin gösterilir).
+- `notifications.os` (Faz 5): kapalı→açık geçişinde kapalıyken biriken bildirimler masaüstünde gösterilmez (zilde okunmamış kalır); yalnızca sonrakiler gösterilir.
 - Keşif'te "Yenilik" (puan) ile "Yenilikler" (yaşam döngüsü) süzgeç adları yan yana; biri yeniden adlandırılmalı.
-- 900 px ve altında harita bölmesi açıkken "/" arama kutusuna odaklanamaz (liste bağlanmamış).
+- 900 px ve altında "/" kısayolu (Faz 5): harita bölmesi açıksa önce liste bölmesine geçer, sonra arama kutusuna odaklanır.
 
 ## 10. Entegrasyon bekleyenler
 
@@ -285,7 +285,7 @@ Bu liste **ihtiyacı ve nedenini** söyler; hangi hizmet veya ücretli seçenek 
 | TB-11 (a) ve (b) sahip kararları | (a) işletmenin başka adresine yeniden temas için elle inceleme, (b) aynı alan adını paylaşan bağımsız şubeler için istisna; davranış kararıdır | Karar verilirse kural ve test | Sahip |
 | Paketlenmiş, imzalı uygulamada OS bildirimleri | Bildirim izni, Windows `AppUserModelId`, oturum açılınca başlatma ve uykudan dönüş yalnızca geliştirme yapısında ve birim testleriyle sınandı | macOS ve Windows'ta bildirimin görünmesi, tıklayınca doğru ekranın açılması | Geliştirici + müşteri bilgisayarı |
 | Ekran okuyucu testi | Erişilebilir adlar, canlı bölgeler ve balonlar kodla ve otomatik testlerle denetlendi; gerçek ekran okuyucuyla dinlenmedi | VoiceOver/NVDA ile Keşif, zil, gösterge paneli, zamanlamalar | Geliştirici |
-| Tek veritabanı bağlantısı (`TRANSACTION_ACTIVE`) izlemesi | Açılıştaki bakım turu yeniden denemeyle toparlanıyor ama eşzamanlı sorgu yine reddedilebilir | Bağlantı düzeyinde kuyruk/kilit tasarımı | Geliştirici |
+| ~~Tek veritabanı bağlantısı (`TRANSACTION_ACTIVE`) izlemesi~~ | **Faz 5'te süreç içi kapıyla çözüldü** (Bölüm 9). Kalan: gerçek kullanımda süreçler arası `SQLITE_BUSY` sıklığının izlenmesi | Uzun süre açık uygulamada `DB_BUSY` / `retry step=` günlük satırları | Geliştirici |
 
 ## 11. Uygulanan beceriler (Skills applied)
 
