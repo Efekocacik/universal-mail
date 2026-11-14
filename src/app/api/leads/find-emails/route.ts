@@ -5,10 +5,10 @@ import { filterQuerySchema, MAX_SELECTION, parseLeadFilters } from "@/lib/api/fi
 import { monthSkuCalls } from "@/lib/budget";
 import { audit } from "@/lib/db/audit";
 import { leadEnrichment, leads } from "@/lib/db/schema";
+import { externalStatus } from "@/lib/email/deps";
 import { enqueueEmailSearch } from "@/lib/email/enqueue";
 import { websiteStates, type LeadInfo } from "@/lib/email/service";
 import { getEnrichmentMap, markEnrichmentQueued } from "@/lib/email/store";
-import { getSecret } from "@/lib/secrets/store";
 import { enqueueJob } from "@/lib/jobs/queue";
 import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
 import { marginalCostUsd } from "@/lib/places/pricing";
@@ -129,16 +129,9 @@ export const POST = route(async (req: Request) => {
   }
   const googleTargets = needsGoogle.filter((l) => l.placeId);
 
-  const settings = await getSettings(db, ["places.provider", "enrichment.external"] as const);
-  const configured = !!(await getSecret("hunter.apiKey"));
-  const external = {
-    enabled: settings["enrichment.external"].enabled,
-    configured,
-    available:
-      settings["enrichment.external"].enabled &&
-      configured &&
-      settings["places.provider"] !== "mock",
-  };
+  const settings = await getSettings(db, ["places.provider"] as const);
+  // Faz 5 (paket A): Hunter veya Snov; demo kipinde ağsız demo sağlayıcı (bkz. lib/email/deps.ts).
+  const external = await externalStatus(db);
   const provider = settings["places.provider"];
   const before = await monthSkuCalls(db, provider, "place_details_enterprise");
   const budget = await budgetSummary(db);

@@ -113,6 +113,7 @@ describe("bağlam oluşturucu", () => {
       firma: "Örnek Dış Ticaret A.Ş.",
       firma_adres: "Örnek Mah. 1, İstanbul",
       telefon: "+90 212 000 00 00",
+      kisisel_giris: null, // Faz 5 A: onaylı giriş yok
     });
     expect(ctx.countryCode).toBe("GB");
     expect((await buildRenderContext(db, leadId, "tr")).values.kategori).toBe("kafe");
@@ -192,7 +193,6 @@ describe("şablon kaydetme", () => {
     };
     const attempts: [object, string][] = [
       [{ ...base, bodyHtml: "<p>{{acilis_tarihi}}</p>" }, "invalid_template"],
-      [{ ...base, bodyHtml: "<p>{{kisisel_giris}}</p>" }, "invalid_template"],
       [{ ...base, subject: "Re: Teklif" }, "invalid_template"],
       [{ ...base, language: "xx" }, "invalid_template"],
       [{ ...base, categoryKey: "yok-boyle-kategori" }, "unknown_category"],
