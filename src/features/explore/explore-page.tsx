@@ -91,6 +91,8 @@ function GlobalKeys() {
     next: () => move(1),
     prev: () => move(-1),
     search: () => {
+      // Dar ekranda harita bölmesi açıksa arama kutusu DOM'da yoktur: önce liste bölmesine geçilir.
+      ex.setPane("list");
       ex.setTab("list");
       ex.select(null);
       // Liste ve süzgeçler bir sonraki çizimde yerleşir; odak ondan sonra verilir.
@@ -218,7 +220,7 @@ function LeftPanel() {
 function Layout() {
   const [width, setWidth] = usePanelWidth();
   const narrow = useMediaQuery("(max-width: 900px)");
-  const [pane, setPane] = useState<"list" | "map">("list");
+  const { pane, setPane } = useExplore();
   const drag = useRef<{ startX: number; startW: number } | null>(null);
 
   if (narrow) {
