@@ -12,6 +12,7 @@ import {
   SCHEDULE_TICK_JOB,
   TICK_INTERVAL_MS,
 } from "@/lib/scan/schedule";
+import { requeueOrphanScans } from "@/lib/scan/service";
 import { getSetting } from "@/lib/settings";
 import { errorMessage } from "@/lib/util";
 import { withShortRetry } from "./retry";
@@ -22,7 +23,8 @@ const refreshPayload = z
 
 /**
  * Faz 4 arka plan işleri (Paket B). Hepsi idempotenttir ve saat enjeksiyonuna açıktır (`now`).
- * - `scan.schedule.tick`: zamanı gelen zamanlamaları çalıştırır ve bir sonraki tick'i (5 dk) planlar. Tick hatası bile
+ * - `scan.schedule.tick`: işi kaybolmuş `queued` taramaları yeniden kuyruğa alır, zamanı gelen zamanlamaları çalıştırır
+ *   ve bir sonraki tick'i (5 dk) planlar. Tick hatası bile
  *   zinciri koparmaz; yeniden kurma da kısa aralıkla yeniden denenir. Bakım turu da zinciri yeniden kurar.
  * - `places.watch_future`: yakında açılacak yerlerin durumunu denetler (ayar `novelty.futureWatch`).
  * - `places.refresh_ids`: 12 aydan eski yer kimliklerini yeniler (ücretsiz IDs Only).
@@ -37,6 +39,8 @@ export function registerScanBackgroundHandlers(
     const now = clock();
     let failure: { error: unknown } | null = null;
     try {
+      // Öksüz tarama onarımı önce: işi kaybolmuş `queued` tarama zamanlamasını PREVIOUS_RUN_ACTIVE ile kilitlemesin.
+      await requeueOrphanScans(ctx.db, now, ctx.log);
       const out = await runDueSchedules(ctx.db, { now, log: ctx.log });
       if (out.length > 0)
         ctx.log(`zamanlama turu: ${out.map((o) => `#${o.scheduleId} ${o.outcome}`).join(", ")}`);

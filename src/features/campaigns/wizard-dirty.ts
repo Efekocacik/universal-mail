@@ -66,7 +66,12 @@ function normalizeSteps(list: readonly StepInput[]): string[] {
     .map(
       (s) =>
         // İlk adımın gecikmesi anlamsızdır (her zaman 0 gönderilir); karşılaştırmaya girmez.
-        `${s.language}|${s.stepIndex}|${s.templateId}|${s.stepIndex === 0 ? 0 : s.delayDays}`,
+        `${s.language}|${s.stepIndex}|${s.templateId}|${s.stepIndex === 0 ? 0 : s.delayDays}|${(
+          s.categoryTemplates ?? []
+        )
+          .map((c) => `${c.categoryKey}:${c.templateId}`)
+          .sort()
+          .join(",")}`,
     )
     .sort();
 }

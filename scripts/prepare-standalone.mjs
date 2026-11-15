@@ -6,6 +6,7 @@
  *  3) işçi ve şema geçişi paketlerini aynı klasöre koyar (aynı node_modules'tan çözülsünler),
  *  4) çalışma anında gerekmeyen büyük paketleri siler,
  *  5) yerel modülün gerçekten yüklenebildiğini doğrular.
+ * standalone/node_modules standalone dışını gösteriyorsa (symlink'li node_modules) hiçbir şey yazmadan durur.
  * Çıktı klasörü: .next/standalone
  */
 import { createRequire } from "node:module";
@@ -17,6 +18,23 @@ const standalone = path.join(root, ".next", "standalone");
 if (!fs.existsSync(path.join(standalone, "server.js"))) {
   console.error("✖ .next/standalone/server.js yok. Önce `next build` çalıştırın.");
   process.exit(1);
+}
+
+// 0) Güvenlik: node_modules'u başka bir çalışma ağacına bağlantı (symlink) olan bir checkout'ta Next, standalone
+// node_modules'u da aynı paylaşımlı klasöre bağlar. O zaman 2. adım "src and dest cannot be the same" ile düşer, 4. adım ise
+// paylaşımlı klasörden typescript/sharp/@types… siler. Herhangi bir yazmadan önce durdurulur.
+const standaloneModules = path.join(standalone, "node_modules");
+if (fs.existsSync(standaloneModules)) {
+  const real = fs.realpathSync(standaloneModules);
+  const inside = real.startsWith(fs.realpathSync(standalone) + path.sep);
+  if (fs.lstatSync(standaloneModules).isSymbolicLink() || !inside) {
+    console.error(
+      `✖ .next/standalone/node_modules standalone klasörünün dışını gösteriyor (${real}).\n` +
+        "  Bu checkout'un node_modules'u büyük olasılıkla bir symlink. Paylaşımlı paketler silinmesin diye durduruldu;\n" +
+        "  gerçek bir node_modules ile (`npm ci`) yeniden derleyin.",
+    );
+    process.exit(1);
+  }
 }
 
 const copy = (from, to) => fs.cpSync(from, to, { recursive: true, force: true });

@@ -1,5 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   createClient,
+  LibsqlError,
   type Client,
   type ResultSet,
   type Transaction,
@@ -71,6 +73,23 @@ interface TrackState {
   inflight: Promise<boolean> | null;
   /** Sarmalanmamış `execute`: yenileme kendi ayar ifadeleri için bunu kullanır (kendi kapısına takılmasın). */
   rawExecute: Client["execute"];
+  /** Açık işlemin bitmesini bekleyen çağrılar; işlem kapanınca hepsi uyandırılır ve yeniden dener. */
+  idle: Array<() => void>;
+  /** Açık işlem için en uzun bekleme (ms); aşılırsa `TRANSACTION_ACTIVE` ile reddedilir. */
+  txWaitMs: number;
+}
+
+/** Açık bir işlemin bitmesi için en uzun bekleme; sonra eskisi gibi `TRANSACTION_ACTIVE` (http.ts → 503 DB_BUSY). */
+export const DB_TX_WAIT_MS = 15_000;
+
+/**
+ * `db.transaction(...)` geri çağrısının içinde miyiz? İçerideki kod yanlışlıkla DIŞ `db`'yi kullanırsa kendi işlemini
+ * beklerdi (kilitlenme); bu yüzden o durumda beklemeden `TRANSACTION_ACTIVE` ile hemen başarısız olunur (eski davranış).
+ */
+const txScope = new AsyncLocalStorage<{ active: boolean }>();
+
+function txActiveError(detail: string): LibsqlError {
+  return new LibsqlError(detail, "TRANSACTION_ACTIVE");
 }
 
 const tracked = new WeakMap<Client, TrackState>();
@@ -119,7 +138,11 @@ function recoverIfNeeded(client: Client, st: TrackState): void {
  * Başarısız ifade ASLA otomatik yeniden çalıştırılmaz: özgün hata çağırana aynen iletilir (çift kayıt ve çift
  * gönderim riski yok); yeniden deneme kararı çağıranındır ve ifade uygulanmamış sayılmalıdır.
  */
-export function trackTransactions(client: Client, path?: string): Client {
+export function trackTransactions(
+  client: Client,
+  path?: string,
+  opts: { txWaitMs?: number } = {},
+): Client {
   if (tracked.has(client)) return client;
   const st: TrackState = {
     open: 0,
@@ -127,6 +150,8 @@ export function trackTransactions(client: Client, path?: string): Client {
     needsReset: false,
     inflight: null,
     rawExecute: client.execute.bind(client),
+    idle: [],
+    txWaitMs: opts.txWaitMs ?? DB_TX_WAIT_MS,
   };
   tracked.set(client, st);
 
@@ -135,10 +160,51 @@ export function trackTransactions(client: Client, path?: string): Client {
     // Şema geçişi (bakım kilidi) başka bir süreçte sürüyorsa bekle; bkz. maintenance.ts (K3).
     if (st.path) await waitForMaintenance(st.path);
   };
+  /** Bir uyandırmayı (işlem kapandı) veya süre sonunu bekler. */
+  const idleOnce = (deadline: number) =>
+    new Promise<void>((resolve, reject) => {
+      const left = deadline - Date.now();
+      if (left <= 0) {
+        reject(
+          txActiveError("Açık bir veritabanı işlemi çok uzun sürdü; çağrı zaman aşımına uğradı."),
+        );
+        return;
+      }
+      const wake = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        const i = st.idle.indexOf(wake);
+        if (i >= 0) st.idle.splice(i, 1);
+        reject(
+          txActiveError("Açık bir veritabanı işlemi çok uzun sürdü; çağrı zaman aşımına uğradı."),
+        );
+      }, left);
+      st.idle.push(wake);
+    });
+  /**
+   * İşlem kapısı (süreç içi): açık işlem varken yeni çağrı reddedilmek yerine sırasını bekler. `start` son denetimle
+   * AYNI eşzamanlı adımda çağrılır (libsql bağlantıyı eşzamanlı ödünç alır): denetimle çağrı arasına işlem giremez.
+   */
+  const inTurn = async <T>(start: () => Promise<T>): Promise<T> => {
+    if (txScope.getStore()?.active)
+      throw txActiveError(
+        "Veritabanı işlemi içinden dış bağlantı kullanıldı; işlem nesnesini (tx) kullanın.",
+      );
+    const deadline = Date.now() + st.txWaitMs;
+    for (;;) {
+      await waitGate();
+      if (st.open === 0 && !st.inflight) return start();
+      if (st.open > 0) await idleOnce(deadline);
+    }
+  };
+  const wakeIdle = () => {
+    for (const w of st.idle.splice(0)) w();
+  };
   const guard = async <T>(fn: () => Promise<T>): Promise<T> => {
-    await waitGate();
     try {
-      return await fn();
+      return await inTurn(fn);
     } catch (e) {
       if (isBusyConnectionError(e)) {
         st.needsReset = true;
@@ -156,16 +222,26 @@ export function trackTransactions(client: Client, path?: string): Client {
     guard(() => batch(...a))) as Client["batch"];
   client.executeMultiple = ((...a: Parameters<Client["executeMultiple"]>) =>
     guard(() => multi(...a))) as Client["executeMultiple"];
+  if (typeof client.migrate === "function") {
+    const migrate = client.migrate.bind(client);
+    client.migrate = ((...a: Parameters<Client["migrate"]>) =>
+      guard(() => migrate(...a))) as Client["migrate"];
+  }
 
   const begin = client.transaction.bind(client);
   client.transaction = (async (mode?: TransactionMode): Promise<Transaction> => {
-    await waitGate();
-    st.open += 1;
+    let counted = false;
     let tx: Transaction;
     try {
-      tx = await begin(mode);
+      tx = await inTurn(() => {
+        st.open += 1; // kapı denetimiyle aynı eşzamanlı adımda
+        counted = true;
+        return begin(mode);
+      });
     } catch (e) {
+      if (!counted) throw e; // kapıda reddedildi: işlem hiç başlamadı
       st.open -= 1;
+      wakeIdle();
       if (isBusyConnectionError(e)) st.needsReset = true;
       recoverIfNeeded(client, st);
       throw e;
@@ -176,6 +252,7 @@ export function trackTransactions(client: Client, path?: string): Client {
         settled = true;
         st.open -= 1;
         recoverIfNeeded(client, st);
+        wakeIdle(); // bekleyenler döngüde yeniden denetler (yenileme başladıysa onu da bekler)
       }
     };
     const markBusy = async <T>(fn: () => Promise<T>): Promise<T> => {
@@ -218,14 +295,44 @@ export function trackTransactions(client: Client, path?: string): Client {
   return client;
 }
 
-async function open(path: string): Promise<Handle> {
-  // concurrency=1: tek bağlantı. PRAGMA ayarları bağlantı başınadır; tek bağlantıyla tutarlı kalır.
+/**
+ * `db.transaction` geri çağrısını `txScope` ile işaretler: içeride dış `db` kullanımı beklemeden hata verir
+ * (bkz. `inTurn`). Geri çağrı bitince işaret kalkar; içeride başlatılıp sonra biten işler beklemeye girebilir.
+ */
+function markTransactionScope(db: Db): Db {
+  const orig = db.transaction.bind(db);
+  db.transaction = ((
+    fn: Parameters<Db["transaction"]>[0],
+    cfg?: Parameters<Db["transaction"]>[1],
+  ) => {
+    const scope = { active: false };
+    return txScope.run(scope, () =>
+      orig(async (tx) => {
+        scope.active = true;
+        try {
+          return await fn(tx);
+        } finally {
+          scope.active = false;
+        }
+      }, cfg),
+    );
+  }) as Db["transaction"];
+  return db;
+}
+
+async function open(path: string, opts: { txWaitMs?: number } = {}): Promise<Handle> {
+  // concurrency=1: tek bağlantı. PRAGMA ayarları bağlantı başınadır; tek bağlantıyla tutarlı kalır. Eşzamanlı
+  // işlemler `trackTransactions` kapısında sıraya girer (libsql tek bağlantıda beklemeden reddederdi).
   const client = trackTransactions(
     createClient({ url: toLibsqlUrl(path), concurrency: 1, timeout: 8000 }),
     path,
+    opts,
   );
   await configure(client, path);
-  return { client, db: drizzle(client, { schema: { ...schema, ...cacheSchema } }) };
+  return {
+    client,
+    db: markTransactionScope(drizzle(client, { schema: { ...schema, ...cacheSchema } })),
+  };
 }
 
 /**
@@ -299,8 +406,11 @@ export function getClient(): Promise<Client> {
 }
 
 /** Test ve betikler için belirli bir dosyaya bağlı yeni bir veritabanı açar. */
-export async function openDatabase(path: string): Promise<Handle> {
-  return open(path);
+export async function openDatabase(
+  path: string,
+  opts: { txWaitMs?: number } = {},
+): Promise<Handle> {
+  return open(path, opts);
 }
 
 export async function closeDb(): Promise<void> {

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getLocale, hasTranslation, t, type Locale, type TrKey } from "@/lib/i18n";
-import { api, localizeApiError } from "./api";
+import { api, ApiError, localizeApiError } from "./api";
 
 /**
  * Zamanlanmış taramalar istemcisi (Paket B).
@@ -10,6 +10,7 @@ import { api, localizeApiError } from "./api";
  *  POST   /api/schedules {fromScanId, intervalDays?, maxCostUsd?} → 201 {id, nextRunAt, ackMaxUsd, warning?}
  *  PATCH  /api/schedules/:id {intervalDays?, enabled?, maxCostUsd?} → {schedule}
  *  DELETE /api/schedules/:id                     → 204
+ *  POST   /api/schedules/rearm                   → {armed: true} (kopmuş tur zincirini yeniden kurar)
  *  POST   /api/schedules/:id/run-now {acknowledgeRisk?} → 201 {scanId}
  */
 export type IntervalDays = 7 | 14 | 30;
@@ -229,6 +230,15 @@ export function useDeleteSchedule() {
   });
 }
 
+/** Kopmuş zamanlama zincirini yeniden kurar (POST /api/schedules/rearm; idempotent). */
+export function useRearmSchedules() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: () => api<{ armed: true }>("/api/schedules/rearm", { method: "POST", json: {} }),
+    onSuccess: done,
+  });
+}
+
 export function useRunScheduleNow() {
   const done = useInvalidate();
   return useMutation({
@@ -239,6 +249,31 @@ export function useRunScheduleNow() {
       }),
     onSuccess: done,
   });
+}
+
+/**
+ * "Şimdi çalıştır" akışı (saf; test edilir). Onaysız ilk denemede NEEDS_ACK gelirse onay penceresi sunucu/yerel
+ * iletiyle açılır ve istek ASLA kendiliğinden onaylı tekrarlanmaz; onaylı çağrı yalnızca kullanıcının düğmesiyle
+ * yapılır. Onaylı çağrı da başarısız olursa hata yeniden fırlatılır (pencere açık kalır ve hatayı gösterir).
+ */
+export async function startScheduleRun(
+  run: (p: { id: number; acknowledgeRisk: boolean }) => Promise<{ scanId: number }>,
+  id: number,
+  acknowledgeRisk: boolean,
+  on: {
+    started: (scanId: number) => void;
+    needsAck: (message: string) => void;
+    failed: (e: unknown) => void;
+  },
+): Promise<void> {
+  try {
+    const r = await run({ id, acknowledgeRisk });
+    on.started(r.scanId);
+  } catch (e) {
+    if (e instanceof ApiError && e.code === "NEEDS_ACK") on.needsAck(e.message);
+    else on.failed(e);
+    if (acknowledgeRisk) throw e;
+  }
 }
 
 /** Maliyet üst sınırı girişini doğrular: boş → null (otomatik), aksi halde 0..10000 sayı. */

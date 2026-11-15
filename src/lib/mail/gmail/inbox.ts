@@ -69,6 +69,8 @@ const MAX_LIST_BODY = 2_000_000;
 const MAX_MESSAGE_BODY = 3_000_000;
 const MAX_PAGE = 100;
 const MAX_QUEUE = 2000;
+/** İleti okumada eşzamanlı istek sayısı (messages.get 5 birim; kullanıcı kotası 250 birim/sn'nin çok altında). */
+export const READ_CONCURRENCY = 4;
 const REQUEST_TIMEOUT_MS = 20_000;
 const ID_RE = /^[0-9a-zA-Z_-]{1,64}$/;
 const HISTORY_RE = /^[0-9]{1,20}$/;
@@ -277,12 +279,29 @@ export class GmailInboxReader implements InboxReader {
     const rest = unique.slice(take);
     if (rest.length > MAX_QUEUE) throw new GmailInboxError("bad_response");
 
-    const items: InboundEnvelope[] = [];
     const skipped = { unrelated: 0, oversize: 0, gone: 0, unparseable: 0 };
-    for (const id of batch) {
-      const env = await this.readMessage(ctx, mailboxId, mb.address, id, skipped);
-      if (env) items.push(env);
-    }
+    // Sınırlı eşzamanlılık (sıra korunur): ileti başına sıralı GET yerine en çok READ_CONCURRENCY istek. Herhangi
+    // bir okuma hata verirse yeni istek başlatılmaz ve bütün tur reddedilir (imleç ilerlemez; kuyruk korunur).
+    const address = mb.address;
+    const read: Array<InboundEnvelope | null> = new Array(batch.length).fill(null);
+    let next = 0;
+    let failed = false;
+    const worker = async () => {
+      while (!failed && next < batch.length) {
+        const i = next++;
+        try {
+          read[i] = await this.readMessage(ctx, mailboxId, address, batch[i]!, skipped);
+        } catch (e) {
+          failed = true;
+          throw e;
+        }
+      }
+    };
+    const workers = Array.from({ length: Math.min(READ_CONCURRENCY, batch.length) }, worker);
+    const settled = await Promise.allSettled(workers);
+    const err = settled.find((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (err) throw err.reason;
+    const items = read.filter((e): e is InboundEnvelope => e !== null);
     return {
       items,
       nextCursor: encodeCursor({ ...st, q: rest }),

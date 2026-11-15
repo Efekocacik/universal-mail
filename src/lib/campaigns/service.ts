@@ -7,6 +7,7 @@ import {
   campaignLeads,
   campaigns,
   campaignSteps,
+  campaignStepTemplates,
   mailboxes,
   templates,
   type CampaignLeadStatus,
@@ -15,6 +16,7 @@ import {
   type SequenceStopReason,
 } from "@/lib/db/schema";
 import { effectiveStopReasonSql } from "@/lib/mail/inbound/complaint-sql";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import { isSupportedLanguage } from "@/lib/mail/language";
 import { MIN_GAP_S } from "@/lib/mail/scheduler/throttle";
 import { DEFAULT_SEND_WINDOW, effectiveWindow } from "@/lib/mail/scheduler/window";
@@ -44,11 +46,18 @@ export interface CampaignSettingsInput {
   maxGapS?: number;
 }
 
+export interface CategoryTemplateInput {
+  categoryKey: string;
+  templateId: number;
+}
+
 export interface StepInput {
   stepIndex: number;
   language: string;
   templateId: number;
   delayDays: number;
+  /** Faz 5: lead kategorisine özel şablon (yoksa adımın şablonu kullanılır). */
+  categoryTemplates?: CategoryTemplateInput[];
 }
 
 type CampaignRow = typeof campaigns.$inferSelect;
@@ -262,12 +271,25 @@ async function validateSteps(db: DbExecutor, steps: readonly StepInput[]): Promi
     }
     if (set.size !== sets[0]!.size) fail("Her dilde aynı adımlar tanımlanmalıdır.");
   }
-  const ids = [...new Set(steps.map((s) => s.templateId))];
+  // Adım ve kategori varyantı şablonları tek sorguda okunur.
+  const ids = [
+    ...new Set(
+      steps.flatMap((s) => [s.templateId, ...(s.categoryTemplates ?? []).map((c) => c.templateId)]),
+    ),
+  ];
   const rows = await db.select().from(templates).where(inArray(templates.id, ids));
+  const infoOnly = (templateId: number) => {
+    throw new CampaignError(
+      "template_info_only",
+      "Bu şablon yalnızca bilgi amaçlıdır ve gönderimde kullanılamaz.",
+      { templateId },
+    );
+  };
   for (const s of steps) {
     const t = rows.find((r) => r.id === s.templateId);
     if (!t) fail("Şablon bulunamadı.", { templateId: s.templateId });
     if (t!.archivedAt !== null) fail("Arşivlenmiş şablon kullanılamaz.", { templateId: t!.id });
+    if (t!.infoOnly || isInfoOnlyLanguage(t!.language)) infoOnly(t!.id);
     if (t!.language !== s.language)
       fail("Şablon dili adım diliyle aynı olmalıdır.", { templateId: t!.id });
     const kind = s.stepIndex === 0 ? "initial" : "followup";
@@ -275,8 +297,32 @@ async function validateSteps(db: DbExecutor, steps: readonly StepInput[]): Promi
       fail("İlk adım için ilk e-posta, takipler için takip şablonu gerekir.", {
         templateId: t!.id,
       });
+    const cats = s.categoryTemplates ?? [];
+    if (cats.length > MAX_CATEGORY_TEMPLATES)
+      fail(`Bir adımda en çok ${MAX_CATEGORY_TEMPLATES} kategori varyantı olabilir.`);
+    const seen = new Set<string>();
+    for (const c of cats) {
+      const key = c.categoryKey.trim();
+      if (!key || key.length > 64) fail("Geçersiz kategori.");
+      if (seen.has(key)) fail("Her kategori bir kez seçilebilir.", { categoryKey: key });
+      seen.add(key);
+      const ct = rows.find((r) => r.id === c.templateId);
+      if (!ct) fail("Şablon bulunamadı.", { templateId: c.templateId });
+      if (ct!.archivedAt !== null) fail("Arşivlenmiş şablon kullanılamaz.", { templateId: ct!.id });
+      if (ct!.infoOnly || isInfoOnlyLanguage(ct!.language)) infoOnly(ct!.id);
+      if (ct!.language !== s.language || ct!.kind !== kind) {
+        throw new CampaignError(
+          "category_template_mismatch",
+          "Kategori şablonunun dili veya türü adımla uyuşmuyor.",
+          { templateId: ct!.id, categoryKey: key },
+        );
+      }
+    }
   }
 }
+
+/** Bir adımdaki en çok kategori varyantı (API şemasıyla aynı). */
+export const MAX_CATEGORY_TEMPLATES = 10;
 
 export async function setCampaignSteps(
   db: Db,
@@ -298,12 +344,30 @@ export async function setCampaignSteps(
         delayDays: s.delayDays,
       })),
     );
+    // Eski kategori varyantları adım satırlarıyla birlikte (bileşik FK, CASCADE) silindi; yenileri aynı işlemde.
+    const variants = steps.flatMap((s) =>
+      (s.categoryTemplates ?? []).map((c) => ({
+        campaignId: id,
+        stepIndex: s.stepIndex,
+        language: s.language,
+        categoryKey: c.categoryKey.trim(),
+        templateId: c.templateId,
+      })),
+    );
+    if (variants.length > 0) await tx.insert(campaignStepTemplates).values(variants);
     await audit(
       tx,
       "campaign.steps_set",
       "campaign",
       id,
-      { steps: steps.map((s) => [s.stepIndex, s.language, s.templateId, s.delayDays]) },
+      {
+        steps: steps.map((s) => [s.stepIndex, s.language, s.templateId, s.delayDays]),
+        ...(variants.length > 0
+          ? {
+              variants: variants.map((v) => [v.stepIndex, v.language, v.categoryKey, v.templateId]),
+            }
+          : {}),
+      },
       now,
     );
     return { updatedAt };
@@ -445,6 +509,11 @@ export async function getCampaign(db: DbExecutor, id: number): Promise<CampaignD
     .from(campaignSteps)
     .where(eq(campaignSteps.campaignId, id))
     .orderBy(asc(campaignSteps.stepIndex), asc(campaignSteps.language));
+  const variants = await db
+    .select()
+    .from(campaignStepTemplates)
+    .where(eq(campaignStepTemplates.campaignId, id))
+    .orderBy(asc(campaignStepTemplates.categoryKey));
   const counts = await countsFor(db, [id]);
   return {
     ...summary(c, counts.get(id)),
@@ -453,11 +522,19 @@ export async function getCampaign(db: DbExecutor, id: number): Promise<CampaignD
     maxGapS: c.maxGapS,
     startConfirmedAt: c.startConfirmedAt,
     pausedAt: c.pausedAt,
-    steps: steps.map((s) => ({
-      stepIndex: s.stepIndex,
-      language: s.language,
-      templateId: s.templateId,
-      delayDays: s.delayDays,
-    })),
+    steps: steps
+      .map((s) => ({
+        stepIndex: s.stepIndex,
+        language: s.language,
+        templateId: s.templateId,
+        delayDays: s.delayDays,
+      }))
+      .map((s) => {
+        // Faz 5: yalnızca varyantı olan adımda `categoryTemplates` döner (eski istemcilerin gördüğü biçim değişmez).
+        const own = variants
+          .filter((v) => v.stepIndex === s.stepIndex && v.language === s.language)
+          .map((v) => ({ categoryKey: v.categoryKey, templateId: v.templateId }));
+        return own.length > 0 ? { ...s, categoryTemplates: own } : s;
+      }),
   };
 }

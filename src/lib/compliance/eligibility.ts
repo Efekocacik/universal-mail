@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, like, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, like, ne, or, sql, type SQL } from "drizzle-orm";
 import { getDomain } from "tldts";
 import type { DbExecutor } from "@/lib/db/client";
 import {
@@ -24,8 +24,13 @@ import {
   type FrequencyLimits,
 } from "./frequency";
 import { isLiveSendingPermitted } from "./live-gate";
-import { policyScopeForMailbox, resolveCountryPolicy } from "./policies";
-import { checkSuppression, hashEmail } from "./suppression";
+import { policyScopeForMailbox, resolveCountryPolicy, type ResolvedPolicy } from "./policies";
+import {
+  checkSuppression,
+  checkSuppressionBatch,
+  hashEmail,
+  type SuppressionCheck,
+} from "./suppression";
 
 /**
  * Merkezi gönderim uygunluğu (FR-CMP-02, FR-CMP-11, FR-CMPL-01/07/08, SRS 5.6.1).
@@ -178,121 +183,382 @@ export async function evaluateEnrollment(
   input: { campaignId: number; leadId: number },
   opts: EligibilityOptions = {},
 ): Promise<EligibilityResult> {
-  const c = new Collector();
+  const batch = await prepareEnrollmentBatch(db, input.campaignId, [input.leadId], opts);
+  return batch.evaluate({ leadId: input.leadId, ignoreCampaignLeadId: opts.ignoreCampaignLeadId });
+}
+
+/** Toplu değerlendirmede bir satır: lead ve (yeniden denetimde) kampanyadaki kendi dizisi. */
+export interface EnrollmentRow {
+  leadId: number;
+  /** `EligibilityOptions.ignoreCampaignLeadId` ile aynı anlam (satır başına). */
+  ignoreCampaignLeadId?: number;
+}
+
+/** Hedef kampanyadaki dizinin değerlendirmede kullanılan görüntüsü. */
+export interface InCampaignSeq {
+  id: number;
+  leadId: number;
+  hash: string | null;
+  domain: string | null;
+  status: CampaignLeadStatus;
+}
+
+type LeadRow = { id: number; status: LeadStatus; countryCode: string | null; source: string };
+type PrimaryEmail = typeof leadEmails.$inferSelect;
+
+/**
+ * Kampanyaya ekleme/başlatma denetimi için önceden yüklenmiş veri. Sorgular lead sayısından BAĞIMSIZ sayıdadır
+ * (500'lük parçalar): ayarlar, kampanya ve kutu bir kez; lead'ler, birincil adresler, engeller, başka kampanyadaki
+ * diziler, adres ve işletme geçmişi toplu. `evaluate` saf bellek içi değerlendirmedir ve `evaluateEnrollment` ile
+ * AYNI kuralları aynı sırayla uygular.
+ *
+ * `inCampaign`: hedef kampanyanın dizileri (bir kez yüklenir). Aynı işlemde dizi ekleyen/değiştiren çağıran (ekleme,
+ * yeniden denetim) değişikliği buraya da yansıtır; böylece önceki eklemeler sonraki lead'lerin değerlendirmesinde
+ * görünür (yeniden sorgu olmadan).
+ */
+export interface EnrollmentBatch {
+  readonly inCampaign: InCampaignSeq[];
+  evaluate(row: EnrollmentRow): EligibilityResult;
+  /** Önceden yüklenmiş lead (yoksa `undefined`). */
+  leadOf(leadId: number): LeadRow | undefined;
+  /** Önceden yüklenmiş birincil adres (yoksa `undefined`). */
+  primaryOf(leadId: number): PrimaryEmail | undefined;
+}
+
+const PREFETCH_CHUNK = 500;
+/** Alan adı LIKE ön süzgecinde bir sorgudaki en çok alan adı (her biri bir LIKE terimi). */
+const DOMAIN_CHUNK = 100;
+
+function chunks<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/** Kampanyaya eklenecek/başlatılacak lead'ler için veriyi toplu yükler; bkz. `EnrollmentBatch`. */
+export async function prepareEnrollmentBatch(
+  db: DbExecutor,
+  campaignId: number,
+  leadIdsIn: readonly number[],
+  opts: EligibilityOptions = {},
+): Promise<EnrollmentBatch> {
+  const now = opts.now ?? Date.now();
+  const global = new Collector();
+  const limits = resolveLimits(opts, global);
   let scope: PolicyScope = "live";
+  const leadMap = new Map<number, LeadRow>();
+  const primaryMap = new Map<number, PrimaryEmail>();
+  const policies = new Map<string | null, ResolvedPolicy>();
+  let sup = new Map<string, SuppressionCheck>();
+  const inCampaign: InCampaignSeq[] = [];
+  const contactedInCampaign = new Set<number>();
+  const activeHashes = new Set<string>();
+  const activeLeads = new Set<number>();
+  const sendingBusinesses = new Set<string>();
+  const historyByHash = new Map<string, HistoryRow[]>();
+  const bizByLead = new Map<number, BusinessRow[]>();
+  const bizByDomain = new Map<string, BusinessRow[]>();
+  const statuses = new Map<number, CampaignLeadStatus>();
+  let campaign: typeof campaigns.$inferSelect | null = null;
+  let failure: unknown = null;
+
   try {
-    const now = opts.now ?? Date.now();
-    const limits = resolveLimits(opts, c);
-    await checkSender(db, c);
-
-    const campaign = await loadCampaign(db, input.campaignId, c);
+    const s = await getSettings(db, ["consent", "company.profile", "mail.gmailGrants"] as const);
+    if (!s.consent) global.add("consent_missing");
+    if (!s["company.profile"]) global.add("sender_profile_incomplete");
+    campaign = await loadCampaign(db, campaignId, global);
     if (campaign) {
-      scope = await checkMailbox(db, campaign.mailboxId, c);
+      const [mb] =
+        campaign.mailboxId === null
+          ? []
+          : await db.select().from(mailboxes).where(eq(mailboxes.id, campaign.mailboxId)).limit(1);
+      scope = applyMailbox(campaign.mailboxId, mb, s["mail.gmailGrants"], global);
       if (["completed", "cancelled", "stopped"].includes(campaign.status)) {
-        c.add("campaign_closed", { detail: campaign.status });
+        global.add("campaign_closed", { detail: campaign.status });
       }
     }
 
-    const lead = await loadLead(db, input.leadId, c, scope);
-    if (!lead) return c.result(scope);
-    const [primary] = await db
-      .select()
-      .from(leadEmails)
-      .where(and(eq(leadEmails.leadId, lead.id), eq(leadEmails.isPrimary, true)))
-      .limit(1);
-    if (!primary) {
-      c.add("no_email");
-      return c.result(scope);
-    }
-    const recipient = await checkRecipient(db, c, scope, lead.countryCode, primary);
-    if (!recipient) return c.result(scope);
-
-    // Aynı kampanyada aynı lead/adres veya aynı alan adı (alan adı başına tek dizi → en çok 3 ileti).
-    if (campaign) {
-      const inCampaignAll = await db
+    const leadIds = [...new Set(leadIdsIn)];
+    for (const part of chunks(leadIds, PREFETCH_CHUNK)) {
+      const rows = await db
         .select({
-          id: campaignLeads.id,
-          leadId: campaignLeads.leadId,
-          hash: campaignLeads.recipientHash,
-          domain: campaignLeads.recipientDomain,
-          status: campaignLeads.status,
+          id: leads.id,
+          status: leads.status,
+          countryCode: leads.countryCode,
+          source: leads.source,
         })
-        .from(campaignLeads)
-        .where(eq(campaignLeads.campaignId, campaign.id));
-      const inCampaign = inCampaignAll.filter((r) => r.id !== opts.ignoreCampaignLeadId);
-      // Başlatma öncesi yeniden denetimde (`pending` dizinin kendisi) eski çift `pending` diziler arasında gönderimdeki
-      // kural uygulanır: küçük kimlik işletmeyi tutar; büyük kimlikli `pending` kardeş bu diziyi engellemez (yoksa
-      // ikisi de dışlanır ve işletmeye hiç yazılmaz).
-      const self = inCampaignAll.find((r) => r.id === opts.ignoreCampaignLeadId);
-      const siblings =
-        self?.status === "pending"
-          ? inCampaign.filter((r) => !(r.status === "pending" && r.id > self.id))
-          : inCampaign;
-      if (inCampaign.some((r) => r.leadId === lead.id || r.hash === recipient.hash)) {
-        c.add("already_in_campaign");
-      } else if (
-        siblings.some(
-          (r) =>
-            r.domain === recipient.domain &&
-            !["excluded", "removed", "cancelled"].includes(r.status),
-        )
-      ) {
-        c.add("domain_already_in_campaign");
-      } else {
-        await checkCampaignBusinessAtEnrollment(
-          db,
-          c,
-          campaign.id,
-          businessDomainOf(recipient.domain),
-          siblings,
-        );
-      }
+        .from(leads)
+        .where(inArray(leads.id, part));
+      for (const r of rows) leadMap.set(r.id, r);
+      const emails = await db
+        .select()
+        .from(leadEmails)
+        .where(and(inArray(leadEmails.leadId, part), eq(leadEmails.isPrimary, true)))
+        .orderBy(asc(leadEmails.id));
+      for (const e of emails) if (!primaryMap.has(e.leadId)) primaryMap.set(e.leadId, e);
     }
 
-    // Başka kampanyada sürmekte olan dizi: aynı adres veya aynı lead (işletme); yoksa aynı işletme alan adında
-    // gönderimi başlamış dizi (`pending` sayılmaz: başlatılmamış taslak başka kampanyayı kilitlemez).
-    const active = await db
-      .select({ id: campaignLeads.id })
-      .from(campaignLeads)
-      .where(
-        and(
-          or(eq(campaignLeads.recipientHash, recipient.hash), eq(campaignLeads.leadId, lead.id)),
-          ne(campaignLeads.campaignId, input.campaignId),
-          inArray(campaignLeads.status, [...ACTIVE_SEQUENCE]),
-        ),
-      )
-      .limit(1);
-    const business = { leadId: lead.id, domain: businessDomainOf(recipient.domain) };
-    if (active.length > 0) c.add("active_sequence_elsewhere");
-    else if (business.domain) {
-      const sameDomain = await db
+    // Değerlendirilebilecek alıcılar (adres çözümlenebiliyorsa): engel, geçmiş ve işletme sorguları için.
+    const recipients: Array<{
+      leadId: number;
+      email: string;
+      hash: string;
+      business: string | null;
+    }> = [];
+    for (const id of leadIds) {
+      const lead = leadMap.get(id);
+      const primary = primaryMap.get(id);
+      if (!lead || !primary) continue;
+      if (!policies.has(lead.countryCode))
+        policies.set(lead.countryCode, await resolveCountryPolicy(db, scope, lead.countryCode));
+      const parsed = parseEmail(primary.email);
+      if (!parsed || parsed.email !== primary.email) continue;
+      recipients.push({
+        leadId: id,
+        email: parsed.email,
+        hash: hashEmail(parsed.email),
+        business: businessDomainOf(parsed.domain),
+      });
+    }
+    sup = await checkSuppressionBatch(
+      db,
+      recipients.map((r) => r.email),
+    );
+    const hashes = [...new Set(recipients.map((r) => r.hash))];
+    const recLeadIds = [...new Set(recipients.map((r) => r.leadId))];
+    const businesses = [
+      ...new Set(recipients.map((r) => r.business).filter((d): d is string => d !== null)),
+    ];
+
+    // Hedef kampanyanın dizileri (bir kez) ve bu kampanyada ileti gitmiş diziler.
+    if (campaign) {
+      inCampaign.push(
+        ...(await db
+          .select({
+            id: campaignLeads.id,
+            leadId: campaignLeads.leadId,
+            hash: campaignLeads.recipientHash,
+            domain: campaignLeads.recipientDomain,
+            status: campaignLeads.status,
+          })
+          .from(campaignLeads)
+          .where(eq(campaignLeads.campaignId, campaign.id))
+          .orderBy(asc(campaignLeads.id))),
+      );
+      const contacted = await db
+        .selectDistinct({ id: messages.campaignLeadId })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.campaignId, campaign.id),
+            eq(messages.direction, "out"),
+            eq(messages.purpose, "campaign"),
+            inArray(messages.status, [...CONTACTED]),
+          ),
+        );
+      for (const r of contacted) if (r.id !== null) contactedInCampaign.add(r.id);
+    }
+
+    // Başka kampanyada süren diziler: aynı adres / aynı lead; ve gönderimi başlamış aynı işletme alan adı.
+    const elsewhere = (cond: SQL | undefined) =>
+      db
+        .select({ hash: campaignLeads.recipientHash, leadId: campaignLeads.leadId })
+        .from(campaignLeads)
+        .where(
+          and(
+            cond,
+            ne(campaignLeads.campaignId, campaignId),
+            inArray(campaignLeads.status, [...ACTIVE_SEQUENCE]),
+          ),
+        );
+    for (const part of chunks(hashes, PREFETCH_CHUNK))
+      for (const r of await elsewhere(inArray(campaignLeads.recipientHash, part)))
+        if (r.hash) activeHashes.add(r.hash);
+    for (const part of chunks(recLeadIds, PREFETCH_CHUNK))
+      for (const r of await elsewhere(inArray(campaignLeads.leadId, part)))
+        activeLeads.add(r.leadId);
+    for (const part of chunks(businesses, DOMAIN_CHUNK)) {
+      const rows = await db
         .select({ domain: campaignLeads.recipientDomain })
         .from(campaignLeads)
         .where(
           and(
-            domainMatches(campaignLeads.recipientDomain, business.domain),
-            ne(campaignLeads.campaignId, input.campaignId),
-            inArray(campaignLeads.status, ["scheduled", "in_flight", "waiting_next"]),
+            anyDomainMatches(campaignLeads.recipientDomain, part),
+            ne(campaignLeads.campaignId, campaignId),
+            inArray(campaignLeads.status, [...SENDING_SEQUENCE]),
           ),
         );
-      if (sameDomain.some((r) => businessDomainOf(r.domain) === business.domain)) {
-        c.add("active_sequence_elsewhere", { detail: "business" });
+      for (const r of rows) {
+        const b = businessDomainOf(r.domain);
+        if (b) sendingBusinesses.add(b);
       }
     }
 
-    await checkHistory(db, c, recipient.hash, now, limits, null);
-    await checkBusinessHistory(
-      db,
-      c,
-      { ...business, hash: recipient.hash, campaignId: input.campaignId },
-      now,
-      limits,
-    );
-    return c.result(scope);
+    // Adres geçmişi ve işletme geçmişi (başka adresler; lead veya işletme alan adı).
+    for (const part of chunks(hashes, PREFETCH_CHUNK)) {
+      const rows = await db
+        .select(HISTORY_COLS)
+        .from(messages)
+        .where(
+          and(
+            inArray(messages.peerHash, part),
+            eq(messages.direction, "out"),
+            eq(messages.purpose, "campaign"),
+            inArray(messages.status, ["queued", ...CONTACTED]),
+          ),
+        );
+      for (const r of rows)
+        historyByHash.set(r.peerHash!, [...(historyByHash.get(r.peerHash!) ?? []), r]);
+    }
+    const bizRows = new Map<number, BusinessRow>();
+    const bizWhere = (cond: SQL | undefined) =>
+      db
+        .select(BUSINESS_COLS)
+        .from(messages)
+        .where(
+          and(
+            cond,
+            eq(messages.direction, "out"),
+            eq(messages.purpose, "campaign"),
+            inArray(messages.status, [...CONTACTED]),
+          ),
+        );
+    for (const part of chunks(recLeadIds, PREFETCH_CHUNK))
+      for (const r of await bizWhere(inArray(messages.leadId, part))) bizRows.set(r.id, r);
+    for (const part of chunks(businesses, DOMAIN_CHUNK))
+      for (const r of await bizWhere(anyDomainMatches(messages.peerDomain, part)))
+        bizRows.set(r.id, r);
+    for (const r of bizRows.values()) {
+      if (r.leadId !== null) bizByLead.set(r.leadId, [...(bizByLead.get(r.leadId) ?? []), r]);
+      const b = businessDomainOf(r.peerDomain);
+      if (b) bizByDomain.set(b, [...(bizByDomain.get(b) ?? []), r]);
+    }
+    const seqIds = [
+      ...new Set(
+        [...[...historyByHash.values()].flat(), ...bizRows.values()]
+          .map((r) => r.campaignLeadId)
+          .filter((x): x is number => x !== null),
+      ),
+    ];
+    for (const part of chunks(seqIds, PREFETCH_CHUNK)) {
+      const rows = await db
+        .select({ id: campaignLeads.id, status: campaignLeads.status })
+        .from(campaignLeads)
+        .where(inArray(campaignLeads.id, part));
+      for (const r of rows) statuses.set(r.id, r.status);
+    }
   } catch (e) {
-    c.add("evaluation_error", { detail: e instanceof Error ? e.name : "unknown" });
-    return c.result(scope);
+    failure = e;
   }
+
+  const evaluate = (row: EnrollmentRow): EligibilityResult => {
+    const c = new Collector();
+    for (const r of global.reasons) c.add(r.code, { ...r });
+    if (failure !== null) {
+      c.add("evaluation_error", { detail: failure instanceof Error ? failure.name : "unknown" });
+      return c.result(scope);
+    }
+    try {
+      const lead = applyLead(leadMap.get(row.leadId), c, scope);
+      if (!lead) return c.result(scope);
+      const primary = primaryMap.get(lead.id);
+      if (!primary) {
+        c.add("no_email");
+        return c.result(scope);
+      }
+      const recipient = applyRecipient(
+        c,
+        primary,
+        policies.get(lead.countryCode) ?? { mode: "blocked", reason: "unknown_country" },
+        (email) => sup.get(email) ?? { suppressed: true, invalidAddress: true, matches: [] },
+      );
+      if (!recipient) return c.result(scope);
+
+      // Aynı kampanyada aynı lead/adres veya aynı alan adı (alan adı başına tek dizi → en çok 3 ileti).
+      if (campaign) {
+        const inCampaignAll = inCampaign;
+        const inCamp = inCampaignAll.filter((r) => r.id !== row.ignoreCampaignLeadId);
+        // Başlatma öncesi yeniden denetimde (`pending` dizinin kendisi) eski çift `pending` diziler arasında
+        // gönderimdeki kural uygulanır: küçük kimlik işletmeyi tutar; büyük kimlikli `pending` kardeş bu diziyi
+        // engellemez (yoksa ikisi de dışlanır ve işletmeye hiç yazılmaz).
+        const self = inCampaignAll.find((r) => r.id === row.ignoreCampaignLeadId);
+        const siblings =
+          self?.status === "pending"
+            ? inCamp.filter((r) => !(r.status === "pending" && r.id > self.id))
+            : inCamp;
+        if (inCamp.some((r) => r.leadId === lead.id || r.hash === recipient.hash)) {
+          c.add("already_in_campaign");
+        } else if (
+          siblings.some(
+            (r) =>
+              r.domain === recipient.domain &&
+              !["excluded", "removed", "cancelled"].includes(r.status),
+          )
+        ) {
+          c.add("domain_already_in_campaign");
+        } else {
+          applyCampaignBusinessAtEnrollment(
+            c,
+            businessDomainOf(recipient.domain),
+            siblings,
+            contactedInCampaign,
+          );
+        }
+      }
+
+      // Başka kampanyada sürmekte olan dizi: aynı adres veya aynı lead (işletme); yoksa aynı işletme alan adında
+      // gönderimi başlamış dizi (`pending` sayılmaz: başlatılmamış taslak başka kampanyayı kilitlemez).
+      const business = { leadId: lead.id, domain: businessDomainOf(recipient.domain) };
+      if (activeHashes.has(recipient.hash) || activeLeads.has(lead.id))
+        c.add("active_sequence_elsewhere");
+      else if (business.domain && sendingBusinesses.has(business.domain)) {
+        c.add("active_sequence_elsewhere", { detail: "business" });
+      }
+
+      applyHistory(c, historyByHash.get(recipient.hash) ?? [], statuses, now, limits, null);
+      const candidates = new Map<number, BusinessRow>();
+      for (const r of bizByLead.get(lead.id) ?? []) candidates.set(r.id, r);
+      if (business.domain)
+        for (const r of bizByDomain.get(business.domain) ?? []) candidates.set(r.id, r);
+      applyBusinessHistory(
+        c,
+        [...candidates.values()].filter(
+          (m) => m.peerHash !== null && m.peerHash !== recipient.hash,
+        ),
+        { ...business, campaignId },
+        statuses,
+        now,
+        limits,
+      );
+      return c.result(scope);
+    } catch (e) {
+      c.add("evaluation_error", { detail: e instanceof Error ? e.name : "unknown" });
+      return c.result(scope);
+    }
+  };
+
+  return {
+    inCampaign,
+    evaluate,
+    leadOf: (id) => leadMap.get(id),
+    primaryOf: (id) => primaryMap.get(id),
+  };
+}
+
+/** Toplu değerlendirme: satırlar sırayla, `evaluateEnrollment` ile aynı sonuçlar (bkz. `prepareEnrollmentBatch`). */
+export async function evaluateEnrollmentBatch(
+  db: DbExecutor,
+  campaignId: number,
+  rows: readonly EnrollmentRow[],
+  opts: EligibilityOptions = {},
+): Promise<EligibilityResult[]> {
+  const batch = await prepareEnrollmentBatch(
+    db,
+    campaignId,
+    rows.map((r) => r.leadId),
+    opts,
+  );
+  return rows.map((r) => batch.evaluate(r));
 }
 
 /** Bir kampanya dizisinin `stepIndex` adımı ŞU AN gönderilebilir mi? Sağlayıcı çağrısından hemen önce çağrılır. */
@@ -544,12 +810,28 @@ async function checkMailbox(
   mailboxId: number | null,
   c: Collector,
 ): Promise<PolicyScope> {
-  if (mailboxId === null) {
-    c.add("mailbox_missing");
-    return "live";
-  }
-  const [mb] = await db.select().from(mailboxes).where(eq(mailboxes.id, mailboxId)).limit(1);
-  if (!mb) {
+  const [mb] =
+    mailboxId === null
+      ? []
+      : await db.select().from(mailboxes).where(eq(mailboxes.id, mailboxId)).limit(1);
+  const needsGrants =
+    !!mb &&
+    mb.status === "connected" &&
+    policyScopeForMailbox(mb.provider) === "live" &&
+    isLiveSendingPermitted();
+  const grants = needsGrants
+    ? (await getSettings(db, ["mail.gmailGrants"] as const))["mail.gmailGrants"]
+    : {};
+  return applyMailbox(mailboxId, mb, grants, c);
+}
+
+function applyMailbox(
+  mailboxId: number | null,
+  mb: typeof mailboxes.$inferSelect | undefined,
+  grants: Record<string, { send?: boolean } | undefined>,
+  c: Collector,
+): PolicyScope {
+  if (mailboxId === null || !mb) {
     c.add("mailbox_missing");
     return "live";
   }
@@ -562,7 +844,6 @@ async function checkMailbox(
   } else if (scope === "live" && isLiveSendingPermitted()) {
     // Bağlı ama `gmail.send` izni verilmemiş (yalnızca okuma veya izin geri alındı) kutu gönderemez: sağlayıcıya
     // ulaşmadan kampanya duraklar (aksi halde her dizi sağlayıcıda `scope_missing` ile başarısız sayılırdı).
-    const grants = (await getSettings(db, ["mail.gmailGrants"] as const))["mail.gmailGrants"];
     if (!grants[String(mb.id)]?.send) c.add("mailbox_not_ready", { detail: "send_grant_missing" });
   }
   return scope;
@@ -579,6 +860,14 @@ async function loadLead(db: DbExecutor, id: number, c: Collector, scope: PolicyS
     .from(leads)
     .where(eq(leads.id, id))
     .limit(1);
+  return applyLead(row, c, scope);
+}
+
+function applyLead<T extends { status: LeadStatus; source: string }>(
+  row: T | undefined,
+  c: Collector,
+  scope: PolicyScope,
+): T | null {
   if (!row) {
     c.add("lead_not_found");
     return null;
@@ -603,6 +892,22 @@ async function checkRecipient(
     c.add("email_invalid");
     return null;
   }
+  const policy = await resolveCountryPolicy(db, scope, countryCode);
+  const sup = await checkSuppression(db, parsed.email);
+  return applyRecipient(c, email, policy, () => sup);
+}
+
+function applyRecipient(
+  c: Collector,
+  email: { email: string; kind: string; verifyStatus: string },
+  policy: ResolvedPolicy,
+  suppressionOf: (email: string) => SuppressionCheck,
+): { hash: string; domain: string } | null {
+  const parsed = parseEmail(email.email);
+  if (!parsed || parsed.email !== email.email) {
+    c.add("email_invalid");
+    return null;
+  }
   if (email.verifyStatus !== "verified")
     c.add("email_not_verified", { detail: email.verifyStatus });
   // Kayıtlı tür ile yeniden hesaplanan tür birlikte "generic" olmalı (çelişkide sıkı olan geçerli).
@@ -614,11 +919,10 @@ async function checkRecipient(
     c.add("email_personal");
   }
 
-  const policy = await resolveCountryPolicy(db, scope, countryCode);
   if (policy.mode === "blocked") c.add("country_blocked", { detail: policy.reason ?? "policy" });
   else if (policy.mode === "generic_only" && !generic) c.add("country_generic_only");
 
-  const sup = await checkSuppression(db, parsed.email);
+  const sup = suppressionOf(parsed.email);
   if (sup.suppressed) {
     for (const m of sup.matches) c.add("suppressed", { detail: `${m.scope}:${m.reason}` });
     if (sup.matches.length === 0) c.add("suppressed", { detail: "invalid_address" });
@@ -643,12 +947,7 @@ async function checkHistory(
   currentCampaignLeadId: number | null,
 ) {
   const history = await db
-    .select({
-      campaignLeadId: messages.campaignLeadId,
-      status: messages.status,
-      sentAt: messages.sentAt,
-      createdAt: messages.createdAt,
-    })
+    .select(HISTORY_COLS)
     .from(messages)
     .where(
       and(
@@ -658,6 +957,52 @@ async function checkHistory(
         inArray(messages.status, ["queued", ...CONTACTED]),
       ),
     );
+  const statuses = await loadStatuses(db, history);
+  applyHistory(c, history, statuses, now, limits, currentCampaignLeadId);
+}
+
+const HISTORY_COLS = {
+  peerHash: messages.peerHash,
+  campaignLeadId: messages.campaignLeadId,
+  status: messages.status,
+  sentAt: messages.sentAt,
+  createdAt: messages.createdAt,
+};
+type HistoryRow = {
+  peerHash: string | null;
+  campaignLeadId: number | null;
+  status: string;
+  sentAt: number | null;
+  createdAt: number;
+};
+
+/** İletilerin dizilerinin durumları (geçmiş kurallarında "yanıtsız tamamlandı" ayrımı için). */
+async function loadStatuses(
+  db: DbExecutor,
+  rows: readonly { campaignLeadId: number | null }[],
+): Promise<Map<number, CampaignLeadStatus>> {
+  const ids = [
+    ...new Set(rows.map((r) => r.campaignLeadId).filter((k): k is number => k !== null)),
+  ];
+  return new Map(
+    (ids.length
+      ? await db
+          .select({ id: campaignLeads.id, status: campaignLeads.status })
+          .from(campaignLeads)
+          .where(inArray(campaignLeads.id, ids))
+      : []
+    ).map((r) => [r.id, r.status]),
+  );
+}
+
+function applyHistory(
+  c: Collector,
+  history: readonly HistoryRow[],
+  statuses: ReadonlyMap<number, CampaignLeadStatus>,
+  now: number,
+  limits: FrequencyLimits,
+  currentCampaignLeadId: number | null,
+) {
   const others = history.filter((m) => m.campaignLeadId !== currentCampaignLeadId);
   if (others.some((m) => (UNRESOLVED as readonly string[]).includes(m.status)))
     c.add("unresolved_delivery");
@@ -671,16 +1016,6 @@ async function checkHistory(
     const at = Math.max(m.sentAt ?? 0, m.createdAt);
     bySequence.set(m.campaignLeadId, Math.max(bySequence.get(m.campaignLeadId) ?? 0, at));
   }
-  const ids = [...bySequence.keys()].filter((k): k is number => k !== null);
-  const statuses = new Map(
-    (ids.length
-      ? await db
-          .select({ id: campaignLeads.id, status: campaignLeads.status })
-          .from(campaignLeads)
-          .where(inArray(campaignLeads.id, ids))
-      : []
-    ).map((r) => [r.id, r.status]),
-  );
   for (const [seq, lastAt] of bySequence) {
     const status = seq === null ? undefined : statuses.get(seq);
     const completedNoReply = status === undefined || status === "completed";
@@ -724,16 +1059,23 @@ function domainMatches(
   return or(eq(column, reg), like(column, `%.${reg}`));
 }
 
+/** `domainMatches`'in çok alan adlı ön süzgeci (toplu değerlendirme; kesin eşleşme yine `businessDomainOf`). */
+function anyDomainMatches(
+  column: typeof messages.peerDomain | typeof campaignLeads.recipientDomain,
+  regs: readonly string[],
+) {
+  return or(inArray(column, [...regs]), ...regs.map((r) => like(column, `%.${r}`)));
+}
+
 /**
  * Eklemede kampanya içi işletme kontrolü (aynı lead/adres/tam alan adı kontrolleri tetiklenmediyse): aynı işletme alan
  * adında açık bir dizi VARSA veya kapanmış olsa bile bu kampanyada o işletmeye ileti GİTMİŞSE eklenmez.
  */
-async function checkCampaignBusinessAtEnrollment(
-  db: DbExecutor,
+function applyCampaignBusinessAtEnrollment(
   c: Collector,
-  campaignId: number,
   businessDomain: string | null,
   inCampaign: readonly { id: number; domain: string | null; status: CampaignLeadStatus }[],
+  contactedInCampaign: ReadonlySet<number>,
 ) {
   if (!businessDomain) return;
   const same = inCampaign.filter((r) => businessDomainOf(r.domain) === businessDomain);
@@ -742,23 +1084,7 @@ async function checkCampaignBusinessAtEnrollment(
     c.add("business_already_in_campaign");
     return;
   }
-  const contacted = await db
-    .select({ id: messages.id })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.campaignId, campaignId),
-        inArray(
-          messages.campaignLeadId,
-          same.map((r) => r.id),
-        ),
-        eq(messages.direction, "out"),
-        eq(messages.purpose, "campaign"),
-        inArray(messages.status, [...CONTACTED]),
-      ),
-    )
-    .limit(1);
-  if (contacted.length > 0) c.add("business_already_in_campaign");
+  if (same.some((r) => contactedInCampaign.has(r.id))) c.add("business_already_in_campaign");
 }
 
 /**
@@ -842,15 +1168,7 @@ async function checkBusinessHistory(
     ? or(eq(messages.leadId, b.leadId), domainMatches(messages.peerDomain, b.domain))
     : eq(messages.leadId, b.leadId);
   const rows = await db
-    .select({
-      campaignId: messages.campaignId,
-      campaignLeadId: messages.campaignLeadId,
-      leadId: messages.leadId,
-      peerDomain: messages.peerDomain,
-      status: messages.status,
-      sentAt: messages.sentAt,
-      createdAt: messages.createdAt,
-    })
+    .select(BUSINESS_COLS)
     .from(messages)
     .where(
       and(
@@ -861,6 +1179,41 @@ async function checkBusinessHistory(
         inArray(messages.status, [...CONTACTED]),
       ),
     );
+  applyBusinessHistory(c, rows, b, await loadStatuses(db, rows), now, limits);
+}
+
+const BUSINESS_COLS = {
+  id: messages.id,
+  campaignId: messages.campaignId,
+  campaignLeadId: messages.campaignLeadId,
+  leadId: messages.leadId,
+  peerDomain: messages.peerDomain,
+  peerHash: messages.peerHash,
+  status: messages.status,
+  sentAt: messages.sentAt,
+  createdAt: messages.createdAt,
+};
+type BusinessRow = {
+  id: number;
+  campaignId: number | null;
+  campaignLeadId: number | null;
+  leadId: number | null;
+  peerDomain: string | null;
+  peerHash: string | null;
+  status: string;
+  sentAt: number | null;
+  createdAt: number;
+};
+
+/** `rows`: bu işletmenin başka adreslerine giden aday iletiler (adresin kendi özeti hariç). */
+function applyBusinessHistory(
+  c: Collector,
+  rows: readonly BusinessRow[],
+  b: { leadId: number; domain: string | null; campaignId: number },
+  statuses: ReadonlyMap<number, CampaignLeadStatus>,
+  now: number,
+  limits: FrequencyLimits,
+) {
   const others = rows.filter(
     (m) =>
       m.campaignId !== b.campaignId &&
@@ -875,16 +1228,6 @@ async function checkBusinessHistory(
     const at = Math.max(m.sentAt ?? 0, m.createdAt);
     bySequence.set(m.campaignLeadId, Math.max(bySequence.get(m.campaignLeadId) ?? 0, at));
   }
-  const ids = [...bySequence.keys()].filter((k): k is number => k !== null);
-  const statuses = new Map(
-    (ids.length
-      ? await db
-          .select({ id: campaignLeads.id, status: campaignLeads.status })
-          .from(campaignLeads)
-          .where(inArray(campaignLeads.id, ids))
-      : []
-    ).map((r) => [r.id, r.status]),
-  );
   let until = 0;
   for (const [seq, lastAt] of bySequence) {
     const status = seq === null ? undefined : statuses.get(seq);

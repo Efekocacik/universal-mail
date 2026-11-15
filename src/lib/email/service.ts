@@ -15,6 +15,7 @@ import {
   refreshLeadSummary,
   saveContacts,
   saveEmails,
+  requeueRunningEnrichment,
   upsertEnrichment,
   type NewEmail,
 } from "./store";
@@ -73,9 +74,15 @@ export interface LeadInfo {
   placeId: string | null;
   status: string;
   countryCode: string | null;
+  /** Faz 5: kullanıcının verdiği web sitesi (`leads.website`; içe aktarma/elle). Google `websiteUri` DEĞİLDİR. */
+  website: string | null;
 }
 
-/** Bir işletmenin web sitesi bilgisi (yalnızca oturum önbelleğinden; kalıcı kayıtta tutulmaz). */
+/**
+ * Bir işletmenin web sitesi bilgisi. Önce Google oturum önbelleği (kalıcı kayıtta tutulmaz); önbellekte site yoksa veya
+ * lead'in yer kaydı yoksa (Faz 5: içe aktarma/sicil) kullanıcının verdiği `leads.website` kullanılır. Yer kaydı olmayan ve
+ * sitesi verilmemiş lead `no_website` olur (Google verisi yüklemek ona bir şey katmaz).
+ */
 export type WebsiteState =
   { kind: "site"; url: string } | { kind: "no_website" } | { kind: "needs_google" };
 
@@ -96,9 +103,13 @@ export async function websiteStates(db: Db, infos: LeadInfo[]): Promise<Map<numb
   const out = new Map<number, WebsiteState>();
   for (const l of infos) {
     const c = l.placeId ? cache.get(l.placeId) : undefined;
-    if (!c || c.enrichedAt === null) out.set(l.id, { kind: "needs_google" });
-    else if (!c.website?.trim()) out.set(l.id, { kind: "no_website" });
-    else out.set(l.id, { kind: "site", url: c.website.trim() });
+    const own = l.website?.trim();
+    if (c && c.enrichedAt !== null && c.website?.trim())
+      out.set(l.id, { kind: "site", url: c.website.trim() });
+    else if (own) out.set(l.id, { kind: "site", url: own });
+    else if (!l.placeId) out.set(l.id, { kind: "no_website" });
+    else if (!c || c.enrichedAt === null) out.set(l.id, { kind: "needs_google" });
+    else out.set(l.id, { kind: "no_website" });
   }
   return out;
 }
@@ -174,6 +185,7 @@ export async function findEmailsForLeads(
           placeId: leads.placeId,
           status: leads.status,
           countryCode: leads.countryCode,
+          website: leads.website,
         })
         .from(leads)
         .where(inArray(leads.id, part))),
@@ -412,11 +424,11 @@ export async function findEmailsForLeads(
   result.stopped = !!deps.shouldStop?.();
   if (result.stopped) {
     // Durdurulduğunda işlenmeyenler "çalışıyor" görünmesin.
-    for (const t of targets) {
-      const row = (await getEnrichmentMap(db, [t.lead.id])).get(t.lead.id);
-      if (row?.status === "running")
-        await upsertEnrichment(db, t.lead.id, { status: "queued" }, now());
-    }
+    await requeueRunningEnrichment(
+      db,
+      targets.map((t) => t.lead.id),
+      now(),
+    );
   }
 
   if (retryLeads.length > 0 && opts.scheduleRetry)

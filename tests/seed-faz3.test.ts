@@ -192,7 +192,10 @@ describe("hazır şablonlar", () => {
   it("Türkçe ve İngilizce ilk e-posta ve takip şablonlarını bir kez ekler (Faz 4: seed v2)", async () => {
     expect(await seedBuiltinTemplates(db, NOW)).toBe(BUILTIN_TEMPLATES.length);
     const rows = await db.select().from(templates);
-    const initial = rows.filter((r) => r.kind === "initial");
+    // Faz 3/4 genel ilk e-postaları TR ve EN; Faz 5 (seed v3) dilleri ve kategori varyantları tests/templates-faz5.
+    const initial = rows.filter(
+      (r) => r.kind === "initial" && r.categoryKey === null && ["en", "tr"].includes(r.language),
+    );
     expect(initial.map((r) => r.language).sort()).toEqual(["en", "tr"]);
     for (const r of rows) {
       expect(r).toMatchObject({ builtIn: true, version: 1, archivedAt: null });
@@ -204,11 +207,15 @@ describe("hazır şablonlar", () => {
 
   it("düzenlenen veya silinen şablonu geri getirmez ya da değiştirmez", async () => {
     await seedBuiltinTemplates(db, NOW);
-    const [en, tr] = await db
-      .select()
-      .from(templates)
-      .where(eq(templates.kind, "initial"))
-      .orderBy(templates.language);
+    const scope = (rows: (typeof templates.$inferSelect)[]) =>
+      rows.filter((r) => r.categoryKey === null && ["en", "tr"].includes(r.language));
+    const [en, tr] = scope(
+      await db
+        .select()
+        .from(templates)
+        .where(eq(templates.kind, "initial"))
+        .orderBy(templates.language),
+    );
     await db
       .update(templates)
       .set({ subject: "Kendi konum", version: 2 })
@@ -216,7 +223,7 @@ describe("hazır şablonlar", () => {
     await db.delete(templates).where(eq(templates.id, tr!.id));
 
     expect(await seedBuiltinTemplates(db, NOW + 1)).toBe(0);
-    const rows = await db.select().from(templates).where(eq(templates.kind, "initial"));
+    const rows = scope(await db.select().from(templates).where(eq(templates.kind, "initial")));
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ subject: "Kendi konum", version: 2 });
   });

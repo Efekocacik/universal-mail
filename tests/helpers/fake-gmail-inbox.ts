@@ -47,6 +47,10 @@ export interface FakeGmailInbox {
   oldestHistory: number;
   faults: Fault[];
   profileAddress: string | null;
+  /** Tek ileti GET yanıtları bu kadar geciktirilir (eşzamanlılık testleri); ileti kimliğine göre de verilebilir. */
+  messageLatencyMs: number | ((id: string) => number);
+  /** Aynı anda süren en fazla tek ileti GET isteği. */
+  maxConcurrentGets: number;
   /** Yeni ileti ekler (geçmişe de yazar). */
   add(
     m: Omit<FakeMsg, "id" | "threadId" | "internalDate"> &
@@ -66,6 +70,8 @@ export async function startFakeGmailInbox(address: string): Promise<FakeGmailInb
     oldestHistory: 1000,
     faults: [],
     profileAddress: address,
+    messageLatencyMs: 0,
+    maxConcurrentGets: 0,
     add(m) {
       const n = st.messages.length + 1;
       st.historyId += 1;
@@ -84,7 +90,8 @@ export async function startFakeGmailInbox(address: string): Promise<FakeGmailInb
     close: async () => undefined,
   };
   const sockets = new Set<import("node:net").Socket>();
-  const server = http.createServer((req, res) => {
+  let gets = 0;
+  const server = http.createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const query = Object.fromEntries(url.searchParams.entries());
     st.requests.push({
@@ -133,6 +140,16 @@ export async function startFakeGmailInbox(address: string): Promise<FakeGmailInb
     }
     const one = /^\/messages\/([^/]+)$/.exec(p);
     if (one) {
+      const wait =
+        typeof st.messageLatencyMs === "function"
+          ? st.messageLatencyMs(one[1]!)
+          : st.messageLatencyMs;
+      if (wait > 0) {
+        gets += 1;
+        st.maxConcurrentGets = Math.max(st.maxConcurrentGets, gets);
+        await new Promise((r) => setTimeout(r, wait));
+        gets -= 1;
+      }
       const m = st.messages.find((x) => x.id === one[1]);
       if (!m) return send(404, { error: { code: 404, status: "NOT_FOUND" } });
       return send(200, {

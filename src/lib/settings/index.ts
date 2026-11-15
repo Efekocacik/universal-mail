@@ -61,10 +61,86 @@ const rdapBootstrapSchema = z
   })
   .nullable();
 
+/** Faz 5: harici e-posta sağlayıcısı Hunter veya Snov (eski `{provider:"hunter"}` kaydı aynen geçerli kalır). */
+export const EXTERNAL_EMAIL_PROVIDERS = ["hunter", "snov"] as const;
 const externalEmailSchema = z.object({
   enabled: z.boolean(),
-  provider: z.literal("hunter"),
+  provider: z.enum(EXTERNAL_EMAIL_PROVIDERS),
 });
+
+/* ------------------------------------------------------------- Faz 5 (P0) ------------------------------------------------------------- */
+
+/** UK SIC 2007 kodu (5 hane). */
+export const SIC_CODE_RE = /^\d{5}$/;
+/** Fransa NAF rév. 2 / 2025 kodu (ör. 56.30Z). */
+export const NAF_CODE_RE = /^\d{2}\.\d{2}[A-Z]$/;
+
+/** Companies House (Birleşik Krallık) sicil taraması. Demo kipinde (`places.provider = "mock"`) anahtar gerekmez. */
+const companiesHouseSchema = z.object({
+  enabled: z.boolean(),
+  sicCodes: z.array(z.string().regex(SIC_CODE_RE)).min(1).max(20),
+  windowDays: z.number().int().min(1).max(365),
+});
+
+/** INSEE Sirene (Fransa) sicil taraması. `NAF2025` INSEE karşılık tablosunu yayımlayana dek API tarafında reddedilir. */
+const inseeSchema = z.object({
+  enabled: z.boolean(),
+  nafCodes: z.array(z.string().regex(NAF_CODE_RE)).min(1).max(20),
+  windowDays: z.number().int().min(1).max(365),
+  scheme: z.enum(["NAFRev2", "NAF2025"]),
+});
+
+/** Yapay zekâ kişisel giriş modelleri; varsayılan Opus 5.5, daha ucuz seçenek Haiku 5.5. */
+export const AI_INTRO_MODELS = ["claude-opus-5-5", "claude-haiku-5-5"] as const;
+
+/** Claude ile kişisel giriş. Açmak maliyet notunun onayını (`costAckAt`) ister. */
+const aiIntroSchema = z
+  .object({
+    enabled: z.boolean(),
+    model: z.enum(AI_INTRO_MODELS),
+    costAckAt: z.number().int().nullable(),
+    /**
+     * Onayın verildiği model. `costAckAt` ve bu alan SUNUCUDA damgalanır (`stampAiIntroAck`; istemcinin gönderdiği değer
+     * yalnızca "yeni onay" işaretidir). Canlı üretim, onaydan sonra daha pahalı modele geçildiyse VEYA bu alan yoksa
+     * (Faz 5 öncesi kayıt) yeni onay ister (`aiGate`).
+     */
+    costAckModel: z.enum(AI_INTRO_MODELS).nullable().optional(),
+  })
+  .refine((v) => !v.enabled || v.costAckAt !== null, {
+    message: "Maliyet notu onaylanmadan yapay zekâ girişi açılamaz.",
+    path: ["costAckAt"],
+  });
+
+type AiIntroSetting = z.infer<typeof aiIntroSchema>;
+
+/**
+ * Maliyet onayını SUNUCUDA damgalar (ayarlar API'si yazmadan önce çağırır). İstemcinin `costAckAt` değeri yalnızca bir
+ * işarettir: önceki kayıttan FARKLI bir değer "kullanıcı onay penceresini şimdi onayladı" demektir ve onay sunucu saati
+ * ile KAYDEDİLEN model için yazılır. Değer aynıysa önceki onay (zamanı ve modeli) aynen korunur; istemcinin gönderdiği
+ * `costAckModel` yok sayılır. Böylece doğrudan API çağrısıyla onay modeli eski/boş bırakılıp pahalı modele geçilemez.
+ * `costAckAt: null` onayı geri alır.
+ */
+export function stampAiIntroAck(
+  prev: AiIntroSetting,
+  next: AiIntroSetting,
+  now: number,
+): AiIntroSetting {
+  if (next.costAckAt === null) return { ...next, costAckAt: null, costAckModel: null };
+  const fresh = prev.costAckAt === null || next.costAckAt !== prev.costAckAt;
+  if (fresh) return { ...next, costAckAt: now, costAckModel: next.model };
+  return { ...next, costAckAt: prev.costAckAt, costAckModel: prev.costAckModel ?? null };
+}
+
+/** Açılma izleme (varsayılan KAPALI). Açmak gizlilik notunun ("açılma verisi kesin değildir") onayını ister. */
+const trackingOpensSchema = z
+  .object({
+    enabled: z.boolean(),
+    ackAt: z.number().int().nullable(),
+  })
+  .refine((v) => !v.enabled || v.ackAt !== null, {
+    message: "Açılma izleme notu onaylanmadan açılamaz.",
+    path: ["ackAt"],
+  });
 
 export const settingSchemas = {
   "setup.completed": z.boolean(),
@@ -255,6 +331,16 @@ export const settingSchemas = {
   "google.derivedFlagsDays": z.number().int().min(30).max(3650).nullable(),
   /** İÇ: gönderim iş parçacığına "hemen uyan" isteği (çalışan iş varken). Yalnızca gönderim zamanlayıcısı yazar. */
   "mail.dispatch.wakeRequestedAt": z.number().int().nullable(),
+
+  /* ---------------------------------------------------------------- Faz 5 (P0) ---------------------------------------------------------------- */
+  /** Companies House: SIC kodları ve kuruluş penceresi (gün). Sahibi: paket R. */
+  "registry.companiesHouse": companiesHouseSchema,
+  /** INSEE Sirene: NAF kodları, pencere ve kod şeması. Sahibi: paket R. */
+  "registry.insee": inseeSchema,
+  /** Claude kişisel girişi: aç/kapa, model, maliyet onayı. Sahibi: paket A. */
+  "ai.intro": aiIntroSchema,
+  /** Açılma izleme: aç/kapa ve gizlilik notu onayı (bu sürümde yalnızca demo). Sahibi: paket T. */
+  "tracking.opens": trackingOpensSchema,
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -303,6 +389,10 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "novelty.futureWatch": { enabled: true, everyDays: 7, maxPerRun: 100 },
   "google.derivedFlagsDays": null,
   "mail.dispatch.wakeRequestedAt": null,
+  "registry.companiesHouse": { enabled: false, sicCodes: ["56102", "56302"], windowDays: 30 },
+  "registry.insee": { enabled: false, nafCodes: ["56.30Z"], windowDays: 30, scheme: "NAFRev2" },
+  "ai.intro": { enabled: false, model: "claude-opus-5-5", costAckAt: null },
+  "tracking.opens": { enabled: false, ackAt: null },
 };
 
 /**
@@ -327,6 +417,10 @@ export const USER_SETTING_KEYS = [
   "novelty.domainYoungDays",
   "novelty.futureWatch",
   "google.derivedFlagsDays",
+  "registry.companiesHouse",
+  "registry.insee",
+  "ai.intro",
+  "tracking.opens",
 ] as const satisfies readonly SettingKey[];
 export type UserSettingKey = (typeof USER_SETTING_KEYS)[number];
 

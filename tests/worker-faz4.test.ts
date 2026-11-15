@@ -364,7 +364,9 @@ describe("işçi IPC sözleşmesi (Electron ana süreci → işçi)", () => {
 
 describe("bakım turu (M3)", () => {
   it("eski bitmiş işleri siler, gün anahtarlı işleri günde bir ekler, tick zincirini kurar", async () => {
-    const now = Date.now();
+    // Gün ortası (UTC): "aynı gün +1 saat" günün son saatinde koşulunca ertesi güne taşıp gün anahtarlı işleri
+    // yeniden ekliyordu (saate bağlı kararsız test).
+    const now = Math.floor(Date.now() / DAY) * DAY + 12 * 3_600_000;
     const old = (await enqueueJob(db, "x.old", {}))!;
     const recent = (await enqueueJob(db, "x.recent", {}))!;
     await db

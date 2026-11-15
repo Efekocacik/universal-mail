@@ -1,6 +1,6 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db/client";
-import { leads } from "@/lib/db/schema";
+import { leadIntros, leads } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import type { SenderProfile } from "./footer";
 import type { TemplateLanguage } from "./language";
@@ -10,7 +10,8 @@ import type { VariableValues } from "./template-engine";
  * Şablon değişkenlerinin değerleri. Yalnızca BİZİM verimiz kullanılır:
  *  - lead: kullanıcının girdiği görünen ad, GeoNames'ten türetilen şehir, kendi kategori etiketimiz;
  *  - gönderen: firma profili (eksikse değer boş kalır; UYDURULMAZ);
- *  - sistem: çıkış bağlantısı (alt bilgiyi üreten taraf verir).
+ *  - sistem: çıkış bağlantısı (alt bilgiyi üreten taraf verir);
+ *  - kişisel giriş: (lead, şablon dili) için kullanıcının ONAYLADIĞI yapay zekâ girişi; taslak asla kullanılmaz.
  * Google oturum önbelleği (işletme adı, açılış tarihi) bilerek OKUNMAZ.
  */
 
@@ -44,6 +45,33 @@ export interface RenderContext {
   profile: SenderProfile | null;
   /** Lead'in ülkesi (dil önerisi için). */
   countryCode: string | null;
+  /** `{{kisisel_giris}}` için yalnızca onay bekleyen taslak var (ön izlemede "onay bekliyor" denebilir). */
+  introPending: boolean;
+}
+
+/**
+ * (lead, dil) için kişisel giriş: onaylı metin varsa o; yoksa yalnızca onay bekleyen taslak olup olmadığı. Tek sorgu
+ * (`lead_intros_lead_idx`); onaylı satır öne alınır.
+ */
+export async function introForRender(
+  db: DbExecutor,
+  leadId: number,
+  language: TemplateLanguage,
+): Promise<{ text: string | null; pending: boolean }> {
+  const [r] = await db
+    .select({ status: leadIntros.status, text: leadIntros.text })
+    .from(leadIntros)
+    .where(
+      and(
+        eq(leadIntros.leadId, leadId),
+        eq(leadIntros.language, language),
+        inArray(leadIntros.status, ["approved", "draft"]),
+      ),
+    )
+    .orderBy(sql`${leadIntros.status} = 'approved' DESC`, desc(leadIntros.id))
+    .limit(1);
+  if (!r) return { text: null, pending: false };
+  return r.status === "approved" ? { text: r.text, pending: false } : { text: null, pending: true };
 }
 
 export class RenderContextError extends Error {
@@ -69,6 +97,7 @@ export async function buildRenderContext(
     .limit(1);
   if (!lead) throw new RenderContextError("lead_not_found");
   const profile = (await getSetting(db, "company.profile")) ?? null;
+  const intro = await introForRender(db, leadId, language);
 
   const values: VariableValues = {
     isletme_adi: lead.displayName,
@@ -78,7 +107,8 @@ export async function buildRenderContext(
     firma: profile?.legalName,
     firma_adres: profile?.address,
     telefon: profile?.phone,
+    kisisel_giris: intro.text,
     // cikis_linki: alt bilgiyi üreten taraf (gerçek veya demo bağlantı) doldurur.
   };
-  return { values, profile, countryCode: lead.countryCode };
+  return { values, profile, countryCode: lead.countryCode, introPending: intro.pending };
 }

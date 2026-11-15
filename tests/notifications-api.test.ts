@@ -4,6 +4,7 @@ import * as listRoute from "@/app/api/notifications/route";
 import * as readRoute from "@/app/api/notifications/read/route";
 import * as claimRoute from "@/app/api/notifications/os-claim/route";
 import * as statusRoute from "@/app/api/status/route";
+import * as settingsRoute from "@/app/api/settings/route";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog } from "@/lib/db/schema";
@@ -182,6 +183,30 @@ describe("POST /api/notifications/os-claim", () => {
       (await json(await claimRoute.POST(req("POST", "/api/notifications/os-claim"), undefined)))
         .items,
     ).toHaveLength(0);
+  });
+});
+
+describe("masaüstü bildirimleri açılınca birikim", () => {
+  it("kapalıyken biriken bildirimler açılışta masaüstünde patlamaz; zilde kalır; sonrakiler gösterilir", async () => {
+    await setSetting(db, "notifications.os", false);
+    await seed(4);
+    const put = (v: boolean) =>
+      settingsRoute.PUT(req("PUT", "/api/settings", { "notifications.os": v }), undefined);
+    expect((await put(true)).status).toBe(200);
+    const claim = async () =>
+      (await json(await claimRoute.POST(req("POST", "/api/notifications/os-claim"), undefined)))
+        .items as { id: number }[];
+    expect(await claim()).toHaveLength(0);
+    // Zil hepsini (okunmamış) tutar.
+    const list = await json(await listRoute.GET(req("GET", "/api/notifications"), undefined));
+    expect(list.unread).toBe(4);
+    // Açıldıktan sonra gelen bildirim gösterilir.
+    await notify(db, { kind: "scan.done", dedupeKey: "yeni", params: { n: 1 }, url: "/" });
+    expect(await claim()).toHaveLength(1);
+    // Zaten açıkken yeniden "açık" yazmak bekleyeni yutmaz.
+    await notify(db, { kind: "scan.done", dedupeKey: "yeni2", params: { n: 2 }, url: "/" });
+    expect((await put(true)).status).toBe(200);
+    expect(await claim()).toHaveLength(1);
   });
 });
 

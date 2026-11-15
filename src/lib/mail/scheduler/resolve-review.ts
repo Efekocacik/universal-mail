@@ -3,6 +3,7 @@ import { DEFAULT_FREQUENCY_LIMITS, type FrequencyLimits } from "@/lib/compliance
 import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { auditLog, campaignLeads, messages, type CampaignLeadStatus } from "@/lib/db/schema";
+import { settleIfBusinessComplaint } from "../inbound/stop";
 import { advanceAfterSent, reconcileStaleSendingIn, settleIfCancelled } from "../send-service";
 import { wakeDispatchSafely } from "./job";
 
@@ -233,6 +234,7 @@ export async function resolveUncertainSend(
             ),
           );
         await settleIfCancelled(tx, clId, now);
+        await settleIfBusinessComplaint(tx, clId, now);
       }
     } else {
       await tx

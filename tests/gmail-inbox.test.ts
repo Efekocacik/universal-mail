@@ -21,6 +21,7 @@ import {
   encodeCursor,
   GmailInboxError,
   GmailInboxReader,
+  READ_CONCURRENCY,
 } from "@/lib/mail/gmail/inbox";
 import { resetOAuthMemoryForTests, type OAuthDeps } from "@/lib/mail/gmail/oauth";
 import { FakeInbox } from "@/lib/mail/inbound/fake-inbox";
@@ -992,6 +993,42 @@ describe("hata ve belirsizlikte veri kaybı/yanlış işleme yok", () => {
     expect(await cursorOf()).toBe(before);
     await drain();
     expect(await inboundRows()).toHaveLength(3);
+  });
+
+  it("iletiler sınırlı eşzamanlılıkla okunur; sonuç sırası Gmail sırasıyla aynı (yavaş yanıtlar öne geçmez)", async () => {
+    for (let i = 1; i <= 9; i++)
+      inbox.add({
+        id: `c${i}`,
+        threadId: "t-out1",
+        labels: ["INBOX"],
+        raw: reply(`par${i}`, `paralel ${i} catalogue`),
+      });
+    // Listede önce gelenler daha yavaş yanıtlanır: tamamlanma sırası tersine döner.
+    inbox.messageLatencyMs = (id) => 5 + (10 - Number(id.slice(1))) * 4;
+    const res = await reader.fetch(gid, null, 20);
+    const order = res.items.map((e) => e.providerMessageId);
+    expect(order).toEqual(["c9", "c8", "c7", "c6", "c5", "c4", "c3", "c2", "c1"]);
+    expect(inbox.maxConcurrentGets).toBeGreaterThan(1);
+    expect(inbox.maxConcurrentGets).toBeLessThanOrEqual(READ_CONCURRENCY);
+  });
+
+  it("eşzamanlı okumada bir ileti hata verirse tur reddedilir; imleç ilerlemez, sonra hepsi bir kez işlenir", async () => {
+    for (let i = 1; i <= 6; i++)
+      inbox.add({
+        id: `d${i}`,
+        threadId: "t-out1",
+        labels: ["INBOX"],
+        raw: reply(`err${i}`, `ileti ${i} catalogue`),
+      });
+    inbox.messageLatencyMs = 5;
+    inbox.faults.push({ match: "/messages/d4", status: 500, times: 1 });
+    const before = await cursorOf();
+    const r = await sync();
+    expect(r.error).toBe("unavailable");
+    expect(await inboundRows()).toHaveLength(0);
+    expect(await cursorOf()).toBe(before);
+    await drain();
+    expect(await inboundRows()).toHaveLength(6);
   });
 
   it("401: belirteç BİR kez yenilenir ve istek tekrarlanır (okuma idempotent); ikinci 401 → hata, kayıt yok", async () => {

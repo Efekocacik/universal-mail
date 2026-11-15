@@ -199,7 +199,27 @@ export type VariableValues = Partial<Record<VariableKey, string | null | undefin
 export interface RenderOptions {
   /** Eksik değişkenin yerine görünür bir işaret koy (ön izleme). Gönderimde kullanılmaz. */
   markMissing?: boolean;
+  /**
+   * Ön izlemede "eksik" yerine "onay bekliyor" işaretiyle gösterilecek değişkenler (ör. yalnızca onaylanmamış taslağı
+   * olan `kisisel_giris`). Yine `missing` listesine girer: gönderimde davranış değişmez.
+   */
+  pendingKeys?: ReadonlySet<VariableKey>;
+  /**
+   * Ön izleme işaretlerinin dili (arayüz dili; e-postanın dili DEĞİL). Varsayılan Türkçe: `[eksik: x]`,
+   * `[onay bekliyor: x]`. Gönderimde işaret hiç üretilmez.
+   */
+  markerLocale?: PreviewMarkerLocale;
 }
+
+export type PreviewMarkerLocale = "tr" | "en";
+
+/** Ön izlemede eksik / onay bekleyen değişken işaretinin etiketi (arayüz diline göre). */
+export const PREVIEW_MARKER_LABELS: Readonly<
+  Record<PreviewMarkerLocale, { missing: string; pending: string }>
+> = {
+  tr: { missing: "eksik", pending: "onay bekliyor" },
+  en: { missing: "missing", pending: "awaiting approval" },
+};
 
 export interface RenderedBody {
   subject: string;
@@ -253,10 +273,11 @@ export function renderTemplate(
 
   const missing = new Set<VariableKey>();
   const usedFallback = new Set<VariableKey>();
+  const labels = PREVIEW_MARKER_LABELS[opts.markerLocale ?? "tr"];
   const fill = (
     tokens: TemplateToken[],
     encode: (v: string) => string,
-    marker: (k: string) => string,
+    marker: (label: string, k: string) => string,
     encodeFallback: (v: string) => string = encode,
   ) =>
     tokens
@@ -269,18 +290,19 @@ export function renderTemplate(
           return encodeFallback(t.fallback);
         }
         missing.add(t.name);
-        return opts.markMissing ? marker(t.name) : "";
+        if (!opts.markMissing) return "";
+        return marker(opts.pendingKeys?.has(t.name) ? labels.pending : labels.missing, t.name);
       })
       .join("");
 
-  const subject = headerSafe(fill(s.tokens, headerSafe, (k) => `[eksik: ${k}]`));
+  const subject = headerSafe(fill(s.tokens, headerSafe, (label, k) => `[${label}: ${k}]`));
   // Gövdedeki yedek metin, kayıtlı (temizlenip HTML olarak yazılmış) gövdeden okunur: zaten HTML metnidir
   // (`&` → `&amp;`) ve `<`, `>` içeremez. Yeniden kaçışlamak alıcıya "Tom &amp; Jerry" gösterirdi. Sonuç yine
   // aşağıda temizlenir.
   const filled = fill(
     b.tokens,
     (v) => escapeHtml(v),
-    (k) => `<strong>[eksik: ${escapeHtml(k)}]</strong>`,
+    (label, k) => `<strong>[${escapeHtml(label)}: ${escapeHtml(k)}]</strong>`,
     (fallbackHtml) => fallbackHtml,
   );
   const html = sanitizeEmailHtml(filled).html;

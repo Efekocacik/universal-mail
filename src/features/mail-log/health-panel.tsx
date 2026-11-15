@@ -19,15 +19,7 @@ import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { MailboxHealthCard, ReadinessCard } from "./mailbox-health-card";
 import { bpToPercent, dnsCodeLabel, dnsStatusLabel, dnsStatusVariant, percentToBp } from "./model";
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
+import { useDebounced } from "@/lib/client/use-debounced";
 
 /* Otomatik durdurma eşikleri ------------------------------------------------------------------------ */
 
@@ -271,7 +263,11 @@ function TestSendCard({
     retryDelay: queryRetryDelay,
   });
   const rows = useMemo(() => leads.data ?? [], [leads.data]);
-  const tpls = useMemo(() => (templates.data ?? []).filter((x) => !x.archived), [templates.data]);
+  // Bilgi amaçlı (ör. DE) şablonlar hiçbir zaman gönderilmez; test gönderiminde de seçilemez (varsayılan olarak da).
+  const tpls = useMemo(
+    () => (templates.data ?? []).filter((x) => !x.archived && !x.infoOnly),
+    [templates.data],
+  );
   useEffect(() => {
     if (!leadId && rows.length > 0) setLeadId(String(rows[0]!.leadId));
   }, [rows, leadId]);

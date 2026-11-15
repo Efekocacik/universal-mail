@@ -36,7 +36,8 @@ export const POST = route(async (req: Request, ctx: { params: Promise<{ id: stri
   if (r.outcome === "started") return json({ scanId: r.scanId }, { status: 201 });
   if (r.outcome === "gate") {
     const status = (GATE_HTTP_STATUS as Record<string, number>)[r.code] ?? 400;
-    throw new HttpError(status, r.message, { code: r.code as GateCode | string });
+    // Yapılandırılmış tutarlar (NEEDS_ACK highUsd/remainingUsd) "Yeniden tara" ile aynı biçimde gövdeye eklenir.
+    throw new HttpError(status, r.message, { ...r.fields, code: r.code as GateCode | string });
   }
   throw new HttpError(
     409,

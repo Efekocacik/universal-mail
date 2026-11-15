@@ -1,14 +1,26 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as schedulesRoute from "@/app/api/schedules/route";
 import * as scheduleRoute from "@/app/api/schedules/[id]/route";
 import * as runNowRoute from "@/app/api/schedules/[id]/run-now/route";
+import * as rearmRoute from "@/app/api/schedules/rearm/route";
 import * as settingsRoute from "@/app/api/settings/route";
 import * as statusRoute from "@/app/api/status/route";
 import { recordUsage } from "@/lib/budget";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
-import { auditLog, categorySets, jobs, notifications, scanSchedules, scans } from "@/lib/db/schema";
+import {
+  apiUsage,
+  auditLog,
+  categorySets,
+  jobs,
+  notifications,
+  scanSchedules,
+  scans,
+} from "@/lib/db/schema";
+import { clearJobHandlers, getJobHandler } from "@/lib/jobs/registry";
+import { registerCoreHandlers } from "@/worker/handlers";
+import { Worker } from "@/worker/loop";
 import { PlacesApiError } from "@/lib/places/errors";
 import { renderNotification } from "@/lib/notifications/render";
 import { onScanFailed } from "@/lib/scan/scan-notifications";
@@ -332,6 +344,87 @@ describe("runDueSchedules: atlama kodları ve bildirim tekilleştirme", () => {
     expect(again).toMatchObject({ outcome: "started" });
   });
 
+  it("CALL_LIMIT ile duraklamış zamanlanmış tarama kendiliğinden sürmez (SCAN_PAUSED)", async () => {
+    const { id, nextRunAt } = await makeSchedule(7);
+    await runDueSchedules(db, { now: nextRunAt + 1 });
+    const own = (await db.select().from(scans).where(eq(scans.origin, "schedule")))[0]!;
+    await db
+      .update(scans)
+      .set({ status: "paused", pauseCode: "CALL_LIMIT" })
+      .where(eq(scans.id, own.id));
+    await db.delete(jobs).where(eq(jobs.type, "scan.run"));
+    const [r] = await runDueSchedules(db, { now: nextRunAt + 8 * DAY_MS });
+    expect(r).toMatchObject({ scheduleId: id, outcome: "skipped", code: "SCAN_PAUSED" });
+    expect((await db.select().from(scans).where(eq(scans.id, own.id)))[0]).toMatchObject({
+      status: "paused",
+      pauseCode: "CALL_LIMIT",
+    });
+    expect(await db.select().from(jobs).where(eq(jobs.type, "scan.run"))).toEqual([]);
+  });
+
+  it.each([
+    ["queued", null],
+    ["budget_stopped", "BUDGET_BLOCKED"],
+    ["paused", "PROVIDER_NETWORK"],
+    ["paused", "INTERRUPTED"],
+  ] as const)(
+    "demo→Google: bitmemiş zamanlanmış tarama (%s/%s) yeni onay olmadan Google'da sürmez",
+    async (status, code) => {
+      const { nextRunAt } = await makeSchedule(7);
+      const [r] = await runDueSchedules(db, { now: nextRunAt + 1 });
+      expect(r).toMatchObject({ outcome: "started" });
+      const own = (await db.select().from(scans).where(eq(scans.origin, "schedule")))[0]!;
+      expect(own.provider).toBe("mock");
+      await db.delete(jobs).where(eq(jobs.type, "scan.run"));
+      await db.update(scans).set({ status, pauseCode: code }).where(eq(scans.id, own.id));
+      if (status === "queued")
+        await db.insert(jobs).values({
+          type: "scan.run",
+          payload: { scanId: own.id },
+          status: "queued",
+          priority: 5,
+          maxAttempts: 1,
+          runAt: T0,
+          createdAt: T0,
+          updatedAt: T0,
+        });
+
+      await setSecret("google.placesKey", "AIza-test-key-not-real-000000000000");
+      const put = await settingsRoute.PUT(
+        req("PUT", "/api/settings", { "places.provider": "google" }),
+        undefined,
+      );
+      expect(put.status).toBe(200);
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        throw new Error("Google çağrılmamalı");
+      });
+      try {
+        // Zamanlama tick'i, işçi kurtarması ve scan.run işleyicisi.
+        await runDueSchedules(db, { now: nextRunAt + 8 * DAY_MS });
+        await new Worker({ db, workerId: "w", log: () => undefined }).recover(
+          nextRunAt + 8 * DAY_MS,
+        );
+        registerCoreHandlers();
+        await getJobHandler("scan.run")!({
+          job: { id: 1, type: "scan.run" } as never,
+          payload: { scanId: own.id },
+          db,
+          shouldStop: () => false,
+          log: () => undefined,
+        });
+        expect(fetchSpy).not.toHaveBeenCalled();
+      } finally {
+        fetchSpy.mockRestore();
+        clearJobHandlers();
+      }
+      expect(await db.select().from(apiUsage).where(eq(apiUsage.provider, "google"))).toEqual([]);
+      const after = (await db.select().from(scans).where(eq(scans.id, own.id)))[0]!;
+      expect(after).toMatchObject({ status: "paused", pauseCode: "PROVIDER_CHANGED" });
+      // Elle sürdürme de reddedilir: eski sağlayıcının onayı geçersiz.
+      expect((await resumeScan(db, own.id)).ok).toBe(false);
+    },
+  );
+
   it.each([
     [
       "CATEGORY_SET_MISSING",
@@ -540,6 +633,36 @@ describe("HTTP: /api/schedules", () => {
     ).toBe(404);
   });
 
+  it("şimdi çalıştır NEEDS_ACK: 409 yapılandırılmış tutarlarla, tarama yok; onayla 201 ve onaylı tavan", async () => {
+    const { id } = await makeSchedule(7);
+    await recordUsage(db, "mock", "text_search_pro", 5000); // ücretsiz kota bitti: her çağrı ücretli
+    await setSetting(db, "budget.monthlyUsd", 0.01);
+    const before = (await db.select().from(scans)).length;
+    const r = await runNowRoute.POST(req("POST", `/api/schedules/${id}/run-now`), params(id));
+    expect(r.status).toBe(409);
+    const body = await json(r);
+    expect(body.code).toBe("NEEDS_ACK");
+    // İngilizce arayüz onay metnini (apiError.NEEDS_ACK.detail) bu alanlarla kurar; "Yeniden tara" ile aynı biçim.
+    expect(typeof body.highUsd).toBe("number");
+    expect(body.remainingUsd).toBe(0.01);
+    expect(body.highUsd).toBeGreaterThan(body.remainingUsd);
+    expect((await db.select().from(scans)).length).toBe(before);
+
+    const ok = await runNowRoute.POST(
+      req("POST", `/api/schedules/${id}/run-now`, { acknowledgeRisk: true }),
+      params(id),
+    );
+    expect(ok.status).toBe(201);
+    const { scanId } = await json(ok);
+    const [scan] = await db.select().from(scans).where(eq(scans.id, scanId));
+    const est = scan!.estimate as { costUsd: { high: number }; costCapUsd: number };
+    // Tavan: zamanlamanın önceden onaylı tutarı ile kullanıcının şimdi onayladığı yüksek tahminin büyüğü.
+    expect(est.costCapUsd).toBe(
+      approvedCostCap((await getSchedule(db, id)).ackMaxUsd, body.highUsd),
+    );
+    expect(est.costCapUsd).toBeGreaterThanOrEqual(est.costUsd.high);
+  });
+
   it("sil: 204, zamanlama bildirimleri silinir, geçmiş taramalar kalır", async () => {
     const { id, nextRunAt } = await makeSchedule(7);
     await setSetting(db, "budget.monthlyUsd", 0.5);
@@ -588,6 +711,37 @@ describe("HTTP: /api/schedules", () => {
     });
     const st = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
     expect(st.schedules).toMatchObject({ total: 1 });
+  });
+
+  it("yeniden başlat: kopuk zincirde tick şimdiye kurulur; tekrar çağrı ikinci tick eklemez", async () => {
+    const { nextRunAt } = await makeSchedule(7);
+    await db.delete(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+    vi.useFakeTimers({ now: nextRunAt + TICK_STALL_MS, toFake: ["Date"] });
+    try {
+      const before = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
+      expect(before.schedules).toMatchObject({ tickArmed: false, stalled: true });
+      const r = await rearmRoute.POST(req("POST", "/api/schedules/rearm"), undefined);
+      expect(r.status).toBe(200);
+      expect(await json(r)).toEqual({ armed: true });
+      const ticks = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+      expect(ticks).toHaveLength(1);
+      expect(ticks[0]).toMatchObject({ status: "queued", runAt: nextRunAt + TICK_STALL_MS });
+      // Kuyruktaki ileri tarihli tick şimdiye çekilir; yenisi eklenmez.
+      await db
+        .update(jobs)
+        .set({ runAt: nextRunAt + TICK_STALL_MS + 60 * 60_000 })
+        .where(eq(jobs.id, ticks[0]!.id));
+      expect((await rearmRoute.POST(req("POST", "/api/schedules/rearm"), undefined)).status).toBe(
+        200,
+      );
+      const again = await db.select().from(jobs).where(eq(jobs.type, SCHEDULE_TICK_JOB));
+      expect(again).toHaveLength(1);
+      expect(again[0]!.runAt).toBe(nextRunAt + TICK_STALL_MS);
+      const after = await json(await statusRoute.GET(req("GET", "/api/status"), undefined));
+      expect(after.schedules).toMatchObject({ tickArmed: true, stalled: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

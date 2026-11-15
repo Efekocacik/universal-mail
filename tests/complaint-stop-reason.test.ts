@@ -26,6 +26,8 @@ import {
 import { processInbound, resolveReview } from "@/lib/mail/inbound/process";
 import { appendReasonsSql, stopBusinessSequences, stopSequences } from "@/lib/mail/inbound/stop";
 import { listMailLog, mailLogCsvLine } from "@/lib/mail/mail-log";
+import type { MailProvider } from "@/lib/mail/provider/provider";
+import { sendCampaignStep } from "@/lib/mail/send-service";
 import { getMailboxHealth } from "@/lib/mail/mailbox-health";
 import {
   addSequence,
@@ -418,6 +420,51 @@ describe("TB-11(d): doğrulanmış şikâyet işletmenin diğer süren dizilerin
     expect(sq.exclusionReasons).toContain("business_complaint");
   });
 
+  it("şikâyet geldiğinde gönderim ortasındaki (in_flight) aynı işletme dizisi, sonucu kaydedilince durur", async () => {
+    // Not: varsayılan sıklık kuralları (işletme bekleme süresi, çözülmemiş teslim) bu yarışı normalde önler; burada
+    // ilk adrese giden ileti, ikinci adresin ayrılmasından SONRA doğrudan yazılarak kural katmanından bağımsız sınanır.
+    const c2 = await createCampaign(db, { status: "running" });
+    const b = await addSequence(db, c2, { email: "satis@alici-ornek.com" });
+    let calls = 0;
+    const provider: MailProvider = {
+      id: "demo",
+      send: async () => {
+        calls++;
+        // Gönderim sürerken (b `in_flight`) aynı işletmenin başka adresinden doğrulanmış şikâyet gelir.
+        expect((await row(b.cl)).status).toBe("in_flight");
+        const a = await seedSent(db, campaign, { email: RCPT });
+        expect(await complain(a)).toMatchObject({ effects: { suppressed: true } });
+        return { status: "accepted", providerMessageId: "x", acceptedAt: NOW };
+      },
+    };
+    const sendAt = NOW + 86_400_000;
+    const r1 = await sendCampaignStep(
+      db,
+      { campaignLeadId: b.cl, stepIndex: 0 },
+      { now: () => sendAt, provider },
+    );
+    expect(r1).toMatchObject({ outcome: "sent" });
+    expect(await row(b.cl)).toMatchObject({
+      status: "unsubscribed",
+      stopReason: "complaint",
+      nextSendAt: null,
+    });
+    expect((await row(b.cl)).exclusionReasons).toEqual(
+      expect.arrayContaining(["arf_complaint", "business_complaint"]),
+    );
+    const [au] = await db.select().from(auditLog).where(eq(auditLog.action, "inbound.complaint"));
+    expect(au!.detail).toMatchObject({ businessPending: 1, businessPendingIds: [b.cl] });
+    // Sonraki takip adımı gönderilmez; diğer adres yine ENGELLENMEZ.
+    const r2 = await sendCampaignStep(
+      db,
+      { campaignLeadId: b.cl, stepIndex: 1 },
+      { now: () => sendAt + 10 * 86_400_000, provider },
+    );
+    expect(r2.outcome).not.toBe("sent");
+    expect(calls).toBe(1);
+    expect((await checkSuppression(db, "satis@alici-ornek.com")).suppressed).toBe(false);
+  });
+
   it("doğrulanmamış şikâyet işletmeye dokunmaz; çıkış (unsubscribe) işletme geneline yayılmaz", async () => {
     const a = await seedSent(db, campaign, { email: RCPT });
     const c2 = await createCampaign(db, { status: "running" });
@@ -431,12 +478,12 @@ describe("TB-11(d): doğrulanmış şikâyet işletmenin diğer süren dizilerin
     const stopped = await db.transaction((tx) =>
       stopBusinessSequences(tx, { leadId: null, recipientDomain: "gmail.com" }, NOW),
     );
-    expect(stopped).toEqual({ stopped: [], businessDomain: null });
+    expect(stopped).toEqual({ stopped: [], pendingIds: [], businessDomain: null });
     const s = await addSequence(db, campaign, { email: "biri@gmail.com" });
     const res = await db.transaction((tx) =>
       stopBusinessSequences(tx, { leadId: s.leadId, recipientDomain: "gmail.com" }, NOW),
     );
-    expect(res).toEqual({ stopped: [s.cl], businessDomain: null });
+    expect(res).toEqual({ stopped: [s.cl], pendingIds: [], businessDomain: null });
   });
 });
 

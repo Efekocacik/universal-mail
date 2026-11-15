@@ -21,7 +21,7 @@ import {
   type UiFilters,
 } from "./filters";
 import { t } from "@/lib/i18n";
-import type { LeadLifecycle } from "@/lib/leads/query";
+import type { LeadLifecycle, LeadSource } from "@/lib/leads/query";
 import {
   EMPTY_SELECTION,
   MAX_SELECTION,
@@ -85,6 +85,8 @@ export interface InitialExploreState {
   emailStatus?: string[];
   /** Açılışta ayrıntısı açılacak işletme (`lead=<id>`). */
   leadId?: number;
+  /** Faz 5: lead kaynağı süzgeci (`source=registry,import`). */
+  source?: LeadSource[];
 }
 
 interface ExploreContextValue {
@@ -100,6 +102,9 @@ interface ExploreContextValue {
   select: (id: number | null, opts?: { focus?: boolean; lat?: number; lng?: number }) => void;
   tab: "list" | "scan";
   setTab: (tab: "list" | "scan") => void;
+  /** Dar ekranda (≤ 900 px) görünen bölme: liste ya da harita. "/" kısayolu listeye geçer. */
+  pane: "list" | "map";
+  setPane: (pane: "list" | "map") => void;
   draft: DraftRegion | null;
   setDraft: (r: DraftRegion | null) => void;
   drawMode: DrawMode;
@@ -152,6 +157,7 @@ export function ExploreProvider({
   const [sort, setSort] = useState<LeadSort>("novelty");
   const [selectedId, setSelectedId] = useState<number | null>(initial?.leadId ?? null);
   const [tab, setTab] = useState<"list" | "scan">("list");
+  const [pane, setPane] = useState<"list" | "map">("list");
   const [draft, setDraft] = useState<DraftRegion | null>(null);
   const [drawMode, setDrawMode] = useState<DrawMode>(null);
   const [viewBounds, setViewBoundsState] = useState<BBox | null>(null);
@@ -273,6 +279,8 @@ export function ExploreProvider({
     select,
     tab,
     setTab,
+    pane,
+    setPane,
     draft,
     setDraft,
     drawMode,

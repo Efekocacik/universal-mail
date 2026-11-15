@@ -169,7 +169,9 @@ export function FindEmailsButton({
                   id="fe-external"
                   help={t("findEmails.useExternal.help")}
                 >
-                  {t("findEmails.useExternal")}
+                  {t("findEmails.useExternalProvider", {
+                    provider: t(`ai.external.provider.${p.external.provider}`),
+                  })}
                 </Option>
               )}
               {(p.alreadyDone > 0 || force) && (

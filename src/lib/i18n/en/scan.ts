@@ -4,7 +4,30 @@ import type { EnFragment } from "../types";
 /** Paket B anahtarlarının İngilizcesi. */
 export const scan = {
   "scans.origin.schedule": "Scheduled",
+  "scans.pause.USER_PAUSED": "You paused this scan.",
+  "scans.pause.APP_STOPPED": "The app was closed; you can continue.",
+  "scans.pause.INTERRUPTED": "The scan stopped unexpectedly; you can continue.",
+  "scans.pause.CALL_LIMIT":
+    "Safety limit: this scan went over the allowed number of calls. Resume the scan to continue.",
+  "scans.pause.COST_CAP":
+    "This scheduled scan reached the amount you approved. If you resume it, the limit is lifted for this scan.",
+  "scans.pause.BUDGET_BLOCKED":
+    "The monthly budget limit has been reached. Raise the budget in Settings or wait for next month.",
+  "scans.pause.PROVIDER_CHANGED":
+    "The places provider changed, so this scan cannot be resumed. Start a new scan.",
+  "scans.pause.PROVIDER_QUOTA": "The Google Places quota ran out. You can resume later.",
+  "scans.pause.PROVIDER_RATE": "Google Places rate limit reached. You can resume in a moment.",
+  "scans.pause.PROVIDER_NETWORK":
+    "The network connection dropped. You can resume once you are back online.",
+  "scans.pause.PROVIDER_SERVER":
+    "Google Places returned a temporary error. You can resume in a moment.",
+  "scans.pause.unknown": "The scan is paused.",
   "schedules.title": "Recurring scans",
+  "schedules.stalled.title": "Recurring scans are not running right now",
+  "schedules.stalled.body":
+    "A scan is due but the background round has stopped. Restart it; the scan starts within a few minutes under the usual approval and budget rules.",
+  "schedules.stalled.action": "Restart",
+  "schedules.stalled.done": "Recurring scans restarted.",
   "help.schedules":
     "Rescans the chosen area automatically at the interval you set. A run can never cost more than the amount you approved; if it would, it pauses and asks you.",
   "schedules.loadError": "Recurring scans could not be loaded.",

@@ -482,9 +482,13 @@ describe("durum, ayarlar ve harici servis", () => {
     const put = (b: unknown) => settingsRoute.PUT(req("PUT", "/api/settings", b), undefined);
     expect((await put({ "enrichment.concurrency": 9 })).status).toBe(400);
     expect((await put({ "enrichment.concurrency": 0 })).status).toBe(400);
-    expect((await put({ "enrichment.external": { enabled: true, provider: "snov" } })).status).toBe(
-      400,
-    );
+    // Faz 5: Snov geçerli bir sağlayıcıdır; listede olmayan sağlayıcı reddedilir.
+    expect(
+      (await put({ "enrichment.external": { enabled: true, provider: "apollo" } })).status,
+    ).toBe(400);
+    expect(
+      (await put({ "enrichment.external": { enabled: false, provider: "snov" } })).status,
+    ).toBe(200);
     expect(
       (
         await put({

@@ -133,6 +133,24 @@ test.describe("Keşif kullanılabilirliği (Faz 4 paket C)", () => {
     await expect(dialog).toHaveCount(0);
   });
 
+  test("dar ekran: harita bölmesindeyken / listeye geçip aramaya odaklanır", async () => {
+    await page.setViewportSize({ width: 800, height: 900 });
+    try {
+      const listBtn = page.getByRole("button", { name: "Liste", exact: true });
+      const mapBtn = page.getByRole("button", { name: "Harita", exact: true });
+      await mapBtn.click();
+      await expect(mapBtn).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator("#lead-search")).toHaveCount(0);
+      await blur();
+      await page.keyboard.press("/");
+      await expect(listBtn).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator("#lead-search")).toBeFocused();
+      await blur();
+    } finally {
+      await page.setViewportSize({ width: 1440, height: 900 });
+    }
+  });
+
   test("Görünümdekileri seç seçim çubuğunu açar; Esc seçimi temizler", async () => {
     const btn = page.getByRole("button", { name: /^Görünümdekileri seç/ });
     await expect(btn).toBeEnabled();

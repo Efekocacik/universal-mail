@@ -14,6 +14,7 @@ import {
   bindEmailEvents,
   registerCoreHandlers,
   registerEmailHandlers,
+  registerFaz5Handlers,
   registerMailHandlers,
 } from "./handlers";
 import { registerScanBackgroundHandlers } from "./background";
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   registerCoreHandlers();
   registerEmailHandlers();
   registerScanBackgroundHandlers();
+  registerFaz5Handlers();
   bindEmailEvents();
   const db = await getDb();
   // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim

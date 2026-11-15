@@ -149,7 +149,7 @@ async function evaluate(
   mode: { interactive: boolean; acknowledgeRisk?: boolean },
 ): Promise<
   | { ok: true; prepared: PreparedScan; regionName: string }
-  | { ok: false; code: ScheduleSkipCode; message: string }
+  | { ok: false; code: ScheduleSkipCode; message: string; fields?: Record<string, number> }
 > {
   const ready = await checkCollectionReady(db);
   if (!ready.ok) return ready;
@@ -374,7 +374,14 @@ export async function runSchedule(
   },
 ): Promise<
   | ScheduleRunResult
-  | { scheduleId: number; outcome: "gate"; code: ScheduleSkipCode; message: string }
+  | {
+      scheduleId: number;
+      outcome: "gate";
+      code: ScheduleSkipCode;
+      message: string;
+      /** Yapılandırılmış tutarlar (ör. NEEDS_ACK `highUsd`/`remainingUsd`); istemci yerelleştirilmiş metni bunlarla kurar. */
+      fields?: Record<string, number>;
+    }
 > {
   const log = mode.log;
   const due = computeDue(s, now);
@@ -385,7 +392,13 @@ export async function runSchedule(
   const ev = await evaluate(db, s, mode);
   if (!ev.ok) {
     if (mode.interactive)
-      return { scheduleId: s.id, outcome: "gate", code: ev.code, message: ev.message };
+      return {
+        scheduleId: s.id,
+        outcome: "gate",
+        code: ev.code,
+        message: ev.message,
+        ...(ev.fields ? { fields: ev.fields } : {}),
+      };
     return recordSkip(db, s, ev.code, now, { notifyUser: true, log });
   }
   const slot = mode.interactive ? now : due.slot;

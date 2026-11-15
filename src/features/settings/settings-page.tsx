@@ -3,13 +3,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Check,
-  CheckCircle2,
   ChevronDown,
   CircleAlert,
-  Eye,
-  EyeOff,
   FlaskConical,
-  KeyRound,
   Plus,
   RefreshCw,
   Trash2,
@@ -20,7 +16,7 @@ import { toast } from "sonner";
 import { LanguageSwitch, ThemeSwitch } from "@/components/appearance-controls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { Progress, Skeleton } from "@/components/ui/misc";
@@ -32,104 +28,33 @@ import { api, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
 import { useUnsavedChanges } from "@/lib/client/locale-switch";
 import {
-  qk,
   useBudget,
   useCategories,
   useConfig,
   useCountries,
   useSettings,
 } from "@/lib/client/queries";
-import type { Category, CompanyProfile, GoogleDataSummary, SecretInfo } from "@/lib/client/types";
+import type { Category, CompanyProfile, GoogleDataSummary } from "@/lib/client/types";
 import { skuLabel, PRICING_VERIFIED_AT } from "@/lib/places/pricing";
+import { AiIntroCard } from "@/features/ai/ai-intro-card";
+import { ExternalEmailCard } from "@/features/ai/external-email-card";
+import { RegistrySettingsCard } from "@/features/registry/registry-settings-card";
+import { OpenTrackingCard } from "@/features/templates/open-tracking-card";
 import { GoogleRetentionCard } from "./google-retention-card";
+import {
+  FieldError,
+  SaveBar,
+  SecretRow,
+  Section,
+  ToggleRow,
+  useInvalidateAll,
+  useSave,
+} from "./shared";
 import { MailboxSettingsSection } from "./mailbox-section";
 import { NoveltyRdapCard } from "./novelty-rdap-card";
 import { UnsubscribeSettingsSection } from "./unsubscribe-section";
-import { getLocale, t, type TrKey } from "@/lib/i18n";
+import { getLocale, t } from "@/lib/i18n";
 import { mapIdProblem } from "@/lib/settings/map-id";
-
-function useInvalidateAll() {
-  const qc = useQueryClient();
-  return () => {
-    for (const key of [qk.settings, qk.config, qk.status, qk.budget, qk.categories])
-      void qc.invalidateQueries({ queryKey: key });
-  };
-}
-
-function useSave() {
-  const invalidate = useInvalidateAll();
-  return useMutation({
-    mutationFn: (patch: Record<string, unknown>) =>
-      api("/api/settings", { method: "PUT", json: patch }),
-    onSuccess: () => {
-      invalidate();
-      toast.success(t("common.saved"));
-    },
-    onError: (e: Error) => toast.error(errorText(e)),
-  });
-}
-
-function Section({
-  title,
-  description,
-  help,
-  children,
-}: {
-  title: string;
-  description?: string;
-  /** "Bu nedir?" balonu (yalnızca karmaşık kavramlarda; docs/07 §FR-UI-07). */
-  help?: TrKey;
-  children: React.ReactNode;
-}) {
-  return (
-    <Card className="um-enter">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-1.5 text-base">
-          {title}
-          {help && <HelpTip>{t(help)}</HelpTip>}
-        </CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
-      </CardHeader>
-      <CardContent className="space-y-4 pt-3">{children}</CardContent>
-    </Card>
-  );
-}
-
-/** Satır içi hata: kırmızı metin + simge (renk tek başına anlam taşımaz). */
-function FieldError({ id, children }: { id?: string; children: React.ReactNode }) {
-  return (
-    <p id={id} role="alert" className="flex items-start gap-1.5 text-[12px] text-destructive">
-      <CircleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-      {children}
-    </p>
-  );
-}
-
-/** Tek tip kaydetme çubuğu: değişiklik yoksa soluk "Değişiklik yok", varsa yeşil Kaydet. */
-function SaveBar({
-  dirty,
-  valid = true,
-  pending,
-  onSave,
-  type = "submit",
-}: {
-  dirty: boolean;
-  valid?: boolean;
-  pending: boolean;
-  onSave?: () => void;
-  type?: "submit" | "button";
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3">
-      <Button type={type} onClick={onSave} disabled={!dirty || !valid} loading={pending}>
-        {t("common.save")}
-      </Button>
-      <span className="text-[12px] text-muted-foreground" aria-live="polite">
-        {dirty ? t("settings.unsaved") : t("settings.noChange")}
-      </span>
-    </div>
-  );
-}
 
 /* ----------------------------- Görünüm ve dil ----------------------------- */
 
@@ -233,203 +158,7 @@ function AppearanceSection() {
   );
 }
 
-function ToggleRow({
-  id,
-  label,
-  hint,
-  checked,
-  disabled,
-  onChange,
-}: {
-  id: string;
-  label: string;
-  hint: string;
-  checked: boolean;
-  disabled?: boolean;
-  onChange: (v: boolean) => void;
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <Switch
-        id={id}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={onChange}
-        aria-describedby={`${id}-hint`}
-        className="mt-0.5"
-      />
-      <div className="min-w-0">
-        <label htmlFor={id} className="text-sm font-medium">
-          {label}
-        </label>
-        <p id={`${id}-hint`} className="text-[12px] text-muted-foreground">
-          {hint}
-        </p>
-      </div>
-    </div>
-  );
-}
-
 /* ----------------------------- Google bağlantısı ----------------------------- */
-
-function SecretRow({
-  name,
-  label,
-  help,
-  info,
-  testable,
-}: {
-  name: "google.placesKey" | "google.mapsKey" | "hunter.apiKey";
-  label: string;
-  help: string;
-  info: SecretInfo;
-  testable?: boolean;
-}) {
-  const invalidate = useInvalidateAll();
-  const [value, setValue] = useState("");
-  useUnsavedChanges(value.trim() !== "");
-  const [shown, setShown] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
-
-  const save = useMutation({
-    mutationFn: () => api("/api/secrets", { method: "POST", json: { name, value } }),
-    onSuccess: () => {
-      setValue("");
-      setShown(false);
-      setResult(null);
-      invalidate();
-      toast.success(t("settings.key.saved"));
-    },
-    onError: (e: Error) => toast.error(errorText(e)),
-  });
-  const remove = useMutation({
-    mutationFn: () => api(`/api/secrets?name=${name}`, { method: "DELETE" }),
-    onSuccess: () => {
-      setResult(null);
-      invalidate();
-      toast.success(t("settings.key.removed"));
-    },
-    onError: (e: Error) => toast.error(errorText(e)),
-  });
-  const test = useMutation({
-    mutationFn: () =>
-      api<{ ok: boolean; message: string }>("/api/setup/test-places", { method: "POST" }),
-    onSuccess: setResult,
-    onError: (e: Error) => setResult({ ok: false, message: errorText(e) }),
-  });
-
-  const trimmed = value.trim();
-  const tooShort = value.length > 0 && trimmed.length < 8;
-
-  return (
-    <div className="space-y-2 rounded-lg border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Label htmlFor={name} className="flex items-center gap-1.5">
-          <KeyRound className="size-3.5" aria-hidden /> {label}
-        </Label>
-        {info.set ? (
-          <Badge variant="success">
-            <Check className="size-3" aria-hidden />
-            {t("settings.key.set")} · {info.masked}
-            {info.source === "env" ? ` · ${t("settings.key.fromEnv")}` : ""}
-          </Badge>
-        ) : (
-          <Badge variant="warning">
-            <CircleAlert className="size-3" aria-hidden />
-            {t("settings.key.missing")}
-          </Badge>
-        )}
-      </div>
-      <p className="text-[12px] text-muted-foreground">{help}</p>
-      <form
-        className="flex gap-2"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (trimmed.length >= 8 && !save.isPending) save.mutate();
-        }}
-      >
-        <div className="relative min-w-0 flex-1">
-          <Input
-            id={name}
-            type={shown ? "text" : "password"}
-            autoComplete="off"
-            spellCheck={false}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={info.set ? t("settings.key.replace") : t("settings.key.paste")}
-            aria-invalid={tooShort}
-            aria-describedby={tooShort ? `${name}-err` : undefined}
-            className="pr-10"
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="absolute top-0.5 right-0.5 size-8"
-            aria-label={shown ? t("settings.key.hide") : t("settings.key.show")}
-            aria-pressed={shown}
-            onClick={() => setShown((v) => !v)}
-          >
-            {shown ? <EyeOff /> : <Eye />}
-          </Button>
-        </div>
-        <Button type="submit" disabled={trimmed.length < 8} loading={save.isPending}>
-          {t("common.save")}
-        </Button>
-        {info.set && info.source === "store" && (
-          <Button
-            type="button"
-            variant="dangerGhost"
-            size="icon"
-            aria-label={`${t("common.delete")}: ${label}`}
-            onClick={() => setConfirmRemove(true)}
-          >
-            <Trash2 />
-          </Button>
-        )}
-      </form>
-      {tooShort && <FieldError id={`${name}-err`}>{t("settings.key.tooShort")}</FieldError>}
-      {testable && (
-        <div className="flex min-h-8 flex-wrap items-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => test.mutate()}
-            disabled={!info.set}
-            loading={test.isPending}
-          >
-            {!test.isPending && <FlaskConical />} {t("settings.key.test")}
-          </Button>
-          {result && (
-            <p
-              className={`flex items-start gap-1.5 text-[13px] ${result.ok ? "text-success" : "text-destructive"}`}
-              role="status"
-            >
-              {result.ok ? (
-                <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
-              ) : (
-                <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-              )}{" "}
-              {result.message}
-            </p>
-          )}
-        </div>
-      )}
-      <ConfirmDialog
-        open={confirmRemove}
-        onOpenChange={setConfirmRemove}
-        tone="danger"
-        title={t("settings.key.remove.title")}
-        description={t("settings.key.remove.body")}
-        confirmLabel={t("common.delete")}
-        onConfirm={async () => {
-          await remove.mutateAsync();
-        }}
-      />
-    </div>
-  );
-}
 
 function GoogleSection() {
   const { data } = useSettings();
@@ -966,24 +695,7 @@ export function CompanyFields({
 function EmailSection() {
   const { data } = useSettings();
   const save = useSave();
-  const [quota, setQuota] = useState<{ ok: boolean; message: string } | null>(null);
-  const test = useMutation({
-    mutationFn: () =>
-      api<{ ok: boolean; remaining: number | null }>("/api/enrichment/external/test", {
-        method: "POST",
-      }),
-    onSuccess: (r) =>
-      setQuota({
-        ok: true,
-        message:
-          r.remaining === null
-            ? t("settings.email.quotaUnknown")
-            : t("settings.email.quota", { n: fmtNumber(r.remaining) }),
-      }),
-    onError: (e: Error) => setQuota({ ok: false, message: errorText(e) }),
-  });
   if (!data) return <Skeleton className="h-48" />;
-  const ext = data.settings["enrichment.external"];
   return (
     <Section title={t("settings.email.title")} description={t("settings.email.desc")}>
       <div className="space-y-1.5">
@@ -1004,58 +716,8 @@ function EmailSection() {
         <p className="text-[12px] text-muted-foreground">{t("settings.email.concurrency.help")}</p>
       </div>
 
-      <div className="space-y-3 rounded-lg border p-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <Label htmlFor="email-external">{t("settings.email.external")}</Label>
-            <p className="mt-1 text-[12px] text-muted-foreground">
-              {t("settings.email.external.help")}
-            </p>
-          </div>
-          <Switch
-            id="email-external"
-            checked={ext.enabled}
-            onCheckedChange={(v) =>
-              save.mutate({ "enrichment.external": { ...ext, enabled: v === true } })
-            }
-          />
-        </div>
-        {ext.enabled && (
-          <>
-            <SecretRow
-              name="hunter.apiKey"
-              label={t("settings.email.hunterKey")}
-              help={t("settings.email.hunterKey.help")}
-              info={data.secrets.hunterKey}
-            />
-            {data.secrets.hunterKey.set && (
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => test.mutate()}
-                  loading={test.isPending}
-                >
-                  {!test.isPending && <FlaskConical />} {t("settings.email.test")}
-                </Button>
-                {quota && (
-                  <p
-                    className={`flex items-start gap-1.5 text-[13px] ${quota.ok ? "text-success" : "text-destructive"}`}
-                    role="status"
-                  >
-                    {quota.ok ? (
-                      <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden />
-                    ) : (
-                      <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
-                    )}{" "}
-                    {quota.message}
-                  </p>
-                )}
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      {/* Faz 5: harici e-posta (Hunter/Snov) kartı paket A'nındır; bu dosya dondurulmuştur. */}
+      <ExternalEmailCard />
     </Section>
   );
 }
@@ -1427,11 +1089,14 @@ const SECTIONS = [
   { id: "google", key: "settings.nav.google" },
   { id: "budget", key: "settings.nav.budget" },
   { id: "markets", key: "settings.nav.markets" },
+  { id: "registry", key: "settings.nav.registry" },
   { id: "company", key: "settings.nav.company" },
   { id: "categories", key: "settings.nav.categories" },
   { id: "email", key: "settings.nav.email" },
+  { id: "ai", key: "settings.nav.ai" },
   { id: "mailbox", key: "settings.nav.mailbox" },
   { id: "unsubscribe", key: "settings.nav.unsubscribe" },
+  { id: "tracking", key: "settings.nav.tracking" },
   { id: "data", key: "settings.nav.data" },
   { id: "novelty", key: "settings.nav.novelty" },
 ] as const;
@@ -1559,6 +1224,10 @@ export function SettingsPage() {
                 <div id="markets" className="scroll-mt-16 lg:scroll-mt-6">
                   <MarketsSection />
                 </div>
+                {/* Faz 5 bağlantı yuvaları: kartlar paketlere aittir (R, A, T); bu dosya dondurulmuştur. */}
+                <div id="registry" className="scroll-mt-16 lg:scroll-mt-6">
+                  <RegistrySettingsCard />
+                </div>
                 <div id="company" className="scroll-mt-16 lg:scroll-mt-6">
                   <CompanySection />
                 </div>
@@ -1568,11 +1237,17 @@ export function SettingsPage() {
                 <div id="email" className="scroll-mt-16 lg:scroll-mt-6">
                   <EmailSection />
                 </div>
+                <div id="ai" className="scroll-mt-16 lg:scroll-mt-6">
+                  <AiIntroCard />
+                </div>
                 <div id="mailbox" className="scroll-mt-16 lg:scroll-mt-6">
                   <MailboxSettingsSection />
                 </div>
                 <div id="unsubscribe" className="scroll-mt-16 lg:scroll-mt-6">
                   <UnsubscribeSettingsSection />
+                </div>
+                <div id="tracking" className="scroll-mt-16 lg:scroll-mt-6">
+                  <OpenTrackingCard />
                 </div>
                 <div id="data" className="scroll-mt-16 lg:scroll-mt-6">
                   <DataSection />

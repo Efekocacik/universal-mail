@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -29,24 +29,34 @@ import {
 const tmpBase = process.env.TMPDIR ?? os.tmpdir();
 const unsafeTmp = process.platform === "win32" && /[^\x20-\x7e]/.test(tmpBase);
 const REPO = path.resolve(__dirname, "..");
-const MIGRATIONS = path.join(REPO, "drizzle");
+/** Depodaki tam migrasyon klasörü (anlık görüntüler buradan okunur). */
+const SOURCE_MIGRATIONS = path.join(REPO, "drizzle");
 const T = 1_790_000_000_000;
 
 function partialMigrations(count: number): string {
   const d = fs.mkdtempSync(path.join(tmpBase, "um-mig4-"));
   fs.mkdirSync(path.join(d, "meta"));
   const journal = JSON.parse(
-    fs.readFileSync(path.join(MIGRATIONS, "meta", "_journal.json"), "utf8"),
+    fs.readFileSync(path.join(SOURCE_MIGRATIONS, "meta", "_journal.json"), "utf8"),
   );
   journal.entries = journal.entries.slice(0, count);
   fs.writeFileSync(path.join(d, "meta", "_journal.json"), JSON.stringify(journal));
   for (const e of journal.entries as { tag: string }[])
-    fs.copyFileSync(path.join(MIGRATIONS, `${e.tag}.sql`), path.join(d, `${e.tag}.sql`));
+    fs.copyFileSync(path.join(SOURCE_MIGRATIONS, `${e.tag}.sql`), path.join(d, `${e.tag}.sql`));
   return d;
 }
 
 const UPTO_0003 = partialMigrations(4);
-afterAll(() => fs.rmSync(UPTO_0003, { recursive: true, force: true }));
+/**
+ * 0004 dönemi migrasyon klasörü (ilk 5 geçiş). Bu dosyadaki "son geçiş = 0004" senaryoları ve 0004 geri alma aracı bu
+ * sürümün klasörüne karşı sınanır; 0005 (Faz 5), geri alması ve schema.ts ↔ anlık görüntü denetimi
+ * tests/migration-0005.test.ts'tedir.
+ */
+const MIGRATIONS = partialMigrations(5);
+afterAll(() => {
+  fs.rmSync(UPTO_0003, { recursive: true, force: true });
+  fs.rmSync(MIGRATIONS, { recursive: true, force: true });
+});
 
 let dir: string;
 let file: string;
@@ -233,10 +243,10 @@ describe.skipIf(unsafeTmp)("0004: veri korunur, varsayılanlar, şema", () => {
     expect(journal.entries.map((e) => e.tag).slice(-1)).toEqual(["0004_faz4"]);
     expect(journal.entries[4]!.when).toBeGreaterThan(journal.entries[3]!.when);
     const snap = JSON.parse(
-      fs.readFileSync(path.join(MIGRATIONS, "meta", "0004_snapshot.json"), "utf8"),
+      fs.readFileSync(path.join(SOURCE_MIGRATIONS, "meta", "0004_snapshot.json"), "utf8"),
     ) as { tables: Record<string, unknown>; prevId: string };
     const prev = JSON.parse(
-      fs.readFileSync(path.join(MIGRATIONS, "meta", "0003_snapshot.json"), "utf8"),
+      fs.readFileSync(path.join(SOURCE_MIGRATIONS, "meta", "0003_snapshot.json"), "utf8"),
     ) as { id: string };
     expect(snap.prevId).toBe(prev.id);
     for (const t of FAZ4_TABLES) expect(Object.keys(snap.tables)).toContain(t);
@@ -261,38 +271,6 @@ describe.skipIf(unsafeTmp)("0004: veri korunur, varsayılanlar, şema", () => {
         1,
       );
   });
-
-  it("şema (schema.ts) ile 0004 anlık görüntüsü aynı: drizzle-kit generate yeni migrasyon üretmez", () => {
-    // Elle yazılmış 0004'ün schema.ts ile kaymadığının kanıtı. Kopya klasörde çalışır; depodaki drizzle/ değişmez.
-    const work = fs.mkdtempSync(path.join(tmpBase, "um-dk-"));
-    try {
-      fs.cpSync(MIGRATIONS, path.join(work, "drizzle"), { recursive: true });
-      // drizzle-kit --out değerini çalışma klasörüne göre yorumlar: göreli yol verilir
-      const out = path.relative(REPO, path.join(work, "drizzle"));
-      const r = spawnSync(
-        process.execPath,
-        [
-          path.join(REPO, "node_modules", "drizzle-kit", "bin.cjs"),
-          "generate",
-          "--dialect",
-          "sqlite",
-          "--schema",
-          "./src/lib/db/schema.ts",
-          "--out",
-          out,
-        ],
-        { cwd: REPO, encoding: "utf8", timeout: 60_000 },
-      );
-      const output = `${r.stdout}\n${r.stderr}`;
-      expect(r.status, output).toBe(0);
-      expect(output).toMatch(/No schema changes/);
-      expect(fs.readdirSync(path.join(work, "drizzle")).filter((f) => f.endsWith(".sql"))).toEqual(
-        fs.readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql")),
-      );
-    } finally {
-      fs.rmSync(work, { recursive: true, force: true });
-    }
-  }, 60_000);
 
   it("boş veritabanında ve ikinci çalıştırmada etkisiz", async () => {
     const h = await handle();

@@ -1,0 +1,14 @@
+{
+  "hits": 3,
+  "items": [
+    {
+      "company_number": "00000003",
+      "company_name": "MAPLEDOT KITCHEN LTD",
+      "company_status": "active",
+      "date_of_creation": "2026-10-20",
+      "sic_codes": ["56101"],
+      "registered_office_address": { "postal_code": "W1A 0AX", "locality": "London" }
+    },
+    { "company_number": "00000004", "company_name": "NO DATE LTD" }
+  ]
+}

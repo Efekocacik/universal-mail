@@ -1,4 +1,4 @@
-import { changedFields, type Draft } from "./model";
+import { changedFields, draftCategoryKey, type Draft } from "./model";
 
 /**
  * Şablon kaydının anlık görüntüsü (C13). Kayıt düğmesine basıldığı anda taslak, temel taslak ve temel sürüm
@@ -22,9 +22,17 @@ export function saveSnapshot(
   return { id, baseVersion: baseVersion ?? 0, baseDraft: { ...baseDraft }, draft: { ...draft } };
 }
 
-/** Sunucuya gönderilecek alanlar: gönderim anındaki temel ile gönderim anındaki taslak arasındaki fark. */
-export function savePatch(v: SaveVars): Partial<Draft> {
-  return changedFields(v.baseDraft, v.draft);
+/**
+ * Sunucuya gönderilecek alanlar: gönderim anındaki temel ile gönderim anındaki taslak arasındaki fark. Kategori
+ * sunucu biçimine çevrilir ("" → null; takip şablonuna geçişte varyant kaldırılır).
+ */
+export function savePatch(
+  v: SaveVars,
+): Omit<Partial<Draft>, "categoryKey"> & { categoryKey?: string | null } {
+  const { categoryKey: _c, ...rest } = changedFields(v.baseDraft, v.draft);
+  const before = draftCategoryKey(v.baseDraft);
+  const after = draftCategoryKey(v.draft);
+  return before === after ? rest : { ...rest, categoryKey: after };
 }
 
 /** Kayıt sürerken taslak değişti mi (gönderilen görüntüden sonra yazılan var mı)? */

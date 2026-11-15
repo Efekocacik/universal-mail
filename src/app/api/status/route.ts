@@ -23,6 +23,7 @@ export const GET = route(async () => {
       status: scans.status,
       progress: scans.progress,
       pauseReason: scans.pauseReason,
+      pauseCode: scans.pauseCode,
       provider: scans.provider,
     })
     .from(scans)

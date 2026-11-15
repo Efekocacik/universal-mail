@@ -536,7 +536,7 @@ describe.skipIf(unsafeTmp)("0003: kayıpsız geri alma", () => {
     expect([r4, r8, r6]).toEqual([
       { stopped: [], annotated: [4] },
       { stopped: [8], annotated: [] },
-      { stopped: [6], businessDomain: null },
+      { stopped: [6], pendingIds: [], businessDomain: null },
     ]);
     // Yeni sürümün gelen ARF satırları (sınıf + işaret)
     for (const [id, err] of [
@@ -773,7 +773,7 @@ describe.skipIf(unsafeTmp)(
           h.client.close();
 
           const startAt = String(Date.now() + 2500);
-          // `init` gerçek açılış yoludur: seed'ler GÜNCEL şemayı bekler, bu yüzden tüm geçişler (0004 dahil) uygulanır.
+          // `init` gerçek açılış yoludur: seed'ler GÜNCEL şemayı bekler, bu yüzden tüm geçişler (0004, 0005 dahil) uygulanır.
           const folder = mode === "init" ? SOURCE_MIGRATIONS : MIGRATIONS;
           const migTotal = (
             JSON.parse(fs.readFileSync(path.join(folder, "meta", "_journal.json"), "utf8")) as {
@@ -800,8 +800,10 @@ describe.skipIf(unsafeTmp)(
           ).toBe(0);
           const after = await dump(v.client);
           expect(after.suppressions).toEqual(before.suppressions);
-          // 0004 yalnızca boş `archived_at` sütunu ekler (init kipi); eski sütunlar bire bir aynı kalır.
-          expect(after.leads.map(({ archived_at: _a, ...rest }) => rest)).toEqual(before.leads);
+          // 0004 yalnızca boş `archived_at`, 0005 boş `website` sütunu ekler (init kipi); eski sütunlar bire bir aynı kalır.
+          expect(after.leads.map(({ archived_at: _a, website: _w, ...rest }) => rest)).toEqual(
+            before.leads,
+          );
           expect(after.messages).toHaveLength(before.messages.length);
           expect(fs.existsSync(maintenancePathFor(f))).toBe(false);
           expect(fs.existsSync(path.join(dir, "migrate.lock"))).toBe(false);
@@ -1073,11 +1075,11 @@ describe("rollback aracı uygulamanın normal çalışma yolundan çağrılamaz"
     const offenders: string[] = [];
     for (const f of roots.flatMap((r) => walk(r))) {
       const rel = path.relative(REPO, f).replace(/\\/g, "/");
-      // Geri alma araçlarının kendileri (0003 ve onu yeniden kullanan 0004) hariç.
-      if (/^(src\/lib\/db|scripts)\/rollback-000[34]\.ts$/.test(rel)) continue;
+      // Geri alma araçlarının kendileri (0003 ve onu yeniden kullanan 0004/0005) hariç.
+      if (/^(src\/lib\/db|scripts)\/rollback-000[345]\.ts$/.test(rel)) continue;
       const text = fs.readFileSync(f, "utf8");
       if (
-        /rollback-000[34]|rollbackFaz3ArfComplaint|rollbackFaz4|executeRollback|planRollback/.test(
+        /rollback-000[345]|rollbackFaz3ArfComplaint|rollbackFaz[45]|executeRollback|planRollback/.test(
           text,
         )
       )

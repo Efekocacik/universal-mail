@@ -21,9 +21,10 @@ import {
   type SendWindow,
   type StepInput,
 } from "@/lib/client/campaigns";
-import { fmtDateTime, fmtNumber } from "@/lib/client/format";
+import { categoryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import type { MutationErrorInfo } from "@/lib/client/retry";
 import { t } from "@/lib/i18n";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import {
   dayLabel,
   DEFAULT_WINDOW,
@@ -32,6 +33,17 @@ import {
   WINDOW_DAYS,
   WINDOW_TIMES,
 } from "./model";
+import {
+  categoryTemplatesFor,
+  hasAbSubject,
+  preservedFollowupVariants,
+  pruneVariantSelection,
+  selectionFromSteps,
+  suggestVariants,
+  variantKey,
+  variantOptions,
+  type VariantSelection,
+} from "./category-variants";
 import { DemoBadge, LoadError, Notice } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { QueueTable } from "./queue-table";
@@ -428,6 +440,9 @@ function StepsStep({
     [templates.data],
   );
   const languages = useMemo(() => [...new Set(initial.map((x) => x.language))].sort(), [initial]);
+  // Faz 5: bilgi amaçlı (DE) şablonlar seçilemez; dilin gönderilebilir şablonu yoksa satır pasif ve gerekçesi yazılı.
+  const sendable = useMemo(() => initial.filter((x) => !x.infoOnly && !x.archived), [initial]);
+  const allTemplates = useMemo(() => templates.data ?? [], [templates.data]);
 
   const existing = draft ?? campaign.steps;
   const [selected, setSelected] = useState<Record<string, number>>(() =>
@@ -446,19 +461,54 @@ function StepsStep({
     existing.find((s) => s.stepIndex === 1)?.delayDays ?? 5,
     existing.find((s) => s.stepIndex === 2)?.delayDays ?? 5,
   ]);
+  const [variants, setVariants] = useState<VariantSelection>(() => selectionFromSteps(existing));
   const [issues, setIssues] = useState<MutationErrorInfo | null>(null);
   const readOnly = campaign.status !== "draft";
 
   const langs = Object.keys(selected).filter((l) => selected[l]);
+  const options = variantOptions(allTemplates, langs);
+  // Şablon listesi yüklenene kadar hiçbir seçim ayıklanmaz (yoksa taslak varyantsız kaydedilirdi).
+  const loaded = templates.data !== undefined;
+  const pruned = loaded
+    ? pruneVariantSelection(variants, options, langs)
+    : { kept: variants, stale: [] };
+  // API ile takip adımlarına yazılmış varyantlar korunur (sihirbaz yalnızca adım 0 için seçtirir).
+  const kept = useMemo(
+    () => (loaded ? preservedFollowupVariants(existing, allTemplates) : null),
+    [loaded, existing, allTemplates],
+  );
+  const followVariants = (l: string, stepIndex: number) =>
+    loaded
+      ? (kept?.byStep[`${l}|${stepIndex}`] ?? [])
+      : (existing.find((s) => s.language === l && s.stepIndex === stepIndex)?.categoryTemplates ??
+        []);
+  const stale = [
+    ...pruned.stale,
+    ...(kept?.stale ?? []).filter((v) => langs.includes(v.language) && v.stepIndex <= extra),
+  ];
   const steps: StepInput[] = langs.flatMap((l) => [
-    { stepIndex: 0, language: l, templateId: selected[l]!, delayDays: 0 },
+    {
+      stepIndex: 0,
+      language: l,
+      templateId: selected[l]!,
+      delayDays: 0,
+      ...(categoryTemplatesFor(l, pruned.kept).length > 0
+        ? { categoryTemplates: categoryTemplatesFor(l, pruned.kept) }
+        : {}),
+    },
     ...Array.from({ length: extra }, (_, i) => ({
       stepIndex: i + 1,
       language: l,
       templateId: followups[l]?.[i] ?? 0,
       delayDays: delays[i] ?? 5,
+      ...(followVariants(l, i + 1).length > 0
+        ? { categoryTemplates: followVariants(l, i + 1) }
+        : {}),
     })),
   ]);
+  const followupVariantCount = steps
+    .filter((s) => s.stepIndex > 0)
+    .reduce((n, s) => n + (s.categoryTemplates?.length ?? 0), 0);
   const valid =
     steps.length > 0 &&
     steps.every((s) => s.templateId > 0) &&
@@ -484,40 +534,136 @@ function StepsStep({
     <div className="space-y-5">
       <fieldset className="space-y-3">
         <legend className="text-[13px] font-medium">{t("wizard.steps.initial")}</legend>
-        {languages.map((l) => (
-          <div key={l} className="grid items-center gap-2 sm:grid-cols-[120px_minmax(0,1fr)]">
-            <label className="flex items-center gap-1.5 text-[13px]">
-              <Checkbox
-                checked={!!selected[l]}
-                disabled={readOnly}
-                onCheckedChange={(v) =>
-                  setSelected((s) => {
-                    const next = { ...s };
-                    if (v === true) next[l] = initial.find((x) => x.language === l)!.id;
-                    else delete next[l];
-                    return next;
-                  })
-                }
-              />
-              {l.toUpperCase()}
-            </label>
-            <Select
-              aria-label={t("wizard.steps.template", { lang: l.toUpperCase() })}
-              value={selected[l] ?? ""}
-              disabled={readOnly || !selected[l]}
-              onChange={(e) => setSelected((s) => ({ ...s, [l]: Number(e.target.value) }))}
-            >
-              {initial
-                .filter((x) => x.language === l)
-                .map((x) => (
-                  <option key={x.id} value={x.id}>
-                    {x.name}
-                  </option>
-                ))}
-            </Select>
-          </div>
-        ))}
+        {languages.map((l) => {
+          // Genel şablonlar önce; kategori varyantları aşağıdaki bölümde seçilir (kayıtlı seçim her zaman listelenir).
+          const choices = sendable.filter(
+            (x) => x.language === l && (!x.categoryKey || x.id === selected[l]),
+          );
+          const blocked = choices.length === 0;
+          return (
+            <div key={l} className="grid items-center gap-2 sm:grid-cols-[120px_minmax(0,1fr)]">
+              <label className="flex items-center gap-1.5 text-[13px]">
+                <Checkbox
+                  checked={!!selected[l]}
+                  disabled={readOnly || blocked}
+                  aria-describedby={blocked ? `cw-lang-blocked-${l}` : undefined}
+                  onCheckedChange={(v) => {
+                    setSelected((s) => {
+                      const next = { ...s };
+                      if (v === true) next[l] = choices[0]!.id;
+                      else delete next[l];
+                      return next;
+                    });
+                    // Dil seçilince o dilin kategori varyantları önerilir (işaret kaldırılarak çıkarılabilir).
+                    if (v === true) setVariants((cur) => suggestVariants(allTemplates, l, cur));
+                  }}
+                />
+                {l.toUpperCase()}
+              </label>
+              {blocked ? (
+                <p
+                  id={`cw-lang-blocked-${l}`}
+                  className="text-[12px] text-warning-text"
+                  data-testid={`cw-lang-blocked-${l}`}
+                >
+                  {isInfoOnlyLanguage(l)
+                    ? t("wizard.steps.infoOnly", { lang: l.toUpperCase() })
+                    : t("wizard.steps.noUsable", { lang: l.toUpperCase() })}
+                </p>
+              ) : (
+                <Select
+                  aria-label={t("wizard.steps.template", { lang: l.toUpperCase() })}
+                  value={selected[l] ?? ""}
+                  disabled={readOnly || !selected[l]}
+                  onChange={(e) => setSelected((s) => ({ ...s, [l]: Number(e.target.value) }))}
+                >
+                  {choices.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+                </Select>
+              )}
+              {selected[l] && hasAbSubject(allTemplates, selected[l]!) && (
+                <p className="text-[12px] text-muted-foreground sm:col-start-2">
+                  {t("wizard.steps.ab", { lang: l.toUpperCase() })}
+                </p>
+              )}
+            </div>
+          );
+        })}
         <p className="text-[12px] text-muted-foreground">{t("wizard.steps.langNote")}</p>
+      </fieldset>
+
+      <fieldset className="space-y-3" data-testid="cw-variants">
+        <legend className="flex items-center gap-1.5 text-[13px] font-medium">
+          {t("wizard.variants.title")}
+          <HelpTip>{t("wizard.variants.help")}</HelpTip>
+        </legend>
+        {options.length === 0 ? (
+          <p className="text-[12px] text-muted-foreground">{t("wizard.variants.none")}</p>
+        ) : (
+          options.map((o) => {
+            const k = variantKey(o.language, o.categoryKey);
+            const id = variants[k] ?? 0;
+            const vars = {
+              lang: o.language.toUpperCase(),
+              category: categoryLabel(o.categoryKey, o.categoryKey),
+            };
+            return (
+              <div
+                key={k}
+                className="grid items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+              >
+                <label className="flex items-center gap-1.5 text-[13px]">
+                  <Checkbox
+                    checked={id > 0}
+                    disabled={readOnly}
+                    onCheckedChange={(v) =>
+                      setVariants((cur) => ({ ...cur, [k]: v === true ? o.templates[0]!.id : 0 }))
+                    }
+                  />
+                  {t("wizard.variants.use", vars)}
+                </label>
+                <Select
+                  aria-label={t("wizard.variants.template", vars)}
+                  value={id > 0 ? id : ""}
+                  disabled={readOnly || id === 0}
+                  onChange={(e) => setVariants((cur) => ({ ...cur, [k]: Number(e.target.value) }))}
+                >
+                  {id === 0 && <option value="">—</option>}
+                  {o.templates.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.name}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+            );
+          })
+        )}
+        {!readOnly && stale.length > 0 && (
+          <div data-testid="cw-variants-stale">
+            <Notice tone="warning">
+              <ul className="space-y-0.5">
+                {stale.map((v) => (
+                  <li key={`${v.stepIndex}|${v.language}|${v.categoryKey}`}>
+                    {t("wizard.variants.stale", {
+                      step: t("queue.step", { n: v.stepIndex + 1 }),
+                      lang: v.language.toUpperCase(),
+                      category: categoryLabel(v.categoryKey, v.categoryKey),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          </div>
+        )}
+        {followupVariantCount > 0 && (
+          <p className="text-[12px] text-muted-foreground" data-testid="cw-variants-followup">
+            {t("wizard.variants.followupKept")}
+          </p>
+        )}
       </fieldset>
 
       <fieldset className="space-y-3">

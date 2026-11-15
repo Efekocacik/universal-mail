@@ -6,12 +6,14 @@ import { getSetupState } from "@/lib/app/state";
 import { audit } from "@/lib/db/audit";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { secretStatus } from "@/lib/secrets/store";
-import { revokeScheduleAcks } from "@/lib/scan/schedule-service";
+import { skipOsBacklog } from "@/lib/notifications/service";
+import { holdScansForProviderChange, revokeScheduleAcks } from "@/lib/scan/schedule-service";
 import {
   getSetting,
   getSettings,
   setSetting,
   settingSchemas,
+  stampAiIntroAck,
   USER_SETTING_KEYS,
   type UserSettingKey,
 } from "@/lib/settings";
@@ -31,6 +33,12 @@ export const GET = route(async () => {
       placesKey: await secretStatus("google.placesKey"),
       mapsKey: await secretStatus("google.mapsKey"),
       hunterKey: await secretStatus("hunter.apiKey"),
+      // Faz 5: yalnızca maskeli durum (değer asla döndürülmez).
+      companiesHouseKey: await secretStatus("registry.companiesHouseKey"),
+      inseeKey: await secretStatus("registry.inseeKey"),
+      anthropicKey: await secretStatus("anthropic.apiKey"),
+      snovClientId: await secretStatus("snov.clientId"),
+      snovClientSecret: await secretStatus("snov.clientSecret"),
     },
     setup: await getSetupState(db),
     app: { version: pkg.version, dataDir: dataDir() },
@@ -86,18 +94,34 @@ export const PUT = route(async (req: Request) => {
   // Hepsi ya da hiçbiri: birden çok anahtar tek işlemde yazılır (yarım kalan güncelleme olmaz).
   await db.transaction(async (tx) => {
     // Sağlayıcı Google'a geçiyorsa demo/önceki sağlayıcıyla verilmiş zamanlama ön onayları geri alınır (aynı işlem).
+    // Sağlayıcı değiştiyse eski sağlayıcıyla oluşturulmuş bitmemiş taramalar PROVIDER_CHANGED ile duraklatılır:
+    // demo döneminin tahmini/onayıyla kuyruktaki veya kendiliğinden sürdürülecek tarama ücretli Google'da çalışmaz.
     const nextProvider = patch["places.provider"];
-    if (nextProvider === "google") {
+    if (nextProvider !== undefined) {
       const prev = await getSetting(tx, "places.provider");
-      if (prev !== nextProvider) await revokeScheduleAcks(tx, { from: prev, to: nextProvider });
+      if (prev !== nextProvider) {
+        if (nextProvider === "google")
+          await revokeScheduleAcks(tx, { from: prev, to: nextProvider });
+        await holdScansForProviderChange(tx, { from: prev, to: nextProvider });
+      }
     }
+    // Masaüstü bildirimleri açılıyorsa kapalıyken biriken bildirimler masaüstünde topluca gösterilmez (zilde kalır).
+    if (patch["notifications.os"] === true && !(await getSetting(tx, "notifications.os")))
+      await skipOsBacklog(tx);
+    // Yapay zekâ maliyet onayı sunucu saatiyle ve kaydedilen modelle damgalanır (istemci değeri yalnızca işarettir).
+    const aiIntro = patch["ai.intro"];
+    const aiIntroStamped = aiIntro
+      ? stampAiIntroAck(await getSetting(tx, "ai.intro"), aiIntro, Date.now())
+      : undefined;
     for (const [key, value] of entries) {
       const normalized =
         key === "targets.countries"
           ? (value as string[]).map((c) => c.toUpperCase())
           : key === "maps.mapId"
             ? normalizeMapId(value as string)
-            : value;
+            : key === "ai.intro"
+              ? aiIntroStamped
+              : value;
       await setSetting(tx, key as UserSettingKey, normalized as never);
     }
     await audit(tx, "settings.updated", "settings", undefined, {

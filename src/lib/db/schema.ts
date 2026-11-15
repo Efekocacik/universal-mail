@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   type AnySQLiteColumn,
   check,
+  foreignKey,
   index,
   integer,
   primaryKey,
@@ -290,6 +291,11 @@ export const leads = sqliteTable(
      * kendi sorgusuyla okuyan yeni kod `LEAD_NOT_ARCHIVED` koşulunu eklemek zorundadır. İndeks kısmidir (çoğu satır NULL).
      */
     archivedAt: integer("archived_at"),
+    /**
+     * Faz 5 (0005): kullanıcının verdiği (içe aktarma / elle) web sitesi = BİZİM verimiz. Google `websiteUri` buraya ASLA
+     * yazılmaz. E-posta bulma, yer kimliği yoksa veya oturum önbelleğinde site yoksa buna düşer (email/service.ts).
+     */
+    website: text("website"),
   },
   (t) => [
     uniqueIndex("leads_place_uq").on(t.placeId),
@@ -302,6 +308,7 @@ export const leads = sqliteTable(
     index("leads_source_idx").on(t.source),
     index("leads_country_city_idx").on(t.countryCode, t.city),
     index("leads_category_idx").on(t.categoryKey),
+    check("leads_website_ck", sql`website IS NULL OR length(website) BETWEEN 4 AND 300`),
   ],
 );
 
@@ -591,6 +598,13 @@ export const templates = sqliteTable(
     followupReuseSubject: integer("followup_reuse_subject", { mode: "boolean" })
       .notNull()
       .default(true),
+    /** Faz 5 (0005): A/B denemesinin ikinci konu satırı (yalnızca ilk e-posta şablonunda anlamlıdır). */
+    subjectB: text("subject_b"),
+    /**
+     * Faz 5 (0005): yalnızca bilgi amaçlı şablon (ör. DE: ülke politikası `blocked`); gönderimde ASLA kullanılmaz. API ile
+     * yazılamaz, yalnızca hazır şablon seed'i yazar.
+     */
+    infoOnly: integer("info_only", { mode: "boolean" }).notNull().default(false),
   },
   (t) => [
     index("templates_lookup_idx")
@@ -598,6 +612,8 @@ export const templates = sqliteTable(
       .where(sql`${t.archivedAt} IS NULL`),
     check("templates_kind_ck", sql`kind IN ('initial', 'followup')`),
     check("templates_followup_reuse_subject_ck", sql`followup_reuse_subject IN (0, 1)`),
+    check("templates_subject_b_ck", sql`subject_b IS NULL OR length(subject_b) BETWEEN 1 AND 500`),
+    check("templates_info_only_ck", sql`info_only IN (0, 1)`),
   ],
 );
 
@@ -755,6 +771,8 @@ export const campaignLeads = sqliteTable(
 );
 
 export type MessageDirection = "out" | "in";
+/** Faz 5: A/B konu varyantı. */
+export type SubjectVariant = "a" | "b";
 export type MessagePurpose = "campaign" | "test" | "inbound";
 /**
  * Giden ileti durumları:
@@ -816,6 +834,8 @@ export const messages = sqliteTable(
     sentAt: integer("sent_at"),
     receivedAt: integer("received_at"),
     redactedAt: integer("redacted_at"),
+    /** Faz 5 (0005): ilk e-postada kullanılan A/B konu varyantı; takiplerde ve A/B'siz şablonda NULL. */
+    subjectVariant: text("subject_variant").$type<SubjectVariant>(),
   },
   (t) => [
     // Aynı adım iki kez gönderilemez. Yalnızca sağlayıcıya kesinlikle ulaşmamış (`failed`) deneme yeniden açılabilir;
@@ -866,6 +886,10 @@ export const messages = sqliteTable(
     check(
       "messages_recipient_ck",
       sql`direction <> 'out' OR to_address IS NOT NULL OR redacted_at IS NOT NULL`,
+    ),
+    check(
+      "messages_subject_variant_ck",
+      sql`subject_variant IS NULL OR subject_variant IN ('a', 'b')`,
     ),
   ],
 );
@@ -1129,5 +1153,316 @@ export const savedFilters = sqliteTable(
     ),
     check("saved_filters_sort_ck", sql`sort IN ('novelty', 'name', 'recent')`),
     check("saved_filters_area_ck", sql`include_area IN (0, 1)`),
+  ],
+);
+
+/* ---------------------------------------------------------------------------
+ * Faz 5 (0005): resmî sicil kayıtları, CSV/XLSX içe aktarma, yapay zekâ kişisel girişi, kategoriye özel şablon ve açılma
+ * izleme. Hepsi YALNIZCA EKLEYEN migrasyonla gelir (drizzle/0005_faz5.sql; geri alma aracı o dosyanın başlığında).
+ * Google içeriği (ad, adres, web sitesi, telefon) bu tablolara YAZILMAZ: sicil eşleşmesi yalnızca `place_id` saklar.
+ * ------------------------------------------------------------------------- */
+
+export type RegistrySource = "companies_house" | "insee";
+export type RegistryRunStatus = "queued" | "running" | "done" | "failed";
+export type ActivityScheme = "SIC2007" | "NAFRev2" | "NAF2025";
+export type RegistryMatchStatus = "pending" | "matched" | "unmatched" | "manual" | "rejected";
+export type IntroStatus = "draft" | "approved" | "rejected";
+export type OpenSource = "pixel" | "relay" | "demo_simulated";
+export type ImportFormat = "csv" | "xlsx";
+/** Yapay zekâ girişini üreten model kimliği; `demo` = ağsız, belirlenimci demo üretici. */
+export type IntroModel = "claude-opus-5-5" | "claude-haiku-5-5" | "demo";
+
+/** Sicil çekme çalışması. Kaynak başına aynı anda tek etkin (kuyrukta/çalışıyor) çalışma: kısmi tekil indeks. */
+export const registryRuns = sqliteTable(
+  "registry_runs",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").$type<RegistrySource>().notNull(),
+    isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+    status: text("status").$type<RegistryRunStatus>().notNull().default("queued"),
+    activityScheme: text("activity_scheme").$type<ActivityScheme>().notNull(),
+    /** Bu çalışmada kullanılan faaliyet kodları (JSON dizi, 1–20). */
+    activityCodes: text("activity_codes", { mode: "json" }).$type<string[]>().notNull(),
+    /** Kuruluş tarihi penceresi 'YYYY-MM-DD' (UTC), iki uç dahil. */
+    windowFrom: text("window_from").notNull(),
+    windowTo: text("window_to").notNull(),
+    locality: text("locality"),
+    fetchedCount: integer("fetched_count").notNull().default(0),
+    newCount: integer("new_count").notNull().default(0),
+    matchedCount: integer("matched_count").notNull().default(0),
+    unmatchedCount: integer("unmatched_count").notNull().default(0),
+    pendingCount: integer("pending_count").notNull().default(0),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at").notNull(),
+    startedAt: integer("started_at"),
+    finishedAt: integer("finished_at"),
+  },
+  (t) => [
+    uniqueIndex("registry_runs_active_uq")
+      .on(t.source)
+      .where(sql`${t.status} IN ('queued', 'running')`),
+    index("registry_runs_created_idx").on(t.createdAt),
+    check("registry_runs_source_ck", sql`source IN ('companies_house', 'insee')`),
+    check("registry_runs_demo_ck", sql`is_demo IN (0, 1)`),
+    check("registry_runs_status_ck", sql`status IN ('queued', 'running', 'done', 'failed')`),
+    check("registry_runs_scheme_ck", sql`activity_scheme IN ('SIC2007', 'NAFRev2', 'NAF2025')`),
+    check(
+      "registry_runs_codes_ck",
+      sql`json_valid(activity_codes) AND json_type(activity_codes) = 'array' AND json_array_length(activity_codes) BETWEEN 1 AND 20`,
+    ),
+    check(
+      "registry_runs_window_ck",
+      sql`date(window_from) IS window_from AND date(window_to) IS window_to AND window_from <= window_to`,
+    ),
+    check("registry_runs_locality_ck", sql`locality IS NULL OR length(locality) BETWEEN 1 AND 80`),
+    check(
+      "registry_runs_counts_ck",
+      sql`fetched_count >= 0 AND new_count >= 0 AND matched_count >= 0 AND unmatched_count >= 0 AND pending_count >= 0`,
+    ),
+    check(
+      "registry_runs_error_ck",
+      sql`error_code IS NULL OR (length(error_code) BETWEEN 1 AND 40 AND error_code NOT GLOB '*[^A-Z0-9_]*')`,
+    ),
+    check("registry_runs_failed_ck", sql`status <> 'failed' OR error_code IS NOT NULL`),
+    check(
+      "registry_runs_finished_ck",
+      sql`(status IN ('done', 'failed')) = (finished_at IS NOT NULL)`,
+    ),
+  ],
+);
+
+/**
+ * Resmî sicilden gelen şirket kaydı (herkese açık sicil = BİZİM verimiz; Google içeriği DEĞİL). Eşleşme yalnızca
+ * `matched_place_id` saklar. `registry_companies_place_ck` TEK YÖNLÜDÜR: yer silinince (SET NULL) CHECK bozulmaz;
+ * uygulama `matched` olup yeri NULL kalanları yeniden eşleştirir.
+ */
+export const registryCompanies = sqliteTable(
+  "registry_companies",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    source: text("source").$type<RegistrySource>().notNull(),
+    isDemo: integer("is_demo", { mode: "boolean" }).notNull().default(false),
+    /** Companies House şirket numarası / INSEE SIRET. */
+    externalId: text("external_id").notNull(),
+    name: text("name").notNull(),
+    /** INSEE tabela adı / kullanılan ad (eşleştirme için daha iyi). */
+    tradingName: text("trading_name"),
+    nameNorm: text("name_norm").notNull(),
+    countryCode: text("country_code").$type<"GB" | "FR">().notNull(),
+    activityScheme: text("activity_scheme").$type<ActivityScheme>().notNull(),
+    activityCodes: text("activity_codes", { mode: "json" }).$type<string[]>().notNull(),
+    categoryKey: text("category_key"),
+    incorporatedOn: text("incorporated_on").notNull(),
+    postcode: text("postcode"),
+    locality: text("locality"),
+    localityNorm: text("locality_norm"),
+    addressLine: text("address_line"),
+    registryStatus: text("registry_status"),
+    lastRunId: integer("last_run_id").references(() => registryRuns.id, {
+      onDelete: "set null",
+    }),
+    matchStatus: text("match_status").$type<RegistryMatchStatus>().notNull().default("pending"),
+    matchReason: text("match_reason"),
+    matchScore: real("match_score"),
+    matchedPlaceId: text("matched_place_id").references(() => places.placeId, {
+      onDelete: "set null",
+    }),
+    matchedAt: integer("matched_at"),
+    leadId: integer("lead_id").references(() => leads.id, { onDelete: "set null" }),
+    firstSeenAt: integer("first_seen_at").notNull(),
+    lastSeenAt: integer("last_seen_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+  },
+  (t) => [
+    uniqueIndex("registry_companies_ext_uq").on(t.source, t.externalId),
+    index("registry_companies_country_inc_idx").on(t.countryCode, t.incorporatedOn),
+    index("registry_companies_match_idx").on(t.matchStatus),
+    index("registry_companies_place_idx")
+      .on(t.matchedPlaceId)
+      .where(sql`${t.matchedPlaceId} IS NOT NULL`),
+    index("registry_companies_lead_idx")
+      .on(t.leadId)
+      .where(sql`${t.leadId} IS NOT NULL`),
+    index("registry_companies_run_idx").on(t.lastRunId),
+    check("registry_companies_source_ck", sql`source IN ('companies_house', 'insee')`),
+    check("registry_companies_demo_ck", sql`is_demo IN (0, 1)`),
+    check("registry_companies_country_ck", sql`country_code IN ('GB', 'FR')`),
+    check(
+      "registry_companies_scheme_ck",
+      sql`activity_scheme IN ('SIC2007', 'NAFRev2', 'NAF2025')`,
+    ),
+    check(
+      "registry_companies_codes_ck",
+      sql`json_valid(activity_codes) AND json_type(activity_codes) = 'array'`,
+    ),
+    check(
+      "registry_companies_name_ck",
+      sql`length(name) BETWEEN 1 AND 300 AND length(name_norm) BETWEEN 1 AND 300 AND (trading_name IS NULL OR length(trading_name) BETWEEN 1 AND 300)`,
+    ),
+    check(
+      "registry_companies_text_ck",
+      sql`(postcode IS NULL OR length(postcode) <= 16) AND (locality IS NULL OR length(locality) <= 120) AND (locality_norm IS NULL OR length(locality_norm) <= 120) AND (address_line IS NULL OR length(address_line) <= 200) AND (registry_status IS NULL OR length(registry_status) <= 40) AND (category_key IS NULL OR length(category_key) BETWEEN 1 AND 64)`,
+    ),
+    check("registry_companies_date_ck", sql`date(incorporated_on) IS incorporated_on`),
+    check(
+      "registry_companies_match_ck",
+      sql`match_status IN ('pending', 'matched', 'unmatched', 'manual', 'rejected')`,
+    ),
+    check(
+      "registry_companies_score_ck",
+      sql`match_score IS NULL OR (match_score >= 0 AND match_score <= 1)`,
+    ),
+    check(
+      "registry_companies_place_ck",
+      sql`matched_place_id IS NULL OR match_status IN ('matched', 'manual')`,
+    ),
+    check(
+      "registry_companies_reason_ck",
+      sql`match_reason IS NULL OR (length(match_reason) BETWEEN 1 AND 40 AND match_reason NOT GLOB '*[^a-z_]*')`,
+    ),
+  ],
+);
+
+/** CSV/XLSX içe aktarma partisi (satırlar ara tabloda tutulmaz; önizleme durumsuzdur). FR-DIS-12 kaynak/kullanım onayı. */
+export const importBatches = sqliteTable(
+  "import_batches",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    filename: text("filename").notNull(),
+    format: text("format").$type<ImportFormat>().notNull(),
+    sourceNote: text("source_note").notNull(),
+    usageAckAt: integer("usage_ack_at").notNull(),
+    mapping: text("mapping", { mode: "json" }).$type<Record<string, number | null>>().notNull(),
+    rowCount: integer("row_count").notNull(),
+    createdCount: integer("created_count").notNull(),
+    duplicateCount: integer("duplicate_count").notNull(),
+    invalidCount: integer("invalid_count").notNull(),
+    createdAt: integer("created_at").notNull(),
+  },
+  (t) => [
+    index("import_batches_created_idx").on(t.createdAt),
+    check("import_batches_format_ck", sql`format IN ('csv', 'xlsx')`),
+    check(
+      "import_batches_name_ck",
+      sql`length(filename) BETWEEN 1 AND 200 AND length(source_note) BETWEEN 3 AND 200`,
+    ),
+    check("import_batches_mapping_ck", sql`json_valid(mapping) AND json_type(mapping) = 'object'`),
+    check(
+      "import_batches_counts_ck",
+      sql`row_count >= 0 AND created_count >= 0 AND duplicate_count >= 0 AND invalid_count >= 0 AND created_count + duplicate_count + invalid_count <= row_count`,
+    ),
+  ],
+);
+
+/** Partinin oluşturduğu lead'ler. `leads` üzerinde sütun YOK: geri alma `leads`'i yeniden kurmak zorunda kalmaz. */
+export const importBatchLeads = sqliteTable(
+  "import_batch_leads",
+  {
+    batchId: integer("batch_id")
+      .notNull()
+      .references(() => importBatches.id, { onDelete: "cascade" }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    rowNumber: integer("row_number").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.batchId, t.leadId] }),
+    index("import_batch_leads_lead_idx").on(t.leadId),
+    check("import_batch_leads_row_ck", sql`row_number >= 1`),
+  ],
+);
+
+/** Yapay zekâ kişisel girişi: her zaman insan onayından geçer; lead ve dil başına en çok bir onaylı satır. */
+export const leadIntros = sqliteTable(
+  "lead_intros",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+    language: text("language").notNull(),
+    text: text("text").notNull(),
+    status: text("status").$type<IntroStatus>().notNull().default("draft"),
+    model: text("model").$type<IntroModel>().notNull(),
+    /** Bağlam olarak kullanılan, işletmenin KENDİ sitesinin alan adı (NULL = yalnızca ad/şehir/kategori). */
+    sourceDomain: text("source_domain"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    estCostUsd: real("est_cost_usd").notNull().default(0),
+    createdAt: integer("created_at").notNull(),
+    updatedAt: integer("updated_at").notNull(),
+    approvedAt: integer("approved_at"),
+  },
+  (t) => [
+    index("lead_intros_lead_idx").on(t.leadId, t.language),
+    uniqueIndex("lead_intros_approved_uq")
+      .on(t.leadId, t.language)
+      .where(sql`${t.status} = 'approved'`),
+    index("lead_intros_created_idx").on(t.createdAt),
+    check(
+      "lead_intros_lang_ck",
+      sql`language IN ('tr', 'en', 'de', 'fr', 'es', 'it', 'nl', 'pt', 'pl')`,
+    ),
+    check("lead_intros_text_ck", sql`length(text) BETWEEN 1 AND 400`),
+    check("lead_intros_status_ck", sql`status IN ('draft', 'approved', 'rejected')`),
+    check("lead_intros_approved_ck", sql`(status = 'approved') = (approved_at IS NOT NULL)`),
+    check(
+      "lead_intros_model_ck",
+      sql`length(model) BETWEEN 1 AND 64 AND model NOT GLOB '*[^a-z0-9.-]*'`,
+    ),
+    check(
+      "lead_intros_domain_ck",
+      sql`source_domain IS NULL OR (length(source_domain) BETWEEN 3 AND 253 AND source_domain = lower(source_domain))`,
+    ),
+    check(
+      "lead_intros_usage_ck",
+      sql`input_tokens >= 0 AND output_tokens >= 0 AND est_cost_usd >= 0`,
+    ),
+  ],
+);
+
+/** Kampanya adımı + dil için kategoriye özel şablon. Adım silinince/yeniden yazılınca (bileşik FK, CASCADE) gider. */
+export const campaignStepTemplates = sqliteTable(
+  "campaign_step_templates",
+  {
+    campaignId: integer("campaign_id").notNull(),
+    stepIndex: integer("step_index").notNull(),
+    language: text("language").notNull(),
+    categoryKey: text("category_key").notNull(),
+    templateId: integer("template_id")
+      .notNull()
+      .references(() => templates.id, { onDelete: "restrict" }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.campaignId, t.stepIndex, t.language, t.categoryKey] }),
+    foreignKey({
+      columns: [t.campaignId, t.stepIndex, t.language],
+      foreignColumns: [campaignSteps.campaignId, campaignSteps.stepIndex, campaignSteps.language],
+    }).onDelete("cascade"),
+    index("campaign_step_templates_tpl_idx").on(t.templateId),
+    check("campaign_step_templates_cat_ck", sql`length(category_key) BETWEEN 1 AND 64`),
+  ],
+);
+
+/** Açılma izleme (varsayılan KAPALI): ileti başına tek satır, sınırlı. Kişisel veri veya adres içermez. */
+export const messageOpens = sqliteTable(
+  "message_opens",
+  {
+    messageId: integer("message_id")
+      .primaryKey()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => campaigns.id, { onDelete: "cascade" }),
+    firstOpenedAt: integer("first_opened_at").notNull(),
+    lastOpenedAt: integer("last_opened_at").notNull(),
+    openCount: integer("open_count").notNull().default(1),
+    source: text("source").$type<OpenSource>().notNull(),
+  },
+  (t) => [
+    index("message_opens_campaign_idx").on(t.campaignId),
+    check("message_opens_source_ck", sql`source IN ('pixel', 'relay', 'demo_simulated')`),
+    check("message_opens_count_ck", sql`open_count >= 1 AND last_opened_at >= first_opened_at`),
   ],
 );

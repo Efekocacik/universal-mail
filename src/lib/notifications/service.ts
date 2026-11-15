@@ -185,6 +185,20 @@ export async function claimForOs(
 }
 
 /**
+ * İşletim sistemi bildirimleri KAPALIYKEN biriken satırlar sahiplenilmiş sayılır (zilde kalırlar). Ayar açılınca
+ * yalnızca bundan sonraki bildirimler masaüstünde gösterilir; son 24 saatin birikimi bir anda patlamaz. Ayarın
+ * kapalı→açık geçişinde, ayarla aynı işlemde çağrılır. Etkilenen satır sayısını döndürür.
+ */
+export async function skipOsBacklog(db: DbExecutor, now: number = Date.now()): Promise<number> {
+  const r = await db
+    .update(notifications)
+    .set({ osClaimedAt: now })
+    .where(isNull(notifications.osClaimedAt))
+    .returning({ id: notifications.id });
+  return r.length;
+}
+
+/**
  * Bakım: okunmuş ve `readRetentionMs`'ten (90 gün) eski ya da okunmasa bile `maxAgeMs`'ten (180 gün) eski bildirimleri
  * siler. Silinen satır sayısını döndürür. Çalışan bakım turunda (günde bir) çağrılmak içindir.
  */

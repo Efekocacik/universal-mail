@@ -6,7 +6,8 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
  * içe aktarma olmadan).
  *
  *  pause_code            neden                                   zamanlanmış taramada kendiliğinden sürer mi?
- *  null                  kullanıcı duraklattı (veya eski kayıt)  hayır (kullanıcının kararı)
+ *  USER_PAUSED           kullanıcı duraklattı                    hayır (kullanıcının kararı)
+ *  null                  eski kayıt (Faz 5 öncesi kullanıcı)     hayır
  *  CALL_LIMIT            güvenlik çağrı sınırı aşıldı            hayır (maliyet kontrolü; kullanıcı onaylar)
  *  COST_CAP              zamanlanmış taramanın onaylı toplam      hayır (kullanıcı sürdürürse tavan kalkar)
  *                        maliyet tavanına ulaşıldı
@@ -14,13 +15,21 @@ import type { PlacesErrorKind } from "@/lib/places/errors";
  *  INTERRUPTED           işçi beklenmedik şekilde durdu          evet
  *  PROVIDER_QUOTA|RATE|NETWORK|SERVER  geçici Google hatası       evet (bir saat sonra yeniden denenir)
  *  BUDGET_BLOCKED        (status = budget_stopped) bütçe doldu   evet, bütçe yeniden izin verince
+ *  PROVIDER_CHANGED      yer sağlayıcısı değişti (ör. demo→Google) hayır; sürdürülemez (eski onay/tahmin geçersiz)
  */
+/** Kullanıcı "Duraklat"a bastı (Faz 5; önceden kodsuz yazılırdı). Arayüz metni `scans.pause.USER_PAUSED`. */
+export const USER_PAUSED = "USER_PAUSED";
 export const APP_STOPPED = "APP_STOPPED";
 export const INTERRUPTED = "INTERRUPTED";
 export const CALL_LIMIT = "CALL_LIMIT";
 /** Zamanlanmış taramanın onaylı toplam maliyet tavanı (`estimate.costCapUsd`) doldu; tüm sürdürmeler dahil. */
 export const COST_CAP = "COST_CAP";
 export const BUDGET_STOP_CODE = "BUDGET_BLOCKED";
+/**
+ * Taramanın sağlayıcısı (`scans.provider`) ayarlardaki sağlayıcıdan farklı: demo modunda verilen onay/tahmin ücretli
+ * Google çağrılarına rıza sayılmaz (docs/11 §2.1). Böyle tarama hiçbir yoldan sürdürülmez; yeni tarama başlatılır.
+ */
+export const PROVIDER_CHANGED = "PROVIDER_CHANGED";
 
 export function providerPauseCode(kind: PlacesErrorKind): string {
   return `PROVIDER_${kind.toUpperCase()}`;

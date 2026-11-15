@@ -4,7 +4,8 @@
  * Değerler yalnızca BİZİM verimizden gelir. Google Places içeriği (işletme adı, açılış tarihi) e-postada
  * kullanılmaz: `{{isletme_adi}}` yalnızca kullanıcının girdiği "Görünen ad"dır; `{{acilis_tarihi}}` bu sürümde
  * desteklenmez. `footer` işaretli değişkenler zorunlu alt bilgide de yer alır (gövdede kullanılsa bile alt bilgi
- * her zaman eklenir). `unsupported` değişken içeren şablon kaydedilemez.
+ * her zaman eklenir). `unsupported` değişken içeren şablon kaydedilemez. `{{kisisel_giris}}` yalnızca onaylanmış
+ * yapay zekâ girişinden gelir (taslak asla kullanılmaz).
  */
 export interface TemplateVariable {
   key: string;
@@ -32,11 +33,9 @@ export const TEMPLATE_VARIABLES: readonly TemplateVariable[] = [
   { key: "firma_adres", source: "sender", footer: true },
   { key: "telefon", source: "sender", footer: true },
   { key: "cikis_linki", source: "system", footer: true },
-  {
-    key: "kisisel_giris",
-    source: "none",
-    unsupported: "Yapay zekâ ile kişisel giriş (Faz 5) henüz desteklenmiyor.",
-  },
+  // Faz 5 (paket A): değeri, (lead, şablon dili) için KULLANICININ ONAYLADIĞI kişisel giriştir. Onaylı giriş yoksa
+  // diğer eksik lead değişkenleri gibi davranır: `{{kisisel_giris|yedek}}` yedeği kullanır, yedeksiz ileti gönderilmez.
+  { key: "kisisel_giris", source: "lead" },
 ];
 
 export type VariableKey =

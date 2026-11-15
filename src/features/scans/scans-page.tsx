@@ -24,11 +24,13 @@ import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { api, ApiError } from "@/lib/client/api";
 import { countryLabel, fmtDateTime, fmtNumber, fmtUsd } from "@/lib/client/format";
+import { pauseReasonText } from "@/lib/client/pause-reason";
 import { qk, useScans } from "@/lib/client/queries";
 import type { ScanListItem, ScanStatus } from "@/lib/client/types";
 import { skuLabel } from "@/lib/places/pricing";
 import { t } from "@/lib/i18n";
 import { RepeatScanDialog } from "./repeat-fields";
+import { ScansSubnav } from "./scans-subnav";
 import { SchedulesSection } from "./schedules-section";
 
 const STATUS_VARIANT: Record<ScanStatus, BadgeProps["variant"]> = {
@@ -66,6 +68,7 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
   const active = scan.status === "running" || scan.status === "queued";
   const p = scan.progress;
   const pct = p.unitsTotal ? Math.round(((p.unitsDone ?? 0) / p.unitsTotal) * 100) : 0;
+  const pauseText = pauseReasonText(scan);
   const calls = Object.values(scan.callsBySku).reduce((a, b) => a + b, 0);
 
   const detail = useQuery({
@@ -209,9 +212,9 @@ function ScanCard({ scan }: { scan: ScanListItem }) {
           </p>
         </div>
       )}
-      {scan.pauseReason && scan.status !== "completed" && (
+      {pauseText && scan.status !== "completed" && (
         <p className="mt-2 rounded-md bg-nov-likely/15 px-3 py-2 text-[13px] text-caution-text">
-          {scan.pauseReason}
+          {pauseText}
         </p>
       )}
       {(scan.error || scan.status === "failed") && (
@@ -348,6 +351,7 @@ export function ScansPage() {
   return (
     <div className="um-scroll min-h-0 flex-1">
       <div className="um-enter mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+        <ScansSubnav />
         <PageHeader
           title={t("scans.title")}
           description={t("scans.subtitle")}

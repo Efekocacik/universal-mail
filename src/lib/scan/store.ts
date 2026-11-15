@@ -34,9 +34,14 @@ export async function setScanStatus(
     error?: string | null;
     finishedAt?: number | null;
     startedAt?: number;
+    /**
+     * Karşılaştır-ve-yaz koruması: verilirse yalnızca durum bu kümedeyse yazılır (ör. çalıştırıcı geçişleri
+     * `['queued','running']`). Böylece kullanıcının iptal/duraklatması çalıştırıcının geç gelen yazısıyla ezilmez.
+     */
+    from?: readonly ScanStatus[];
   } = {},
-): Promise<void> {
-  await db
+): Promise<boolean> {
+  const changed = await db
     .update(scans)
     .set({
       status,
@@ -46,7 +51,13 @@ export async function setScanStatus(
       ...(extra.finishedAt !== undefined ? { finishedAt: extra.finishedAt } : {}),
       ...(extra.startedAt !== undefined ? { startedAt: extra.startedAt } : {}),
     })
-    .where(eq(scans.id, scanId));
+    .where(
+      extra.from
+        ? and(eq(scans.id, scanId), inArray(scans.status, [...extra.from]))
+        : eq(scans.id, scanId),
+    )
+    .returning({ id: scans.id });
+  return changed.length > 0;
 }
 
 export async function scanStatusOf(db: Db, scanId: number): Promise<ScanStatus | undefined> {

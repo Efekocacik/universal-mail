@@ -15,7 +15,7 @@ import {
   type CampaignAction,
   type CampaignDetail,
 } from "@/lib/client/campaigns";
-import { fmtDateTime, fmtNumber } from "@/lib/client/format";
+import { categoryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t, type TrKey } from "@/lib/i18n";
 import {
   allowedActions,
@@ -28,6 +28,8 @@ import {
   progressTone,
   statusStats,
 } from "./model";
+import { CampaignStatsCard } from "./campaign-stats-card";
+import { hasAbSubject } from "./category-variants";
 import { CampaignStatusBadge, DemoBadge, LoadError, Notice, Stat } from "./parts";
 import { PreflightPanel } from "./preflight-panel";
 import { MessagesTable, QueueTable } from "./queue-table";
@@ -134,6 +136,17 @@ function Overview({ c }: { c: CampaignDetail }) {
           ))}
         </div>
       </div>
+      <CampaignStatsCard
+        campaignId={c.id}
+        running={c.status === "running"}
+        abConfigured={c.steps.some(
+          (st) =>
+            st.stepIndex === 0 &&
+            [st.templateId, ...(st.categoryTemplates ?? []).map((x) => x.templateId)].some((id) =>
+              hasAbSubject(templates.data ?? [], id),
+            ),
+        )}
+      />
       <dl className="grid gap-3 rounded-lg border bg-card p-4 text-[13px] sm:grid-cols-2">
         <div>
           <dt className="text-muted-foreground">{t("wizard.window")}</dt>
@@ -168,6 +181,22 @@ function Overview({ c }: { c: CampaignDetail }) {
                     {t("queue.step", { n: s.stepIndex + 1 })} · {s.language.toUpperCase()} ·{" "}
                     {tplName(s.templateId)}
                     {s.stepIndex > 0 ? ` · ${t("wizard.delay.after", { n: s.delayDays })}` : ""}
+                    {(s.categoryTemplates?.length ?? 0) > 0 && (
+                      <ul
+                        className="ml-4 mt-0.5 space-y-0.5 text-muted-foreground"
+                        aria-label={t("campaign.stepVariants")}
+                        data-testid={`cd-step-variants-${s.stepIndex}-${s.language}`}
+                      >
+                        {s.categoryTemplates!.map((c) => (
+                          <li key={c.categoryKey}>
+                            {t("campaign.stepVariant", {
+                              category: categoryLabel(c.categoryKey, c.categoryKey),
+                              template: tplName(c.templateId),
+                            })}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </li>
                 ))}
               </ul>

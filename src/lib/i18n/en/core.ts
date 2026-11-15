@@ -249,6 +249,13 @@ export const core = {
   "apiError.SAVED_FILTER_LIMIT.detail":
     "You can save up to {limit} filters. Delete one you no longer use and try again.",
   "apiError.SCHEDULE_NOT_FOUND": "Schedule not found. It may have been deleted.",
+  "apiError.SCAN_NOT_PAUSABLE": "Only a running scan can be paused.",
+  "apiError.SCAN_NOT_RESUMABLE":
+    "Only a paused scan, or one stopped by the budget, can be resumed.",
+  "apiError.SCAN_PROVIDER_CHANGED":
+    "The places provider changed, so this scan cannot be resumed. Start a new scan.",
+  "apiError.SCAN_CHANGED": "The scan changed in the meantime. Refresh the page and try again.",
+  "apiError.SCAN_FINISHED": "The scan has already finished.",
   "apiError.SCAN_NOT_FOUND": "Scan not found.",
   "apiError.SCAN_NOT_STARTED": "A scan that has not started yet cannot be repeated on a schedule.",
   "apiError.SCHEDULE_EXISTS": "A schedule already exists for this region and these categories.",

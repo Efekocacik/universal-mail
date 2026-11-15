@@ -98,6 +98,13 @@ export interface Draft {
   bodyHtml: string;
   /** Takip şablonunda ilk e-postanın konusu "Re:" ile kullanılır (9d). İlk e-posta şablonunda etkisizdir. */
   followupReuseSubject: boolean;
+  /** Faz 5: A/B ikinci konusu ("" = A/B yok; yalnızca ilk e-postada saklanır). */
+  subjectB: string;
+  /**
+   * Faz 5: kategori varyantı ("" = genel şablon). Yalnızca ilk e-posta şablonunda anlamlıdır; kampanya sihirbazı bu dil
+   * ve kategoride bu şablonu varyant olarak önerir.
+   */
+  categoryKey: string;
 }
 
 export const EMPTY_DRAFT: Draft = {
@@ -107,11 +114,13 @@ export const EMPTY_DRAFT: Draft = {
   subject: "",
   bodyHtml: "",
   followupReuseSubject: true,
+  subjectB: "",
+  categoryKey: "",
 };
 
 export function toDraft(
   d: Pick<TemplateDetail, "name" | "language" | "kind" | "subject" | "bodyHtml"> &
-    Partial<Pick<TemplateDetail, "followupReuseSubject">>,
+    Partial<Pick<TemplateDetail, "followupReuseSubject" | "subjectB" | "categoryKey">>,
 ): Draft {
   return {
     name: d.name,
@@ -120,7 +129,19 @@ export function toDraft(
     subject: d.subject,
     bodyHtml: d.bodyHtml,
     followupReuseSubject: d.followupReuseSubject ?? true,
+    subjectB: d.subjectB ?? "",
+    categoryKey: d.categoryKey ?? "",
   };
+}
+
+/** Sunucuya giden kategori anahtarı: boş veya takip şablonunda null (varyant yalnızca ilk e-postada). */
+export function draftCategoryKey(d: Pick<Draft, "kind" | "categoryKey">): string | null {
+  return d.kind === "initial" && d.categoryKey.trim() ? d.categoryKey.trim() : null;
+}
+
+/** Faz 5: taslakta A/B denemesi var mı (yalnızca ilk e-posta ve dolu B konusu)? */
+export function hasSubjectB(d: Pick<Draft, "kind" | "subjectB">): boolean {
+  return d.kind === "initial" && d.subjectB.trim() !== "";
 }
 
 /** Konu alanının açıklaması: takip şablonunda konu devamı açıksa şablon konusu yalnızca yedektir (9d). */

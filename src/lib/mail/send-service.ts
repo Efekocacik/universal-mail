@@ -56,6 +56,7 @@ import {
   type MailProvider,
   type ProviderResult,
 } from "./provider/provider";
+import { settleIfBusinessComplaint } from "./inbound/stop";
 import { retryDelayMs } from "./scheduler/retry";
 import { effectiveMailboxCap, gapMs, nextUtcDayStart, warmupCeiling } from "./scheduler/throttle";
 import {
@@ -64,7 +65,13 @@ import {
   nextWindowStart,
   timeZonesForCountry,
 } from "./scheduler/window";
-import { composeEmail, type ComposeIssue } from "./template-service";
+import { demoOpenPixelUrl, openTrackingEnabled, simulateDemoOpen } from "./open-tracking";
+import {
+  assignSubjectVariant,
+  composeEmail,
+  resolveStepTemplateId,
+  type ComposeIssue,
+} from "./template-service";
 
 /**
  * Tek kampanya adımının gönderimi (TEK deneme).
@@ -150,6 +157,8 @@ export interface PendingRecord {
   stepIndex: number;
   previousStatus: CampaignLeadStatus;
   result: ProviderResult;
+  /** Faz 5: demo iletisi + açılma izleme açık: `sent` kaydıyla aynı işlemde benzetim açılması yazılır. */
+  demoOpen?: { campaignId: number };
 }
 
 export type SendStepOutcome =
@@ -256,6 +265,8 @@ interface Reservation {
   provider: MailProvider;
   /** Takip iletisinin sağlayıcı konuşması (9d); yoksa `undefined`. */
   threadId?: string;
+  /** Faz 5: demo + açılma izleme açık (benzetim açılması kayıtla birlikte yazılır). */
+  demoOpen?: { campaignId: number };
 }
 
 export async function sendCampaignStep(
@@ -390,23 +401,55 @@ export async function sendCampaignStep(
         .orderBy(asc(messages.stepIndex));
       const thread = followupThread(previous, input.stepIndex);
 
+      // Faz 5: lead kategorisine özel şablon varsa o (yoksa adımın şablonu); ilk e-postada A/B konusu deterministik
+      // atanır (yeniden deneme aynı varyantı verir). Bilgi amaçlı şablon `compose_failed` + `template_info_only` verir.
+      const [leadRow] = await tx
+        .select({ categoryKey: leads.categoryKey })
+        .from(leads)
+        .where(eq(leads.id, cl.leadId))
+        .limit(1);
+      const templateId = await resolveStepTemplateId(
+        tx,
+        {
+          campaignId: campaign.id,
+          stepIndex: input.stepIndex,
+          language: step.language,
+          categoryKey: leadRow?.categoryKey ?? null,
+        },
+        step.templateId,
+      );
       const composed = await composeEmail(tx, {
-        templateId: step.templateId,
+        templateId,
         leadId: cl.leadId,
         mode,
         purpose: "send",
         ...(unsubscribe ? { unsubscribeUrl: unsubscribe.url } : {}),
         ...(thread.subject ? { threadSubject: thread.subject } : {}),
+        ...(input.stepIndex === 0 ? { subjectVariant: assignSubjectVariant(cl.id) } : {}),
       });
       if (!composed.sendable) {
         throw new Abort({
           outcome: "not_sendable",
           code: "compose_failed",
           errors: composed.errors,
+          // Dağıtıcı bunu sonlandırmaz, erteler: kullanıcı girişi onaylayınca dizi kaldığı yerden sürer.
+          ...(composed.introPending ? { detail: "intro_pending" } : {}),
         });
       }
 
       const references = thread.references;
+
+      // Faz 5: açılma pikseli YALNIZCA demo kampanya iletisine ve ayar açıkken (canlıda bu sürümde hiç yok).
+      const tracking = mode === "demo" && (await openTrackingEnabled(tx));
+      let openPixelUrl: string | undefined;
+      if (tracking) {
+        try {
+          openPixelUrl = demoOpenPixelUrl({ campaignLeadId: cl.id, stepIndex: input.stepIndex });
+        } catch {
+          // Belirteç anahtarı okunamadı: isteğe bağlı demo özelliği; ileti pikselsiz oluşturulur, gönderim sürer.
+          openPixelUrl = undefined;
+        }
+      }
 
       const profile = await getSetting(tx, "company.profile");
       let built;
@@ -420,6 +463,7 @@ export async function sendCampaignStep(
           now,
           inReplyTo: references.at(-1) ?? null,
           references,
+          ...(openPixelUrl ? { openPixelUrl } : {}),
           ...(unsubscribe
             ? {
                 unsubscribe: {
@@ -457,6 +501,7 @@ export async function sendCampaignStep(
           sendDay: utcDay(now),
           subjectLogged: composed.subjectLogged,
           bodySha256: composed.bodySha256,
+          subjectVariant: input.stepIndex === 0 ? composed.subjectVariant : null,
           status: "sending",
           createdAt: now,
         })
@@ -483,6 +528,7 @@ export async function sendCampaignStep(
         previousStatus: cl.status,
         provider,
         ...(thread.threadId ? { threadId: thread.threadId } : {}),
+        ...(tracking ? { demoOpen: { campaignId: campaign.id } } : {}),
       };
     });
   } catch (e) {
@@ -513,6 +559,7 @@ export async function sendCampaignStep(
     stepIndex: input.stepIndex,
     previousStatus: r.previousStatus,
     result,
+    ...(r.demoOpen ? { demoOpen: r.demoOpen } : {}),
   };
   // Yalnızca veritabanı KAYDI yeniden denenir (meşgulse); ileti asla yeniden gönderilmez.
   for (let attempt = 0; ; attempt++) {
@@ -753,6 +800,14 @@ async function recordResult(
         now,
         limits,
       );
+      // Faz 5: demo açılma benzetimi aynı işlemde (tekrarlanabilir; ikinci kayıt denemesi satırı değiştirmez).
+      if (p.demoOpen) {
+        await simulateDemoOpen(tx, {
+          messageId: p.rowId,
+          campaignId: p.demoOpen.campaignId,
+          sentAt: now,
+        });
+      }
       return;
     }
 
@@ -775,6 +830,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -808,6 +864,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -849,6 +906,7 @@ async function recordResult(
         })
         .where(inFlight);
       await settleIfCancelled(tx, p.campaignLeadId, now);
+      await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
       return;
     }
 
@@ -915,6 +973,7 @@ export async function advanceAfterSent(
     })
     .where(eq(leads.id, cl!.leadId));
   await settleIfCancelled(tx, p.campaignLeadId, now);
+  await settleIfBusinessComplaint(tx, p.campaignLeadId, now);
   // Isınma, kutunun ilk başarılı gönderimiyle başlar.
   await tx
     .update(mailboxes)

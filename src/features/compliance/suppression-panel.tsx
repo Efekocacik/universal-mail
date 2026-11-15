@@ -1,7 +1,7 @@
 "use client";
 
 import { Ban, Lock, Plus, Search, Upload } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -50,6 +50,7 @@ import {
   sourceName,
   type ManualReason,
 } from "./model";
+import { useDebounced } from "@/lib/client/use-debounced";
 
 const INVALIDATE = [xk.all] as const;
 const ALL_REASONS: SuppressionReason[] = [
@@ -60,15 +61,6 @@ const ALL_REASONS: SuppressionReason[] = [
   "negative_reply",
   "erasure",
 ];
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
 
 /* Elle ekleme ---------------------------------------------------------------------------------------- */
 

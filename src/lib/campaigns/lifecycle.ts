@@ -1,6 +1,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { FrequencyLimits } from "@/lib/compliance/frequency";
 import { audit } from "@/lib/db/audit";
+import { chunk } from "@/lib/util";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, type CampaignStatus } from "@/lib/db/schema";
 import { wakeDispatchSafely, type WakeOutcome } from "@/lib/mail/scheduler/job";
@@ -122,18 +123,33 @@ export async function transitionCampaign(
           "Başlatma özeti güncel değil; özeti yeniden alıp onaylayın.",
         );
       }
-      for (const e of plan.eligible) {
-        await tx
-          .update(campaignLeads)
-          .set({ status: "scheduled", language: e.language, nextSendAt: null, updatedAt: now })
-          .where(and(eq(campaignLeads.id, e.id), eq(campaignLeads.status, "pending")));
-      }
+      // Toplu yazım: uygunlar dil başına, uygun olmayanlar aynı gerekçe kümesi başına tek UPDATE (500'lük parçalar).
+      const byLanguage = new Map<string, number[]>();
+      for (const e of plan.eligible)
+        byLanguage.set(e.language, [...(byLanguage.get(e.language) ?? []), e.id]);
+      for (const [language, ids] of byLanguage)
+        for (const part of chunk(ids, 500))
+          await tx
+            .update(campaignLeads)
+            .set({ status: "scheduled", language, nextSendAt: null, updatedAt: now })
+            .where(and(inArray(campaignLeads.id, part), eq(campaignLeads.status, "pending")));
+      const byReasons = new Map<string, { reasons: string[]; ids: number[] }>();
       for (const i of plan.ineligible) {
-        await tx
-          .update(campaignLeads)
-          .set({ status: "excluded", exclusionReasons: i.reasons, updatedAt: now })
-          .where(and(eq(campaignLeads.id, i.id), eq(campaignLeads.status, "pending")));
+        const key = JSON.stringify(i.reasons);
+        const g = byReasons.get(key) ?? { reasons: i.reasons, ids: [] };
+        g.ids.push(i.id);
+        byReasons.set(key, g);
       }
+      for (const g of byReasons.values())
+        for (const part of chunk(g.ids, 500))
+          await tx
+            .update(campaignLeads)
+            .set({
+              status: "excluded",
+              exclusionReasons: g.reasons,
+              updatedAt: now,
+            })
+            .where(and(inArray(campaignLeads.id, part), eq(campaignLeads.status, "pending")));
       scheduled = plan.eligible.length;
       excluded = plan.ineligible.length;
       Object.assign(values, {

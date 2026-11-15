@@ -133,6 +133,54 @@ export async function upsertEnrichment(
     .onConflictDoUpdate({ target: leadEnrichment.leadId, set: { ...patch, updatedAt: now } });
 }
 
+/**
+ * Lead'leri e-posta araması için "kuyrukta" işaretler: tek işlemde, 500'lük çok satırlı INSERT … ON CONFLICT ile
+ * (lead başına ayrı otomatik commit yerine). Şu anda `running` olan satıra dokunulmaz (`setWhere`); diğer sütunlar
+ * (son sonuç, hata) korunur.
+ */
+export async function markEnrichmentQueued(
+  db: Db,
+  leadIds: readonly number[],
+  now: number = Date.now(),
+): Promise<void> {
+  const ids = [...new Set(leadIds)];
+  if (ids.length === 0) return;
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < ids.length; i += 500) {
+      await tx
+        .insert(leadEnrichment)
+        .values(
+          ids
+            .slice(i, i + 500)
+            .map((leadId) => ({ leadId, status: "queued" as const, updatedAt: now })),
+        )
+        .onConflictDoUpdate({
+          target: leadEnrichment.leadId,
+          set: { status: sql`excluded.status`, updatedAt: sql`excluded.updated_at` },
+          setWhere: sql`${leadEnrichment.status} <> 'running'`,
+        });
+    }
+  });
+}
+
+/** Durdurulan işte hâlâ `running` görünen lead'leri tek ifadeyle yeniden `queued` yapar. */
+export async function requeueRunningEnrichment(
+  db: Db,
+  leadIds: readonly number[],
+  now: number = Date.now(),
+): Promise<void> {
+  for (let i = 0; i < leadIds.length; i += 500)
+    await db
+      .update(leadEnrichment)
+      .set({ status: "queued", updatedAt: now })
+      .where(
+        and(
+          inArray(leadEnrichment.leadId, leadIds.slice(i, i + 500)),
+          eq(leadEnrichment.status, "running"),
+        ),
+      );
+}
+
 export async function getEnrichmentMap(
   db: Db,
   leadIds: number[],

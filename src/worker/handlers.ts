@@ -17,6 +17,7 @@ import {
 import { enqueueEmailSearch, leadIdsForPlaces } from "@/lib/email/enqueue";
 import { findEmailsForLeads } from "@/lib/email/service";
 import { enqueueRdap } from "@/lib/novelty/rdap-job";
+import { registerRegistryJobs } from "@/lib/registry/jobs";
 import { onEvent } from "@/lib/events";
 import { getDb, recoverDbConnection } from "@/lib/db/client";
 import { createProvider } from "@/lib/places/factory";
@@ -24,7 +25,7 @@ import { enrichPlaces } from "@/lib/scan/enrich";
 import { loadNoveltyConfig } from "@/lib/scan/novelty-sync";
 import { runScan } from "@/lib/scan/runner";
 import { onScanFailed } from "@/lib/scan/scan-notifications";
-import { scanStatusOf, setScanStatus } from "@/lib/scan/store";
+import { setScanStatus } from "@/lib/scan/store";
 import { errorMessage } from "@/lib/util";
 import { getSetting } from "@/lib/settings";
 import type { Db } from "@/lib/db/client";
@@ -78,11 +79,12 @@ export function registerCoreHandlers(): void {
     } catch (e) {
       // Beklenmeyen hata: tarama "çalışıyor"/"kuyrukta" görünmeye devam etmesin (iş tek denemelik).
       const message = errorMessage(e);
-      const status = await scanStatusOf(ctx.db, scanId);
-      if (status === "running" || status === "queued") {
-        await setScanStatus(ctx.db, scanId, "failed", { error: message, finishedAt: Date.now() });
-        await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
-      }
+      const failed = await setScanStatus(ctx.db, scanId, "failed", {
+        error: message,
+        finishedAt: Date.now(),
+        from: ["running", "queued"], // CAS: arada gelen kullanıcı iptali/duraklatması ezilmez
+      });
+      if (failed) await onScanFailed(ctx.db, scanId, Date.now(), ctx.log);
       throw e;
     }
   });
@@ -159,6 +161,14 @@ export function registerMailHandlers(opts: {
     }),
   );
   return dispatcher;
+}
+
+/**
+ * Faz 5 iş kayıtları. Her paket kendi `register…Jobs()` işlevini doldurur (bu dosya P0'dan sonra dondurulmuştur):
+ * paket R → `registry.fetch`, `registry.match`.
+ */
+export function registerFaz5Handlers(): void {
+  registerRegistryJobs();
 }
 
 let emailEventsBound = false;
