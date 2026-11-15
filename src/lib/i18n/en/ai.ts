@@ -6,6 +6,8 @@ export const ai = {
   "ai.settings.title": "Personal intro with AI",
   "ai.settings.desc":
     "Claude drafts a short opening sentence for each business. No sentence is used without your approval.",
+  "ai.settings.help":
+    "Claude only sees the business name, category, city and a short excerpt from its own website. No Google data is sent. In a template, {{kisisel_giris}} is filled only with a sentence you approved.",
   "ai.intro.title": "Personal intro",
   "ai.settings.enable": "Draft personal intros",
   "ai.settings.enable.hint":

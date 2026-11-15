@@ -9,6 +9,8 @@ export const registry = {
   "registry.settings.title": "Official registries",
   "registry.settings.desc":
     "Newly incorporated businesses from the UK (Companies House) and France (INSEE Sirene) registries.",
+  "registry.settings.help":
+    "The registry is the official list of newly incorporated companies. Records are matched with businesses on the Google map by name and postcode; unmatched ones stay in a separate list and can be added as leads.",
   "registry.matchBadge": "In the registry",
   "registry.matchBadge.detail": "Registry: {name} · incorporated {date}",
   "registry.matchBadge.demo": "Demo registry record",

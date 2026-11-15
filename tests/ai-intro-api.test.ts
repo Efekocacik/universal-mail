@@ -161,6 +161,22 @@ describe("POST /api/leads/:id/intro — kapılar", () => {
     expect((await json(r)).code).toBe("AI_KEY_MISSING");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("canlı kipte onay daha ucuz model için verildiyse pahalı modelde AI_COST_ACK_REQUIRED; ağa çıkılmaz", async () => {
+    await setup("google");
+    await setSetting(db, "ai.intro", {
+      enabled: true,
+      model: "claude-opus-5-5",
+      costAckAt: Date.now(),
+      costAckModel: "claude-haiku-5-5",
+    });
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const r = await post(await addLead());
+    expect(r.status).toBe(409);
+    expect((await json(r)).code).toBe("AI_COST_ACK_REQUIRED");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {

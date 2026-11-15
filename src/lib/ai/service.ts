@@ -12,6 +12,7 @@ import { getSecret } from "@/lib/secrets/store";
 import { getSettings } from "@/lib/settings";
 import { createClaudeIntroGenerator } from "./claude";
 import { createDemoIntroGenerator, validateIntroText, visibleTextExcerpt } from "./intro";
+import { modelChangeNeedsCostAck } from "./pricing";
 import {
   AiError,
   type AiBilledUsage,
@@ -274,6 +275,7 @@ export async function aiMode(db: DbExecutor): Promise<{
   demo: boolean;
   model: Exclude<IntroModel, "demo">;
   costAckAt: number | null;
+  costAckModel: Exclude<IntroModel, "demo"> | null;
 }> {
   const s = await getSettings(db, ["ai.intro", "places.provider"] as const);
   return {
@@ -281,6 +283,7 @@ export async function aiMode(db: DbExecutor): Promise<{
     demo: s["places.provider"] === "mock",
     model: s["ai.intro"].model,
     costAckAt: s["ai.intro"].costAckAt,
+    costAckModel: s["ai.intro"].costAckModel ?? null,
   };
 }
 
@@ -296,12 +299,21 @@ const GATE_MESSAGE: Record<GateCode, string> = {
  * şeması bunu zaten engeller; bu ikinci savunma hattıdır), anahtar yoksa AI_KEY_MISSING.
  */
 export function aiGate(
-  mode: { enabled: boolean; demo: boolean; costAckAt: number | null },
+  mode: {
+    enabled: boolean;
+    demo: boolean;
+    costAckAt: number | null;
+    model?: Exclude<IntroModel, "demo">;
+    costAckModel?: Exclude<IntroModel, "demo"> | null;
+  },
   hasKey: boolean,
 ): GateCode | null {
   if (!mode.enabled) return "AI_DISABLED";
   if (mode.demo) return null;
   if (mode.costAckAt === null) return "AI_COST_ACK_REQUIRED";
+  // Onay daha ucuz bir model için verildiyse pahalı modele geçiş yeni onay ister (istemcideki pencerenin sunucu karşılığı).
+  if (mode.model && mode.costAckModel && modelChangeNeedsCostAck(mode.costAckModel, mode.model))
+    return "AI_COST_ACK_REQUIRED";
   if (!hasKey) return "AI_KEY_MISSING";
   return null;
 }

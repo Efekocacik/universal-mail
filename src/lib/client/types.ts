@@ -231,7 +231,12 @@ export interface SettingsResponse {
       windowDays: number;
       scheme: "NAFRev2" | "NAF2025";
     };
-    "ai.intro": { enabled: boolean; model: AiIntroModel; costAckAt: number | null };
+    "ai.intro": {
+      enabled: boolean;
+      model: AiIntroModel;
+      costAckAt: number | null;
+      costAckModel?: AiIntroModel | null;
+    };
     "tracking.opens": { enabled: boolean; ackAt: number | null };
   };
   secrets: {

@@ -6,6 +6,8 @@ export const variants = {
   "tracking.settings.title": "Açılma izleme",
   "tracking.settings.desc":
     "Demo kampanyalarda iletilerin açılıp açılmadığını yaklaşık olarak gösterir. Varsayılan olarak kapalıdır.",
+  "tracking.settings.help":
+    "İletiye görünmez küçük bir görsel eklenir; alıcının e-posta programı onu yüklediğinde ileti açılmış sayılır. Görselleri engelleyen programlar açılmayı göstermez, bu yüzden sayı yaklaşıktır.",
   "tracking.toggle": "Açılma izlemeyi kullan",
   "tracking.toggle.hint":
     "Demo kampanya iletilerine görünmez bir izleme görseli eklenir ve açılmalar yaklaşık olarak sayılır.",

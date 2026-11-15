@@ -6,6 +6,8 @@ export const variants = {
   "tracking.settings.title": "Open tracking",
   "tracking.settings.desc":
     "Shows roughly whether messages in demo campaigns were opened. Off by default.",
+  "tracking.settings.help":
+    "A tiny invisible image is added to the message; when the recipient's mail app loads it, the message counts as opened. Apps that block images never report an open, so the number is approximate.",
   "tracking.toggle": "Use open tracking",
   "tracking.toggle.hint":
     "An invisible tracking image is added to demo campaign messages and opens are counted approximately.",

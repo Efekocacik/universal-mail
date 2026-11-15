@@ -99,6 +99,11 @@ const aiIntroSchema = z
     enabled: z.boolean(),
     model: z.enum(AI_INTRO_MODELS),
     costAckAt: z.number().int().nullable(),
+    /**
+     * Onayın verildiği model (sunucu da denetler: onaydan sonra daha pahalı modele geçilmişse canlı üretim yeni onay ister).
+     * Eski kayıtlarda yoktur; yokluk mevcut onayı geçerli sayar.
+     */
+    costAckModel: z.enum(AI_INTRO_MODELS).nullable().optional(),
   })
   .refine((v) => !v.enabled || v.costAckAt !== null, {
     message: "Maliyet notu onaylanmadan yapay zekâ girişi açılamaz.",

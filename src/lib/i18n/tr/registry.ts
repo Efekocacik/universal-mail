@@ -9,6 +9,8 @@ export const registry = {
   "registry.settings.title": "Resmî siciller",
   "registry.settings.desc":
     "Birleşik Krallık (Companies House) ve Fransa (INSEE Sirene) sicillerinden yeni kurulan işletmeler.",
+  "registry.settings.help":
+    "Sicil, yeni kurulan şirketlerin resmî listesidir. Kayıtlar Google haritasındaki işletmelerle ad ve posta koduna göre eşleştirilir; eşleşmeyenler ayrı listede kalır ve isterseniz lead olarak eklenir.",
   "registry.matchBadge": "Sicilde kayıtlı",
   "registry.matchBadge.detail": "Sicil: {name} · kuruluş {date}",
   "registry.matchBadge.demo": "Demo sicil kaydı",

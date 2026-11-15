@@ -25,7 +25,11 @@ export function RegistrySettingsCard() {
   if (!data) return <Skeleton className="h-40" />;
   const demo = data.settings["places.provider"] === "mock";
   return (
-    <Section title={t("registry.settings.title")} description={t("registry.settings.desc")}>
+    <Section
+      title={t("registry.settings.title")}
+      description={t("registry.settings.desc")}
+      help="registry.settings.help"
+    >
       {demo && (
         <p className="flex items-start gap-2 text-[13px] text-muted-foreground">
           <Info className="mt-0.5 size-4 shrink-0" aria-hidden />

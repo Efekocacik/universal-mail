@@ -23,7 +23,11 @@ export function OpenTrackingCard() {
   const value = settings.data?.settings["tracking.opens"] ?? { enabled: false, ackAt: null };
 
   return (
-    <Section title={t("tracking.settings.title")} description={t("tracking.settings.desc")}>
+    <Section
+      title={t("tracking.settings.title")}
+      description={t("tracking.settings.desc")}
+      help="tracking.settings.help"
+    >
       {settings.isLoading ? (
         <Skeleton className="h-16 rounded-lg" />
       ) : (

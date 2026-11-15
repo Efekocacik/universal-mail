@@ -58,7 +58,11 @@ export function AiIntroCard() {
   const cost = fmtUsd(typicalIntroCostUsd(ai.model));
 
   return (
-    <Section title={t("ai.settings.title")} description={t("ai.settings.desc")}>
+    <Section
+      title={t("ai.settings.title")}
+      description={t("ai.settings.desc")}
+      help="ai.settings.help"
+    >
       {demo && (
         <p className="flex items-start gap-1.5 rounded-md bg-muted px-2.5 py-2 text-[12px] text-muted-foreground">
           <Badge variant="info">{t("faz5.demoBadge")}</Badge>
@@ -204,7 +208,13 @@ export function AiIntroCard() {
         onConfirm={async () => {
           if (!confirm) return;
           await save.mutateAsync({
-            "ai.intro": { ...ai, enabled: true, model: confirm.model, costAckAt: Date.now() },
+            "ai.intro": {
+              ...ai,
+              enabled: true,
+              model: confirm.model,
+              costAckAt: Date.now(),
+              costAckModel: confirm.model,
+            },
           });
         }}
       />

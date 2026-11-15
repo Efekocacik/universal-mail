@@ -6,6 +6,8 @@ export const ai = {
   "ai.settings.title": "Yapay zekâ ile kişisel giriş",
   "ai.settings.desc":
     "Claude, her işletme için kısa bir giriş cümlesi taslağı yazar. Hiçbir cümle sizin onayınız olmadan kullanılmaz.",
+  "ai.settings.help":
+    "Claude yalnızca işletmenin adını, kategorisini, şehrini ve kendi web sitesinden kısa bir metni görür. Google verisi gönderilmez. Şablonda {{kisisel_giris}} yalnızca onayladığınız cümleyle doldurulur.",
   "ai.intro.title": "Kişisel giriş",
   "ai.settings.enable": "Kişisel giriş taslakları üret",
   "ai.settings.enable.hint":
