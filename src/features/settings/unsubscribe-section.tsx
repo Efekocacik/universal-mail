@@ -361,11 +361,15 @@ function KeyFileStep({ s }: { s: UnsubscribeState }) {
         </Button>
         {!s.keyFileReady && <FieldHint>{t("unsubInfra.file.needs")}</FieldHint>}
       </div>
-      <p className="text-[12px] text-muted-foreground">{t("unsubInfra.file.scp")}</p>
-      <pre className="um-scroll overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-[12px]">
-        {"scp relay-keys.json KULLANICI@SUNUCU:/tmp/relay-keys.json\n" +
-          "ssh KULLANICI@SUNUCU 'sudo install -o root -g umrelay -m 0640 /tmp/relay-keys.json /etc/um-relay/keys.json && rm /tmp/relay-keys.json'"}
-      </pre>
+      <p className="text-[12px] text-muted-foreground">{t("unsubInfra.file.worker")}</p>
+      <details className="text-[12px] text-muted-foreground">
+        <summary className="cursor-pointer">{t("unsubInfra.file.vps")}</summary>
+        <p className="mt-1">{t("unsubInfra.file.scp")}</p>
+        <pre className="um-scroll mt-1 overflow-x-auto rounded-md bg-muted px-3 py-2 font-mono text-[12px]">
+          {"scp relay-keys.json KULLANICI@SUNUCU:/tmp/relay-keys.json\n" +
+            "ssh KULLANICI@SUNUCU 'sudo install -o root -g umrelay -m 0640 /tmp/relay-keys.json /etc/um-relay/keys.json && rm /tmp/relay-keys.json'"}
+        </pre>
+      </details>
       <FieldHint>{t("unsubInfra.file.after")}</FieldHint>
     </StepCard>
   );

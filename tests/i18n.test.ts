@@ -110,13 +110,15 @@ describe("i18n: parça düzeni (Faz 4)", () => {
     // Özet, bölmeden önceki `git show 5475f05:src/lib/i18n/tr.ts` sözlüğünün aynı yöntemle hesaplanmış özetidir. Faz 4
     // anahtarları paketin kendi parçasına eklenir; base.ts'te bir metni bilerek düzeltirseniz bu özeti de güncelleyin.
     // Bilinçli değişiklikler: Faz 4 entegrasyonunda kullanılmayan `sequenceStatus.complaint` kaldırıldı (F'nin
-    // `sequenceStop.*` anahtarları yerini aldı) → 1673'ten 1672'ye.
+    // `sequenceStop.*` anahtarları yerini aldı) → 1673'ten 1672'ye. Çıkış sunucusu Cloudflare Worker yoluyla:
+    // `unsubInfra.base.help`, `unsubInfra.file.title` ve `unsubInfra.file.help` metinleri bilerek güncellendi (SSH'ye
+    // özgü ifade kaldırıldı; yeni anahtarlar core.ts'te) → anahtar sayısı aynı, özet yeni.
     const entries = Object.entries(TR_FRAGMENTS.base as Record<string, string>).sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     );
     expect(entries).toHaveLength(1672);
     expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
-      "abca313075fd796f991ebed09c8951ff9c45906db3fb2454641dec0f171f3cdf",
+      "f08321c5143ad2d3ad4adfb401f59a0a019b30cfee88a4da058a51514c6e34bf",
     );
   });
 

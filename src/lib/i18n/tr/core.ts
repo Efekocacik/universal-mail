@@ -364,4 +364,8 @@ export const core = {
   "electron.deliveryAlert.title": "Çıkış bağlantısı uyarısı",
   "electron.deliveryAlert.body":
     "Abonelikten çıkma talepleri işlenmiyor olabilir. Ayrıntılar için Uyum sayfasına bakın.",
+  // Çıkış sunucusu: Cloudflare Worker (önerilen) ve VPS anahtar dosyası yönergeleri
+  "unsubInfra.file.worker":
+    "Cloudflare Worker (önerilen): Cloudflare panelinde Worker'ın Settings → Variables and Secrets bölümünde RELAY_KEYS adlı bir Secret ekleyin, değerine indirdiğiniz dosyanın içeriğini olduğu gibi yapıştırın ve dağıtın.",
+  "unsubInfra.file.vps": "Kendi sunucunuz (VPS) kullanıyorsanız",
 } as const;
