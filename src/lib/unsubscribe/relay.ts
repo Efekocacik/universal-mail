@@ -30,6 +30,10 @@ import { verifyTokenWeb } from "./web-crypto";
  *  2. En az bir kez (at-least-once) teslimat: aynı olay birden çok kez kuyruğa girebilir (yeniden deneme, aktarıcı
  *     yeniden başlaması, zaman aşımından sonra geç başarı). Tekilleştirme UYGULAMA tarafındadır (`jti`, ingest.ts).
  *  3. Aynı `jti` için eşzamanlı istekler TEK bir `push` çağrısında birleştirilir (single-flight) ve aynı sonucu alır.
+ *     Cloudflare Worker bunu kapatır (`coalesceConcurrent: false`): orada bir isteğin G/Ç'si ve zamanlayıcısı o isteğe
+ *     aittir; istemcisi bağlantıyı kesen istek iptal edilince onu bekleyen ikinci istek hiç yanıt üretemezdi. Her
+ *     istek kendi `push`unu yapar; yinelenen kayıt D1'in benzersiz dizini ve uygulamanın `jti` tekilleştirmesiyle
+ *     zararsızdır (madde 2).
  *  4. Kuyruk dolu/yazılamıyorsa olay ASLA sessizce atılmaz: `push` reddedilir → 503.
  *  5. BELLEK İÇİ kuyruk (`MemoryEventQueue`) YALNIZCA test/demo içindir ve dayanıklı DEĞİLDİR (`durable=false`).
  *     Dayanıklı olmayan bir kuyruk, `NODE_ENV !== "test"` iken işleyiciye verilirse `createRelayHandler` HATA FIRLATIR
@@ -93,6 +97,11 @@ export interface RelayOptions {
     keys: readonly PublicKeyEntry[],
     now: number,
   ) => VerifyResult | Promise<VerifyResult>;
+  /**
+   * Aynı `jti` için eşzamanlı istekler tek `push`ta birleşsin mi (varsayılan true; teslimat sözleşmesi madde 3).
+   * Cloudflare Worker false verir: istekler arası paylaşılan söz, iptal edilen isteğin G/Ç'sine bağlı kalmasın.
+   */
+  coalesceConcurrent?: boolean;
 }
 
 export const DEFAULT_SINK_TIMEOUT_MS = 10_000;
@@ -315,8 +324,9 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
   assertSinkAllowed(opts.sink);
   const sinkTimeout = opts.sinkTimeoutMs ?? DEFAULT_SINK_TIMEOUT_MS;
   const verify = opts.verify ?? verifyTokenWeb;
-  /** Aynı jti için eşzamanlı istekler tek `push` çağrısında birleşir. */
+  /** Aynı jti için eşzamanlı istekler tek `push` çağrısında birleşir (`coalesceConcurrent: false` ise birleşmez). */
   const inflight = new Map<string, Promise<boolean>>();
+  const coalesce = opts.coalesceConcurrent !== false;
 
   /** Olayı dayanıklı kaydeder; YALNIZCA geçerli makbuzla true. Hata, zaman aşımı veya makbuzsuz çözülme false. */
   const deliver = async (event: UnsubscribeEvent): Promise<boolean> => {
@@ -425,7 +435,7 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
       already = false; // kayıt okunamazsa yeniden ilet (uygulama tarafı tekilleştirir)
     }
     if (!already) {
-      let flight = inflight.get(j);
+      let flight = coalesce ? inflight.get(j) : undefined;
       if (!flight) {
         const event: UnsubscribeEvent = { v: 1, token, receivedAt: now, via: "one_click" };
         flight = deliver(event)
@@ -439,8 +449,10 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
             }
             return ok;
           })
-          .finally(() => inflight.delete(j));
-        inflight.set(j, flight);
+          .finally(() => {
+            if (coalesce) inflight.delete(j);
+          });
+        if (coalesce) inflight.set(j, flight);
       }
       // 200 YALNIZCA dayanıklı kayıt onaylandıysa; aksi halde 503 (RFC 8058 istemcisi yeniden dener).
       if (!(await flight)) return text(503, "Unavailable", { "Retry-After": "60" });

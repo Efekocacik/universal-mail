@@ -9,7 +9,8 @@ import type { D1Database, D1PreparedStatement, D1Result, D1Value } from "@/relay
  * `batch` tek bir yazma işlemidir (hepsi ya da hiçbiri), D1'deki gibi. Ağ yoktur; gerçek D1'e bağlanmaz.
  *
  * Hata enjeksiyonu: `failWrites` → INSERT/UPDATE/DELETE içeren her çağrı (tekil veya toplu) istisna fırlatır;
- * `failAll` → her çağrı istisna fırlatır (D1'e ulaşılamıyor). `queries` her çalıştırılan SQL'i sayar.
+ * `failAll` → her çağrı istisna fırlatır (D1'e ulaşılamıyor). `queries` her çalıştırılan SQL'i sayar. `beforeQuery`
+ * tekil çağrıdan önce beklenir (ör. yavaş yazımla eşzamanlılık sınaması).
  */
 
 const WRITE_RE = /^\s*(insert|update|delete|replace|create|drop|alter)\b/i;
@@ -17,6 +18,7 @@ const WRITE_RE = /^\s*(insert|update|delete|replace|create|drop|alter)\b/i;
 export class FakeD1 implements D1Database {
   failWrites = false;
   failAll = false;
+  beforeQuery: ((sql: string) => Promise<void>) | null = null;
   readonly queries: string[] = [];
   private constructor(
     readonly client: Client,
@@ -95,6 +97,7 @@ class FakeStatement implements D1PreparedStatement {
 
   private async exec(): Promise<ResultSet> {
     this.db.guard(this.sql);
+    if (this.db.beforeQuery) await this.db.beforeQuery(this.sql);
     return this.db.client.execute({ sql: this.sql, args: this.args });
   }
 

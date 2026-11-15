@@ -1,7 +1,12 @@
 import crypto from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { UnsubscribeEventSource } from "@/lib/unsubscribe/ingest";
-import { createRelayHandler, type EventSink, type UnsubscribeEvent } from "@/lib/unsubscribe/relay";
+import {
+  createRelayHandler,
+  type EventSink,
+  type RelayOptions,
+  type UnsubscribeEvent,
+} from "@/lib/unsubscribe/relay";
 import { kidOfPublicKey, newClaims, signToken, type PublicKeyEntry } from "@/lib/unsubscribe/token";
 
 /**
@@ -53,12 +58,18 @@ export const postFor = (token: string): Request =>
     body: "List-Unsubscribe=One-Click",
   });
 
-export const relayFor = (sink: EventSink, now = NOW + 1000, sinkTimeoutMs?: number) =>
+export const relayFor = (
+  sink: EventSink,
+  now = NOW + 1000,
+  sinkTimeoutMs?: number,
+  extra: Partial<RelayOptions> = {},
+) =>
   createRelayHandler({
     keys: () => [KEY],
     sink,
     now: () => now,
     ...(sinkTimeoutMs ? { sinkTimeoutMs } : {}),
+    ...extra,
   });
 
 export function runSinkContract(name: string, make: () => Promise<SinkHarness>): void {

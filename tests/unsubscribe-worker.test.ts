@@ -431,6 +431,7 @@ describe("D1Spool: FileSpool ile aynı anlam", () => {
     expect(await rows()).toHaveLength(2);
     // farklı an = farklı olay (yetkili tekilleştirme uygulamada)
     await s.ack([r1.id]);
+    clock += 5; // farklı milisaniye öneki: sıra rastgele sonekten bağımsız (aksi halde test kararsız)
     const r3 = await s.push(ev("t2", 1_700_000_000_001));
     expect((await s.pull(10)).map((p) => p.id)).toEqual([r2.id, r3.id]);
     // ack: yalnızca listelenen; geçersiz kimlik yok sayılır
@@ -439,6 +440,58 @@ describe("D1Spool: FileSpool ile aynı anlam", () => {
     await s.ack([]);
     expect(await s.stats()).toMatchObject({ depth: 1, corrupt: 0 });
     expect(WORKER_DEFAULT_MAX_PENDING).toBe(10_000);
+  });
+
+  it("şema kısıtı ihlali (CHECK) sessizce yutulmaz: write_failed (queue_full DEĞİL), satır yok", async () => {
+    // Doğrulayıcı ile şema ayrışırsa (burada: kimlik uzunluğu 30 değil) INSERT OR IGNORE ihlali yutup "kuyruk dolu"
+    // derdi; ON CONFLICT yalnızca (token, received_at) çakışmasını yok sayar.
+    const s = new D1Spool({ db: d1, randomHex16: () => "abc" });
+    await expect(s.push(ev("t1"))).rejects.toMatchObject({ code: "write_failed" });
+    expect(await rows()).toHaveLength(0);
+    expect(await s.stats()).toMatchObject({ depth: 0 });
+  });
+
+  it("kuyruk derinliği sayaç satırından: push/stats COUNT(*) ile tabloyu taramaz; elle silme/ekleme sayacı bozmaz", async () => {
+    let clock = 1_700_000_000_000;
+    const s = new D1Spool({ db: d1, maxPending: 3, now: () => clock });
+    const before = d1.queries.length;
+    const a = await s.push(ev("a"));
+    clock += 1;
+    await s.push(ev("b"));
+    expect(await s.stats()).toMatchObject({ depth: 2 });
+    const sql = d1.queries.slice(before).join("\n");
+    expect(sql).not.toMatch(/COUNT\(\*\)\s+FROM\s+spool_events/i);
+    expect(sql).toMatch(/spool_meta/);
+    // konsoldan elle silme ve ekleme: tetikleyiciler sayacı günceller
+    await d1.client.execute({ sql: "DELETE FROM spool_events WHERE id = ?", args: [a.id] });
+    expect(await s.stats()).toMatchObject({ depth: 1 });
+    clock += 1;
+    await s.push(ev("c"));
+    clock += 1;
+    await s.push(ev("d"));
+    await expect(s.push(ev("e"))).rejects.toMatchObject({ code: "queue_full" });
+    expect(await rows()).toHaveLength(3);
+    const meta = await d1.client.execute("SELECT depth FROM spool_meta WHERE k = 1");
+    expect(Number(meta.rows[0]!.depth)).toBe(3);
+    // şemayı yeniden çalıştırmak sayacı sıfırlamaz/çiftlemez
+    await d1.applySchema();
+    expect(await s.stats()).toMatchObject({ depth: 3 });
+  });
+
+  it("sayaç satırı silinmişse sağlık false (sessiz queue_full yerine /healthz 503); şema yeniden çalışınca düzelir", async () => {
+    let clock = 1_700_000_000_000;
+    const s = new D1Spool({ db: d1, now: () => clock });
+    await s.push(ev("a"));
+    await d1.client.execute("DELETE FROM spool_meta");
+    expect(await s.reachable()).toBe(false);
+    expect((await appOf().handle(new Request(`${ORIGIN}/healthz`))).status).toBe(503);
+    clock += 1;
+    await expect(s.push(ev("b"))).rejects.toMatchObject({ code: "queue_full" });
+    await d1.applySchema(); // satır mevcut kayıt sayısıyla geri gelir
+    expect(await s.reachable()).toBe(true);
+    expect(await s.stats()).toMatchObject({ depth: 1 });
+    await s.push(ev("b"));
+    expect(await s.stats()).toMatchObject({ depth: 2 });
   });
 
   it("çok sayıda kimlik tek işlemde onaylanır (D1 parametre sınırı parçalanır); istatistik yaşı", async () => {
@@ -601,6 +654,26 @@ describe("Worker fetch işleyicisi: uçtan uca", () => {
     d1.failWrites = false;
     expect(await rows()).toHaveLength(0);
     expect((await app.handle(post(t))).status).toBe(200);
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it("eşzamanlı aynı belirteç: istekler söz PAYLAŞMAZ (her biri kendi yazımını yapar), hepsi 200, tek satır", async () => {
+    // Workers'ta bir isteğin G/Ç'si o isteğe aittir; birleştirme olsaydı iptal edilen ilk isteği bekleyen ikincisi
+    // hiç yanıt üretemezdi. D1'in benzersiz dizini (aynı alınma anı) yinelenen satırı önler.
+    const t = mint();
+    const fixed = Date.now();
+    const app = createWorkerApp(env(), {
+      log: () => undefined,
+      now: () => fixed,
+      healthCacheMs: 0,
+    });
+    d1.beforeQuery = async (sql) => {
+      if (/INSERT INTO spool_events/.test(sql)) await new Promise((r) => setTimeout(r, 30));
+    };
+    const res = await Promise.all(Array.from({ length: 4 }, () => app.handle(post(t))));
+    d1.beforeQuery = null;
+    expect(res.map((r) => r.status)).toEqual([200, 200, 200, 200]);
+    expect(d1.queries.filter((q) => /INSERT INTO spool_events/.test(q))).toHaveLength(4);
     expect(await rows()).toHaveLength(1);
   });
 
@@ -956,6 +1029,11 @@ describe("dağıtım paketi (npm run build:worker)", () => {
     expect(externals).toEqual([]);
     const bundle = fs.readFileSync(path.join(out, "worker.js"), "utf8");
     expect(bundle).not.toMatch(/\bnode:|require\(|process\.|drizzle|libsql|node:fs/);
+    // Node'a özgü küresel adlar: test paketi Node'da çalıştırır, bunlar orada var olduğu için yalnızca çalıştırmak
+    // Workers uyumunu kanıtlamaz.
+    expect(bundle).not.toMatch(
+      /\bBuffer\b|\bsetImmediate\b|__dirname|__filename|globalThis\.process|\bglobal\./,
+    );
     expect(bundle).toMatch(/export\s*\{[^}]*default/);
 
     // paketlenmiş Worker'ı gerçekten çalıştır (Node'un WebCrypto'su; D1 taklidi)

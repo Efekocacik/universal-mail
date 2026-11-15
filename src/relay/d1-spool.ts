@@ -22,8 +22,12 @@ import type { D1Database, D1PreparedStatement } from "./d1-types";
  *
  *  - Dayanıklılık: `push` YALNIZCA D1 `INSERT` işlemi onaylandıktan (commit) SONRA makbuzla çözülür; aktarıcı 200'ü
  *    olay veritabanındayken verir. Yazım hatası → `SpoolError("write_failed")` → aktarıcı 503 (olay atılmaz).
- *  - Kuyruk sınırı: sayım ve ekleme TEK SQL deyimindedir (`INSERT … SELECT … WHERE (SELECT COUNT(*) …) < sınır`);
- *    eşzamanlı isteklerde de sınır aşılmaz. Doluysa `SpoolError("queue_full")` → 503.
+ *  - Kuyruk sınırı: denetim ve ekleme TEK SQL deyimindedir (`INSERT … SELECT … WHERE (SELECT depth …) < sınır`);
+ *    eşzamanlı isteklerde de sınır aşılmaz. Doluysa `SpoolError("queue_full")` → 503. Bekleyen sayısı `spool_meta`
+ *    satırında tetikleyicilerle tutulur (schema.sql): D1 `COUNT(*)` işlemini tablodaki HER satırı okumuş sayar; kuyruk
+ *    birikince her çıkış binlerce okuma harcar ve ücretsiz katmanın günlük okuma sınırı tükenirdi.
+ *  - Kısıt ihlali (CHECK/NOT NULL; ör. doğrulayıcı ile şema ayrışırsa) SESSİZCE yutulmaz: `ON CONFLICT` yalnızca
+ *    benzersiz (token, received_at) çakışmasını yok sayar, diğer ihlaller `write_failed` olur (`queue_full` DEĞİL).
  *  - İdempotent: aynı olay (aynı belirteç + aynı alınma anı) ikinci kez yazılırsa YENİ satır oluşmaz, mevcut kaydın
  *    makbuzu döner (benzersiz dizin `spool_events_token_received`). Farklı anlardaki tıklamalar ayrı olaydır;
  *    yetkili tekilleştirme uygulamadadır (`jti`), kısa pencereli sel koruması `D1ReplayStore`dadır.
@@ -32,7 +36,7 @@ import type { D1Database, D1PreparedStatement } from "./d1-types";
  *  - Bozuk satır (ör. konsoldan elle değiştirilmiş) silinmez: `spool_corrupt` tablosuna taşınır ve sayılır.
  */
 
-/** Worker için varsayılan kuyruk sınırı: D1 ücretsiz katmanında sayım (okunan satır) maliyetini sınırlı tutar. */
+/** Worker için varsayılan kuyruk sınırı (D1 depolaması ve uygulamanın çekme süresi sınırlı kalsın). */
 export const WORKER_DEFAULT_MAX_PENDING = 10_000;
 /** D1 tek deyimde en çok 100 bağlı parametre kabul eder. */
 const ACK_CHUNK = 90;
@@ -73,8 +77,9 @@ export class D1Spool implements EventSink, SpoolPort {
     try {
       const res = await this.db
         .prepare(
-          "INSERT OR IGNORE INTO spool_events (id, token, received_at, created_at) " +
-            "SELECT ?1, ?2, ?3, ?4 WHERE (SELECT COUNT(*) FROM spool_events) < ?5",
+          "INSERT INTO spool_events (id, token, received_at, created_at) " +
+            "SELECT ?1, ?2, ?3, ?4 WHERE (SELECT depth FROM spool_meta WHERE k = 1) < ?5 " +
+            "ON CONFLICT (token, received_at) DO NOTHING",
         )
         .bind(id, event.token, event.receivedAt, now, this.max)
         .run();
@@ -157,13 +162,17 @@ export class D1Spool implements EventSink, SpoolPort {
   }
 
   async stats(): Promise<SpoolStats> {
-    const [a, b] = await this.db.batch([
-      this.db.prepare("SELECT COUNT(*) AS depth, MIN(id) AS first FROM spool_events"),
+    // Derinlik sayaç satırından, en eski kimlik birincil anahtar dizininden (tek satır) okunur; `spool_corrupt` yalnızca
+    // elle bozulmuş satırları tutar (normalde boş).
+    const [a, b, m] = await this.db.batch([
+      this.db.prepare("SELECT MIN(id) AS first FROM spool_events"),
       this.db.prepare("SELECT COUNT(*) AS corrupt FROM spool_corrupt"),
+      this.db.prepare("SELECT depth FROM spool_meta WHERE k = 1"),
     ]);
-    const row = (a?.results?.[0] ?? {}) as { depth?: unknown; first?: unknown };
+    const row = (a?.results?.[0] ?? {}) as { first?: unknown };
     const c = (b?.results?.[0] ?? {}) as { corrupt?: unknown };
-    const depth = Number(row.depth ?? 0);
+    const meta = (m?.results?.[0] ?? {}) as { depth?: unknown };
+    const depth = Number(meta.depth ?? 0);
     const corrupt = Number(c.corrupt ?? 0);
     const first = typeof row.first === "string" ? row.first : null;
     return {
@@ -174,17 +183,19 @@ export class D1Spool implements EventSink, SpoolPort {
   }
 
   /**
-   * Sağlık denetimi: veritabanına ulaşılabiliyor ve ŞEMA uygulanmış mı (üç tablo da sorgulanabilir)? İstisna
-   * fırlatmaz. En çok birkaç satır okur; sayı/yaş açığa VERİLMEZ.
+   * Sağlık denetimi: veritabanına ulaşılabiliyor ve ŞEMA uygulanmış mı (tablolar sorgulanabilir ve sayaç satırı
+   * var)? Sayaç satırı yoksa her çıkış `queue_full` alırdı; schema.sql yeniden çalıştırılınca satır geri gelir.
+   * İstisna fırlatmaz. En çok birkaç satır okur; sayı/yaş açığa VERİLMEZ.
    */
   async reachable(): Promise<boolean> {
     try {
-      await this.db.batch([
+      const res = await this.db.batch([
         this.db.prepare("SELECT 1 FROM spool_events LIMIT 1"),
         this.db.prepare("SELECT 1 FROM spool_corrupt LIMIT 1"),
         this.db.prepare("SELECT 1 FROM replay_jti LIMIT 1"),
+        this.db.prepare("SELECT depth FROM spool_meta WHERE k = 1"),
       ]);
-      return true;
+      return (res[3]?.results?.length ?? 0) === 1;
     } catch {
       return false;
     }

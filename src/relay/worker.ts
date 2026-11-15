@@ -36,7 +36,9 @@ import { KeyFileError, normalizeOrigin, parseKeySetWeb, type RelayKeySet } from 
  *
  * Güvenlik: aktarıcıda GİZLİ ANAHTAR YOKTUR (yalnızca genel anahtarlar); uygulama her olayı kendi anahtarlarıyla
  * yeniden doğrular. Hız sınırı istemci adresi YALNIZCA Cloudflare'in koyduğu `CF-Connecting-IP` başlığından alınır
- * (`X-Forwarded-For` vb. yok sayılır). Günlüğe belirteç/yol YAZILMAZ (yalnızca yöntem, yol sınıfı, durum).
+ * (`X-Forwarded-For` vb. yok sayılır). Günlüğe belirteç/yol YAZILMAZ (yalnızca yöntem, yol sınıfı, durum). Bu
+ * güvence Cloudflare'in kendi istek günlükleri (Workers Logs) KAPALIYKEN tamdır: açıkken platform tam adresi (belirteç
+ * dahil) saklar; kurulumda kapatılması ZORUNLUDUR (README adım 4; wrangler.toml `[observability] enabled = false`).
  * SINIR (dürüstlük): bellek içi hız sınırı her Worker örneğine (isolate) ayrıdır; dağıtık bir saldırıya karşı tam
  * koruma DEĞİLDİR. Geçersiz belirteç kuyruğa/D1'e hiç yazılmaz; GET hiçbir veritabanı işlemi yapmaz.
  *
@@ -204,6 +206,8 @@ export function createWorkerApp(env: WorkerEnv, deps: WorkerDeps = {}): WorkerAp
           clientKey: workerClientKey,
           sinkTimeoutMs: config.sinkTimeoutMs,
           now,
+          // Workers'ta istekler arası söz paylaşımı yok (relay.ts, teslimat sözleşmesi madde 3).
+          coalesceConcurrent: false,
         }),
         pull: createSpoolPullHandler({
           spool,
