@@ -1,7 +1,22 @@
 import crypto from "node:crypto";
+import { channelPrecheck, channelSigningText, type ChannelRequestParts } from "./channel-server";
 import type { UnsubscribeEventSource } from "./ingest";
-import type { SpoolStats } from "./spool";
+import type { SpoolStats } from "./spool-core";
 import { kidOfPublicKey, publicKeyObject, type PublicKeyEntry } from "./token";
+
+/*
+ * Aktarıcı tarafı uçlar (`createSpoolPullHandler`) çalışma ortamından bağımsız `./channel-server` içindedir (VPS ve
+ * Cloudflare Worker aktarıcısı ortak); mevcut içe aktarımlar değişmesin diye buradan aynen yeniden dışa aktarılır.
+ */
+export {
+  CHANNEL_SKEW_MS,
+  channelSigningText,
+  createSpoolPullHandler,
+  verifyChannelRequestWeb,
+  type ChannelVerifier,
+  type PullHandlerOptions,
+  type SpoolPort,
+} from "./channel-server";
 
 /**
  * Aktarıcı ↔ uygulama KANALI (Aşama 15.7; docs/09 K9). Uygulama, aktarıcıdaki kuyruktan olayları ÇEKER ve onaylar.
@@ -15,14 +30,11 @@ import { kidOfPublicKey, publicKeyObject, type PublicKeyEntry } from "./token";
  *    (`getStats`) bunu görünür kılar (K11). Olay içeriği uygulamada ayrıca imzayla yeniden doğrulanır.
  *  - Aktarıcı yanıtları sıkı doğrulanır (boyut, şekil, kimlik biçimi); bozuk yanıt hata sayılır, olay işlenmez.
  *
- * Bu modül SAFTIR: yalnızca `node:crypto`, `./token` ve TÜR içe aktarımları kullanır; veritabanı, gizli depo ve
- * ayarlar YOKTUR. Böylece bağımsız aktarıcı sunucusu (src/relay) drizzle/şema taşımadan paketlenir. Uygulama
- * tarafındaki anahtar yönetimi `./channel` içindedir; o modül buradaki her şeyi aynen yeniden dışa aktarır.
+ * Bu modül SAFTIR: yalnızca `node:crypto`, `./token`, `./channel-server` ve TÜR içe aktarımları kullanır; veritabanı,
+ * gizli depo ve ayarlar YOKTUR. Uygulama tarafındaki anahtar yönetimi `./channel` içindedir; o modül buradaki her şeyi
+ * aynen yeniden dışa aktarır. Aktarıcılar (src/relay) yalnızca `./channel-server`ı kullanır (WebCrypto).
  */
 
-const SIGN_PREFIX = "um-chan-v1";
-export const CHANNEL_SKEW_MS = 5 * 60_000;
-const MAX_ACK_BODY = 64 * 1024;
 const MAX_RESPONSE = 1_500_000;
 const ID_RE = /^[0-9]{13}-[0-9a-f]{16}$/;
 
@@ -36,10 +48,7 @@ export function channelSigningInput(
   body: string,
 ): Buffer {
   const bodyHash = crypto.createHash("sha256").update(body, "utf8").digest("hex");
-  return Buffer.from(
-    `${SIGN_PREFIX}\n${method.toUpperCase()}\n${pathWithQuery}\n${ts}\n${bodyHash}`,
-    "utf8",
-  );
+  return Buffer.from(channelSigningText(method, pathWithQuery, ts, bodyHash), "utf8");
 }
 
 export function signChannelRequest(
@@ -54,117 +63,27 @@ export function signChannelRequest(
   return { "X-UM-Kid": kid, "X-UM-Ts": String(now), "X-UM-Sig": sig.toString("base64url") };
 }
 
+/** Uygulama tarafı (Node) doğrulayıcı; aktarıcılar WebCrypto eşdeğerini (`verifyChannelRequestWeb`) kullanır. */
 export function verifyChannelRequest(
-  req: { method: string; pathWithQuery: string; headers: Headers; body: string },
+  req: ChannelRequestParts,
   keys: readonly PublicKeyEntry[],
   now: number,
 ): boolean {
-  const kid = req.headers.get("x-um-kid") ?? "";
-  const tsRaw = req.headers.get("x-um-ts") ?? "";
-  const sigB64 = req.headers.get("x-um-sig") ?? "";
-  if (!/^[0-9a-f]{16}$/.test(kid) || !/^[0-9]{10,16}$/.test(tsRaw)) return false;
-  if (!/^[A-Za-z0-9_-]{86}$/.test(sigB64)) return false;
-  const ts = Number(tsRaw);
-  if (!Number.isSafeInteger(ts) || Math.abs(now - ts) > CHANNEL_SKEW_MS) return false;
-  const entry = keys.find((k) => k.kid === kid);
+  const pre = channelPrecheck(req.headers, now);
+  if (!pre) return false;
+  const entry = keys.find((k) => k.kid === pre.kid);
   if (!entry) return false;
   try {
     if (kidOfPublicKey(entry.x) !== entry.kid) return false;
     return crypto.verify(
       null,
-      channelSigningInput(req.method, req.pathWithQuery, ts, req.body),
+      channelSigningInput(req.method, req.pathWithQuery, pre.ts, req.body),
       publicKeyObject(entry.x),
-      Buffer.from(sigB64, "base64url"),
+      Buffer.from(pre.sigB64, "base64url"),
     );
   } catch {
     return false;
   }
-}
-
-/* ---------------------------------------------------------------------------------------------- */
-/* Aktarıcı tarafı: imzalı çekme/onay uçları                                                       */
-
-export interface SpoolPort extends UnsubscribeEventSource {
-  stats(): SpoolStats;
-}
-
-export interface PullHandlerOptions {
-  spool: SpoolPort;
-  /** Uygulamanın GENEL kanal anahtarları (aktarıcı yapılandırması). */
-  keys: () => readonly PublicKeyEntry[] | Promise<readonly PublicKeyEntry[]>;
-  now?: () => number;
-}
-
-const JSON_HEADERS = {
-  "Content-Type": "application/json; charset=utf-8",
-  "Cache-Control": "no-store",
-  "X-Content-Type-Options": "nosniff",
-};
-const reply = (status: number, body: unknown): Response =>
-  new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
-
-/** `/spool/events`, `/spool/ack`, `/spool/stats`. Önce kimlik doğrulama; başarısızsa her durumda tek tip 401. */
-export function createSpoolPullHandler(
-  opts: PullHandlerOptions,
-): (req: Request) => Promise<Response> {
-  const clock = opts.now ?? Date.now;
-  return async (req) => {
-    const url = new URL(req.url);
-    const route = /^\/spool\/(events|ack|stats)$/.exec(url.pathname)?.[1];
-    if (!route) return reply(404, { error: "not_found" });
-    const method = req.method.toUpperCase();
-    const expected = route === "ack" ? "POST" : "GET";
-    if (method !== expected) return reply(405, { error: "method_not_allowed" });
-
-    let body = "";
-    if (method === "POST") {
-      const len = req.headers.get("content-length");
-      if (len !== null && (!/^\d{1,9}$/.test(len) || Number(len) > MAX_ACK_BODY)) {
-        return reply(413, { error: "too_large" });
-      }
-      body = await req.text();
-      if (body.length > MAX_ACK_BODY) return reply(413, { error: "too_large" });
-    }
-    let keys: readonly PublicKeyEntry[];
-    try {
-      keys = await opts.keys();
-    } catch {
-      return reply(503, { error: "unavailable" });
-    }
-    const ok = verifyChannelRequest(
-      { method, pathWithQuery: `${url.pathname}${url.search}`, headers: req.headers, body },
-      keys,
-      clock(),
-    );
-    if (!ok) return reply(401, { error: "unauthorized" });
-
-    try {
-      if (route === "stats") return reply(200, opts.spool.stats());
-      if (route === "events") {
-        const raw = url.searchParams.get("limit") ?? "100";
-        const limit = /^\d{1,3}$/.test(raw) ? Math.min(Math.max(Number(raw), 1), 500) : 100;
-        return reply(200, { events: await opts.spool.pull(limit) });
-      }
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(body);
-      } catch {
-        return reply(400, { error: "bad_request" });
-      }
-      const ids = (parsed as { ids?: unknown } | null)?.ids;
-      if (
-        !Array.isArray(ids) ||
-        ids.length > 500 ||
-        !ids.every((i) => typeof i === "string" && ID_RE.test(i))
-      ) {
-        return reply(400, { error: "bad_request" });
-      }
-      await opts.spool.ack(ids as string[]);
-      return reply(200, { acked: ids.length });
-    } catch {
-      return reply(503, { error: "unavailable" });
-    }
-  };
 }
 
 /* ---------------------------------------------------------------------------------------------- */

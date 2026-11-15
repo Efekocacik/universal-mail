@@ -1,11 +1,13 @@
-import { verifyToken, type PublicKeyEntry } from "./token";
+import type { PublicKeyEntry, VerifyResult } from "./token-core";
+import { verifyTokenWeb } from "./web-crypto";
 
 /**
  * Taşınabilir HTTPS abonelikten çıkış aktarıcısı (Aşama 15.6; RFC 8058 tek tıklamalı çıkış, RFC 2369).
  *
- * Bu modül yalnızca web standardı `Request`/`Response` ve `./token` (saf, GENEL anahtarla doğrulama) kullanır:
- * veritabanı, dosya sistemi, gizli depo, ağ ÇIKIŞI yoktur. Herhangi bir Node tabanlı HTTPS sunucusuna bağlanabilir.
- * Bağımsız sunucu girişi ve dağıtım dosyaları: src/relay/ ve deploy/relay/ (bu modül onlardan habersizdir).
+ * Bu modül yalnızca web standardı `Request`/`Response` ve WebCrypto (./web-crypto; GENEL anahtarla doğrulama)
+ * kullanır: veritabanı, dosya sistemi, gizli depo, ağ ÇIKIŞI ve `node:` modülü yoktur. Hem Node tabanlı HTTPS sunucusuna
+ * (src/relay/server.ts, deploy/relay/) hem Cloudflare Worker'a (src/relay/worker.ts, deploy/cloudflare-worker/)
+ * bağlanır; bu modül onlardan habersizdir.
  *
  * Protokol kuralları:
  *  - POST + gövde alanı `List-Unsubscribe=One-Click`: çıkışı kaydeder (RFC 8058). İçerik türü
@@ -83,6 +85,14 @@ export interface RelayOptions {
   clientKey?: (req: Request) => string;
   /** Sink'in `push` için en çok bekleme süresi (ms); aşılırsa 503 (varsayılan 10 sn). */
   sinkTimeoutMs?: number;
+  /**
+   * Belirteç doğrulayıcı; varsayılan WebCrypto (`verifyTokenWeb`, ./token `verifyToken` ile aynı kurallar ve sonuçlar).
+   */
+  verify?: (
+    token: string,
+    keys: readonly PublicKeyEntry[],
+    now: number,
+  ) => VerifyResult | Promise<VerifyResult>;
 }
 
 export const DEFAULT_SINK_TIMEOUT_MS = 10_000;
@@ -304,6 +314,7 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
   const replay = opts.replay ?? new MemoryReplayStore(100_000, clock);
   assertSinkAllowed(opts.sink);
   const sinkTimeout = opts.sinkTimeoutMs ?? DEFAULT_SINK_TIMEOUT_MS;
+  const verify = opts.verify ?? verifyTokenWeb;
   /** Aynı jti için eşzamanlı istekler tek `push` çağrısında birleşir. */
   const inflight = new Map<string, Promise<boolean>>();
 
@@ -345,7 +356,12 @@ export function createRelayHandler(opts: RelayOptions): (req: Request) => Promis
     } catch {
       return text(503, "Unavailable", { "Retry-After": "60" });
     }
-    const verdict = verifyToken(token, keys, now);
+    let verdict: VerifyResult;
+    try {
+      verdict = await verify(token, keys, now);
+    } catch {
+      verdict = { ok: false, reason: "malformed" };
+    }
 
     if (method === "GET" || method === "HEAD") {
       const head = method === "HEAD";

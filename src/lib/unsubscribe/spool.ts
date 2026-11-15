@@ -3,7 +3,16 @@ import fs from "node:fs";
 import path from "node:path";
 import type { UnsubscribeEventSource } from "./ingest";
 import type { DeliveryReceipt, EventSink, UnsubscribeEvent } from "./relay";
-import { MAX_TOKEN_LENGTH } from "./token";
+import {
+  SPOOL_DEFAULT_MAX_PENDING,
+  SPOOL_ID_RE as ID_RE,
+  SpoolError,
+  isSpoolEvent as isEvent,
+  newSpoolId,
+  type SpoolStats,
+} from "./spool-core";
+
+export { SPOOL_DEFAULT_MAX_PENDING, SpoolError, type SpoolStats } from "./spool-core";
 
 /**
  * Dosya tabanlı DAYANIKLI olay kuyruğu (Aşama 15.7; 15.6'daki teslimat sözleşmesinin K1–K6, K10, K11 gerçeklemesi).
@@ -26,45 +35,12 @@ import { MAX_TOKEN_LENGTH } from "./token";
  * (docs/09, K2). Tek süreç yazar varsayılır; birden çok yazar güvenlidir (benzersiz dosya adları) ama sayaç yaklaşıktır.
  */
 
-const ID_RE = /^[0-9]{13}-[0-9a-f]{16}$/;
-export const SPOOL_DEFAULT_MAX_PENDING = 100_000;
-
 export interface FileSpoolOptions {
   dir: string;
   maxPending?: number;
   now?: () => number;
   /** Yalnızca testte: yazmadan önce çağrılır; istisna fırlatarak disk hatası simüle eder. */
   beforeWrite?: () => void;
-}
-
-export interface SpoolStats {
-  depth: number;
-  /** En eski onaysız olayın yaşı (ms); kuyruk boşsa null. */
-  oldestAgeMs: number | null;
-  corrupt: number;
-}
-
-export class SpoolError extends Error {
-  constructor(readonly code: "queue_full" | "invalid_event" | "write_failed") {
-    super(code);
-    this.name = "SpoolError";
-  }
-}
-
-function isEvent(e: unknown): e is UnsubscribeEvent {
-  if (!e || typeof e !== "object") return false;
-  const x = e as Record<string, unknown>;
-  return (
-    Object.keys(x).length === 4 &&
-    x.v === 1 &&
-    x.via === "one_click" &&
-    typeof x.token === "string" &&
-    x.token.length > 0 &&
-    x.token.length <= MAX_TOKEN_LENGTH &&
-    typeof x.receivedAt === "number" &&
-    Number.isSafeInteger(x.receivedAt) &&
-    x.receivedAt > 0
-  );
 }
 
 export class FileSpool implements EventSink, UnsubscribeEventSource {
@@ -102,7 +78,7 @@ export class FileSpool implements EventSink, UnsubscribeEventSource {
   async push(event: UnsubscribeEvent): Promise<DeliveryReceipt> {
     if (!isEvent(event)) throw new SpoolError("invalid_event");
     if (this.pendingIds().length >= this.max) throw new SpoolError("queue_full");
-    const id = `${String(this.clock()).padStart(13, "0")}-${crypto.randomBytes(8).toString("hex")}`;
+    const id = newSpoolId(this.clock(), crypto.randomBytes(8).toString("hex"));
     const tmpPath = path.join(this.tmp, `${id}.tmp`);
     const finalPath = path.join(this.pending, `${id}.json`);
     try {
