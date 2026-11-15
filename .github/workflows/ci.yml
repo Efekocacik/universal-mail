@@ -55,7 +55,7 @@ jobs:
           code=${PIPESTATUS[0]}
           if [ "$code" -ne 0 ]; then
             # Günlük oturum açmadan okunamaz; başarısız/hata satırları ve son satırlar not olarak düşülür.
-            summary=$(grep -E "FAIL|×|Error|ERROR|threshold|Unhandled|Test Files|Tests " vitest.log | head -n 60 | tr '\n' '|' | cut -c1-3500)
+            summary=$(grep -E "FAIL|×|Error|ERROR|threshold|Unhandled|originated|Test Files|Tests " vitest.log | head -n 60 | tr '\n' '|' | cut -c1-3500)
             echo "::error title=Birim testleri başarısız (çıkış $code)::$summary"
             echo "::error title=Birim testleri: son satırlar::$(tail -n 40 vitest.log | tr '\n' '|' | cut -c1-3500)"
           fi

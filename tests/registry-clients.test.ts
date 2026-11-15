@@ -23,6 +23,7 @@ import {
   INSEE_BASE_URL,
 } from "@/lib/registry/insee";
 import { RegistryProviderError, registryWindow, type RegistryQuery } from "@/lib/registry/types";
+import { streamedResponse } from "./helpers/stream-response";
 
 /** Canlı sicil istemcileri: sahte `fetch` + YAPAY fikstürler; gerçek API'ye asla gidilmez. */
 
@@ -105,7 +106,7 @@ describe("ortak HTTP yardımcıları", () => {
     expect(() => registryWindow(0, now)).toThrow(RangeError);
   });
   it("gövde sınırı: Content-Length aşıyorsa okunmaz; akış sınırı aşınca iptal edilir (bellekte biriktirilmez)", async () => {
-    const big = new Response("x".repeat(64), { headers: { "Content-Length": "64" } });
+    const big = streamedResponse("x".repeat(64), { headers: { "Content-Length": "64" } });
     await expect(readCapped(big, 32)).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });
 
     // Content-Length olmadan sonsuz akış: sınırı aşan ilk parçada iptal.
@@ -137,9 +138,9 @@ describe("ortak HTTP yardımcıları", () => {
       },
     });
     expect(await readCapped(new Response(split), bytes.length)).toBe('{"ad":"Çağ Ünlü"}');
-    await expect(
-      readCapped(new Response(new TextEncoder().encode("ççç")), 5),
-    ).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });
+    await expect(readCapped(streamedResponse("ççç", undefined, 64), 5)).rejects.toMatchObject({
+      code: "REGISTRY_BAD_RESPONSE",
+    });
     expect(await readCapped(new Response(null), 10)).toBe("");
 
     // getJson sınırı uygular.
@@ -150,7 +151,7 @@ describe("ortak HTTP yardımcıları", () => {
         {
           maxBodyBytes: 10,
           fetchImpl: (async () =>
-            new Response(JSON.stringify({ items: [1, 2, 3, 4, 5] }))) as typeof fetch,
+            streamedResponse(JSON.stringify({ items: [1, 2, 3, 4, 5] }))) as typeof fetch,
         },
       ),
     ).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });

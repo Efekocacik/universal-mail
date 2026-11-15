@@ -28,6 +28,7 @@ import { getSetting, setSetting, stampAiIntroAck } from "@/lib/settings";
 import { draftCategoryKey, EMPTY_DRAFT, toDraft, type Draft } from "@/features/templates/model";
 import { savePatch, saveSnapshot } from "@/features/templates/save-snapshot";
 import { createTestDb, type TestDb } from "./helpers/db";
+import { streamedResponse } from "./helpers/stream-response";
 
 /**
  * Faz 5 inceleme bulgularının düzeltmeleri (P1 + P2): giriş metninde görünmez karakterler, site metninde satır içi
@@ -114,9 +115,9 @@ describe("dış istemciler: yönlendirme izlenmez, yanıt gövdesi sınırlı ok
   };
 
   it("ortak katman: Content-Length aşımı okunmaz; akış sınırı aşınca kesilir; sahte (akışsız) yanıt json() ile okunur", async () => {
-    const declared = new Response("{}", { headers: { "content-length": "999999" } });
+    const declared = streamedResponse("{}", { headers: { "content-length": "999999" } });
     await expect(readCappedText(declared, 1000)).rejects.toBeInstanceOf(BodyTooLargeError);
-    await expect(readJsonCapped(new Response(big(5000)), 1000)).rejects.toBeInstanceOf(
+    await expect(readJsonCapped(streamedResponse(big(5000)), 1000)).rejects.toBeInstanceOf(
       BodyTooLargeError,
     );
     expect(await readJsonCapped(new Response('{"a":1}'), 1000)).toEqual({ a: 1 });
@@ -129,7 +130,7 @@ describe("dış istemciler: yönlendirme izlenmez, yanıt gövdesi sınırlı ok
     const inits: Parameters<ClaudeFetch>[1][] = [];
     const fetchImpl: ClaudeFetch = async (_url, init) => {
       inits.push(init);
-      return new Response(big(400 * 1024), { status: 200 });
+      return streamedResponse(big(400 * 1024), { status: 200 });
     };
     const gen = createClaudeIntroGenerator({
       apiKey: "sk-test-not-real",
@@ -154,7 +155,7 @@ describe("dış istemciler: yönlendirme izlenmez, yanıt gövdesi sınırlı ok
     const inits: { redirect: string }[] = [];
     const hunter = createHunterProvider("KEY", async (_u, init) => {
       inits.push(init);
-      return new Response(big(600 * 1024), { status: 200 });
+      return streamedResponse(big(600 * 1024), { status: 200 });
     });
     const err = await hunter.search("example.test").catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ExternalProviderError);
@@ -170,7 +171,7 @@ describe("dış istemciler: yönlendirme izlenmez, yanıt gövdesi sınırlı ok
       clientSecret: "secret",
       fetchImpl: async (_u, init) => {
         inits.push(init);
-        return new Response(big(600 * 1024), { status: 200 });
+        return streamedResponse(big(600 * 1024), { status: 200 });
       },
     });
     const err = await snov.search("example.test").catch((e: unknown) => e);

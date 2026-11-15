@@ -23,6 +23,7 @@ import { IMPORT_LIMITS } from "@/lib/import/types";
 import { setSetting } from "@/lib/settings";
 import { createCampaign } from "./helpers/campaign-fixture";
 import { createTestDb, type TestDb } from "./helpers/db";
+import { streamedRequest } from "./helpers/stream-response";
 import { writeXlsx } from "./fixtures/import/zip-writer";
 
 /**
@@ -155,8 +156,21 @@ describe("POST /api/imports/preview", () => {
       }),
     );
     expect(declared).toMatchObject({ status: 413, body: { code: "IMPORT_TOO_LARGE" } });
+    // Gövde test akışıyla gönderilir (FormData gövdesinin undici akışı iptalden sonra işlenmemiş hata bırakabilir).
+    const form = new Response(multipart({ name: "a.csv", bytes: huge }));
     const streamed = await call(
-      post("/api/imports/preview", multipart({ name: "a.csv", bytes: huge })),
+      streamedRequest(
+        `${ORIGIN}/api/imports/preview`,
+        {
+          method: "POST",
+          headers: {
+            Origin: ORIGIN,
+            Host: "127.0.0.1:3000",
+            "Content-Type": form.headers.get("content-type")!,
+          },
+        },
+        new Uint8Array(await form.arrayBuffer()),
+      ),
     );
     expect(streamed).toMatchObject({ status: 413, body: { code: "IMPORT_TOO_LARGE" } });
     const parse = await call(
