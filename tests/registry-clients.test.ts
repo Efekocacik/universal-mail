@@ -10,8 +10,10 @@ import { fromProviderError } from "@/lib/registry/errors";
 import {
   clip,
   createSpacer,
+  getJson,
   isIsoDay,
   parseRetryAfter,
+  readCapped,
   RETRY_AFTER_CAP_MS,
 } from "@/lib/registry/http";
 import {
@@ -101,6 +103,57 @@ describe("ortak HTTP yardımcıları", () => {
     const now = Date.UTC(2026, 10, 15, 23, 59, 0);
     expect(registryWindow(30, now)).toEqual({ from: "2026-10-16", to: "2026-11-15" });
     expect(() => registryWindow(0, now)).toThrow(RangeError);
+  });
+  it("gövde sınırı: Content-Length aşıyorsa okunmaz; akış sınırı aşınca iptal edilir (bellekte biriktirilmez)", async () => {
+    const big = new Response("x".repeat(64), { headers: { "Content-Length": "64" } });
+    await expect(readCapped(big, 32)).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });
+
+    // Content-Length olmadan sonsuz akış: sınırı aşan ilk parçada iptal.
+    let pulled = 0;
+    let cancelled = false;
+    const chunk = new Uint8Array(16).fill(0x61);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(c) {
+        pulled++;
+        c.enqueue(chunk);
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    await expect(readCapped(new Response(endless), 100)).rejects.toMatchObject({
+      code: "REGISTRY_BAD_RESPONSE",
+    });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(12);
+
+    // Sınır BAYT sayar (UTF-16 birimi değil) ve çok baytlı karakterler parça sınırında bölünse de doğru çözülür.
+    const bytes = new TextEncoder().encode('{"ad":"Çağ Ünlü"}');
+    const split = new ReadableStream<Uint8Array>({
+      start(c) {
+        c.enqueue(bytes.slice(0, 8));
+        c.enqueue(bytes.slice(8));
+        c.close();
+      },
+    });
+    expect(await readCapped(new Response(split), bytes.length)).toBe('{"ad":"Çağ Ünlü"}');
+    await expect(
+      readCapped(new Response(new TextEncoder().encode("ççç")), 5),
+    ).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });
+    expect(await readCapped(new Response(null), 10)).toBe("");
+
+    // getJson sınırı uygular.
+    await expect(
+      getJson(
+        new URL("https://registry.invalid/x"),
+        {},
+        {
+          maxBodyBytes: 10,
+          fetchImpl: (async () =>
+            new Response(JSON.stringify({ items: [1, 2, 3, 4, 5] }))) as typeof fetch,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "REGISTRY_BAD_RESPONSE" });
   });
   it("sağlayıcı hatası → API kodu", () => {
     expect(fromProviderError(new RegistryProviderError("REGISTRY_AUTH", "x")).status).toBe(400);

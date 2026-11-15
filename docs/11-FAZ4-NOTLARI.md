@@ -268,6 +268,10 @@ Son kapıdan önce güvenlik, şema ve olay (incident) odaklı denetim yedi bulg
 - `notifications.os` (Faz 5): kapalı→açık geçişinde kapalıyken biriken bildirimler masaüstünde gösterilmez (zilde okunmamış kalır); yalnızca sonrakiler gösterilir.
 - Keşif'te "Yenilik" (puan) ile "Yenilikler" (yaşam döngüsü) süzgeç adları yan yana; biri yeniden adlandırılmalı.
 - 900 px ve altında "/" kısayolu (Faz 5): harita bölmesi açıksa önce liste bölmesine geçer, sonra arama kutusuna odaklanır.
+- **Resmî sicil (Faz 5 / R), bilinen sınırlar:**
+  - Çalışma sayaçları (eşleşen/eşleşmeyen/bekleyen) **anlık görüntüdür**: kayıt yeniden görülünce en yeni çalışmaya geçer; yalnızca kaynağın en yeni çalışması yeniden sayılır, eski çalışmalar kendi eşleştirmelerinin sonundaki değeri korur. Genel oran sonuç kartındadır (canlı).
+  - Lead'e dönüştürülen sicil kaydı sonradan eşleştirilmez (aynı işletmeye ikinci lead/sıra açılmasın); aynı işletme sonra haritada da bulunursa iki lead durur ve aralarında bağ kurulmaz (elle arşivlenir).
+  - Sert kapanış (işçi süreci öldürülürse) yarım çekmenin deneme hakkını yine harcar; düzgün kapanış harcamaz.
 
 ## 10. Entegrasyon bekleyenler
 
@@ -285,6 +289,8 @@ Bu liste **ihtiyacı ve nedenini** söyler; hangi hizmet veya ücretli seçenek 
 | TB-11 (a) ve (b) sahip kararları | (a) işletmenin başka adresine yeniden temas için elle inceleme, (b) aynı alan adını paylaşan bağımsız şubeler için istisna; davranış kararıdır | Karar verilirse kural ve test | Sahip |
 | Paketlenmiş, imzalı uygulamada OS bildirimleri | Bildirim izni, Windows `AppUserModelId`, oturum açılınca başlatma ve uykudan dönüş yalnızca geliştirme yapısında ve birim testleriyle sınandı | macOS ve Windows'ta bildirimin görünmesi, tıklayınca doğru ekranın açılması | Geliştirici + müşteri bilgisayarı |
 | Ekran okuyucu testi | Erişilebilir adlar, canlı bölgeler ve balonlar kodla ve otomatik testlerle denetlendi; gerçek ekran okuyucuyla dinlenmedi | VoiceOver/NVDA ile Keşif, zil, gösterge paneli, zamanlamalar | Geliştirici |
+| Canlı Companies House denemesi (anahtar) | İstemci yalnızca YAPAY fikstürlerle sınandı. Arama sonucu **kayıtlı ofis** adresini verir: küçük işletmelerde bu çoğu zaman muhasebecinin adresidir, eşleşme oranı canlıda demodan düşük olabilir | Gerçek alan adları (`registered_office_address`, `sic_codes`, `hits` üst sınırı), `location` süzgecinin davranışı, gerçek eşleşme oranı | Geliştirici + müşteri anahtarı |
+| Canlı INSEE Sirene denemesi (anahtar) | Fikstürle sınandı. `libelleCommuneEtablissement` Paris/Lyon/Marseille'de belediye bölgesini içerir ("PARIS 8"); eşleştirme bunu şehir adına indirir, ama "Paris" yer süzgecinin Sirene sorgusunda bölgeli kayıtları bulup bulmadığı (tam ifade) doğrulanmadı — gerekirse posta kodu (75) ile aranır | Gerçek alan adları, belediye etiketi biçimi, yer süzgecinin sonuç sayısı | Geliştirici + müşteri anahtarı |
 | ~~Tek veritabanı bağlantısı (`TRANSACTION_ACTIVE`) izlemesi~~ | **Faz 5'te süreç içi kapıyla çözüldü** (Bölüm 9). Kalan: gerçek kullanımda süreçler arası `SQLITE_BUSY` sıklığının izlenmesi | Uzun süre açık uygulamada `DB_BUSY` / `retry step=` günlük satırları | Geliştirici |
 
 ## 11. Uygulanan beceriler (Skills applied)

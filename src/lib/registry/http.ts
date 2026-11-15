@@ -15,6 +15,8 @@ export interface HttpDeps {
   now?: () => number;
   /** İstek başına zaman aşımı (ms). */
   timeoutMs?: number;
+  /** Yanıt gövdesi üst sınırı (bayt); yalnızca testler küçültür. */
+  maxBodyBytes?: number;
 }
 
 /** 429 `Retry-After` en çok bu kadar beklenir (sözleşme: 60 sn). */
@@ -98,14 +100,43 @@ export async function getJson(
       "REGISTRY_BAD_RESPONSE",
       `Sicil isteği reddedildi (HTTP ${res.status}).`,
     );
-  const text = await res.text();
-  if (text.length > MAX_BODY_BYTES)
-    throw new RegistryProviderError("REGISTRY_BAD_RESPONSE", "Sicil yanıtı beklenenden büyük.");
+  const text = await readCapped(res, deps.maxBodyBytes ?? MAX_BODY_BYTES);
   try {
     return JSON.parse(text) as unknown;
   } catch {
     throw new RegistryProviderError("REGISTRY_BAD_RESPONSE", "Sicil yanıtı JSON değil.");
   }
+}
+
+const tooLarge = () =>
+  new RegistryProviderError("REGISTRY_BAD_RESPONSE", "Sicil yanıtı beklenenden büyük.");
+
+/**
+ * Gövdeyi BAYT sayarak okur ve sınır aşılır aşılmaz akışı iptal eder: bozuk/düşmanca bir uç (araya giren portal, hatalı
+ * kenar sunucusu) işçi belleğine sınırsız veri dolduramaz. `Content-Length` sınırı aşıyorsa hiç okunmaz.
+ */
+export async function readCapped(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined);
+    throw tooLarge();
+  }
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let total = 0;
+  let out = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw tooLarge();
+    }
+    out += decoder.decode(value, { stream: true });
+  }
+  return out + decoder.decode();
 }
 
 /** 'YYYY-MM-DD' geçerli bir takvim günü mü? */

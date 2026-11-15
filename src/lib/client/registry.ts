@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import {
   useInfiniteQuery,
   useMutation,
@@ -116,6 +117,36 @@ export function companyTitle(c: Pick<RegistryCompanyDto, "name" | "tradingName">
     : { primary: c.name, secondary: null };
 }
 
+/**
+ * Çalışma listesinin "durum imzası": bir çalışmanın durumu/sayaçları veya eşleştirme etkinliği değişince değişir.
+ * Kayıt listeleri yalnızca iş sürerken yoklanır; demo çekme + eşleştirme ilk yoklamadan önce bitebilir, bu yüzden imza
+ * her değiştiğinde (özellikle etkin → boşta geçişinde) kayıt listeleri ve lead rozetleri yenilenir.
+ */
+export function runsSignature(
+  data: { runs: RegistryRunDto[]; matchActive: boolean } | undefined,
+): string | null {
+  if (!data) return null;
+  return [
+    data.matchActive ? "m" : "-",
+    ...data.runs.map(
+      (r) =>
+        `${r.id}:${r.status}:${r.fetchedCount}:${r.matchedCount}:${r.unmatchedCount}:${r.pendingCount}`,
+    ),
+  ].join("|");
+}
+
+/** Lead rozeti: lead bu kayıttan OLUŞTURULDUYSA veya lead'in yeri bu kayıtla eşleştiyse o kayıt (yoksa null). */
+export function pickLeadRegistryCompany(
+  items: readonly RegistryCompanyDto[] | undefined,
+  leadId: number,
+): RegistryCompanyDto | null {
+  return (
+    items?.find(
+      (c) => c.leadId === leadId || c.matchStatus === "matched" || c.matchStatus === "manual",
+    ) ?? null
+  );
+}
+
 /* ------------------------------------------------ sorgular ------------------------------------------------- */
 
 export function useRegistryRuns() {
@@ -127,6 +158,23 @@ export function useRegistryRuns() {
         ? 1500
         : false,
   });
+}
+
+/** Çalışma imzası değişince (ilk yüklemede değil) kayıt listelerini ve lead rozetlerini yeniler. */
+export function useRegistryAutoRefresh(
+  data: { runs: RegistryRunDto[]; matchActive: boolean } | undefined,
+) {
+  const qc = useQueryClient();
+  const sig = runsSignature(data);
+  const prev = useRef<string | null>(null);
+  useEffect(() => {
+    if (sig === null) return;
+    const before = prev.current;
+    prev.current = sig;
+    if (before === null || before === sig) return;
+    void qc.invalidateQueries({ queryKey: [...KEY, "companies"] });
+    void qc.invalidateQueries({ queryKey: [...KEY, "lead"] });
+  }, [sig, qc]);
 }
 
 export interface CompanyPage {
@@ -156,12 +204,15 @@ export function useRegistryCompanies(
   });
 }
 
-/** Lead ayrıntısı rozeti: bu lead'e bağlı sicil kayıtları (eşleşen yeri veya ondan oluşturulan lead). */
+/**
+ * Lead ayrıntısı rozeti: bu lead'e bağlı sicil kayıtları. Sunucu `leadId` süzgeci "lead bu kayıttan oluşturuldu VEYA
+ * lead'in yeri bu kayıtla eşleşti" demektir; eşleşme durumu süzülmez (sicilden oluşturulan kayıt `pending` kalır).
+ * Rozetin göstereceği kayıt `pickLeadRegistryCompany` ile seçilir.
+ */
 export function useLeadRegistry(leadId: number) {
   return useQuery({
     queryKey: registryKeys.lead(leadId),
-    queryFn: () =>
-      api<CompanyPage>(`/api/registry/companies?leadId=${leadId}&match=matched&limit=5`),
+    queryFn: () => api<CompanyPage>(`/api/registry/companies?leadId=${leadId}&limit=5`),
     staleTime: 30_000,
   });
 }

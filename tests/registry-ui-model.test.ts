@@ -4,11 +4,14 @@ import {
   companyTitle,
   formatRate,
   isRunActive,
+  pickLeadRegistryCompany,
   reasonText,
+  runsSignature,
   runErrorText,
   runMatchRate,
   runSummary,
   runTone,
+  type RegistryCompanyDto,
   type RegistryRunDto,
 } from "@/lib/client/registry";
 import { setLocale } from "@/lib/i18n";
@@ -163,5 +166,39 @@ describe("keşif: kaynak süzgeci", () => {
     expect(plain).not.toHaveProperty("source");
     expect(fromSavedPayload(plain)!.filters).not.toHaveProperty("registryMatch");
     expect(fromSavedPayload({ ...plain, source: ["bogus"] })).toBeNull();
+  });
+});
+
+describe("yoklama bitişi ve lead rozeti", () => {
+  it("çalışma imzası durum/sayaç/eşleştirme değişince değişir (etkin → boşta geçişi yenileme tetikler)", () => {
+    expect(runsSignature(undefined)).toBeNull();
+    const running = runsSignature({
+      runs: [run({ status: "running", matchedCount: 0 })],
+      matchActive: false,
+    });
+    const fetched = runsSignature({
+      runs: [run({ status: "done", matchedCount: 0 })],
+      matchActive: true,
+    });
+    const matched = runsSignature({
+      runs: [run({ status: "done", matchedCount: 8 })],
+      matchActive: false,
+    });
+    expect(new Set([running, fetched, matched]).size).toBe(3);
+    expect(runsSignature({ runs: [run()], matchActive: false })).toBe(
+      runsSignature({ runs: [run({ createdAt: 99 })], matchActive: false }),
+    );
+  });
+
+  it("rozet: sicilden oluşturulan lead (bekliyor) ve eşleşen yer lead'i görünür; ilgisiz kayıt görünmez", () => {
+    const c = (o: Partial<RegistryCompanyDto>) =>
+      ({ id: 1, leadId: null, matchStatus: "pending", ...o }) as RegistryCompanyDto;
+    const created = c({ id: 1, leadId: 7, matchStatus: "pending" });
+    expect(pickLeadRegistryCompany([created], 7)).toBe(created);
+    const matched = c({ id: 2, matchStatus: "matched" });
+    expect(pickLeadRegistryCompany([matched], 9)).toBe(matched);
+    expect(pickLeadRegistryCompany([c({ id: 3, matchStatus: "manual" })], 9)?.id).toBe(3);
+    expect(pickLeadRegistryCompany([c({ id: 4, matchStatus: "unmatched" })], 9)).toBeNull();
+    expect(pickLeadRegistryCompany(undefined, 9)).toBeNull();
   });
 });

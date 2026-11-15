@@ -3,7 +3,7 @@
 import { Landmark } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Tip } from "@/components/ui/tooltip";
-import { companyTitle, useLeadRegistry } from "@/lib/client/registry";
+import { companyTitle, pickLeadRegistryCompany, useLeadRegistry } from "@/lib/client/registry";
 import { t } from "@/lib/i18n";
 
 /**
@@ -13,7 +13,7 @@ import { t } from "@/lib/i18n";
  */
 export function RegistryMatchBadge({ leadId }: { leadId: number }) {
   const { data } = useLeadRegistry(leadId);
-  const c = data?.items[0];
+  const c = pickLeadRegistryCompany(data?.items, leadId);
   if (!c) return null;
   const detail = t("registry.matchBadge.detail", {
     name: companyTitle(c).primary,
