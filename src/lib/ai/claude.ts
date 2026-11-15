@@ -128,33 +128,38 @@ interface MessagesResponse {
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : 0);
 
-/** Yanıtı çözer: önce `stop_reason`, sonra metin blokları, sonra doğrulayıcı. Saf; testler doğrudan çağırır. */
+/**
+ * Yanıtı çözer: önce kullanım (her 200 yanıtı faturalanır), sonra `stop_reason`, metin blokları ve doğrulayıcı. Red,
+ * kesik veya kural dışı çıktıda atılan `AiError` kullanımı taşır; servis bunu maliyet ve hız sınırına yazar. Saf;
+ * testler doğrudan çağırır.
+ */
 export function parseMessagesResponse(
   requested: IntroModel,
   raw: unknown,
 ): Omit<IntroResult, "sourceDomain"> {
   const r = (raw ?? {}) as MessagesResponse;
+  const inputTokens = num(r.usage?.input_tokens);
+  const outputTokens = num(r.usage?.output_tokens);
+  // Yedek model yanıt verdiyse onun fiyatı (bilinmiyorsa tutucu fiyat) kullanılır; kayıttaki model istenen modeldir.
+  const served = typeof r.model === "string" && r.model ? r.model : requested;
+  const usage = {
+    inputTokens,
+    outputTokens,
+    estCostUsd: estimateCostUsd(served, inputTokens, outputTokens),
+  };
+  const billed = inputTokens + outputTokens > 0 ? usage : null;
   if (r.stop_reason === "refusal")
-    throw new AiError("AI_REFUSED", "Claude bu işletme için giriş yazmadı.");
+    throw new AiError("AI_REFUSED", "Claude bu işletme için giriş yazmadı.", billed);
   if (r.stop_reason === "max_tokens")
-    throw new AiError("AI_TRUNCATED", "Claude yanıtı yarıda kesildi.");
+    throw new AiError("AI_TRUNCATED", "Claude yanıtı yarıda kesildi.", billed);
   const text = (Array.isArray(r.content) ? r.content : [])
     .filter((b) => b?.type === "text" && typeof b.text === "string")
     .map((b) => b.text as string)
     .join(" ");
   const v = validateIntroText(text);
-  if (!v.ok) throw new AiError("AI_OUTPUT_INVALID", `Üretilen metin kurala uymadı (${v.issue}).`);
-  const inputTokens = num(r.usage?.input_tokens);
-  const outputTokens = num(r.usage?.output_tokens);
-  // Yedek model yanıt verdiyse onun fiyatı (bilinmiyorsa tutucu fiyat) kullanılır; kayıttaki model istenen modeldir.
-  const served = typeof r.model === "string" && r.model ? r.model : requested;
-  return {
-    text: v.text,
-    model: requested,
-    inputTokens,
-    outputTokens,
-    estCostUsd: estimateCostUsd(served, inputTokens, outputTokens),
-  };
+  if (!v.ok)
+    throw new AiError("AI_OUTPUT_INVALID", `Üretilen metin kurala uymadı (${v.issue}).`, billed);
+  return { text: v.text, model: requested, ...usage };
 }
 
 /** Canlı üretici: Messages API'ye tek istek; hata kodları `AiError`. */

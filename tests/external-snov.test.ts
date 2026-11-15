@@ -107,11 +107,14 @@ describe("Snov istemcisi", () => {
       RESULT("abc123"),
       RESULT("abc123"),
     ]);
-    expect(JSON.parse(calls[0]!.body!)).toEqual({
+    // Belirteç ucu: form gövdesi (Snov örnekleri ve OAuth 2 standardı), JSON değil
+    expect(calls[0]!.headers["content-type"]).toBe("application/x-www-form-urlencoded");
+    expect(Object.fromEntries(new URLSearchParams(calls[0]!.body!))).toEqual({
       grant_type: "client_credentials",
       client_id: "client-id-test",
       client_secret: "client-secret-test",
     });
+    expect(calls[1]!.headers["content-type"]).toBe("application/json");
     expect(JSON.parse(calls[1]!.body!)).toEqual({ domain: "kahve.example" });
     expect(calls[1]!.headers.authorization).toBe("Bearer tok-1");
     expect(calls.some((c) => c.url.includes("evil.example"))).toBe(false);

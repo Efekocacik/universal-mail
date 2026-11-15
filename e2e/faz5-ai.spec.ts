@@ -94,9 +94,24 @@ test("Ayarlar: yapay zekâ girişi maliyet notu onayıyla açılır (demo, anaht
   }
   await expect(toggle).toHaveAttribute("aria-checked", "true");
   await expect(page.getByText(/Maliyet notunu .* tarihinde onayladınız/)).toBeVisible();
-  // Demo kipinde anahtar sınaması ağa çıkmaz
-  await page.getByRole("button", { name: "Anahtarı dene" }).click();
-  await expect(page.getByText("Demo kipi: anahtar denenmedi, ağa çıkılmadı.")).toBeVisible();
+  // Demo kipinde anahtar sınaması ağa çıkmaz. Kart kapsamı + tam ad: Hunter'ın "Anahtarı dene ve kotayı göster"
+  // düğmesi ve sicil anahtar düğmeleri eşleşmez.
+  const card = page.locator("#ai");
+  await card.getByRole("button", { name: "Anahtarı dene", exact: true }).click();
+  await expect(card.getByText("Demo kipi: anahtar denenmedi, ağa çıkılmadı.")).toBeVisible();
+
+  // Maliyet onayı modele bağlı: ucuz modele geçiş onaysız, pahalı modele dönüş yeni onay ister
+  const model = card.locator("#ai-intro-model");
+  await model.selectOption("claude-haiku-5-5");
+  await expect(model).toHaveValue("claude-haiku-5-5");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await model.selectOption("claude-opus-5-5");
+  const ack = page.getByRole("dialog", { name: "Daha pahalı modele geçilsin mi?" });
+  await expect(ack).toBeVisible();
+  await expect(ack.getByText(/Claude Opus 5\.5 .*modeline geçiyorsunuz/)).toBeVisible();
+  await ack.getByRole("button", { name: "Maliyeti anladım, geç" }).click();
+  await expect(ack).toHaveCount(0);
+  await expect(model).toHaveValue("claude-opus-5-5");
 });
 
 test("lead ayrıntısı: Oluştur → düzenle → Onayla; şablon ön izlemesi onaylı metni gösterir", async () => {
@@ -110,6 +125,23 @@ test("lead ayrıntısı: Oluştur → düzenle → Onayla; şablon ön izlemesi 
   const status = panel.getByTestId("lead-intro-status");
   await expect(status).toHaveText("Onay bekliyor");
   await expect(panel.getByText("Demo metni · ücretsiz")).toBeVisible();
+
+  const previewDraft = {
+    name: "AI giriş ön izleme",
+    language: "en",
+    kind: "initial",
+    subject: "Hello",
+    bodyHtml: "<p>Hi,</p><p>{{kisisel_giris}}</p>",
+  };
+  // Yalnızca taslak varken ön izleme "onay bekliyor" der (eksik değil)
+  const pending = await (
+    await page.request.post("/api/templates/preview", {
+      headers,
+      data: { leadId, draft: previewDraft },
+    })
+  ).json();
+  expect(pending.introPending).toBe(true);
+  expect(pending.html).toContain("[onay bekliyor: kisisel_giris]");
 
   const text = panel.getByLabel("Giriş metni");
   await expect(text).not.toHaveValue("");
@@ -126,20 +158,12 @@ test("lead ayrıntısı: Oluştur → düzenle → Onayla; şablon ön izlemesi 
 
   const preview = await page.request.post("/api/templates/preview", {
     headers,
-    data: {
-      leadId,
-      draft: {
-        name: "AI giriş ön izleme",
-        language: "en",
-        kind: "initial",
-        subject: "Hello",
-        bodyHtml: "<p>Hi,</p><p>{{kisisel_giris}}</p>",
-      },
-    },
+    data: { leadId, draft: previewDraft },
   });
   const body = await preview.json();
   expect(body.ok).toBe(true);
   expect(body.missing).toEqual([]);
+  expect(body.introPending).toBe(false);
   expect(body.html).toContain("send a few packaging samples");
 });
 

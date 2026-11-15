@@ -10,7 +10,7 @@ import {
   type ClaudeFetch,
 } from "@/lib/ai/claude";
 import { INTRO_SYSTEM_PROMPT } from "@/lib/ai/intro";
-import { estimateCostUsd, typicalIntroCostUsd } from "@/lib/ai/pricing";
+import { estimateCostUsd, modelChangeNeedsCostAck, typicalIntroCostUsd } from "@/lib/ai/pricing";
 import { AiError, type IntroContext } from "@/lib/ai/types";
 
 /**
@@ -239,9 +239,34 @@ describe("Claude istemcisi: yanıt ve hata eşlemesi", () => {
     });
     expect(z).toMatchObject({ inputTokens: 0, outputTokens: 0, estCostUsd: 0 });
   });
+
+  it("red, kesik ve kural dışı çıktı faturalanır: hata kullanımı taşır (yanıtta belirteç yoksa null)", () => {
+    const usageOf = (raw: unknown) => {
+      try {
+        parseMessagesResponse("claude-opus-5-5", raw);
+      } catch (e) {
+        return (e as AiError).usage;
+      }
+      throw new Error("hata bekleniyordu");
+    };
+    expect(usageOf(ok("We noticed", { stop_reason: "max_tokens" }))).toEqual({
+      inputTokens: 1000,
+      outputTokens: 500,
+      estCostUsd: 0.014,
+    });
+    expect(usageOf(ok(GOOD, { stop_reason: "refusal" }))?.outputTokens).toBe(500);
+    expect(usageOf(ok("Visit https://cafe.example now"))?.inputTokens).toBe(1000);
+    expect(usageOf({ stop_reason: "refusal", content: [] })).toBeNull();
+  });
 });
 
 describe("fiyat", () => {
+  it("maliyet onayı modele bağlı: yalnızca pahalı modele geçiş yeni onay ister", () => {
+    expect(modelChangeNeedsCostAck("claude-haiku-5-5", "claude-opus-5-5")).toBe(true);
+    expect(modelChangeNeedsCostAck("claude-opus-5-5", "claude-haiku-5-5")).toBe(false);
+    expect(modelChangeNeedsCostAck("claude-opus-5-5", "claude-opus-5-5")).toBe(false);
+  });
+
   it("Opus 5.5 $4/$20, Haiku 5.5 $0,10/$0,50, demo ücretsiz; geçersiz belirteç 0", () => {
     expect(estimateCostUsd("claude-opus-5-5", 1_000_000, 1_000_000)).toBe(24);
     expect(estimateCostUsd("claude-haiku-5-5", 1_000_000, 1_000_000)).toBe(0.6);

@@ -203,18 +203,33 @@ export function createSnovProvider(o: SnovOptions): ExternalEmailProvider {
 
   async function send(
     url: string,
-    init: { method: "GET" | "POST"; headers?: Record<string, string>; body?: unknown },
+    init: {
+      method: "GET" | "POST";
+      headers?: Record<string, string>;
+      body?: unknown;
+      /** Gövde `application/x-www-form-urlencoded` (OAuth belirteç ucu); yoksa JSON. */
+      form?: Record<string, string>;
+    },
   ): Promise<{ status: number; body: Record<string, unknown> }> {
+    const payload =
+      init.form !== undefined
+        ? {
+            type: "application/x-www-form-urlencoded",
+            text: new URLSearchParams(init.form).toString(),
+          }
+        : init.body !== undefined
+          ? { type: "application/json", text: JSON.stringify(init.body) }
+          : null;
     let res;
     try {
       res = await fetchImpl(url, {
         method: init.method,
         headers: {
           accept: "application/json",
-          ...(init.body === undefined ? {} : { "content-type": "application/json" }),
+          ...(payload ? { "content-type": payload.type } : {}),
           ...init.headers,
         },
-        ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+        ...(payload ? { body: payload.text } : {}),
         signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {
@@ -248,9 +263,11 @@ export function createSnovProvider(o: SnovOptions): ExternalEmailProvider {
   async function token(): Promise<string> {
     const cached = snovTokens.get(cacheKey);
     if (cached && cached.expiresAt > now()) return cached.token;
+    // Snov'un yayımlanmış örnekleri belirteç parametrelerini FORM olarak gönderir (OAuth 2 istemci kimliği akışının
+    // standardı): form gövdesi JSON kabul edilse de edilmese de çalışır. (Gerçek anahtarla doğrulama: docs/12 açık iş.)
     const r = await send(`${SNOV}/v1/oauth/access_token`, {
       method: "POST",
-      body: {
+      form: {
         grant_type: "client_credentials",
         client_id: o.clientId,
         client_secret: o.clientSecret,

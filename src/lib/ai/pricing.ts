@@ -43,3 +43,11 @@ export const TYPICAL_OUTPUT_TOKENS = 400;
 export function typicalIntroCostUsd(model: IntroModel): number {
   return estimateCostUsd(model, TYPICAL_INPUT_TOKENS, TYPICAL_OUTPUT_TOKENS);
 }
+
+/**
+ * Açıkken model değişikliği yeni maliyet onayı ister mi? Yalnızca giriş başına tipik maliyet ARTIYORSA (ör. Haiku →
+ * Opus, ~40 kat). Ucuz modele geçiş onaysız kaydedilir. Ayarlar kartı ve testler bunu kullanır (saf; istemci de alır).
+ */
+export function modelChangeNeedsCostAck(from: IntroModel, to: IntroModel): boolean {
+  return typicalIntroCostUsd(to) > typicalIntroCostUsd(from);
+}

@@ -97,4 +97,11 @@ export const ai = {
     "Harici e-posta servisi çok fazla istek aldı. Bir dakika sonra yeniden deneyin.",
   "apiError.EXTERNAL_NETWORK":
     "Harici e-posta servisine ulaşılamıyor. İnternet bağlantınızı kontrol edip yeniden deneyin.",
+  "tplPreview.introPending":
+    "Bu işletmenin kişisel girişi onay bekliyor. Keşif → işletme ayrıntısı → Kişisel giriş bölümünden onaylayın; onaylanana kadar kampanyada bu işletmeye ileti ertelenir.",
+  "reason.intro_pending": "Kişisel giriş onay bekliyor; onaylanınca gönderim sürer",
+  "ai.settings.confirm.modelChange":
+    "{model} modeline geçiyorsunuz; giriş başına maliyet artar. Yeni tutarı onaylayın.",
+  "ai.settings.confirm.modelTitle": "Daha pahalı modele geçilsin mi?",
+  "ai.settings.confirm.modelOk": "Maliyeti anladım, geç",
 } as const;

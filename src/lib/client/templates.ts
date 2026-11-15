@@ -34,6 +34,8 @@ export type PreviewResponse =
       text: string;
       language: string | null;
       missing: string[];
+      /** `kisisel_giris` yalnızca onay bekleyen taslak olarak var. */
+      introPending?: boolean;
       variables: string[];
       errors: ComposeIssue[];
       warnings: (TemplateIssue | ContentIssue)[];

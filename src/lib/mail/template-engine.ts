@@ -199,6 +199,11 @@ export type VariableValues = Partial<Record<VariableKey, string | null | undefin
 export interface RenderOptions {
   /** Eksik değişkenin yerine görünür bir işaret koy (ön izleme). Gönderimde kullanılmaz. */
   markMissing?: boolean;
+  /**
+   * Ön izlemede "eksik" yerine "onay bekliyor" işaretiyle gösterilecek değişkenler (ör. yalnızca onaylanmamış taslağı
+   * olan `kisisel_giris`). Yine `missing` listesine girer: gönderimde davranış değişmez.
+   */
+  pendingKeys?: ReadonlySet<VariableKey>;
 }
 
 export interface RenderedBody {
@@ -269,10 +274,14 @@ export function renderTemplate(
           return encodeFallback(t.fallback);
         }
         missing.add(t.name);
-        return opts.markMissing ? marker(t.name) : "";
+        if (!opts.markMissing) return "";
+        return opts.pendingKeys?.has(t.name) ? pendingMarker(t.name, marker) : marker(t.name);
       })
       .join("");
 
+  // "[eksik: x]" → "[onay bekliyor: x]" (işaret metni bilerek sabittir; arayüz ayrıca çevrilmiş bir not gösterir).
+  const pendingMarker = (k: string, marker: (k: string) => string) =>
+    marker(k).replace("[eksik: ", "[onay bekliyor: ");
   const subject = headerSafe(fill(s.tokens, headerSafe, (k) => `[eksik: ${k}]`));
   // Gövdedeki yedek metin, kayıtlı (temizlenip HTML olarak yazılmış) gövdeden okunur: zaten HTML metnidir
   // (`&` → `&amp;`) ve `<`, `>` içeremez. Yeniden kaçışlamak alıcıya "Tom &amp; Jerry" gösterirdi. Sonuç yine

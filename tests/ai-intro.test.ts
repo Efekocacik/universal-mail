@@ -139,6 +139,41 @@ describe("site metni özeti", () => {
     expect(calls[1]!.opts.allowPrivate).toBeUndefined(); // iç ağ engeli açık kalır
   });
 
+  it("yalnızca www altında yayında olan site: çıplak alan adına ulaşılamazsa www (kendi robots'uyla) denenir", async () => {
+    const { deps, calls } = site({
+      "https://kahve.example/robots.txt": Object.assign(new Error("ENOTFOUND"), {
+        kind: "network",
+      }),
+      "https://www.kahve.example/robots.txt": { status: 200, body: "User-agent: *\nAllow: /" },
+      "https://www.kahve.example/": { status: 200, body: HOME },
+    });
+    expect(await fetchSiteExcerpt("kahve.example", deps)).toEqual({
+      excerpt: "Family run café serving fresh pastries near the river.",
+      domain: "kahve.example",
+    });
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://kahve.example/robots.txt",
+      "https://www.kahve.example/robots.txt",
+      "https://www.kahve.example/",
+    ]);
+    // www'nin robots'u yasaklarsa metin yok
+    const blocked = site({
+      "https://kahve.example/robots.txt": new Error("ENOTFOUND"),
+      "https://www.kahve.example/robots.txt": { status: 200, body: "User-agent: *\nDisallow: /" },
+      "https://www.kahve.example/": { status: 200, body: HOME },
+    });
+    expect(await fetchSiteExcerpt("kahve.example", blocked.deps)).toBeNull();
+    expect(blocked.calls).toHaveLength(2);
+    // Çıplak alan adı yanıt verip yasakladıysa www denenmez
+    const apexNo = site({
+      "https://kahve.example/robots.txt": { status: 200, body: "User-agent: *\nDisallow: /" },
+      "https://www.kahve.example/robots.txt": { status: 404 },
+      "https://www.kahve.example/": { status: 200, body: HOME },
+    });
+    expect(await fetchSiteExcerpt("kahve.example", apexNo.deps)).toBeNull();
+    expect(apexNo.calls).toHaveLength(1);
+  });
+
   it("robots yasaklar, robots 403/5xx, ana sayfa hatası, ağ hatası veya geçersiz alan adı → metin yok", async () => {
     const disallow = site({
       "https://kahve.example/robots.txt": { status: 200, body: "User-agent: *\nDisallow: /" },
@@ -166,6 +201,16 @@ describe("site metni özeti", () => {
       await fetchSiteExcerpt(
         "kahve.example",
         site({ "https://kahve.example/robots.txt": new Error("ECONNRESET") }).deps,
+      ),
+    ).toBeNull();
+    // Çıplak alan adı ulaşılamaz, www de ulaşılamaz → metin yok
+    expect(
+      await fetchSiteExcerpt(
+        "kahve.example",
+        site({
+          "https://kahve.example/robots.txt": new Error("ECONNRESET"),
+          "https://www.kahve.example/robots.txt": new Error("ENOTFOUND"),
+        }).deps,
       ),
     ).toBeNull();
     const bad = site({});

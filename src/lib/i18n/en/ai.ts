@@ -96,4 +96,11 @@ export const ai = {
     "The external email service received too many requests. Try again in a minute.",
   "apiError.EXTERNAL_NETWORK":
     "The external email service cannot be reached. Check your internet connection and try again.",
+  "tplPreview.introPending":
+    "This business's personal intro is awaiting approval. Approve it in Explore → business details → Personal intro; until then, campaign messages to this business are postponed.",
+  "reason.intro_pending": "Personal intro awaiting approval; sending resumes once approved",
+  "ai.settings.confirm.modelChange":
+    "You are switching to {model}; the cost per intro goes up. Please confirm the new amount.",
+  "ai.settings.confirm.modelTitle": "Switch to a more expensive model?",
+  "ai.settings.confirm.modelOk": "I understand the cost, switch",
 } as const satisfies EnFragment<typeof TrAi>;

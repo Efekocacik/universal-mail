@@ -1,7 +1,7 @@
 import { and, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
-import { leadEnrichment, leadIntros, leads } from "@/lib/db/schema";
+import { auditLog, leadEnrichment, leadIntros, leads } from "@/lib/db/schema";
 import { RobotsPolicy } from "@/lib/email/robots";
 import type { FetchFn } from "@/lib/email/safe-fetch";
 import { categoryLabel } from "@/lib/mail/render-context";
@@ -14,6 +14,7 @@ import { createClaudeIntroGenerator } from "./claude";
 import { createDemoIntroGenerator, validateIntroText, visibleTextExcerpt } from "./intro";
 import {
   AiError,
+  type AiBilledUsage,
   type AiErrorCode,
   type IntroContext,
   type IntroGenerator,
@@ -172,6 +173,11 @@ const DOMAIN_RE = /^(?=.{3,253}$)[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z][a-z0-9-]+$/;
  * boyut/zaman sınırı) ve robots.txt kuralları geçerlidir; robots okunamazsa veya ana sayfayı yasaklıyorsa metin
  * alınmaz. Yönlendirme yalnızca aynı kayıtlı alan adı içinde izlenir. Her hata sessizce "metin yok" demektir:
  * giriş yine ad/şehir/kategoriyle üretilir.
+ *
+ * `site_domain` kayıtlı alan adıdır; birçok küçük işletme sitesi yalnızca `www.` altında yayındadır (çıplak alan
+ * adının A kaydı veya sertifikası yok). Çıplak alan adına HİÇ ulaşılamazsa (ağ/DNS/TLS/zaman aşımı) aynı adımlar
+ * `www.<alan>` üzerinde (kendi robots.txt'siyle) denenir. Çıplak alan adı yanıt verdiyse (robots yasağı dahil) karar
+ * onundur; `www` denenmez.
  */
 export async function fetchSiteExcerpt(
   domain: string,
@@ -185,20 +191,29 @@ export async function fetchSiteExcerpt(
     timeoutMs: deps.timeoutMs ?? 10_000,
     allowRedirect: sameSite,
   };
-  try {
-    const robots = await deps.fetch(`https://${d}/robots.txt`, opts);
-    let policy = RobotsPolicy.allowAll();
-    if (robots.status === 401 || robots.status === 403 || robots.status >= 500) return null;
-    if (robots.status === 200 && !robots.skippedBody)
-      policy = RobotsPolicy.parse(robots.body, deps.agentToken);
-    if (!policy.isAllowed("/")) return null;
-    const home = await deps.fetch(`https://${d}/`, opts);
-    if (home.status < 200 || home.status >= 300 || home.skippedBody || !home.body) return null;
-    const excerpt = visibleTextExcerpt(home.body);
-    return excerpt ? { excerpt, domain: d } : null;
-  } catch {
-    return null;
+  const hosts = d.startsWith("www.") ? [d] : [d, `www.${d}`];
+  for (const host of hosts) {
+    let robots;
+    try {
+      robots = await deps.fetch(`https://${host}/robots.txt`, opts);
+    } catch {
+      continue; // bu ana bilgisayara ulaşılamadı: sıradakini dene
+    }
+    try {
+      let policy = RobotsPolicy.allowAll();
+      if (robots.status === 401 || robots.status === 403 || robots.status >= 500) return null;
+      if (robots.status === 200 && !robots.skippedBody)
+        policy = RobotsPolicy.parse(robots.body, deps.agentToken);
+      if (!policy.isAllowed("/")) return null;
+      const home = await deps.fetch(`https://${host}/`, opts);
+      if (home.status < 200 || home.status >= 300 || home.skippedBody || !home.body) return null;
+      const excerpt = visibleTextExcerpt(home.body);
+      return excerpt ? { excerpt, domain: d } : null;
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 /* ------------------------------- üretim ------------------------------- */
@@ -214,6 +229,45 @@ export interface GenerateDeps {
 
 /** Aynı (lead, dil) için eşzamanlı ikinci üretimi (çift tıklama) engeller; süreç içi kilit yeterlidir (tek sunucu). */
 const inFlight = new Set<string>();
+
+/** Faturalanmış başarısız üretimlerin denetim eylemi (red, kesik, kural dışı çıktı: belirteç harcandı, satır yok). */
+export const BILLED_FAILURE_ACTION = "ai.intro.failed";
+
+/**
+ * Faturalanmış başarısız üretimler (`audit_log`, `detail.billed = true`): hız sınırlarına ve aylık kullanıma sayılır;
+ * böylece "Yeniden oluştur"a art arda basmak sınırsız ücretli çağrı yapamaz ve maliyet kartında görünür.
+ */
+async function billedFailures(
+  db: DbExecutor,
+  from: number,
+  to: number,
+  leadId?: number,
+): Promise<{ n: number; inputTokens: number; outputTokens: number; estUsd: number }> {
+  const [r] = await db
+    .select({
+      n: sql<number>`count(*)`,
+      inputTokens: sql<number>`coalesce(sum(json_extract(${auditLog.detail}, '$.inputTokens')), 0)`,
+      outputTokens: sql<number>`coalesce(sum(json_extract(${auditLog.detail}, '$.outputTokens')), 0)`,
+      estUsd: sql<number>`coalesce(sum(json_extract(${auditLog.detail}, '$.estCostUsd')), 0)`,
+    })
+    .from(auditLog)
+    .where(
+      and(
+        gte(auditLog.at, from),
+        lt(auditLog.at, to),
+        eq(auditLog.action, BILLED_FAILURE_ACTION),
+        eq(auditLog.entity, "lead"),
+        sql`json_extract(${auditLog.detail}, '$.billed') = 1`,
+        ...(leadId === undefined ? [] : [eq(auditLog.entityId, String(leadId))]),
+      ),
+    );
+  return {
+    n: Number(r?.n ?? 0),
+    inputTokens: Number(r?.inputTokens ?? 0),
+    outputTokens: Number(r?.outputTokens ?? 0),
+    estUsd: Number(r?.estUsd ?? 0),
+  };
+}
 
 export async function aiMode(db: DbExecutor): Promise<{
   enabled: boolean;
@@ -282,16 +336,34 @@ export async function generateLeadIntro(
     .select({ n: sql<number>`count(*)` })
     .from(leadIntros)
     .where(and(eq(leadIntros.leadId, leadId), gte(leadIntros.createdAt, t - HOUR)));
-  if ((perLead?.n ?? 0) >= INTRO_LIMITS.perLeadPerHour)
+  const leadFailed = await billedFailures(db, t - HOUR, Number.MAX_SAFE_INTEGER, leadId);
+  if (Number(perLead?.n ?? 0) + leadFailed.n >= INTRO_LIMITS.perLeadPerHour)
     throw new IntroError("RATE_LIMITED", "Bu işletme için çok sık giriş üretildi.");
   if (!generator.isDemo) {
     const [live] = await db
       .select({ n: sql<number>`count(*)` })
       .from(leadIntros)
       .where(and(gte(leadIntros.createdAt, t - HOUR), ne(leadIntros.model, "demo")));
-    if ((live?.n ?? 0) >= INTRO_LIMITS.livePerHour)
+    const liveFailed = await billedFailures(db, t - HOUR, Number.MAX_SAFE_INTEGER);
+    if (Number(live?.n ?? 0) + liveFailed.n >= INTRO_LIMITS.livePerHour)
       throw new IntroError("RATE_LIMITED", "Saatlik yapay zekâ sınırına ulaşıldı.");
   }
+
+  const recordFailure = (code: AiErrorCode, usage: AiBilledUsage | null) =>
+    audit(
+      db,
+      BILLED_FAILURE_ACTION,
+      "lead",
+      leadId,
+      {
+        language: ctx.language,
+        model: generator.model,
+        code,
+        billed: usage !== null,
+        ...(usage ?? {}),
+      },
+      now(),
+    );
 
   const lockKey = `${leadId}:${ctx.language}`;
   if (inFlight.has(lockKey)) throw new IntroError("CONFLICT", "Bu giriş zaten hazırlanıyor.");
@@ -310,18 +382,27 @@ export async function generateLeadIntro(
       });
     } catch (e) {
       if (e instanceof AiError) {
-        await audit(db, "ai.intro.failed", "lead", leadId, {
-          language: ctx.language,
-          model: generator.model,
-          code: e.code,
-        });
+        await recordFailure(e.code, generator.isDemo ? null : e.usage);
         throw new IntroError(e.code, e.message);
       }
       throw e;
     }
     // Üretici ne döndürürse döndürsün, kayda yalnızca doğrulayıcıdan geçen metin girer.
     const v = validateIntroText(result.text);
-    if (!v.ok) throw new IntroError("AI_OUTPUT_INVALID", "Üretilen metin kurala uymadı.");
+    if (!v.ok) {
+      const spent = result.inputTokens + result.outputTokens > 0 && !generator.isDemo;
+      await recordFailure(
+        "AI_OUTPUT_INVALID",
+        spent
+          ? {
+              inputTokens: result.inputTokens,
+              outputTokens: result.outputTokens,
+              estCostUsd: result.estCostUsd,
+            }
+          : null,
+      );
+      throw new IntroError("AI_OUTPUT_INVALID", "Üretilen metin kurala uymadı.");
+    }
     const ts = now();
     const [row] = await db
       .insert(leadIntros)
@@ -478,7 +559,10 @@ export interface AiUsage {
   estUsd: number;
 }
 
-/** Bu (UTC) ayın Claude kullanımı: yalnızca canlı üretimler sayılır (demo satırları ücretsizdir ve istek değildir). */
+/**
+ * Bu (UTC) ayın Claude kullanımı: canlı üretimler (demo satırları ücretsizdir ve istek değildir) ARTI faturalanmış ama
+ * kullanılamayan yanıtlar (red, kesik, kural dışı çıktı; `audit_log`).
+ */
 export async function aiUsage(db: DbExecutor, now: number = Date.now()): Promise<AiUsage> {
   const d = new Date(now);
   const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1);
@@ -498,11 +582,12 @@ export async function aiUsage(db: DbExecutor, now: number = Date.now()): Promise
         ne(leadIntros.model, "demo"),
       ),
     );
+  const f = await billedFailures(db, start, end);
   return {
     month: `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`,
-    requests: Number(r?.requests ?? 0),
-    inputTokens: Number(r?.inputTokens ?? 0),
-    outputTokens: Number(r?.outputTokens ?? 0),
-    estUsd: Math.round(Number(r?.estUsd ?? 0) * 1e4) / 1e4,
+    requests: Number(r?.requests ?? 0) + f.n,
+    inputTokens: Number(r?.inputTokens ?? 0) + f.inputTokens,
+    outputTokens: Number(r?.outputTokens ?? 0) + f.outputTokens,
+    estUsd: Math.round((Number(r?.estUsd ?? 0) + f.estUsd) * 1e4) / 1e4,
   };
 }

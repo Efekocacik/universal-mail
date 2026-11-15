@@ -189,6 +189,15 @@ describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {
     expect(
       renderTemplate({ ...tpl, bodyHtml: "<p>{{kisisel_giris|Merhaba}}</p>" }, ctx.values).html,
     ).toContain("Merhaba");
+    // Ön izleme "eksik" değil "onay bekliyor" der ve bunu yanıtta işaretler
+    const pending = await previewTemplateDraft(
+      db,
+      { name: "P", language: "en", kind: "initial", subject: "Hello", bodyHtml: tpl.bodyHtml },
+      leadId,
+    );
+    expect(pending.ok && pending.composed.introPending).toBe(true);
+    expect(pending.ok && pending.composed.html).toContain("[onay bekliyor: kisisel_giris]");
+    expect(pending.ok && pending.composed.html).not.toContain("[eksik: kisisel_giris]");
 
     const edited = "We noticed your café in Leeds and would love to send you some samples.";
     const saved = await patch(leadId, i1.id, { action: "save", text: `  ${edited} ` });
@@ -211,6 +220,7 @@ describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {
       leadId,
     );
     expect(pv.ok && pv.composed.html).toContain("would love to send you some samples");
+    expect(pv.ok && pv.composed.introPending).toBe(false);
 
     // İkinci taslak onaylanınca ilki reddedilene iner
     const i2 = (await json(await post(leadId, { language: "en" }))).intro;
@@ -352,7 +362,41 @@ describe("canlı Claude (sahte fetch)", () => {
     expect(await db.select().from(leadIntros)).toHaveLength(0);
     const failed = (await db.select().from(auditLog)).filter((a) => a.action === "ai.intro.failed");
     expect(failed).toHaveLength(cases.length);
-    expect((await aiUsage(db)).requests).toBe(0);
+    // HTTP hataları faturalanmaz; red/kesik/kural dışı çıktı 200 yanıttır ve belirteci faturalanır: kullanıma sayılır.
+    const billed = failed.filter((a) => (a.detail as { billed?: boolean }).billed === true);
+    expect(billed.map((a) => (a.detail as { code: string }).code)).toEqual([
+      "AI_REFUSED",
+      "AI_TRUNCATED",
+      "AI_OUTPUT_INVALID",
+    ]);
+    expect(billed[0]!.detail).toMatchObject({ inputTokens: 900, outputTokens: 300 });
+    const usage = await aiUsage(db);
+    expect(usage).toMatchObject({ requests: 3, inputTokens: 2700, outputTokens: 900 });
+    expect(usage.estUsd).toBeCloseTo(3 * 0.0096, 4);
+    expect(JSON.stringify(failed)).not.toContain(KEY);
+  });
+
+  it("faturalanmış başarısız üretimler hız sınırına sayılır: 'Yeniden oluştur'a art arda basmak sınırsız ücretli çağrı yapamaz", async () => {
+    await setup("google");
+    await secretsRoute.POST(
+      req("POST", "/api/secrets", { name: "anthropic.apiKey", value: KEY }),
+      undefined,
+    );
+    const leadId = await addLead();
+    const calls = vi.fn(async () => ({
+      status: 200,
+      json: async () => reply("Since 1999 we offer 20% off, call +44 20 7946 0000."),
+    }));
+    vi.stubGlobal("fetch", calls);
+    for (let i = 0; i < INTRO_LIMITS.perLeadPerHour; i++) {
+      const r = await post(leadId);
+      expect((await json(r)).code).toBe("AI_OUTPUT_INVALID");
+    }
+    const r = await post(leadId);
+    expect(r.status).toBe(429);
+    expect((await json(r)).code).toBe("RATE_LIMITED");
+    expect(calls).toHaveBeenCalledTimes(INTRO_LIMITS.perLeadPerHour);
+    expect((await aiUsage(db)).requests).toBe(INTRO_LIMITS.perLeadPerHour);
   });
 
   it("site metni yalnızca kendi taramamızın site_domain'inden; robots ve güvenli istemci üzerinden; kaynak alan adı kaydedilir", async () => {

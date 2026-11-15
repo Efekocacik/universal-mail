@@ -106,6 +106,20 @@ function onlyLeadVariablesMissing(errors: readonly ComposeIssue[]): boolean {
     });
 }
 
+/**
+ * Yalnızca `{{kisisel_giris}}` eksik ve giriş onay bekleyen taslak olarak var: dizi sonlandırılmaz, ertelenir. Kullanıcı
+ * girişi onaylayınca (veya reddedip taslak kalmayınca) sonraki tur gerçek kararı verir.
+ */
+export const INTRO_PENDING_DEFER_MS = 60 * 60_000;
+function onlyPendingIntroMissing(out: { detail?: string; errors?: readonly ComposeIssue[] }) {
+  if (out.detail !== "intro_pending") return false;
+  const errs = out.errors ?? [];
+  return (
+    errs.length > 0 &&
+    errs.every((e) => e.code === "missing_variables" && e.detail === "kisisel_giris")
+  );
+}
+
 /** Yalnızca o lead'e özgü içerik hataları (`compose_failed`): dizi sonlandırılır, kampanya sürer. */
 const LEAD_COMPOSE_ERRORS: ReadonlySet<ComposeErrorCode> = new Set<ComposeErrorCode>([
   "missing_variables",
@@ -346,6 +360,13 @@ export class MailDispatcher {
             // Yalnızca bu lead'e özgü hata (eksik değişken, içerik) diziyi sonlandırır. Ertelemek kampanyayı hiç
             // bitirmezdi: aynı içerik ertesi gün de aynı hatayı verir.
             const errs = (out.errors ?? []).map((e) => e.code);
+            if (onlyPendingIntroMissing(out)) {
+              const at = now + INTRO_PENDING_DEFER_MS;
+              if (await this.defer(c.id, at, "intro_pending", now)) res.deferred++;
+              log(`dizi #${c.id} ertelendi: kişisel giriş onay bekliyor`);
+              wakeCandidates.push(at);
+              break;
+            }
             if (
               errs.length === 0 ||
               errs.some((e) => !LEAD_COMPOSE_ERRORS.has(e)) ||

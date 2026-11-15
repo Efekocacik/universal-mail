@@ -9,6 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
 import { Section, SecretRow, ToggleRow, useSave } from "@/features/settings/shared";
+import { modelChangeNeedsCostAck, typicalIntroCostUsd } from "@/lib/ai/pricing";
 import { useAiUsage } from "@/lib/client/ai";
 import { api, errorText } from "@/lib/client/api";
 import { fmtDate, fmtNumber, fmtUsd } from "@/lib/client/format";
@@ -22,12 +23,6 @@ import { t } from "@/lib/i18n";
  * anahtar gerekmez; kart bunu açıkça söyler.
  */
 
-/** Giriş başına tahmini maliyet (sunucudaki `typicalIntroCostUsd` ile aynı varsayım: 1300 giriş + 400 çıkış belirteci). */
-const PER_INTRO_USD: Record<AiIntroModel, number> = {
-  "claude-opus-5-5": (1300 * 4 + 400 * 20) / 1_000_000,
-  "claude-haiku-5-5": (1300 * 0.1 + 400 * 0.5) / 1_000_000,
-};
-
 const MODEL_LABEL: Record<AiIntroModel, () => string> = {
   "claude-opus-5-5": () => t("ai.settings.model.opus"),
   "claude-haiku-5-5": () => t("ai.settings.model.haiku"),
@@ -36,7 +31,11 @@ const MODEL_LABEL: Record<AiIntroModel, () => string> = {
 export function AiIntroCard() {
   const { data } = useSettings();
   const save = useSave();
-  const [confirm, setConfirm] = useState(false);
+  /**
+   * Maliyet onayı penceresi: açarken (seçili model) veya AÇIKKEN daha pahalı bir modele geçerken (yeni model). Onay
+   * modele bağlıdır: Haiku ile onaylayıp sessizce Opus'a (~40 kat) geçmek yeni onay ister.
+   */
+  const [confirm, setConfirm] = useState<{ model: AiIntroModel } | null>(null);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const usage = useAiUsage(!!data);
   const test = useMutation({
@@ -56,7 +55,7 @@ export function AiIntroCard() {
   if (!data) return <Skeleton className="h-40" />;
   const ai = data.settings["ai.intro"];
   const demo = data.settings["places.provider"] === "mock";
-  const cost = fmtUsd(PER_INTRO_USD[ai.model]);
+  const cost = fmtUsd(typicalIntroCostUsd(ai.model));
 
   return (
     <Section title={t("ai.settings.title")} description={t("ai.settings.desc")}>
@@ -73,7 +72,7 @@ export function AiIntroCard() {
         checked={ai.enabled}
         disabled={save.isPending}
         onChange={(v) => {
-          if (v) setConfirm(true);
+          if (v) setConfirm({ model: ai.model });
           else save.mutate({ "ai.intro": { ...ai, enabled: false } });
         }}
       />
@@ -90,9 +89,11 @@ export function AiIntroCard() {
           value={ai.model}
           disabled={save.isPending}
           aria-describedby="ai-intro-cost"
-          onChange={(e) =>
-            save.mutate({ "ai.intro": { ...ai, model: e.target.value as AiIntroModel } })
-          }
+          onChange={(e) => {
+            const model = e.target.value as AiIntroModel;
+            if (ai.enabled && modelChangeNeedsCostAck(ai.model, model)) setConfirm({ model });
+            else save.mutate({ "ai.intro": { ...ai, model } });
+          }}
           className="max-w-xs"
         >
           {(Object.keys(MODEL_LABEL) as AiIntroModel[]).map((m) => (
@@ -169,20 +170,42 @@ export function AiIntroCard() {
       )}
 
       <ConfirmDialog
-        open={confirm}
-        onOpenChange={setConfirm}
+        open={confirm !== null}
+        onOpenChange={(o) => {
+          if (!o) setConfirm(null);
+        }}
         tone="warning"
-        title={t("ai.settings.confirm.title")}
-        description={
-          <span className="space-y-2">
-            <span className="block">{t("ai.settings.costNote", { cost })}</span>
-            <span className="block">{t("ai.settings.privacy")}</span>
-            <span className="block">{t("ai.intro.never")}</span>
-          </span>
+        title={
+          confirm && confirm.model !== ai.model
+            ? t("ai.settings.confirm.modelTitle")
+            : t("ai.settings.confirm.title")
         }
-        confirmLabel={t("ai.settings.confirm.ok")}
+        description={
+          confirm && (
+            <span className="space-y-2">
+              {confirm.model !== ai.model && (
+                <span className="block font-medium">
+                  {t("ai.settings.confirm.modelChange", { model: MODEL_LABEL[confirm.model]() })}
+                </span>
+              )}
+              <span className="block">
+                {t("ai.settings.costNote", { cost: fmtUsd(typicalIntroCostUsd(confirm.model)) })}
+              </span>
+              <span className="block">{t("ai.settings.privacy")}</span>
+              <span className="block">{t("ai.intro.never")}</span>
+            </span>
+          )
+        }
+        confirmLabel={
+          confirm && confirm.model !== ai.model
+            ? t("ai.settings.confirm.modelOk")
+            : t("ai.settings.confirm.ok")
+        }
         onConfirm={async () => {
-          await save.mutateAsync({ "ai.intro": { ...ai, enabled: true, costAckAt: Date.now() } });
+          if (!confirm) return;
+          await save.mutateAsync({
+            "ai.intro": { ...ai, enabled: true, model: confirm.model, costAckAt: Date.now() },
+          });
         }}
       />
     </Section>
