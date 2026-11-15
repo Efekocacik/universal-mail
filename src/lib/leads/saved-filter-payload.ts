@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { BBox, NoveltyLabel } from "@/lib/domain/types";
 import type { LeadStatus } from "@/lib/db/schema";
-import type { LeadLifecycle } from "./query";
+import type { LeadLifecycle, LeadSource } from "./query";
 
 /**
  * Kaydedilmiş süzgeç yükü (isomorfik: hem sunucu hem tarayıcı kullanır; veritabanı içe aktarmaz).
@@ -40,6 +40,13 @@ export const LIFECYCLE_OPTIONS = [
 ] as const satisfies readonly LeadLifecycle[];
 const LIFECYCLE = LIFECYCLE_OPTIONS;
 const SORTS = ["novelty", "name", "recent"] as const;
+/** Lead kaynağı seçenekleri (isomorfik kopya; sunucudaki `LEAD_SOURCES` ile aynı). */
+export const SOURCE_OPTIONS = [
+  "google",
+  "demo",
+  "registry",
+  "import",
+] as const satisfies readonly LeadSource[];
 
 const text = z.string().max(200);
 const lat = z.number().finite().min(-90).max(90);
@@ -66,6 +73,9 @@ export const savedFilterPayloadSchema = z
     detectedDays: z.number().int().min(1).max(3650).optional(),
     detectedSince: z.number().int().min(0).optional(),
     archived: z.boolean().optional(),
+    /** Faz 5 (isteğe bağlı; eski kayıtlar etkilenmez). */
+    source: z.array(z.enum(SOURCE_OPTIONS)).max(SOURCE_OPTIONS.length).optional(),
+    registryMatch: z.boolean().optional(),
     bbox: z.object({ south: lat, west: lng, north: lat, east: lng }).strict().optional(),
   })
   .strict();
@@ -101,6 +111,10 @@ export interface FilterSnapshot {
   /** Tespit tarihi alt sınırı; `days` varsa göreli dönemden (son N gün) hesaplanmıştır. */
   detected: { since: number; days?: number } | null;
   archived: boolean;
+  /** Faz 5: lead kaynağı (boş/yok = tümü). İsteğe bağlı: eski anlık görüntüler geçerli kalır. */
+  source?: LeadSource[];
+  /** Faz 5: sicil eşleşmesi var (true) / yok (false); yoksa süzgeç yok. */
+  registryMatch?: boolean;
 }
 
 export const EMPTY_SNAPSHOT: FilterSnapshot = {
@@ -145,6 +159,8 @@ export function toSavedPayload(f: FilterSnapshot, bbox?: BBox | null): SavedFilt
         ? { detectedSince: f.detected.since }
         : {}),
     ...(f.archived ? { archived: true } : {}),
+    ...(f.source?.length ? { source: [...f.source] } : {}),
+    ...(f.registryMatch !== undefined ? { registryMatch: f.registryMatch } : {}),
     ...(bbox
       ? { bbox: { south: bbox.south, west: bbox.west, north: bbox.north, east: bbox.east } }
       : {}),
@@ -194,6 +210,8 @@ export function fromSavedPayload(
             ? { since: p.detectedSince }
             : null,
       archived: p.archived === true,
+      ...(p.source?.length ? { source: p.source } : {}),
+      ...(p.registryMatch !== undefined ? { registryMatch: p.registryMatch } : {}),
     },
     bbox: p.bbox ?? null,
     dropped,

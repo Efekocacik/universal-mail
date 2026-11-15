@@ -14,17 +14,40 @@ export const IMPORT_LIMITS = {
   maxRows: 5000,
   /** Önizlemede gösterilen satır sayısı. */
   previewRows: 20,
+  /** En çok sütun (fazlası okunmaz; uyarı verilir). Seyrek XLSX'te `XFD1` gibi uç hücre bellek şişirmesin. */
+  maxColumns: 200,
+  /** Hücre başına en çok karakter (fazlası kesilir; uyarı verilir). */
+  maxCellChars: 2000,
   /** XLSX (zip) koruması: girdi sayısı, toplam açılmış boyut, girdi başına sıkıştırma oranı. */
   zipMaxEntries: 2000,
   zipMaxTotalBytes: 50 * 1024 * 1024,
   zipMaxRatio: 200,
+  /**
+   * XLSX: tek bir XML parçasının (sayfa, paylaşılan metinler) en büyük açılmış boyutu; DOM'a çevrilmeden önce
+   * denetlenir. Sayfadaki `<row>` öğesi sayısı da (boş satırlar atıldıktan sonra) `maxRows × 4` ile sınırlıdır.
+   */
+  xlsxMaxXmlBytes: 20 * 1024 * 1024,
 } as const;
 
 /** Ayrıştırılmış tablo: ilk satır başlık; hücreler metin (boş hücre ""). */
 export interface ParsedTable {
   headers: string[];
   rows: string[][];
+  /** `rows[i]`'nin dosyadaki satır numarası (başlık 1. satırsa ilk veri genelde 2); hata raporunda gösterilir. */
+  rowNumbers?: number[];
+  /** Okuma sırasında düzeltilen durumlar (kararlı kodlar; arayüz `imports.warning.<kod>` ile yerelleştirir). */
+  warnings?: ImportWarning[];
 }
+
+/** Önizleme uyarı kodları: veri okunur ama kullanıcı bilmelidir. */
+export const IMPORT_WARNINGS = [
+  "encoding_fallback",
+  "columns_truncated",
+  "extra_cells",
+  "cells_truncated",
+  "duplicate_headers",
+] as const;
+export type ImportWarning = (typeof IMPORT_WARNINGS)[number];
 
 export interface ImportParser {
   readonly format: ImportFormat;

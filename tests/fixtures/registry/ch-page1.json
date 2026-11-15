@@ -1,0 +1,27 @@
+{
+  "hits": 3,
+  "kind": "search#advanced-search",
+  "items": [
+    {
+      "company_number": "00000001",
+      "company_name": "QUIETLANE BEAN CAFE LTD",
+      "company_status": "active",
+      "company_type": "ltd",
+      "date_of_creation": "2026-11-02",
+      "sic_codes": ["56102"],
+      "registered_office_address": {
+        "address_line_1": "12 Example Street",
+        "locality": "London",
+        "postal_code": "EC1A 1ZZ"
+      }
+    },
+    {
+      "company_number": "00000002",
+      "company_name": "SYNTHWAVE TAVERN LIMITED",
+      "company_status": "active",
+      "date_of_creation": "2026-10-28",
+      "sic_codes": ["56302", "bogus"],
+      "registered_office_address": { "locality": "London" }
+    }
+  ]
+}

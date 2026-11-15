@@ -8,6 +8,7 @@ import {
   leads,
   placeSnapshots,
   places,
+  registryCompanies,
 } from "@/lib/db/schema";
 import type { LeadStatus } from "@/lib/db/schema";
 import type { BBox, NoveltyLabel } from "@/lib/domain/types";
@@ -20,7 +21,12 @@ export interface LeadFilters {
   novelty?: NoveltyLabel[];
   leadStatus?: LeadStatus[];
   businessStatus?: string[];
-  source?: ("google" | "demo")[];
+  source?: LeadSource[];
+  /**
+   * Faz 5 (paket R): resmî sicil eşleşmesi. `true`: lead'in yeri bir sicil kaydıyla eşleşmiş (otomatik/elle) VEYA lead
+   * bir sicil kaydından oluşturulmuş; `false`: hiçbiri.
+   */
+  registryMatch?: boolean;
   bbox?: BBox;
   hasWebsite?: boolean;
   ratingMin?: number;
@@ -68,6 +74,12 @@ export function auditFilterSummary(filters: LeadFilters): Record<string, unknown
 }
 
 export const LEAD_LIFECYCLES = ["opened", "future", "new"] as const;
+/** Lead kaynakları (Faz 5: `registry` sicilden, `import` CSV/XLSX'ten; ikisinin de yer kimliği olmayabilir). */
+export const LEAD_SOURCES = ["google", "demo", "registry", "import"] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+/** Sicil eşleşmesi koşulu (iki ayrı EXISTS: her biri kendi kısmi indeksini kullanır). */
+export const REGISTRY_MATCHED = sql`(EXISTS (SELECT 1 FROM ${registryCompanies} rc WHERE rc.matched_place_id = ${leads.placeId} AND rc.match_status IN ('matched', 'manual')) OR EXISTS (SELECT 1 FROM ${registryCompanies} rc WHERE rc.lead_id = ${leads.id}))`;
 export type LeadLifecycle = (typeof LEAD_LIFECYCLES)[number];
 
 /** `lifecycle`/`detectedSince` koşulu (ikisi de yoksa undefined). Tüm değerler parametrelidir. */
@@ -174,7 +186,8 @@ const LIST_COLUMNS = {
   noveltyScore: leads.noveltyScore,
   noveltyLabel: leads.noveltyLabel,
   leadStatus: leads.status,
-  website: placeCache.website,
+  // Faz 5: Google sitesi yoksa kullanıcının verdiği site (içe aktarma/sicil `leads.website`; Google lead'lerinde boş).
+  website: sql<string | null>`coalesce(${placeCache.website}, ${leads.website})`,
   phone: placeCache.phone,
   userRatingCount: placeCache.userRatingCount,
   firstSeenAt: places.firstSeenAt,
@@ -223,6 +236,8 @@ export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefin
   if (f.leadStatus?.length) conds.push(inArray(leads.status, f.leadStatus));
   if (f.businessStatus?.length) conds.push(inArray(DERIVED_STATUS, f.businessStatus));
   if (f.source?.length) conds.push(inArray(leads.source, f.source));
+  if (f.registryMatch === true) conds.push(REGISTRY_MATCHED);
+  if (f.registryMatch === false) conds.push(sql`NOT ${REGISTRY_MATCHED}`);
   if (f.bbox) {
     conds.push(
       gte(places.lat, f.bbox.south),
@@ -231,8 +246,10 @@ export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefin
       lte(places.lng, f.bbox.east),
     );
   }
-  if (f.hasWebsite === true) conds.push(sql`${placeCache.website} IS NOT NULL`);
-  if (f.hasWebsite === false) conds.push(sql`${placeCache.website} IS NULL`);
+  if (f.hasWebsite === true)
+    conds.push(sql`coalesce(${placeCache.website}, ${leads.website}) IS NOT NULL`);
+  if (f.hasWebsite === false)
+    conds.push(sql`coalesce(${placeCache.website}, ${leads.website}) IS NULL`);
   if (f.ratingMin !== undefined) conds.push(gte(placeCache.userRatingCount, f.ratingMin));
   if (f.ratingMax !== undefined) conds.push(lte(placeCache.userRatingCount, f.ratingMax));
   if (f.scanId !== undefined) {
@@ -276,6 +293,12 @@ function toRow(r: Record<string, unknown>): LeadRow {
   };
 }
 
+/*
+ * Faz 5: liste/sayı/yüz/kimlik sorguları `places`'a LEFT JOIN yapar; böylece yer kimliği olmayan lead'ler (sicilden veya
+ * içe aktarmadan, `place_id` NULL) da listelenir. Yer alanları (konum, tespit zamanları, türetilmiş durum) bu satırlarda
+ * NULL'dur; `DERIVED_STATUS` NULL bayraklarda 'OPERATIONAL' döner, bbox/tarama/yaşam döngüsü süzgeçleri onları doğal
+ * olarak dışarıda bırakır. Harita noktaları (`queryPoints`) ve önbelleksiz yer listesi yer gerektirdiği için INNER kalır.
+ */
 export async function queryLeads(
   db: Db,
   filters: LeadFilters,
@@ -295,7 +318,7 @@ export async function queryLeads(
   const base = db
     .select(LIST_COLUMNS)
     .from(leads)
-    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
     .leftJoin(leadEmails, and(eq(leadEmails.leadId, leads.id), eq(leadEmails.isPrimary, true)));
@@ -306,7 +329,7 @@ export async function queryLeads(
   const countBase = db
     .select({ n: sql<number>`count(*)` })
     .from(leads)
-    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   const total = Number((await (where ? countBase.where(where) : countBase))[0]?.n ?? 0);
@@ -437,7 +460,7 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     const base = db
       .select({ k: col, n: sql<number>`count(*)` })
       .from(leads)
-      .innerJoin(places, eq(leads.placeId, places.placeId))
+      .leftJoin(places, eq(leads.placeId, places.placeId))
       .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
       .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
     const rows = await (where ? base.where(where) : base).groupBy(col);
@@ -453,10 +476,11 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
   const totalBase = db
     .select({
       n: sql<number>`count(*)`,
-      uncached: sql<number>`coalesce(sum(case when ${placeCache.placeId} IS NULL then 1 else 0 end), 0)`,
+      // Yer kimliği olmayan (sicil/içe aktarma) lead'lerin yüklenecek Google verisi yoktur; sayılmaz.
+      uncached: sql<number>`coalesce(sum(case when ${leads.placeId} IS NOT NULL AND ${placeCache.placeId} IS NULL then 1 else 0 end), 0)`,
     })
     .from(leads)
-    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   const totals = (await (where ? totalBase.where(where) : totalBase))[0];
@@ -528,7 +552,7 @@ export async function queryLeadIds(
   const base = db
     .select({ id: leads.id })
     .from(leads)
-    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   // Kampanyada hiç olmayanlar önce (NULL), sonra en eski değerlendirilmiş `excluded` satırlar.
@@ -554,7 +578,7 @@ export async function countLeadIds(
   const base = db
     .select({ n: sql<number>`count(DISTINCT ${leads.id})` })
     .from(leads)
-    .innerJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
   const [r] = await (where ? base.where(where) : base);

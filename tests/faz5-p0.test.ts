@@ -288,22 +288,24 @@ describe("Faz 5 paket sözleşmeleri (demo taslakları)", () => {
     const p = createDemoRegistryProvider("insee");
     expect([p.source, p.isDemo]).toEqual(["insee", true]);
     await expect(p.test()).resolves.toBeUndefined();
-    expect(
-      await p.search({
-        scheme: "NAFRev2",
-        activityCodes: ["56.30Z"],
-        incorporatedFrom: "2026-10-01",
-        incorporatedTo: "2026-10-31",
-        locality: null,
-        cursor: null,
-      }),
-    ).toEqual({ items: [], total: 0, nextCursor: null });
+    // Paket R demo üreticiyi doldurdu (ayrıntı: tests/registry-demo.test.ts): ağsız, FR kayıtları, pencere içinde.
+    const page = await p.search({
+      scheme: "NAFRev2",
+      activityCodes: ["56.30Z"],
+      incorporatedFrom: "2026-10-01",
+      incorporatedTo: "2026-10-31",
+      locality: null,
+      cursor: null,
+    });
+    expect(page.items.length).toBeGreaterThan(0);
+    expect(page.items.every((i) => i.countryCode === "FR")).toBe(true);
   });
 
-  it("işler: Faz 5 kayıt yuvası çağrılabilir; P0'da sicil işleyicisi yoktur", () => {
+  it("işler: Faz 5 kayıt yuvası çağrılabilir; paket R sicil işleyicilerini kaydeder", () => {
     registerRegistryJobs();
     registerFaz5Handlers();
-    expect(getJobHandler("registry.fetch")).toBeUndefined();
+    expect(getJobHandler("registry.fetch")).toBeDefined();
+    expect(getJobHandler("registry.match")).toBeDefined();
   });
 
   it("yapay zekâ: demo üretici ağsız, ücretsiz, model 'demo'; hata sınıfı kod taşır", async () => {

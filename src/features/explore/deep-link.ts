@@ -1,5 +1,6 @@
 import { EMAIL_STATES } from "@/lib/leads/email-states";
-import type { LeadLifecycle } from "@/lib/leads/query";
+import type { LeadLifecycle, LeadSource } from "@/lib/leads/query";
+import { SOURCE_OPTIONS } from "@/lib/leads/saved-filter-payload";
 
 /** Keşif bağlantısından gelen başlangıç süzgeçleri (bkz. state.tsx `InitialExploreState`). */
 export interface ExploreLink {
@@ -13,6 +14,8 @@ export interface ExploreLink {
   emailStatus?: string[];
   /** Açılışta ayrıntısı gösterilecek işletme (ör. gösterge panelindeki "Bu hafta yeni açılanlar" satırı). */
   leadId?: number;
+  /** Faz 5: lead kaynağı süzgeci (ör. sicil sayfasından `/?source=registry`, içe aktarmadan `/?source=import`). */
+  source?: LeadSource[];
 }
 
 const DAY_MS = 86_400_000;
@@ -64,6 +67,8 @@ export function parseExploreLink(
   if (es.length) out.emailStatus = es;
   const lead = Number(first(sp.lead));
   if (Number.isSafeInteger(lead) && lead > 0) out.leadId = lead;
+  const src = knownList(first(sp.source), SOURCE_OPTIONS);
+  if (src.length) out.source = src;
   return out;
 }
 
@@ -78,6 +83,7 @@ export function exploreHref(link: ExploreLink): string {
   if (link.archived) sp.set("archived", "1");
   if (link.emailStatus?.length) sp.set("emailStatus", link.emailStatus.join(","));
   if (link.leadId) sp.set("lead", String(link.leadId));
+  if (link.source?.length) sp.set("source", link.source.join(","));
   const q = sp.toString();
   return q ? `/?${q}` : "/";
 }
