@@ -404,6 +404,8 @@ export async function sendCampaignStep(
           outcome: "not_sendable",
           code: "compose_failed",
           errors: composed.errors,
+          // Dağıtıcı bunu sonlandırmaz, erteler: kullanıcı girişi onaylayınca dizi kaldığı yerden sürer.
+          ...(composed.introPending ? { detail: "intro_pending" } : {}),
         });
       }
 

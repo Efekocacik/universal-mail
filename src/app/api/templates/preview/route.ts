@@ -22,6 +22,7 @@ export const POST = domainRoute(async (req: Request) => {
     text: c.text,
     language: c.language,
     missing: c.missing,
+    introPending: c.introPending,
     variables: r.variables,
     errors: c.errors,
     warnings: [...r.warnings, ...c.warnings],

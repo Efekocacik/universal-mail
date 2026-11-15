@@ -77,7 +77,6 @@ describe("şablon ayrıştırma ve doğrulama", () => {
     ["{{bilinmeyen}}", "unknown_variable"],
     ["{{Sehir}}", "unknown_variable"],
     ["{{acilis_tarihi}}", "unsupported_variable"],
-    ["{{kisisel_giris}}", "unsupported_variable"],
     ["{{sehir", "unclosed_variable"],
     ["{{sehir {{firma}}", "unclosed_variable"],
     ["sehir}}", "stray_braces"],

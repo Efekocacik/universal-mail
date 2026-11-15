@@ -419,6 +419,11 @@ export interface ComposedEmail {
   /** İçerik kanıtı (`messages.body_sha256`, tanım: `CONTENT_HASH_VERSION`); gövde saklanmaz. */
   bodySha256: string | null;
   missing: string[];
+  /**
+   * `{{kisisel_giris}}` eksik, çünkü giriş yalnızca onay bekleyen taslak olarak var. Ön izleme "onay bekliyor" der;
+   * dağıtıcı bu diziyi sonlandırmaz, erteler (onaylanınca devam eder).
+   */
+  introPending: boolean;
 }
 
 /**
@@ -498,6 +503,7 @@ async function composeCore(
     text: "",
     bodySha256: null,
     missing: [],
+    introPending: false,
   };
 
   if (input.mode === "live" && !isLiveSendingPermitted() && !input.selfTest)
@@ -545,7 +551,10 @@ async function composeCore(
     body = renderTemplate(
       { subject: tpl.subject, bodyHtml: tpl.bodyHtml },
       { ...ctx.values, cikis_linki: footer?.unsubscribeUrl ?? null },
-      { markMissing: input.purpose === "preview" },
+      {
+        markMissing: input.purpose === "preview",
+        ...(ctx.introPending ? { pendingKeys: new Set(["kisisel_giris"] as const) } : {}),
+      },
     );
   } catch (e) {
     if (!(e instanceof TemplateRenderError)) throw e;
@@ -581,6 +590,7 @@ async function composeCore(
     text,
     bodySha256: contentSha256(subject, text, html),
     missing: body.missing,
+    introPending: ctx.introPending && body.missing.includes("kisisel_giris"),
   };
 }
 

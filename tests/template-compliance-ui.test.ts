@@ -80,7 +80,7 @@ describe("şablon editörü: saf mantık", () => {
         .filter((c) => c.unsupported)
         .map((c) => c.key)
         .sort(),
-    ).toEqual(["acilis_tarihi", "kisisel_giris"]);
+    ).toEqual(["acilis_tarihi"]); // Faz 5 A: kisisel_giris onaylı yapay zekâ girişiyle desteklenir
     expect(chips.find((c) => c.key === "sehir")!.token).toBe("{{sehir}}");
     expect(chips.find((c) => c.key === "firma_adres")!.footer).toBe(true);
   });

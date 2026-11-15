@@ -190,6 +190,7 @@ function PreviewPanel({ draft }: { draft: Draft }) {
               <span className="block text-[12px]">{t("tplPreview.missing.note")}</span>
             </Notice>
           )}
+          {data.introPending && <Notice tone="warning">{t("tplPreview.introPending")}</Notice>}
           {data.errors.length > 0 && (
             <Notice tone="warning">
               <ul className="list-disc pl-4">

@@ -49,10 +49,19 @@ export const AI_ERROR_CODES = [
 ] as const;
 export type AiErrorCode = (typeof AI_ERROR_CODES)[number];
 
+/** Faturalanmış ama kullanılamayan yanıtın kullanımı (red, kesik, kural dışı çıktı). */
+export interface AiBilledUsage {
+  inputTokens: number;
+  outputTokens: number;
+  estCostUsd: number;
+}
+
 export class AiError extends Error {
   constructor(
     readonly code: AiErrorCode,
     message: string,
+    /** Yanıt geldiyse ve belirteç harcandıysa kullanım; ağ/HTTP hatalarında yoktur (faturalanmaz). */
+    readonly usage: AiBilledUsage | null = null,
   ) {
     super(message);
     this.name = "AiError";
