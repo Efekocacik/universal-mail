@@ -14,7 +14,7 @@ import { countryLabel, fmtDate, fmtNumber, NOVELTY_ORDER } from "@/lib/client/fo
 import { useCategories, useFacets } from "@/lib/client/queries";
 import { t } from "@/lib/i18n";
 import { EMAIL_STATES } from "@/lib/leads/email-states";
-import { LIFECYCLE_OPTIONS } from "@/lib/leads/saved-filter-payload";
+import { LIFECYCLE_OPTIONS, SOURCE_OPTIONS } from "@/lib/leads/saved-filter-payload";
 import { SavedFiltersMenu } from "./saved-filters-menu";
 import { SEARCH_INPUT_ID, useExplore, type UiFilters } from "./state";
 
@@ -247,6 +247,21 @@ export function LeadFilters() {
       key: "arc",
       label: t("filters.archived.chip"),
       remove: () => setFilters({ archived: false }),
+    });
+  for (const v of filters.source ?? [])
+    chips.push({
+      key: `src-${v}`,
+      label: t(`registry.filter.source.${v}`),
+      remove: () => {
+        const rest = without(filters.source ?? [], v);
+        setFilters({ source: rest.length ? rest : undefined });
+      },
+    });
+  if (filters.registryMatch !== undefined)
+    chips.push({
+      key: "reg",
+      label: t(filters.registryMatch ? "registry.filter.match.yes" : "registry.filter.match.no"),
+      remove: () => setFilters({ registryMatch: undefined }),
     });
   if (filters.scanId !== undefined)
     chips.push({
@@ -484,6 +499,50 @@ export function LeadFilters() {
                 {detectedLabel(filters.detected)}
               </label>
             )}
+          </fieldset>
+        </FilterButton>
+
+        <FilterButton
+          label={t("registry.filter.source")}
+          active={(filters.source?.length ?? 0) > 0 || filters.registryMatch !== undefined}
+          summary={summaryOf(
+            (filters.source?.length ?? 0) + (filters.registryMatch !== undefined ? 1 : 0),
+          )}
+          help={<HelpTip>{t("registry.filter.help")}</HelpTip>}
+        >
+          <MultiList
+            options={SOURCE_OPTIONS.map((v) => ({
+              value: v,
+              label: t(`registry.filter.source.${v}`),
+            }))}
+            selected={filters.source ?? []}
+            onChange={(v) =>
+              set("source", v.length ? (v as NonNullable<UiFilters["source"]>) : undefined)
+            }
+          />
+          <fieldset className="mt-2 border-t px-1 pt-2">
+            <legend className="mb-1 px-1 pt-2 text-[12px] font-medium text-muted-foreground">
+              {t("registry.filter.match")}
+            </legend>
+            {(["any", "yes", "no"] as const).map((v) => (
+              <label
+                key={v}
+                className="flex cursor-pointer items-center gap-2 px-1 py-1 text-[13px]"
+              >
+                <input
+                  type="radio"
+                  name="registryMatch"
+                  checked={
+                    v === "any"
+                      ? filters.registryMatch === undefined
+                      : filters.registryMatch === (v === "yes")
+                  }
+                  onChange={() => set("registryMatch", v === "any" ? undefined : v === "yes")}
+                  className="accent-[var(--primary)]"
+                />
+                {t(`registry.filter.match.${v}`)}
+              </label>
+            ))}
           </fieldset>
         </FilterButton>
 
