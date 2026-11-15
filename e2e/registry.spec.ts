@@ -96,7 +96,11 @@ test("BK demo çalışması: oran ≥ %30, eşleşmeyen kayıt lead olur ve Keş
 
   await page.getByTestId("registry-tab-open").click();
   const open = page.getByTestId("registry-list-open");
-  const row = open.getByTestId("registry-company").first();
+  // Henüz lead'e dönüştürülmemiş ilk kayıt (dosya aynı sunucuda yeniden çalışırsa öncekiler "Lead'i aç" gösterir).
+  const row = open
+    .getByTestId("registry-company")
+    .filter({ has: page.getByRole("button", { name: /^Lead olarak ekle/ }) })
+    .first();
   await expect(row).toBeVisible();
   const name = (await row.locator("p > span").first().textContent())?.trim() ?? "";
   expect(name).not.toBe("");
