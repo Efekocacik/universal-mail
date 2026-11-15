@@ -271,7 +271,11 @@ function TestSendCard({
     retryDelay: queryRetryDelay,
   });
   const rows = useMemo(() => leads.data ?? [], [leads.data]);
-  const tpls = useMemo(() => (templates.data ?? []).filter((x) => !x.archived), [templates.data]);
+  // Bilgi amaçlı (ör. DE) şablonlar hiçbir zaman gönderilmez; test gönderiminde de seçilemez (varsayılan olarak da).
+  const tpls = useMemo(
+    () => (templates.data ?? []).filter((x) => !x.archived && !x.infoOnly),
+    [templates.data],
+  );
   useEffect(() => {
     if (!leadId && rows.length > 0) setLeadId(String(rows[0]!.leadId));
   }, [rows, leadId]);

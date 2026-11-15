@@ -91,6 +91,8 @@ test("kendime test gönder: demo kutusuna gider ve günlükte maskeli görünür
   const card = page.getByRole("region", { name: "Kendime test gönder", exact: true });
   await expect(card).toBeVisible();
   await expect(card.getByLabel("Önizleme işletmesi")).not.toHaveValue("");
+  // Faz 5: bilgi amaçlı (DE) şablonlar gönderilemez; listede yoktur, varsayılan seçim de olamaz.
+  await expect(card.getByLabel("Şablon").locator("option", { hasText: "(DE)" })).toHaveCount(0);
   await card.getByRole("button", { name: "Test gönder" }).click();
   await expect(page.getByText("Test iletisi demo kutusuna gönderildi.")).toBeVisible();
 
