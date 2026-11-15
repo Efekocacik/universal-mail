@@ -28,6 +28,7 @@ export function initialExploreFilters(initial?: ExploreLink): UiFilters {
           : { since: initial.detectedSince },
     archived: initial?.archived === true,
     emailStatus: initial?.emailStatus ?? [],
+    ...(initial?.source?.length ? { source: initial.source } : {}),
   };
 }
 
@@ -51,6 +52,8 @@ export function toApiFilters(
     lifecycle: f.lifecycle,
     detectedSince: f.detected?.since,
     archived: f.archived ? true : undefined,
+    source: f.source?.length ? f.source : undefined,
+    registryMatch: f.registryMatch,
     bbox: onlyInView && bounds ? bboxParam(bounds) : undefined,
   };
 }
@@ -72,5 +75,7 @@ export function countActiveFilters(f: UiFilters): number {
   if (f.lifecycle.length) n++;
   if (f.detected) n++;
   if (f.archived) n++;
+  if (f.source?.length) n++;
+  if (f.registryMatch !== undefined) n++;
   return n;
 }

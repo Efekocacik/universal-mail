@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LEAD_LIFECYCLES, type LeadFilters, type LeadSort } from "@/lib/leads/query";
+import { LEAD_LIFECYCLES, LEAD_SOURCES, type LeadFilters, type LeadSort } from "@/lib/leads/query";
 import { HttpError } from "./http";
 
 const NOVELTY = ["future_opening", "high", "likely", "low"] as const;
@@ -57,7 +57,7 @@ export function parseLeadFilters(sp: URLSearchParams): LeadFilters {
     .object({
       novelty: z.array(z.enum(NOVELTY)).optional(),
       leadStatus: z.array(z.enum(LEAD_STATUS)).optional(),
-      source: z.array(z.enum(["google", "demo"])).optional(),
+      source: z.array(z.enum(LEAD_SOURCES)).optional(),
       lifecycle: z.array(z.enum(LEAD_LIFECYCLES)).optional(),
     })
     .safeParse({ novelty, leadStatus, source, lifecycle });
@@ -91,6 +91,7 @@ export function parseLeadFilters(sp: URLSearchParams): LeadFilters {
     leadStatus: parsed.data.leadStatus,
     businessStatus: list(sp.get("businessStatus")),
     source: parsed.data.source,
+    registryMatch: bool(sp.get("registryMatch")),
     bbox,
     hasWebsite: bool(sp.get("hasWebsite")),
     ratingMin: num(sp.get("ratingMin")),

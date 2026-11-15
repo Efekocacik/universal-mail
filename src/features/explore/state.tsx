@@ -21,7 +21,7 @@ import {
   type UiFilters,
 } from "./filters";
 import { t } from "@/lib/i18n";
-import type { LeadLifecycle } from "@/lib/leads/query";
+import type { LeadLifecycle, LeadSource } from "@/lib/leads/query";
 import {
   EMPTY_SELECTION,
   MAX_SELECTION,
@@ -85,6 +85,8 @@ export interface InitialExploreState {
   emailStatus?: string[];
   /** Açılışta ayrıntısı açılacak işletme (`lead=<id>`). */
   leadId?: number;
+  /** Faz 5: lead kaynağı süzgeci (`source=registry,import`). */
+  source?: LeadSource[];
 }
 
 interface ExploreContextValue {
