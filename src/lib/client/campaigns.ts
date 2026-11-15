@@ -17,7 +17,13 @@ import type {
   PreflightReport,
   PreflightStepPreview,
 } from "@/lib/campaigns/preflight";
-import type { CampaignDetail, CampaignSummary, StepInput } from "@/lib/campaigns/service";
+import type {
+  CampaignDetail,
+  CampaignSummary,
+  CategoryTemplateInput,
+  StepInput,
+} from "@/lib/campaigns/service";
+import type { CampaignStats, VariantStats } from "@/lib/campaigns/stats";
 import type { CampaignAction, TransitionResult } from "@/lib/campaigns/lifecycle";
 import { api } from "./api";
 import { shouldRetryQuery, queryRetryDelay } from "./retry";
@@ -37,8 +43,10 @@ export type {
   CampaignDetail,
   CampaignLeadStatus,
   CampaignMessageItem,
+  CampaignStats,
   CampaignStatus,
   CampaignSummary,
+  CategoryTemplateInput,
   IneligibleCode,
   PreflightPreview,
   PreflightReport,
@@ -48,6 +56,7 @@ export type {
   SendWindow,
   StepInput,
   TransitionResult,
+  VariantStats,
 };
 
 export interface MailboxItem {
@@ -91,6 +100,7 @@ export const ck = {
   queue: (id: number, status?: string) => ["campaigns", "queue", id, status ?? "all"] as const,
   messages: (id: number) => ["campaigns", "messages", id] as const,
   preflight: (id: number) => ["campaigns", "preflight", id] as const,
+  stats: (id: number) => ["campaigns", "stats", id] as const,
   review: ["campaigns", "review"] as const,
   mailboxes: ["mailboxes"] as const,
   templates: ["templates"] as const,
@@ -142,6 +152,15 @@ export const useCampaign = (id: number, enabled = true) =>
     queryFn: () => api<CampaignDetail>(`/api/campaigns/${id}`),
     enabled,
     refetchInterval: (q) => (isActive(q.state.data?.status) ? 5000 : false),
+    ...getOpts,
+  });
+
+/** Faz 5: A/B konu ve açılma özeti; kampanya çalışırken 10 sn'de bir yenilenir. */
+export const useCampaignStats = (id: number, running = false) =>
+  useQuery({
+    queryKey: ck.stats(id),
+    queryFn: () => api<CampaignStats>(`/api/campaigns/${id}/stats`),
+    refetchInterval: running ? 10_000 : false,
     ...getOpts,
   });
 

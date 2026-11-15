@@ -73,6 +73,24 @@ function validBasics(b: unknown): b is BasicsValues {
   );
 }
 
+/** Faz 5: isteğe bağlı kategori varyantları (en çok 10; anahtar 1–64 karakter, tamsayı şablon kimliği). */
+function validCategoryTemplates(v: unknown): boolean {
+  if (v === undefined) return true;
+  return (
+    Array.isArray(v) &&
+    v.length <= 10 &&
+    v.every(
+      (c) =>
+        typeof c === "object" &&
+        c !== null &&
+        typeof (c as { categoryKey?: unknown }).categoryKey === "string" &&
+        ((c as { categoryKey: string }).categoryKey.length || 0) >= 1 &&
+        (c as { categoryKey: string }).categoryKey.length <= 64 &&
+        isInt((c as { templateId?: unknown }).templateId),
+    )
+  );
+}
+
 function validSteps(s: unknown): s is StepInput[] {
   return (
     Array.isArray(s) &&
@@ -84,7 +102,8 @@ function validSteps(s: unknown): s is StepInput[] {
         isInt((x as StepInput).stepIndex) &&
         isInt((x as StepInput).templateId) &&
         isInt((x as StepInput).delayDays) &&
-        typeof (x as StepInput).language === "string",
+        typeof (x as StepInput).language === "string" &&
+        validCategoryTemplates((x as StepInput).categoryTemplates),
     )
   );
 }

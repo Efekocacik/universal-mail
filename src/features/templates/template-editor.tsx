@@ -17,21 +17,24 @@ import { EmailPreview } from "@/features/campaigns/email-preview";
 import { CampaignStatusBadge, LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import { api } from "@/lib/client/api";
-import { countryLabel } from "@/lib/client/format";
+import { categoryLabel, countryLabel } from "@/lib/client/format";
 import { shouldRetryQuery, queryRetryDelay, type MutationErrorInfo } from "@/lib/client/retry";
 import {
   templateApi,
   tk,
   useTemplateDetail,
   type PreviewResponse,
+  type SubjectVariant,
   type TemplateDraftInput,
 } from "@/lib/client/templates";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import {
   changedFields,
   draftReady,
   EMPTY_DRAFT,
+  hasSubjectB,
   insertAt,
   issueText,
   KINDS,
@@ -100,16 +103,21 @@ function PreviewPanel({ draft }: { draft: Draft }) {
   }, [rows, leadId]);
 
   const debounced = useDebounced(draft, PREVIEW_DEBOUNCE_MS);
+  // Faz 5: A/B — B konusu yoksa her zaman A önizlenir (sunucu "b" isteğini 400 ile reddeder).
+  const [variantPick, setVariantPick] = useState<SubjectVariant>("a");
+  const abOn = hasSubjectB(draft);
+  const variant: SubjectVariant = hasSubjectB(debounced) ? variantPick : "a";
   const ready =
     leadId !== null && debounced.subject.trim() !== "" && debounced.bodyHtml.trim() !== "";
   const preview = useQuery({
-    queryKey: ["templates", "preview", debounced, leadId],
+    queryKey: ["templates", "preview", debounced, leadId, variant],
     enabled: ready,
     queryFn: ({ signal }) =>
       templateApi.preview(
         { ...debounced, categoryKey: null } as TemplateDraftInput,
         leadId!,
         signal,
+        variant,
       ),
     placeholderData: keepPreviousData,
     staleTime: 0,
@@ -162,6 +170,29 @@ function PreviewPanel({ draft }: { draft: Draft }) {
           </Select>
         </div>
       </div>
+
+      {abOn && (
+        <div
+          role="group"
+          aria-label={t("tplPreview.variant")}
+          className="flex flex-wrap items-center gap-1.5"
+          data-testid="tpl-preview-variant"
+        >
+          <span className="text-[12px] text-muted-foreground">{t("tplPreview.variant")}</span>
+          {(["a", "b"] as const).map((v) => (
+            <Button
+              key={v}
+              type="button"
+              size="sm"
+              variant={variantPick === v ? "default" : "outline"}
+              aria-pressed={variantPick === v}
+              onClick={() => setVariantPick(v)}
+            >
+              {t(`tplPreview.variant.${v}`)}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {leads.isError ? (
         <LoadError error={leads.error} onRetry={() => void leads.refetch()} />
@@ -381,6 +412,17 @@ export function TemplateEditor({ id }: { id?: number }) {
           }
         />
 
+        {(d?.infoOnly || isInfoOnlyLanguage(draft.language)) && (
+          <Notice tone="warning">
+            <p className="font-medium">{t("tpl.infoOnly")}</p>
+            <p>{t("tplEditor.infoOnly")}</p>
+          </Notice>
+        )}
+        {d?.categoryKey && (
+          <Notice>
+            {t("tplEditor.category", { name: categoryLabel(d.categoryKey, d.categoryKey) })}
+          </Notice>
+        )}
         {reason && (
           <Notice tone="warning">
             <p>{t(`tplEditor.readOnly.${reason}`)}</p>
@@ -519,6 +561,20 @@ export function TemplateEditor({ id }: { id?: number }) {
                 <FieldHint id="tpl-subject-hint">{t(subjectHintKey(draft)!)}</FieldHint>
               )}
             </div>
+            {draft.kind === "initial" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="tpl-subject-b">{t("tplEditor.subjectB")}</Label>
+                <Input
+                  id="tpl-subject-b"
+                  value={draft.subjectB}
+                  maxLength={150}
+                  disabled={readOnly}
+                  aria-describedby="tpl-subject-b-hint"
+                  onChange={(e) => setDraft({ ...draft, subjectB: e.target.value })}
+                />
+                <FieldHint id="tpl-subject-b-hint">{t("tplEditor.subjectB.hint")}</FieldHint>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="tpl-body">{t("tplEditor.body")}</Label>
               <Textarea

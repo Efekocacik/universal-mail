@@ -13,7 +13,7 @@ import { EmptyState, PageHeader } from "@/components/ui/page";
 import { CampaignsSubnav } from "@/features/campaigns/subnav";
 import { LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
-import { fmtDateTime } from "@/lib/client/format";
+import { categoryLabel, fmtDateTime } from "@/lib/client/format";
 import { templateApi, tk, useTemplateList, type TemplateListItem } from "@/lib/client/templates";
 import { t } from "@/lib/i18n";
 import { KINDS, kindName, LANGUAGES, languageName } from "./model";
@@ -49,6 +49,17 @@ function TemplateCard({ tpl }: { tpl: TemplateListItem }) {
             <Badge variant="outline">{languageName(tpl.language)}</Badge>
             <Badge variant="default">{kindName(tpl.kind)}</Badge>
             {tpl.builtIn && <Badge variant="info">{t("tpl.builtIn")}</Badge>}
+            {tpl.categoryKey && (
+              <Badge variant="outline">
+                {t("tpl.categoryBadge", { name: categoryLabel(tpl.categoryKey, tpl.categoryKey) })}
+              </Badge>
+            )}
+            {tpl.subjectB && <Badge variant="contacted">{t("tpl.abBadge")}</Badge>}
+            {tpl.infoOnly && (
+              <Badge variant="warning" title={t("tpl.infoOnly.hint")} data-testid="tpl-info-only">
+                {t("tpl.infoOnly")}
+              </Badge>
+            )}
             {tpl.archived && <Badge variant="low">{t("tpl.archivedBadge")}</Badge>}
             {locked && (
               <Badge variant="warning">

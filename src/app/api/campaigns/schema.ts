@@ -63,6 +63,21 @@ export const stepsSchema = z
             language: z.string().min(2).max(5),
             templateId: id,
             delayDays: z.number().int().min(0).max(90),
+            /**
+             * Faz 5: lead kategorisine özel şablon (en çok 10, kategori başına bir). Aynı dilde ve türde olmalı
+             * (`CATEGORY_TEMPLATE_MISMATCH`); bilgi amaçlı şablon kabul edilmez (`TEMPLATE_INFO_ONLY`).
+             */
+            categoryTemplates: z
+              .array(
+                z
+                  .object({ categoryKey: z.string().trim().min(1).max(64), templateId: id })
+                  .strict(),
+              )
+              .max(10)
+              .refine((list) => new Set(list.map((c) => c.categoryKey)).size === list.length, {
+                message: "Her kategori bir kez seçilebilir.",
+              })
+              .optional(),
           })
           .strict(),
       )

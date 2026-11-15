@@ -4,12 +4,25 @@ import { prepareEnrollmentBatch, type IneligibleCode } from "@/lib/compliance/el
 import { DEFAULT_FREQUENCY_LIMITS, type FrequencyLimits } from "@/lib/compliance/frequency";
 import { maskEmail } from "@/lib/compliance/suppression";
 import type { DbExecutor } from "@/lib/db/client";
-import { campaignLeads, campaigns, campaignSteps, mailboxes, templates } from "@/lib/db/schema";
+import {
+  campaignLeads,
+  campaigns,
+  campaignSteps,
+  campaignStepTemplates,
+  leads,
+  mailboxes,
+  templates,
+} from "@/lib/db/schema";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import { pickTemplateLanguage, suggestLanguage } from "@/lib/mail/language";
 import { isMailSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
 import { effectiveWindow, nextWindowStart, timeZonesForCountry } from "@/lib/mail/scheduler/window";
-import { composeEmail } from "@/lib/mail/template-service";
+import {
+  assignSubjectVariant,
+  composeEmail,
+  resolveStepTemplateId,
+} from "@/lib/mail/template-service";
 import { getSetting, getSettings } from "@/lib/settings";
 import { CampaignError } from "./errors";
 import { assertSendableMailbox } from "./service";
@@ -110,14 +123,30 @@ async function stepsStillValid(db: DbExecutor, campaignId: number): Promise<bool
       tLanguage: templates.language,
       tKind: templates.kind,
       tArchivedAt: templates.archivedAt,
+      tInfoOnly: templates.infoOnly,
     })
     .from(campaignSteps)
     .leftJoin(templates, eq(templates.id, campaignSteps.templateId))
     .where(eq(campaignSteps.campaignId, campaignId));
-  return rows.every(
+  // Faz 5: kategori varyantları da aynı kurallarla (dil, tür, arşiv, bilgi amaçlı) denetlenir.
+  const variants = await db
+    .select({
+      stepIndex: campaignStepTemplates.stepIndex,
+      language: campaignStepTemplates.language,
+      tLanguage: templates.language,
+      tKind: templates.kind,
+      tArchivedAt: templates.archivedAt,
+      tInfoOnly: templates.infoOnly,
+    })
+    .from(campaignStepTemplates)
+    .leftJoin(templates, eq(templates.id, campaignStepTemplates.templateId))
+    .where(eq(campaignStepTemplates.campaignId, campaignId));
+  return [...rows, ...variants].every(
     (r) =>
       r.tLanguage !== null &&
       r.tArchivedAt === null &&
+      r.tInfoOnly !== true &&
+      !isInfoOnlyLanguage(r.tLanguage) &&
       r.tLanguage === r.language &&
       r.tKind === (r.stepIndex === 0 ? "initial" : "followup"),
   );
@@ -175,7 +204,18 @@ export async function computeStartPlan(
 
   // Onaylanan içerik: kullanılan şablonların SÜRÜMLERİ ve gönderen profili (alt bilgiyi belirler). Bunlar
   // başlatma özeti alındıktan sonra değişirse belirteç eskir ve başlatma `preflight_stale` ile reddedilir.
-  const templateIds = [...new Set(steps.map((s) => s.templateId))].sort((a, b) => a - b);
+  const variants = await db
+    .select()
+    .from(campaignStepTemplates)
+    .where(eq(campaignStepTemplates.campaignId, campaignId))
+    .orderBy(
+      asc(campaignStepTemplates.stepIndex),
+      asc(campaignStepTemplates.language),
+      asc(campaignStepTemplates.categoryKey),
+    );
+  const templateIds = [
+    ...new Set([...steps.map((s) => s.templateId), ...variants.map((v) => v.templateId)]),
+  ].sort((a, b) => a - b);
   const templateVersions =
     templateIds.length === 0
       ? []
@@ -198,6 +238,7 @@ export async function computeStartPlan(
         c.id,
         c.updatedAt,
         steps.map((s) => [s.stepIndex, s.language, s.templateId, s.delayDays]),
+        variants.map((v) => [v.stepIndex, v.language, v.categoryKey, v.templateId]),
         templateVersions.map((t) => [t.id, t.version]),
         profileDigest,
         eligible.map((e) => [e.id, e.language]),
@@ -378,15 +419,39 @@ export async function runPreflight(
     .orderBy(asc(campaignSteps.stepIndex));
   let followupMissing = 0;
   let followupErrors = 0;
-  for (const e of plan.eligible.slice(0, PREVIEW_COUNT)) {
+  const shown = plan.eligible.slice(0, PREVIEW_COUNT);
+  // Faz 5: önizleme gönderimdeki şablonu gösterir (lead kategorisine özel varyant ve A/B konusu). Tek sorgu.
+  const categories = new Map(
+    shown.length === 0
+      ? []
+      : (
+          await db
+            .select({ id: leads.id, categoryKey: leads.categoryKey })
+            .from(leads)
+            .where(
+              inArray(
+                leads.id,
+                shown.map((e) => e.leadId),
+              ),
+            )
+        ).map((r) => [r.id, r.categoryKey]),
+  );
+  const resolve = (stepIndex: number, language: string, leadId: number, templateId: number) =>
+    resolveStepTemplateId(
+      db,
+      { campaignId, stepIndex, language, categoryKey: categories.get(leadId) ?? null },
+      templateId,
+    );
+  for (const e of shown) {
     const own = steps.filter((s) => s.language === e.language);
     const step = own.find((s) => s.stepIndex === 0);
     if (!step) continue;
     const composed = await composeEmail(db, {
-      templateId: step.templateId,
+      templateId: await resolve(0, e.language, e.leadId, step.templateId),
       leadId: e.leadId,
       mode: "demo",
       purpose: "preview",
+      subjectVariant: assignSubjectVariant(e.id),
     });
     const stepPreviews: PreflightStepPreview[] = [
       {
@@ -404,7 +469,7 @@ export async function runPreflight(
     let hasError = false;
     for (const f of own.filter((s) => s.stepIndex > 0)) {
       const fc = await composeEmail(db, {
-        templateId: f.templateId,
+        templateId: await resolve(f.stepIndex, e.language, e.leadId, f.templateId),
         leadId: e.leadId,
         mode: "demo",
         purpose: "preview",

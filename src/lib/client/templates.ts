@@ -23,13 +23,18 @@ export interface TemplateDraftInput {
   bodyHtml: string;
   /** Takip şablonunda ilk e-postanın konusunu "Re:" ile kullan (9d; varsayılan açık). */
   followupReuseSubject?: boolean;
+  /** Faz 5: A/B ikinci konusu (yalnızca ilk e-posta; boş = A/B yok). */
+  subjectB?: string | null;
 }
+
+export type SubjectVariant = "a" | "b";
 
 export type PreviewResponse =
   | { ok: false; errors: TemplateIssue[]; warnings: TemplateIssue[] }
   | {
       ok: true;
       subject: string;
+      variant?: SubjectVariant;
       html: string;
       text: string;
       language: string | null;
@@ -87,10 +92,15 @@ export const templateApi = {
       json: {},
     }),
   /** Ön izleme yazma yapmaz; bu yüzden okuma gibi (kullanıcı tetiklemeli) çağrılır. */
-  preview: (draft: TemplateDraftInput, leadId: number, signal?: AbortSignal) =>
+  preview: (
+    draft: TemplateDraftInput,
+    leadId: number,
+    signal?: AbortSignal,
+    variant: SubjectVariant = "a",
+  ) =>
     api<PreviewResponse>("/api/templates/preview", {
       method: "POST",
-      json: { draft, leadId },
+      json: variant === "b" ? { draft, leadId, variant } : { draft, leadId },
       signal,
     }),
 };

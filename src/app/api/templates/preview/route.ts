@@ -1,4 +1,4 @@
-import { body, database, json } from "@/lib/api/http";
+import { body, database, HttpError, json } from "@/lib/api/http";
 import { domainRoute } from "@/lib/api/domain-route";
 import { previewTemplateDraft } from "@/lib/mail/template-service";
 import { previewSchema } from "../schema";
@@ -11,13 +11,17 @@ export const dynamic = "force-dynamic";
  */
 export const POST = domainRoute(async (req: Request) => {
   const db = await database();
-  const { draft, leadId } = await body(req, previewSchema);
-  const r = await previewTemplateDraft(db, draft, leadId);
+  const { draft, leadId, variant = "a" } = await body(req, previewSchema);
+  if (variant === "b" && !(draft.kind === "initial" && draft.subjectB?.trim())) {
+    throw new HttpError(400, "Bu şablonun B konusu yok.", { code: "TEMPLATE_NO_VARIANT_B" });
+  }
+  const r = await previewTemplateDraft(db, draft, leadId, variant);
   if (!r.ok) return json({ ok: false, errors: r.errors, warnings: r.warnings });
   const c = r.composed;
   return json({
     ok: true,
     subject: c.subject,
+    variant,
     html: c.html,
     text: c.text,
     language: c.language,

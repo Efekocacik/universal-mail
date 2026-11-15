@@ -1,13 +1,19 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { mailboxes, settings, templates } from "@/lib/db/schema";
 import { getSetting, settingSchemas, type SettingKey, type SettingValue } from "@/lib/settings";
-import { BUILTIN_TEMPLATES, textToHtml } from "./builtin-templates";
+import {
+  BUILTIN_TEMPLATES,
+  INFO_ONLY_LANGUAGES,
+  isInfoOnlyLanguage,
+  textToHtml,
+} from "./builtin-templates";
 
 /**
  * Hazır şablon seed sürümü. 1: ilk e-posta şablonları (Faz 3). 2: TR/EN takip şablonları (Faz 4, 9b; EKLEMELİ).
+ * 3: DE/FR/ES/IT/NL/PT/PL ilk + takip şablonları ve TR/EN kafe/pub varyantları (Faz 5; EKLEMELİ, DE bilgi amaçlı).
  */
-export const TEMPLATE_SEED_VERSION = 2;
+export const TEMPLATE_SEED_VERSION = 3;
 export const DEMO_MAILBOX_SEED_VERSION = 1;
 
 /** Demo posta kutusunun adresi. `.invalid` alan adı (RFC 2606) hiçbir zaman gerçek bir sunucuya çözülmez. */
@@ -35,6 +41,8 @@ function templateRow(t: BuiltinRow, now: number) {
     subject: t.subject,
     bodyText: t.bodyText,
     bodyHtml: textToHtml(t.bodyText),
+    subjectB: t.subjectB ?? null,
+    infoOnly: isInfoOnlyLanguage(t.language),
     builtIn: true,
     createdAt: now,
     updatedAt: now,
@@ -46,10 +54,11 @@ function templateRow(t: BuiltinRow, now: number) {
  *
  *  - Sürüm 1 (ilk e-postalar): veritabanında hiç hazır şablon yoksa bir kez eklenir. Sonraki açılışlarda (kullanıcı
  *    şablonu arşivlemiş veya silmiş olsa bile) dokunulmaz.
- *  - Sürüm 2 (takip şablonları): yalnızca `since: 2` şablonlarından EKSİK olanlar (hazır + dil + tür + ad) eklenir.
- *    Var olan hiçbir şablon değiştirilmez; ikinci çalıştırma 0 ekler.
+ *  - Sürüm 2 ve 3 (takip şablonları; Faz 5 dilleri ve kategori varyantları): yalnızca `since >= 2` şablonlarından
+ *    EKSİK olanlar (hazır + dil + tür + ad) eklenir. Var olan hiçbir şablon değiştirilmez; ikinci çalıştırma 0 ekler.
  *
- * Ekleme ve bayrak aynı `batch` içinde (atomik) yazılır. Bayrak tek güvence değildir: `seed.faz3` okunamazsa (bozuk
+ * Sürüm 3 ayrıca bilgi amaçlı dildeki (DE) var olan şablonları `info_only=1` yapar (Faz 5 öncesi kullanıcı şablonları).
+ * Ekleme, işaretleme ve bayrak aynı `batch` içinde (atomik) yazılır. Bayrak tek güvence değildir: `seed.faz3` okunamazsa (bozuk
  * değer varsayılana döner) var olan hazır şablonlar yeniden eklenmez, yalnızca eksik sürüm 2 şablonları tamamlanır.
  */
 export async function seedBuiltinTemplates(db: Db, now = Date.now()): Promise<number> {
@@ -64,11 +73,23 @@ export async function seedBuiltinTemplates(db: Db, now = Date.now()): Promise<nu
     t.since === 1 ? existing.length === 0 : !has.has(`${t.language}|${t.kind}|${t.name}`),
   );
   const flag = markSeeded(db, { ...applied, templates: TEMPLATE_SEED_VERSION }, now);
+  // Faz 5 öncesinde oluşturulmuş bilgi amaçlı dildeki (DE) şablonlar `info_only=0` ile kalmıştı (sütun 0005'te
+  // varsayılan 0 ile eklendi). Aynı `batch` içinde işaretlenir; sunucu denetimleri ayrıca dili de denetler.
+  const backfill = db
+    .update(templates)
+    .set({ infoOnly: true })
+    .where(
+      and(inArray(templates.language, [...INFO_ONLY_LANGUAGES]), eq(templates.infoOnly, false)),
+    );
   if (toInsert.length === 0) {
-    await flag;
+    await db.batch([backfill, flag]);
     return 0;
   }
-  await db.batch([db.insert(templates).values(toInsert.map((t) => templateRow(t, now))), flag]);
+  await db.batch([
+    db.insert(templates).values(toInsert.map((t) => templateRow(t, now))),
+    backfill,
+    flag,
+  ]);
   return toInsert.length;
 }
 
