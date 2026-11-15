@@ -1,0 +1,34 @@
+# Universal Mail — abonelikten çıkış aktarıcısı, Cloudflare Worker ŞABLONU (README.md).
+# Panelden (tarayıcıdan) kurulumda bu dosyaya GEREK YOKTUR; yalnızca `npx wrangler deploy` yolu içindir.
+# Gizli değer, kişisel veri veya gerçek alan adı YAZMAYIN: bu dosya depoya girer.
+
+name = "um-relay"
+# `npm run build:worker` çıktısı (depo kökünden). Dosya zaten paketlenmiştir; wrangler yeniden paketlemez.
+main = "../../dist/cloudflare-worker/worker.js"
+no_bundle = true
+compatibility_date = "2025-09-01"
+# nodejs_compat GEREKMEZ: aktarıcı yalnızca WebCrypto (Ed25519, SHA-256) kullanır.
+workers_dev = true
+# Panelden eklenen düz metin değişkenleri (ör. adres değişikliğinden sonra RELAY_PUBLIC_ORIGIN) `wrangler deploy`
+# sırasında SİLİNMESİN; aksi halde eski e-postalardaki çıkış bağlantıları 503 alırdı. Gizli değerler zaten korunur.
+keep_vars = true
+
+# İstek günlükleri (Workers Logs) isteğin tam adresini, yani çıkış belirtecini de kaydeder; kapalı tutun.
+[observability]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "um-relay"
+# `npx wrangler d1 create um-relay` çıktısındaki kimlik (gizli değildir):
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# Hepsi isteğe bağlıdır; boş bırakılırsa varsayılanlar kullanılır.
+# RELAY_PUBLIC_ORIGIN = "https://um-relay.<hesap>.workers.dev"
+# RELAY_MAX_PENDING = "10000"
+# RELAY_RATE_LIMIT_GET = "60"
+# RELAY_RATE_LIMIT_POST = "300"
+
+# Anahtarlar bir GİZLİ değişkendir, bu dosyaya yazılmaz:
+#   npx wrangler secret put RELAY_KEYS --config deploy/cloudflare-worker/wrangler.toml < relay-keys.json

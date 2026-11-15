@@ -206,6 +206,30 @@ describe("eşzamanlılık ve geri basınç", () => {
     expect(store.rows).toHaveLength(1);
   });
 
+  it("coalesceConcurrent: false (Cloudflare Worker): eşzamanlı istekler söz paylaşmaz, her biri kendi push'unu yapar", async () => {
+    const store = new SimDurableStore();
+    const real = store.sink();
+    let calls = 0;
+    const sink: EventSink = {
+      durable: true,
+      push: async (e) => {
+        calls++;
+        await new Promise((r) => setTimeout(r, 30));
+        return real.push(e);
+      },
+    };
+    const relay = relayFor(sink, undefined, undefined, { coalesceConcurrent: false });
+    const token = newToken();
+    const results = await Promise.all(Array.from({ length: 3 }, () => relay(postFor(token))));
+    expect(results.map((r) => r.status)).toEqual([200, 200, 200]);
+    expect(calls).toBe(3);
+    // yinelenen kayıt zararsız: uygulama jti ile tekilleştirir (teslimat sözleşmesi madde 2)
+    expect(new Set(store.rows.map((r) => r.event.token))).toEqual(new Set([token]));
+    // sonraki istek tekrar oynatma kaydını görür: yeni push yok
+    expect((await relay(postFor(token))).status).toBe(200);
+    expect(calls).toBe(3);
+  });
+
   it("eşzamanlı istekler ve sink hatası: hepsi 503, sonra yeniden deneme başarılı (tıkanma yok)", async () => {
     const store = new SimDurableStore();
     store.failWrites = true;

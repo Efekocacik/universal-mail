@@ -2,14 +2,19 @@ import fs from "node:fs";
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
 import path from "node:path";
-import { createSpoolPullHandler } from "@/lib/unsubscribe/channel-protocol";
-import {
-  DEFAULT_SINK_TIMEOUT_MS,
-  MemoryRateLimiter,
-  createRelayHandler,
-  type RateLimiter,
-} from "@/lib/unsubscribe/relay";
+import { createSpoolPullHandler } from "@/lib/unsubscribe/channel-server";
+import { DEFAULT_SINK_TIMEOUT_MS, createRelayHandler } from "@/lib/unsubscribe/relay";
 import { FileSpool, SPOOL_DEFAULT_MAX_PENDING } from "@/lib/unsubscribe/spool";
+import {
+  JSON_RESPONSE_HEADERS as JSON_H,
+  MethodAwareRateLimiter,
+  PLAIN_HEADERS as PLAIN,
+  RelayConfigError,
+  intEnv,
+  rateLimitSubjectWith,
+  routeClass,
+  type RelayEnv,
+} from "./common";
 import { KeyFileLoader, normalizeOrigin } from "./key-file";
 import {
   CLIENT_HEADER,
@@ -19,11 +24,14 @@ import {
 } from "./node-adapter";
 import { FileReplayStore } from "./replay-store";
 
+export { MethodAwareRateLimiter, RelayConfigError, routeClass, type RelayEnv } from "./common";
+
 /**
  * Bağımsız HTTPS abonelikten çıkış AKTARICISI sunucusu (Aşama 15.7 dağıtımı; docs/09 Bölüm 3, K1–K11).
  *
  * Tek süreç, `node:http`; TLS önündeki ters vekilde (Caddy) sonlanır (deploy/relay/). Uygulamanın kendisi (Next)
- * aktarıcıyı barındıramaz: yalnızca 127.0.0.1'e bağlanır ve yabancı Host'u reddeder.
+ * aktarıcıyı barındıramaz: yalnızca 127.0.0.1'e bağlanır ve yabancı Host'u reddeder. Sunucu YÖNETMEK istemeyenler için
+ * önerilen eşdeğer: Cloudflare Worker + D1 (./worker.ts, deploy/cloudflare-worker/); yollar ve protokol aynıdır.
  *
  * Yollar:
  *  - `/u/<belirteç>` (GET, HEAD, POST) → RFC 8058 işleyicisi (relay.ts); olaylar DAYANIKLI `FileSpool`a yazılır.
@@ -51,25 +59,6 @@ export interface RelayConfig {
   rateLimitPost: number;
   rateWindowMs: number;
   trust: ProxyTrust;
-}
-
-/** Yalnızca okunan ortam değişkenleri (testte düz nesne verilebilir). */
-export type RelayEnv = Readonly<Record<string, string | undefined>>;
-
-export class RelayConfigError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RelayConfigError";
-  }
-}
-
-function intEnv(env: RelayEnv, name: string, def: number, min: number, max: number): number {
-  const raw = env[name]?.trim();
-  if (raw === undefined || raw === "") return def;
-  if (!/^\d{1,10}$/.test(raw)) throw new RelayConfigError(`${name} bir tamsayı olmalı.`);
-  const n = Number(raw);
-  if (n < min || n > max) throw new RelayConfigError(`${name} ${min}–${max} aralığında olmalı.`);
-  return n;
 }
 
 /** Ortam değişkenlerinden yapılandırma; eksik/geçersiz değerde `RelayConfigError`. */
@@ -105,43 +94,9 @@ export function loadRelayConfig(env: RelayEnv = process.env): RelayConfig {
   };
 }
 
-/**
- * Yönteme duyarlı hız sınırlayıcı (B8): Gmail tek tıklamalı POST'ları paylaşılan Google adreslerinden gelir, bu
- * yüzden POST kovası GET'ten geniştir. Anahtar `${YÖNTEM}:${istemci}` biçimindedir (sınırlayıcı isteği görmez).
- */
-export class MethodAwareRateLimiter implements RateLimiter {
-  private readonly get: MemoryRateLimiter;
-  private readonly post: MemoryRateLimiter;
-  constructor(getLimit: number, postLimit: number, windowMs: number) {
-    this.get = new MemoryRateLimiter(getLimit, windowMs);
-    this.post = new MemoryRateLimiter(postLimit, windowMs);
-  }
-  check(key: string, now: number): number | null {
-    return (key.startsWith("POST:") ? this.post : this.get).check(key, now);
-  }
-}
-
-/**
- * Hız sınırı için istemci kimliği: IPv4 olduğu gibi; IPv6 ise /64 öneki (tek bir istemci genellikle bütün bir /64'ü
- * denetler; tam adresle her istek yeni bir kova alırdı). Geçersiz değer olduğu gibi döner.
- */
+/** Hız sınırı için istemci kimliği (IPv6 → /64 öneki); bkz. `rateLimitSubjectWith` (./common). */
 export function rateLimitSubject(ip: string): string {
-  if (!net.isIPv6(ip)) return ip;
-  const lower = ip.toLowerCase();
-  const compressed = lower.includes("::");
-  const [head = "", tail = ""] = lower.split("::", 2);
-  const h = head ? head.split(":") : [];
-  const t = compressed && tail ? tail.split(":") : [];
-  // Gömülü IPv4 (a.b.c.d) son iki 16 bitlik grubu kaplar.
-  const width = (gs: string[]) => gs.reduce((n, g) => n + (g.includes(".") ? 2 : 1), 0);
-  const groups = compressed
-    ? [...h, ...Array<string>(Math.max(0, 8 - width(h) - width(t))).fill("0"), ...t]
-    : h;
-  const norm = groups.map((g) => (g.includes(".") ? g : (parseInt(g, 16) || 0).toString(16)));
-  // IPv4 eşlemeli/uyumlu adres (onaltılık biçim dahil, ör. ::ffff:c000:201): ilk 80 bit sıfırdır; /64'e indirgemek
-  // bütün IPv4 istemcilerini TEK kovada toplardı, bu yüzden adresin kendisi kullanılır.
-  if (norm.slice(0, 5).every((g) => g === "0")) return lower;
-  return `${norm.slice(0, 4).join(":")}::/64`;
+  return rateLimitSubjectWith(ip, net.isIPv6);
 }
 
 /** Hız sınırı anahtarı: yöntem + bağdaştırıcının koyduğu güvenilir istemci adresi (gelen kopya silinmiştir). */
@@ -149,22 +104,6 @@ export function relayClientKey(req: Request): string {
   const method = req.method.toUpperCase() === "POST" ? "POST" : "GET";
   return `${method}:${rateLimitSubject(req.headers.get(CLIENT_HEADER) ?? "unknown")}`;
 }
-
-/** Günlük için yol sınıfı; yolun kendisi (belirteç) ASLA yazılmaz. */
-export function routeClass(pathname: string): "u" | "spool" | "healthz" | "other" {
-  if (pathname.startsWith("/u/")) return "u";
-  if (pathname.startsWith("/spool/")) return "spool";
-  if (pathname === "/healthz") return "healthz";
-  return "other";
-}
-
-const PLAIN = {
-  "Content-Type": "text/plain; charset=utf-8",
-  "Cache-Control": "no-store",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-};
-const JSON_H = { ...PLAIN, "Content-Type": "application/json; charset=utf-8" };
 
 export interface RelayApp {
   /** Web düzeyinde yönlendirici (testlerde doğrudan çağrılabilir). */

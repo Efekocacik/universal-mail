@@ -1,4 +1,8 @@
-# Abonelikten çıkış aktarıcısı: küçük bir Linux sunucusuna kurulum
+# Abonelikten çıkış aktarıcısı: küçük bir Linux sunucusuna kurulum (isteğe bağlı yol)
+
+> **Önerilen yol: Cloudflare Worker.** Sunucu kiralamak ve yönetmek istemiyorsanız aktarıcıyı ücretsiz bir Cloudflare
+> hesabında tarayıcıdan kurabilirsiniz: [`deploy/cloudflare-worker/README.md`](../cloudflare-worker/README.md).
+> Protokol ve uygulama tarafı aynıdır. Bu belge yalnızca kendi Linux sunucusunu (VPS) kullanmak isteyenler içindir.
 
 Bu belge, Universal Mail'in **tek tıklamalı abonelikten çıkış aktarıcısını** (RFC 8058) küçük bir Linux sunucusuna
 (VPS) adım adım kurmayı anlatır.
@@ -14,13 +18,13 @@ Bu belge, Universal Mail'in **tek tıklamalı abonelikten çıkış aktarıcıs�
 - Aktarıcıda **hiçbir gizli anahtar yoktur.** Sunucuya yalnızca genel anahtarlar gider. Aktarıcı e-posta
   **göndermez**, uygulamanın veritabanına erişmez ve hiçbir canlı gönderim kapısını açmaz.
 - Masaüstü uygulaması aktarıcıyı kendi barındıramaz: yalnızca 127.0.0.1'i dinler ve yabancı Host'u reddeder. Bu
-  yüzden ayrı, herkese açık bir sunucu gerekir.
+  yüzden herkese açık ayrı bir uç gerekir: bu belgedeki VPS **ya da** Cloudflare Worker (önerilen).
 
 ## Ön koşullar
 
 | Gereken | Ayrıntı |
 |---|---|
-| Alt alan adı | Örneğin `cikis.firma.com`. DNS'te sunucunun IP'sine giden **A** (ve varsa **AAAA**) kaydı olmalı. DNS **Cloudflare**'daysa (ör. `cikis.gurcankagitpromosyon.com`) kayıt **"DNS only" (gri bulut)** olmalı; Cloudflare proxy'si (turuncu bulut) kullanılmaz, istekler ve sertifika doğrulaması doğrudan Caddy'ye ulaşmalıdır. Gönderen hesabın kişisel Gmail olması veya alan adında MX bulunmaması aktarıcıyı etkilemez. |
+| Alt alan adı | Örneğin `cikis.firma.com`. DNS'te sunucunun IP'sine giden **A** (ve varsa **AAAA**) kaydı olmalı. DNS **Cloudflare**'daysa kayıt **"DNS only" (gri bulut)** olmalı; Cloudflare proxy'si (turuncu bulut) kullanılmaz, istekler ve sertifika doğrulaması doğrudan Caddy'ye ulaşmalıdır. Gönderen hesabın kişisel Gmail olması veya alan adında MX bulunmaması aktarıcıyı etkilemez. |
 | Sunucu | Debian 12 veya Ubuntu 24.04; 1 vCPU ve 512 MB RAM yeterli. **Kalıcı** ext4/xfs disk gerekir (geçici/tmpfs olmamalı). |
 | Erişim | SSH; 80 ve 443 portları internete açık olmalı. |
 | Saat | NTP açık olmalı. Kanal en çok ±5 dakika saat farkına izin verir. |

@@ -1837,7 +1837,7 @@ export const base = {
   "unsubInfra.key.revokedToast": "Key revoked.",
   "unsubInfra.base.title": "Unsubscribe server address",
   "unsubInfra.base.help":
-    "Only the root HTTPS address, without port, path or query (e.g. https://unsubscribe.yourcompany.com). Links use the /u/ path of this address.",
+    "Only the root HTTPS address, without port, path or query (e.g. https://um-relay.youraccount.workers.dev for a Cloudflare Worker, or https://unsubscribe.yourcompany.com). Links use the /u/ path of this address.",
   "unsubInfra.base.label": "Unsubscribe server address",
   "unsubInfra.base.save": "Save the address",
   "unsubInfra.base.saved": "Address saved. Verify the endpoint again.",
@@ -1851,9 +1851,9 @@ export const base = {
   "unsubInfra.base.change.confirm": "Change the address",
   "unsubInfra.base.clear.body":
     "The verification proof is deleted. Until a new address is saved and verified, no unsubscribe link can be prepared for live messages and pending requests on the unsubscribe server are not pulled.",
-  "unsubInfra.file.title": "Upload the key file to the server",
+  "unsubInfra.file.title": "Upload the key file to the unsubscribe server",
   "unsubInfra.file.help":
-    "The file only contains PUBLIC keys. Still, copy it only over SSH and do not share it with others.",
+    "The file only contains PUBLIC keys. Still, do not share it: anyone who can change the channel keys could delete pending unsubscribe requests.",
   "unsubInfra.file.download": "Download the key file",
   "unsubInfra.file.downloaded": "relay-keys.json downloaded.",
   "unsubInfra.file.needs": "Complete steps 1–3 first.",

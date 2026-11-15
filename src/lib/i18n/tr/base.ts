@@ -1892,7 +1892,7 @@ export const base = {
   "unsubInfra.key.revokedToast": "Anahtar iptal edildi.",
   "unsubInfra.base.title": "Çıkış sunucusu adresi",
   "unsubInfra.base.help":
-    "Yalnızca kök HTTPS adresi; port, yol veya sorgu olmadan (örn. https://cikis.firmaniz.com). Bağlantılar bu adresin /u/ yolunu kullanır.",
+    "Yalnızca kök HTTPS adresi; port, yol veya sorgu olmadan (örn. Cloudflare Worker için https://um-relay.hesabiniz.workers.dev ya da https://cikis.firmaniz.com). Bağlantılar bu adresin /u/ yolunu kullanır.",
   "unsubInfra.base.label": "Çıkış sunucusu adresi",
   "unsubInfra.base.save": "Adresi kaydet",
   "unsubInfra.base.saved": "Adres kaydedildi. Uç noktayı yeniden doğrulayın.",
@@ -1906,9 +1906,9 @@ export const base = {
   "unsubInfra.base.change.confirm": "Adresi değiştir",
   "unsubInfra.base.clear.body":
     "Doğrulama kanıtı silinir. Yeni bir adres kaydedilip doğrulanana kadar canlı iletiler için çıkış bağlantısı hazırlanamaz ve çıkış sunucusundaki bekleyen talepler çekilmez.",
-  "unsubInfra.file.title": "Anahtar dosyasını sunucuya yükleyin",
+  "unsubInfra.file.title": "Anahtar dosyasını çıkış sunucusuna yükleyin",
   "unsubInfra.file.help":
-    "Dosya yalnızca GENEL anahtarları içerir. Yine de yalnızca SSH ile kopyalayın ve başkasıyla paylaşmayın.",
+    "Dosya yalnızca GENEL anahtarları içerir. Yine de başkasıyla paylaşmayın: kanal anahtarlarını değiştirebilen biri bekleyen çıkış taleplerini silebilir.",
   "unsubInfra.file.download": "Anahtar dosyasını indir",
   "unsubInfra.file.downloaded": "relay-keys.json indirildi.",
   "unsubInfra.file.needs": "Önce 1-3. adımları tamamlayın.",

@@ -19,6 +19,7 @@
     "build:web": "next build",
     "build:bundles": "node scripts/build-bundles.mjs",
     "build:relay": "node scripts/build-bundles.mjs --relay",
+    "build:worker": "node scripts/build-bundles.mjs --worker",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "cities:build": "node scripts/build-cities.mjs",

@@ -363,4 +363,8 @@ export const core = {
   "electron.deliveryAlert.title": "Unsubscribe link warning",
   "electron.deliveryAlert.body":
     "Unsubscribe requests may not be processed. See the Compliance page for details.",
+  // Unsubscribe server: Cloudflare Worker (recommended) and VPS key file instructions
+  "unsubInfra.file.worker":
+    "Cloudflare Worker (recommended): in the Worker's Settings → Variables and Secrets, add a Secret named RELAY_KEYS, paste the content of the downloaded file as its value unchanged, and deploy.",
+  "unsubInfra.file.vps": "If you use your own server (VPS)",
 } as const satisfies { readonly [K in keyof typeof TrCore]: string };
