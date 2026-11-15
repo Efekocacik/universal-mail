@@ -70,41 +70,71 @@ export function normaliseName(s: string): string {
   return out || folded || "?";
 }
 
-function bigrams(s: string): Map<string, number> {
-  const m = new Map<string, number>();
-  for (let i = 0; i < s.length - 1; i++) {
-    const g = s.slice(i, i + 2);
-    m.set(g, (m.get(g) ?? 0) + 1);
+/** Bir adın benzerlik profili: bigram çoklu kümesi ve belirteç kümesi bir kez hesaplanır (çift başına yeniden değil). */
+export interface NameProfile {
+  /** Boşluksuz metin (kısa adların eşitlik denetimi için). */
+  compact: string;
+  bigrams: Map<string, number>;
+  /** Bigram sayısı (= compact.length − 1; kısa adlarda 0). */
+  bigramCount: number;
+  tokens: Set<string>;
+}
+
+export function nameProfile(s: string): NameProfile {
+  const compact = s.replace(/\s+/g, "");
+  const bigrams = new Map<string, number>();
+  for (let i = 0; i < compact.length - 1; i++) {
+    const g = compact.slice(i, i + 2);
+    bigrams.set(g, (bigrams.get(g) ?? 0) + 1);
   }
-  return m;
+  return {
+    compact,
+    bigrams,
+    bigramCount: Math.max(compact.length - 1, 0),
+    tokens: new Set(s.split(" ").filter(Boolean)),
+  };
+}
+
+function diceProfiles(x: NameProfile, y: NameProfile): number {
+  if (x.compact.length < 2 || y.compact.length < 2)
+    return x.compact === y.compact && x.compact.length > 0 ? 1 : 0;
+  // Küçük haritada dolaşılır, büyükte aranır.
+  const [small, big] = x.bigrams.size <= y.bigrams.size ? [x, y] : [y, x];
+  let common = 0;
+  for (const [g, n] of small.bigrams) {
+    const m = big.bigrams.get(g);
+    if (m) common += Math.min(n, m);
+  }
+  return (2 * common) / (x.bigramCount + y.bigramCount);
+}
+
+function containmentProfiles(x: NameProfile, y: NameProfile): number {
+  const min = Math.min(x.tokens.size, y.tokens.size);
+  if (min < 2) return 0;
+  const [small, big] = x.tokens.size <= y.tokens.size ? [x, y] : [y, x];
+  let inter = 0;
+  for (const t of small.tokens) if (big.tokens.has(t)) inter++;
+  return inter / min;
+}
+
+/** İki ad profilinin benzerliği (sıcak yol; eşleştirme bunu kullanır). */
+export function profileSimilarity(x: NameProfile, y: NameProfile): number {
+  return Math.max(diceProfiles(x, y), containmentProfiles(x, y));
 }
 
 /** Sørensen–Dice (bigram çoklu kümesi, boşluklar yok sayılır). 0..1 */
 export function diceBigram(a: string, b: string): number {
-  const x = a.replace(/\s+/g, "");
-  const y = b.replace(/\s+/g, "");
-  if (x.length < 2 || y.length < 2) return x === y && x.length > 0 ? 1 : 0;
-  const bx = bigrams(x);
-  const by = bigrams(y);
-  let common = 0;
-  for (const [g, n] of bx) common += Math.min(n, by.get(g) ?? 0);
-  return (2 * common) / (x.length - 1 + (y.length - 1));
+  return diceProfiles(nameProfile(a), nameProfile(b));
 }
 
 /** |A∩B| / min(|A|,|B|) (belirteç kümeleri); kısa taraf 2 belirteçten azsa 0. */
 export function tokenContainment(a: string, b: string): number {
-  const A = new Set(a.split(" ").filter(Boolean));
-  const B = new Set(b.split(" ").filter(Boolean));
-  const min = Math.min(A.size, B.size);
-  if (min < 2) return 0;
-  let inter = 0;
-  for (const t of A) if (B.has(t)) inter++;
-  return inter / min;
+  return containmentProfiles(nameProfile(a), nameProfile(b));
 }
 
 /** İki NORMALLEŞTİRİLMİŞ adın benzerliği. */
 export function nameSimilarity(a: string, b: string): number {
-  return Math.max(diceBigram(a, b), tokenContainment(a, b));
+  return profileSimilarity(nameProfile(a), nameProfile(b));
 }
 
 const GB_POSTCODE = /^([A-Z]{1,2}\d[A-Z\d]?)\s*\d[A-Z]{2}$/i;
@@ -154,11 +184,14 @@ export function addressKey(line: string | null | undefined): string | null {
   return k.length >= 5 && /\d/.test(k) ? k : null;
 }
 
-/** Şehir anahtarı (katlanmış; "Saint-Denis" ≡ "saint denis"). */
+/** INSEE belediye etiketi belediye bölgesini içerir ("PARIS 8", "LYON 3E ARRONDISSEMENT"); harita "Paris" der. */
+const ARRONDISSEMENT = /^(paris|lyon|marseille) \d{1,2}(?: ?(?:e|er|eme))?(?: arrondissement)?$/;
+
+/** Şehir anahtarı (katlanmış; "Saint-Denis" ≡ "saint denis"; "PARIS 8" ≡ "Paris"). */
 export function localityKey(s: string | null | undefined): string | null {
   if (!s) return null;
   const k = foldText(s);
-  return k || null;
+  return k.replace(ARRONDISSEMENT, "$1") || null;
 }
 
 export interface MatchCandidate {
@@ -193,22 +226,31 @@ export type MatchDecision =
   | { status: "unmatched"; placeId: null; score: number | null; reason: MatchReason }
   | { status: "pending"; placeId: null; score: null; reason: "no_cache" };
 
-/** Ülke başına bloklama dizinleri (çalışma başına bir kez kurulur; şirket başına maliyet O(blok)). */
+/** Ad profili önceden hesaplanmış aday (dizin kurulurken bir kez). */
+export interface IndexedCandidate extends MatchCandidate {
+  profile: NameProfile;
+}
+
+/**
+ * Ülke başına bloklama dizinleri (çalışma başına bir kez kurulur; şirket başına maliyet O(blok)). Adayların ad
+ * profilleri burada BİR KEZ hesaplanır; çift başına yalnızca harita aramaları kalır.
+ */
 export interface CandidateIndex {
-  byCity: Map<string, MatchCandidate[]>;
-  byPostcode: Map<string, MatchCandidate[]>;
+  byCity: Map<string, IndexedCandidate[]>;
+  byPostcode: Map<string, IndexedCandidate[]>;
   size: number;
 }
 
 export function buildCandidateIndex(cands: readonly MatchCandidate[]): CandidateIndex {
-  const byCity = new Map<string, MatchCandidate[]>();
-  const byPostcode = new Map<string, MatchCandidate[]>();
-  const push = (m: Map<string, MatchCandidate[]>, k: string, c: MatchCandidate) => {
+  const byCity = new Map<string, IndexedCandidate[]>();
+  const byPostcode = new Map<string, IndexedCandidate[]>();
+  const push = (m: Map<string, IndexedCandidate[]>, k: string, c: IndexedCandidate) => {
     const arr = m.get(k);
     if (arr) arr.push(c);
     else m.set(k, [c]);
   };
-  for (const c of cands) {
+  for (const raw of cands) {
+    const c: IndexedCandidate = { ...raw, profile: nameProfile(raw.nameNorm) };
     if (c.cityKey) push(byCity, c.cityKey, c);
     if (c.postcodeKey) push(byPostcode, c.postcodeKey, c);
   }
@@ -216,7 +258,7 @@ export function buildCandidateIndex(cands: readonly MatchCandidate[]): Candidate
 }
 
 interface Scored {
-  cand: MatchCandidate;
+  cand: IndexedCandidate;
   sim: number;
   postcode: boolean;
   city: boolean;
@@ -229,9 +271,9 @@ function containsPhrase(hay: string, needle: string): boolean {
   return ` ${hay} `.includes(` ${needle} `);
 }
 
-function blockFor(s: MatchSubject, index: CandidateIndex): MatchCandidate[] {
+function blockFor(s: MatchSubject, index: CandidateIndex): IndexedCandidate[] {
   const seen = new Set<string>();
-  const out: MatchCandidate[] = [];
+  const out: IndexedCandidate[] = [];
   for (const c of [
     ...(s.localityKey ? (index.byCity.get(s.localityKey) ?? []) : []),
     ...(s.postcodeKey ? (index.byPostcode.get(s.postcodeKey) ?? []) : []),
@@ -265,9 +307,10 @@ export function decideMatch(
   const block = all.filter((c) => !taken.has(c.placeId));
   if (block.length === 0)
     return { status: "unmatched", placeId: null, score: null, reason: "no_candidates" };
+  const profile = nameProfile(s.nameNorm);
   const scored: Scored[] = block.map((cand) => ({
     cand,
-    sim: nameSimilarity(s.nameNorm, cand.nameNorm),
+    sim: profileSimilarity(profile, cand.profile),
     postcode: s.postcodeKey !== null && cand.postcodeKey === s.postcodeKey,
     city: s.localityKey !== null && cand.cityKey === s.localityKey,
     address: s.addressKey !== null && containsPhrase(cand.addressFold, s.addressKey),

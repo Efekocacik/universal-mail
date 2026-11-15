@@ -491,7 +491,7 @@ async function searchWithRateRetry(
       const wait = e.retryAfterMs ?? 5_000;
       ctx.log(`Sicil hız sınırı: ${Math.round(wait / 1000)} sn bekleniyor.`);
       await (ctx.sleep ?? registryHttp.deps.sleep ?? defaultSleep)(wait);
-      if (ctx.shouldStop()) throw e;
+      if (ctx.shouldStop()) throw new RegistryFetchInterrupted();
     }
   }
 }
@@ -510,11 +510,27 @@ export async function executeFetch(
   const clock = ctx.now ?? Date.now;
   const [run] = await db.select().from(registryRuns).where(eq(registryRuns.id, runId)).limit(1);
   if (!run || run.status === "done" || run.status === "failed") return "skipped";
+
+  // Yeniden denemede `started_at` korunur: bu çalışmanın İLK denemeden beri eklediği kayıtlar "yeni" sayılır.
+  const startedAt = run.startedAt ?? clock();
   if (run.status === "queued")
     await db
       .update(registryRuns)
-      .set({ status: "running", startedAt: clock() })
+      .set({ status: "running", startedAt })
       .where(eq(registryRuns.id, runId));
+  // Kaynak başına tek etkin çalışma (kısmi tekil indeks) → bu andan sonra ilk kez görülen kayıtlar bu çalışmanındır.
+  const countNew = async () => {
+    const [r] = await db
+      .select({ n: sql<number>`count(*)` })
+      .from(registryCompanies)
+      .where(
+        and(
+          eq(registryCompanies.source, run.source),
+          sql`${registryCompanies.firstSeenAt} >= ${startedAt}`,
+        ),
+      );
+    return Number(r?.n ?? 0);
+  };
 
   let fetched = 0;
   let created = 0;
@@ -522,7 +538,7 @@ export async function executeFetch(
     const provider = ctx.provider ?? (await providerFor(db, run.source, run.isDemo));
     let cursor: string | null = null;
     for (let page = 0; page < MAX_PAGES; page++) {
-      if (ctx.shouldStop()) throw new Error("İşçi kapanıyor; sicil çekme sonra sürdürülecek.");
+      if (ctx.shouldStop()) throw new RegistryFetchInterrupted();
       const res = await searchWithRateRetry(
         provider,
         {
@@ -535,13 +551,14 @@ export async function executeFetch(
         },
         ctx,
       );
-      created += await upsertCompanies(db, res.items, {
+      await upsertCompanies(db, res.items, {
         source: run.source,
         isDemo: run.isDemo,
         runId,
         now: clock(),
       });
       fetched += res.items.length;
+      created = await countNew();
       await db
         .update(registryRuns)
         .set({ fetchedCount: fetched, newCount: created })
@@ -550,6 +567,11 @@ export async function executeFetch(
       if (!cursor) break;
     }
   } catch (e) {
+    // İşçi kapanışı bir hata değildir: çalışma `failed` yapılmaz, iş katmanı denemeyi geri verip yeniden kuyruğa alır.
+    if (e instanceof RegistryFetchInterrupted) {
+      ctx.log(`Sicil çalışması ${runId}: işçi kapanıyor; sonraki açılışta baştan sürdürülecek.`);
+      throw e;
+    }
     const code: RegistryRunErrorCode =
       e instanceof RegistryProviderError ? e.code : "REGISTRY_UPSTREAM";
     const permanent = e instanceof RegistryProviderError && PERMANENT_RUN_ERRORS.has(e.code);
@@ -561,6 +583,15 @@ export async function executeFetch(
     throw e;
   }
 
+  // Eşleştirme işi çalışma `done` olmadan ÖNCE kuyruğa alınır: arayüz hiçbir anda "bitti ama eşleştirme yok" görmez
+  // (yoklama erken durup eşleşme sonucunu kaçırırdı). İşçi işleri sırayla çalıştırdığı için eşleştirme bu iş bitmeden
+  // başlamaz; yeniden denemede tekilleştirme anahtarı ikinci işi engeller.
+  await enqueueJob(
+    db,
+    REGISTRY_MATCH_JOB,
+    { runId },
+    { dedupeKey: `${REGISTRY_MATCH_JOB}:${runId}:fetch`, maxAttempts: 2 },
+  );
   const [pending] = await db
     .select({ n: sql<number>`count(*)` })
     .from(registryCompanies)
@@ -578,12 +609,6 @@ export async function executeFetch(
       pendingCount: Number(pending?.n ?? 0),
     })
     .where(eq(registryRuns.id, runId));
-  await enqueueJob(
-    db,
-    REGISTRY_MATCH_JOB,
-    { runId },
-    { dedupeKey: `${REGISTRY_MATCH_JOB}:${runId}:fetch`, maxAttempts: 2 },
-  );
   ctx.log(`Sicil çalışması ${runId}: ${fetched} kayıt (${created} yeni).`);
   return "done";
 }
@@ -593,9 +618,19 @@ export class PermanentRegistryError extends Error {
   override name = "PermanentRegistryError";
 }
 
+/** İşçi kapanırken çekme durdu: hata DEĞİLDİR; iş katmanı deneme hakkı harcamadan yeniden kuyruğa alır. */
+export class RegistryFetchInterrupted extends Error {
+  override name = "RegistryFetchInterrupted";
+  constructor() {
+    super("İşçi kapanıyor; sicil çekme sonra sürdürülecek.");
+  }
+}
+
 /* ------------------------------------------------ eşleştirme ------------------------------------------------ */
 
-const MATCH_CHUNK = 2000;
+/** Kayıt dilimi; dilimler arasında olay döngüsüne dönülür (işçinin kalp atışı ve kapanış denetimi aksamaz). */
+const MATCH_CHUNK = 500;
+const yieldToEventLoop = () => new Promise<void>((r) => setImmediate(r));
 const WRITE_CHUNK = 500;
 
 /**
@@ -672,7 +707,14 @@ async function writeDecisions(db: Db, decisions: Map<number, MatchDecision>, now
   }
 }
 
-/** Çalışma sayaçlarını kayıtlardan yeniden hesaplar (tek ifade, `registry_companies_run_idx`). */
+/**
+ * Çalışma sayaçlarını kayıtlardan yeniden hesaplar (tek ifade, `registry_companies_run_idx`).
+ *
+ * Sayaçlar ANLIK GÖRÜNTÜDÜR: bir kayıt yeniden görüldüğünde `last_run_id` en yeni çalışmaya geçer, bu yüzden
+ * `last_run_id` üzerinden sayım yalnızca kaynağının EN YENİ çalışması için eksiksizdir. Yalnızca o (ve `done`) çalışma
+ * güncellenir; eski çalışmalar kendi eşleştirmelerinin sonundaki değerleri korur (genel "Yeniden eşleştir" geçmişi
+ * 0/0/0'a düşürmez). `runId` verilirse yalnızca o çalışma (en yeniyse) güncellenir.
+ */
 export async function refreshRunCounts(db: Db, runId: number | null): Promise<void> {
   const c = (statuses: string) =>
     sql.raw(
@@ -683,7 +725,9 @@ export async function refreshRunCounts(db: Db, runId: number | null): Promise<vo
       matched_count = ${c("'matched','manual'")},
       unmatched_count = ${c("'unmatched','rejected'")},
       pending_count = ${c("'pending'")}
-    WHERE ${runId === null ? sql`1` : sql`id = ${runId}`}`);
+    WHERE status = 'done'
+      AND id IN (SELECT max(r2.id) FROM registry_runs r2 GROUP BY r2.source)
+      AND ${runId === null ? sql`1` : sql`id = ${runId}`}`);
 }
 
 export interface MatchSummary {
@@ -696,7 +740,9 @@ export interface MatchSummary {
 /**
  * `registry.match` işi: çalışmanın (veya tümünün) `pending`/`unmatched` kayıtları ile yeri silinmiş `matched` kayıtları
  * oturum önbelleğindeki adaylarla eşleştirilir. `manual`/`rejected` kayıtlara dokunulmaz; zaten bağlı yerler aday
- * değildir (bire bir). Kayıtlar 2000'lik kimlik dilimleriyle okunur; aday dizini çalışma başına bir kez kurulur.
+ * değildir (bire bir). Kayıtlar 500'lük kimlik dilimleriyle okunur (dilimler arasında olay döngüsüne dönülür); aday
+ * dizini çalışma başına bir kez kurulur. Kendisinden lead oluşturulmuş kayıtlar (`lead_id`) eşleştirilmez: aynı işletme
+ * için ikinci (harita) lead'i ile ikili sıra/kampanya oluşmasın; o kaydın lead'i zaten vardır.
  */
 export async function runMatch(
   db: Db,
@@ -711,6 +757,7 @@ export async function runMatch(
         sql`${registryCompanies.matchedPlaceId} IS NULL`,
       ),
     )!,
+    sql`${registryCompanies.leadId} IS NULL`,
   ];
   if (runId !== null) scope.push(eq(registryCompanies.lastRunId, runId));
   const countries = (
@@ -762,6 +809,7 @@ export async function runMatch(
     }
     await writeDecisions(db, decisions, now);
     if (rows.length < MATCH_CHUNK) break;
+    await yieldToEventLoop();
   }
   await refreshRunCounts(db, runId);
   return summary;
@@ -922,7 +970,7 @@ export async function promoteToLead(
       const [l] = await tx
         .select({ id: leads.id })
         .from(leads)
-        .where(eq(leads.placeId, c.matchedPlaceId))
+        .where(and(eq(leads.placeId, c.matchedPlaceId), sql`${leads.archivedAt} IS NULL`))
         .limit(1);
       throw new RegistryServiceError("REGISTRY_MATCHED", "Kayıt haritadaki bir yerle eşleşti.", {
         leadId: l?.id ?? null,

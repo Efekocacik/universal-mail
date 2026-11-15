@@ -29,6 +29,7 @@ import {
   useCreateRegistryRun,
   usePromoteToLead,
   useRegistryCompanies,
+  useRegistryAutoRefresh,
   useRegistryRuns,
   useRematch,
   type RegistryCompanyDto,
@@ -47,6 +48,8 @@ export function RegistryPage() {
   const runs = useRegistryRuns();
   const demo = settings?.settings["places.provider"] === "mock";
   const busy = !!runs.data && (runs.data.matchActive || runs.data.runs.some(isRunActive));
+  // Kayıt listeleri yalnızca iş sürerken yoklanır; çalışma/eşleştirme durumu değişince (bitiş dahil) bir kez yenilenir.
+  useRegistryAutoRefresh(runs.data);
 
   return (
     <div className="um-scroll min-h-0 flex-1">

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, jobs, leads, registryCompanies, registryRuns } from "@/lib/db/schema";
-import { enqueueJob } from "@/lib/jobs/queue";
+import { enqueueJob, failJob } from "@/lib/jobs/queue";
 import type { JobContext } from "@/lib/jobs/registry";
 import { NonRetryableJobError } from "@/lib/jobs/registry";
 import { handleRegistryFetch, handleRegistryMatch } from "@/lib/registry/jobs";
@@ -12,7 +12,9 @@ import {
   encodeCursor,
   executeFetch,
   reapOrphanRuns,
+  promoteToLead,
   refreshRunCounts,
+  RegistryFetchInterrupted,
   registryHttp,
   runMatch,
   upsertCompanies,
@@ -346,10 +348,50 @@ describe("canlı akış (sahte HTTP)", () => {
     const runs = await db.select().from(registryRuns).orderBy(registryRuns.id);
     expect(runs[1]).toMatchObject({ fetchedCount: 3, newCount: 1 });
     expect((await db.select().from(registryCompanies)).length).toBe(3);
-    // Önceki çalışmanın kayıtları yeni çalışmaya geçti; eski çalışmanın sayaçları yeniden hesaplanır.
+    // Önceki çalışmanın kayıtları yeni çalışmaya geçti (`last_run_id`). Sayaçlar anlık görüntüdür: genel yeniden sayım
+    // yalnızca kaynağın EN YENİ çalışmasını günceller; eski çalışmanın geçmişi 0/0/0'a düşmez.
     await refreshRunCounts(db, null);
-    const [old] = await db.select().from(registryRuns).where(eq(registryRuns.id, runs[0]!.id));
-    expect(old!.pendingCount).toBe(0);
+    await refreshRunCounts(db, runs[0]!.id);
+    const after = await db.select().from(registryRuns).orderBy(registryRuns.id);
+    expect(after[0]).toMatchObject({ fetchedCount: 2, pendingCount: 2 });
+    expect(after[1]).toMatchObject({ fetchedCount: 3, pendingCount: 3 });
+  });
+
+  it("geçici hatadan sonra yeniden deneme: ilk denemede eklenen kayıtlar da yeni sayılır", async () => {
+    await enableCh();
+    const item = (n: number) => ({
+      company_number: `7100000${n}`,
+      company_name: `RETRY ${n} CAFE LTD`,
+      date_of_creation: "2026-11-10",
+      sic_codes: ["56102"],
+      registered_office_address: { locality: "London", postal_code: "EC1A 1ZZ" },
+    });
+    // Önceden görülmüş bir kayıt yeni sayılmamalı.
+    fakeCh({ hits: 1, items: [item(9)] });
+    await runPost({ source: "companies_house" });
+    await drainRegistryJobs(db);
+    // İkinci çalışma: ilk sayfa gelir, ikinci sayfa 503 → iş yeniden denenir.
+    let calls = 0;
+    registryHttp.deps = {
+      sleep: async () => undefined,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        calls++;
+        const start = Number(new URL(String(input)).searchParams.get("start_index") ?? 0);
+        if (calls === 2) return new Response("{}", { status: 503 });
+        const body =
+          start === 0
+            ? { hits: 4, items: [item(1), item(2)] }
+            : { hits: 4, items: [item(3), item(9)] };
+        return new Response(JSON.stringify(body), { status: 200 });
+      }) as typeof fetch,
+    };
+    await runPost({ source: "companies_house" });
+    const [, run2] = await db.select().from(registryRuns).orderBy(registryRuns.id);
+    const ctx = { shouldStop: () => false, log: () => undefined };
+    await expect(executeFetch(db, run2!.id, { ...ctx, finalAttempt: false })).rejects.toThrow();
+    expect(await executeFetch(db, run2!.id, { ...ctx, finalAttempt: false })).toBe("done");
+    const [done] = await db.select().from(registryRuns).where(eq(registryRuns.id, run2!.id));
+    expect(done).toMatchObject({ status: "done", fetchedCount: 4, newCount: 3 });
   });
 
   it("401 → çalışma failed REGISTRY_AUTH, iş yeniden denenmez; sına uç noktası 400", async () => {
@@ -433,6 +475,41 @@ describe("canlı akış (sahte HTTP)", () => {
     });
     // Bitmiş çalışma yeniden teslimde atlanır (idempotent).
     expect(await executeFetch(db, r2!.id, { ...ctx, finalAttempt: false })).toBe("skipped");
+  });
+
+  it("işçi kapanışı deneme hakkı harcamaz: son denemede bile çalışma failed olmaz, iş gecikmesiz yeniden kuyruğa", async () => {
+    await enableCh();
+    await runPost({ source: "companies_house" });
+    const [run] = await db.select().from(registryRuns);
+    const [job] = await db.select().from(jobs).where(eq(jobs.type, "registry.fetch"));
+    // Döngü işi kaparken `attempts`'ı artırır: bu son deneme (3/3).
+    await db.update(jobs).set({ status: "running", attempts: 3 }).where(eq(jobs.id, job!.id));
+    const logs: string[] = [];
+    const ctx: JobContext = {
+      job: { ...job!, status: "running", attempts: 3 },
+      payload: job!.payload,
+      db,
+      shouldStop: () => true,
+      log: (m) => void logs.push(m),
+    };
+    const err = await handleRegistryFetch(ctx).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RegistryFetchInterrupted);
+    expect(err).not.toBeInstanceOf(NonRetryableJobError);
+    expect(ctx.job.attempts).toBe(2);
+    expect((await db.select().from(jobs).where(eq(jobs.id, job!.id)))[0]!.attempts).toBe(2);
+    // Döngünün yaptığı: failJob(ctx.job) → deneme hakkı kaldığı için yeniden kuyruğa.
+    expect(await failJob(db, ctx.job, String(err))).toBe("queued");
+    expect((await db.select().from(registryRuns))[0]).toMatchObject({
+      status: "running",
+      errorCode: null,
+    });
+    expect(logs.join(" ")).not.toMatch(/REGISTRY_/);
+    // Sonraki açılışta iş sürer ve çalışma tamamlanır.
+    fakeCh({ hits: 0, items: [] });
+    await db.update(jobs).set({ runAt: 0 }).where(eq(jobs.id, job!.id));
+    await drainRegistryJobs(db);
+    expect((await db.select().from(registryRuns))[0]!.id).toBe(run!.id);
+    expect((await db.select().from(registryRuns))[0]!.status).toBe("done");
   });
 
   it("işçi kapanırken iş yeniden denenir; çalışma açık kalır", async () => {
@@ -577,5 +654,92 @@ describe("iş işleyicileri", () => {
     ]);
     const [counted] = await db.select().from(registryRuns).where(eq(registryRuns.id, run!.id));
     expect(counted).toMatchObject({ matchedCount: 2, unmatchedCount: 1, pendingCount: 0 });
+  });
+});
+
+describe("sicilden oluşturulan lead ile harita lead'i çakışmaz", () => {
+  const base = {
+    countryCode: "GB" as const,
+    activityScheme: "SIC2007" as const,
+    activityCodes: ["56102"],
+    incorporatedOn: "2026-11-05",
+    postcode: null,
+    locality: "Leeds",
+    addressLine: null,
+    registryStatus: "active",
+    tradingName: null,
+  };
+  async function doneRun() {
+    const [run] = await db
+      .insert(registryRuns)
+      .values({
+        source: "companies_house",
+        status: "done",
+        activityScheme: "SIC2007",
+        activityCodes: ["56102"],
+        windowFrom: "2026-11-01",
+        windowTo: "2026-11-15",
+        createdAt: Date.now(),
+        finishedAt: Date.now(),
+      })
+      .returning();
+    return run!;
+  }
+
+  it("lead'e dönüştür → o şehirde tarama → yeniden eşleştir: kayıt yere bağlanmaz, tek lead kalır", async () => {
+    await completeSetup(db);
+    const run = await doneRun();
+    await upsertCompanies(
+      db,
+      [
+        { ...base, externalId: "D1", name: "FERN HOLLOW CAFE LTD" },
+        { ...base, externalId: "D2", name: "QUARTZ LANE BAKERY LTD" },
+      ],
+      { source: "companies_house", isDemo: false, runId: run.id, now: Date.now() },
+    );
+    // Önbellekte Leeds yok → ikisi de bekliyor; biri lead'e dönüştürülür.
+    await runMatch(db, null);
+    const [d1] = await db
+      .select()
+      .from(registryCompanies)
+      .where(eq(registryCompanies.externalId, "D1"));
+    const { leadId } = await promoteToLead(db, d1!.id);
+    // Sonra kullanıcı Leeds'i tarar: aynı işletmeler haritada da bulunur.
+    const p1 = await seedPlace(db, { name: "Fern Hollow Cafe", city: "Leeds" });
+    const p2 = await seedPlace(db, { name: "Quartz Lane Bakery", city: "Leeds" });
+    const s = await runMatch(db, null);
+    expect(s).toMatchObject({ considered: 1, matched: 1 });
+    const rows = await db.select().from(registryCompanies).orderBy(registryCompanies.externalId);
+    expect(rows.map((r) => [r.externalId, r.leadId, r.matchStatus, r.matchedPlaceId])).toEqual([
+      ["D1", leadId, "pending", null],
+      ["D2", null, "matched", p2.placeId],
+    ]);
+    // Rozet sorgusu: sicil lead'i kendi kaydını, harita lead'i yalnızca eşleşen kaydı görür.
+    expect((await companies(`?leadId=${leadId}`)).items.map((c: { id: number }) => c.id)).toEqual([
+      d1!.id,
+    ]);
+    expect((await companies(`?leadId=${p1.leadId}`)).items).toHaveLength(0);
+  });
+
+  it("REGISTRY_MATCHED arşivlenmiş lead'i göstermez", async () => {
+    await completeSetup(db);
+    const run = await doneRun();
+    const p = await seedPlace(db, { name: "Amber Wick", city: "Leeds" });
+    await upsertCompanies(db, [{ ...base, externalId: "A1", name: "AMBER WICK LTD" }], {
+      source: "companies_house",
+      isDemo: false,
+      runId: run.id,
+      now: Date.now(),
+    });
+    await runMatch(db, run.id);
+    const [c] = await db.select().from(registryCompanies);
+    expect(c!.matchedPlaceId).toBe(p.placeId);
+    await db.update(leads).set({ archivedAt: Date.now() }).where(eq(leads.id, p.leadId));
+    const r = await leadRoute.POST(
+      req("POST", `/api/registry/companies/${c!.id}/lead`, {}),
+      params(c!.id),
+    );
+    expect(r.status).toBe(409);
+    expect(await json(r)).toMatchObject({ code: "REGISTRY_MATCHED", leadId: null });
   });
 });

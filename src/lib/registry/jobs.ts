@@ -1,10 +1,30 @@
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { jobs } from "@/lib/db/schema";
 import { NonRetryableJobError, registerJobHandler, type JobContext } from "@/lib/jobs/registry";
-import { executeFetch, PermanentRegistryError, runMatch } from "./service";
+import {
+  executeFetch,
+  PermanentRegistryError,
+  RegistryFetchInterrupted,
+  runMatch,
+} from "./service";
 import { REGISTRY_FETCH_JOB, REGISTRY_MATCH_JOB } from "./types";
 
 const fetchPayload = z.object({ runId: z.number().int().positive() });
 const matchPayload = z.object({ runId: z.number().int().positive().nullable() });
+
+/**
+ * İşçi kapanışında kesilen iş deneme hakkı harcamaz: kapma sırasında artırılan `attempts` geri alınır (veritabanında ve
+ * döngünün `failJob`'a verdiği iş nesnesinde), böylece döngü işi gecikmesiz yeniden kuyruğa alır. Uygulamayı çekme
+ * sırasında kaç kez kapatırsanız kapatın çalışma `failed` olmaz.
+ */
+async function giveBackAttempt(ctx: JobContext): Promise<void> {
+  await ctx.db
+    .update(jobs)
+    .set({ attempts: sql`max(${jobs.attempts} - 1, 0)` })
+    .where(eq(jobs.id, ctx.job.id));
+  ctx.job.attempts = Math.max(ctx.job.attempts - 1, 0);
+}
 
 /** `registry.fetch`: sicil sayfalarını çeker (bkz. `executeFetch`). Kalıcı hata → yeniden denenmez. */
 export async function handleRegistryFetch(ctx: JobContext): Promise<void> {
@@ -18,6 +38,7 @@ export async function handleRegistryFetch(ctx: JobContext): Promise<void> {
     });
   } catch (e) {
     if (e instanceof PermanentRegistryError) throw new NonRetryableJobError(e.message);
+    if (e instanceof RegistryFetchInterrupted) await giveBackAttempt(ctx);
     throw e;
   }
 }

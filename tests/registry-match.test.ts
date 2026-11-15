@@ -261,3 +261,45 @@ describe("kod → kategori", () => {
     expect(codesForScheme("NAF2025")).toEqual([]);
   });
 });
+
+describe("INSEE belediye bölgesi ve büyük blok başarımı", () => {
+  it("Paris/Lyon/Marseille belediye bölgesi etiketi şehir adına iner", () => {
+    expect(localityKey("PARIS 8")).toBe("paris");
+    expect(localityKey("Paris 8e")).toBe("paris");
+    expect(localityKey("PARIS 1ER ARRONDISSEMENT")).toBe("paris");
+    expect(localityKey("LYON 3E ARRONDISSEMENT")).toBe("lyon");
+    expect(localityKey("Marseille 13eme")).toBe("marseille");
+    // Başka şehirler ve sayı taşıyan adlar değişmez.
+    expect(localityKey("Paris-l'Hôpital")).toBe("paris l hopital");
+    expect(localityKey("Saint-Denis 2")).toBe("saint denis 2");
+    const idx = buildCandidateIndex([cand("p1", "Brulerie Exemple", "Paris", "", "FR")]);
+    const d = decideMatch(
+      { ...subj(1, "LA BRÛLERIE EXEMPLE SAS", "PARIS 8"), countryCode: "FR" },
+      idx,
+    );
+    expect(d).toMatchObject({ status: "matched", placeId: "p1", reason: "name_city" });
+  });
+
+  it("aday profilleri dizinde bir kez hesaplanır; 600 kayıt × 1000 adaylık tek şehir bloğu zaman bütçesinde", () => {
+    const words = ["amber", "birch", "cobalt", "dawn", "ember", "fern", "grove", "hazel", "iris"];
+    const nm = (i: number) =>
+      `${words[i % 9]} ${words[Math.floor(i / 9) % 9]} ${words[Math.floor(i / 81) % 9]} ${i}`;
+    const cands = Array.from({ length: 1000 }, (_, i) => cand(`p${i}`, `${nm(i)} cafe`, "London"));
+    const subjects = Array.from({ length: 600 }, (_, i) =>
+      subj(i + 1, `${nm(i)} cafe ltd`, "London"),
+    );
+    const t0 = performance.now();
+    const index = buildCandidateIndex(cands);
+    // Ön hesap dizinde: çift başına bigram/belirteç kümesi kurulmaz.
+    const first = index.byCity.get("london")![0]!;
+    expect(first.profile.tokens.has("amber")).toBe(true);
+    expect(first.profile.bigramCount).toBe(first.profile.compact.length - 1);
+    const out = assignMatches(subjects, new Map([["GB", index]]));
+    const ms = performance.now() - t0;
+    expect(out.size).toBe(600);
+    expect(out.get(1)).toMatchObject({ status: "matched", placeId: "p0" });
+    // 600 bin çift: yerelde ~0,3 sn (eski, çift başına bigram kuran sürüm ~1,6 sn). Kapsam ölçümü ve paralel yük
+    // altında da kararlı kalacak geniş bütçe; kaba bir gerilemeyi yakalar.
+    expect(ms).toBeLessThan(8_000);
+  }, 30_000);
+});
