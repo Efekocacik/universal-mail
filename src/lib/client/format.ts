@@ -11,6 +11,8 @@ interface Formatters {
   usd: Intl.NumberFormat;
   usdSmall: Intl.NumberFormat;
   date: Intl.DateTimeFormat;
+  /** Takvim günü ('YYYY-MM-DD'): UTC'de biçimlenir, saat dilimi günü kaydırmaz. */
+  isoDay: Intl.DateTimeFormat;
   dateTime: Intl.DateTimeFormat;
   monthYear: Intl.DateTimeFormat;
   relative: Intl.RelativeTimeFormat;
@@ -37,6 +39,12 @@ function fmt(locale: Locale = getLocale()): Formatters {
         maximumFractionDigits: 3,
       }),
       date: new Intl.DateTimeFormat(tag, { day: "numeric", month: "short", year: "numeric" }),
+      isoDay: new Intl.DateTimeFormat(tag, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      }),
       dateTime: new Intl.DateTimeFormat(tag, {
         day: "numeric",
         month: "short",
@@ -56,6 +64,16 @@ export const fmtUsd = (n: number): string =>
   n > 0 && n < 0.1 ? fmt().usdSmall.format(n) : fmt().usd.format(n);
 export const fmtDate = (ms: number | null | undefined): string =>
   ms ? fmt().date.format(new Date(ms)) : "—";
+/**
+ * Takvim günü ('YYYY-MM-DD', ör. sicil kuruluş tarihi) → "16 Eki 2026" / "16 Oct 2026". Gün UTC gece yarısı olarak
+ * çözülür ve UTC'de biçimlenir (yerel saat dilimi günü bir öncekine kaydırmaz). Geçersiz değer olduğu gibi döner.
+ */
+export function fmtIsoDay(day: string | null | undefined, locale?: Locale): string {
+  if (!day) return "—";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return day;
+  const ms = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(ms) ? fmt(locale).isoDay.format(new Date(ms)) : day;
+}
 export const fmtDateTime = (ms: number | null | undefined): string =>
   ms ? fmt().dateTime.format(new Date(ms)) : "—";
 

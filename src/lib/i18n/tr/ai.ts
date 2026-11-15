@@ -32,10 +32,10 @@ export const ai = {
   "ai.settings.test.demo": "Demo kipi: anahtar denenmedi, ağa çıkılmadı.",
   "ai.settings.usage.title": "Bu ayki kullanım ({month})",
   "ai.settings.usage.requests": "İstek",
-  "ai.settings.usage.tokens": "Belirteç (giriş / çıkış)",
+  "ai.settings.usage.tokens": "Kullanılan metin birimi (gönderilen / üretilen)",
   "ai.settings.usage.cost": "Tahmini maliyet",
   "ai.intro.help":
-    "Şablondaki kisisel_giris değişkeninin değeri. E-postada yalnızca onayladığınız metin kullanılır; onaylı metin yoksa yedek metin kullanılır veya ileti gönderilmez.",
+    "Şablondaki {{kisisel_giris}} alanına girecek cümle. E-postada yalnızca onayladığınız metin kullanılır; onaylı metin yoksa yedek metin kullanılır veya ileti gönderilmez.",
   "ai.intro.language": "Giriş dili",
   "ai.intro.generate": "Oluştur",
   "ai.intro.regenerate": "Yeniden oluştur",
@@ -54,6 +54,13 @@ export const ai = {
   "ai.intro.reject": "Reddet",
   "ai.intro.never": "Onaylamadığınız hiçbir metin gönderilmez.",
   "ai.intro.meta": "{model} · tahmini {cost}",
+  "ai.intro.model.opus": "Claude Opus 5.5",
+  "ai.intro.model.haiku": "Claude Haiku 5.5",
+  "ai.intro.approvedInUse":
+    "E-postalarda şu an onaylı metin kullanılıyor; aşağıdaki yeni taslağı onaylarsanız onun yerine geçer:",
+  "ai.settings.reack":
+    "Maliyet onayı artık seçili modele bağlı. Gerçek Claude girişleri için maliyet notunu bir kez yeniden onaylayın.",
+  "ai.settings.reack.button": "Yeniden onayla",
   "ai.intro.meta.demo": "Demo metni · ücretsiz",
   "ai.intro.toast.generated": "Taslak hazır. Okuyun, gerekirse düzeltin ve onaylayın.",
   "ai.intro.toast.approved": "Giriş onaylandı; bu dildeki e-postalarda kullanılacak.",
@@ -65,6 +72,7 @@ export const ai = {
   "ai.external.provider": "Servis",
   "ai.external.provider.hunter": "Hunter.io",
   "ai.external.provider.snov": "Snov.io",
+  "findEmails.useExternalProvider": "Bulunamayanlar için harici servisi ({provider}) de kullan",
   "ai.external.snovId.help":
     "snov.io → Account settings → API bölümündeki User ID (istemci kimliği).",
   "ai.external.snovSecret.help":

@@ -74,6 +74,12 @@ export const registry = {
   "registry.list.empty.unmatched": "No unmatched records",
   "registry.list.empty.unmatchedBody": "Every registry record matched a business on the map.",
   "registry.list.incorporated": "Incorporated: {date}",
+  "registry.list.empty.none": "No registry records yet",
+  "registry.list.empty.noneBody":
+    "Start a registry search with the form above; the records found are listed here.",
+  "registry.list.empty.noResults": "No results for this search",
+  "registry.list.empty.noResultsBody": "Try another name or clear the search box.",
+  "registry.stats.inSearch": "In this search: {n} records",
   "registry.list.score": "Similarity: {score}",
   "registry.list.openLead": "Open the business on the map",
   "registry.list.addLead": "Add as lead",

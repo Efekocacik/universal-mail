@@ -32,10 +32,10 @@ export const ai = {
   "ai.settings.test.demo": "Demo mode: the key was not tested and nothing was sent.",
   "ai.settings.usage.title": "Usage this month ({month})",
   "ai.settings.usage.requests": "Requests",
-  "ai.settings.usage.tokens": "Tokens (input / output)",
+  "ai.settings.usage.tokens": "Text units used (sent / generated)",
   "ai.settings.usage.cost": "Estimated cost",
   "ai.intro.help":
-    "The value of the kisisel_giris template variable. Emails only use text you approved; without approved text the fallback is used or the email is not sent.",
+    "The sentence that goes into the {{kisisel_giris}} field of your template. Emails only use text you approved; without approved text the fallback is used or the email is not sent.",
   "ai.intro.language": "Intro language",
   "ai.intro.generate": "Generate",
   "ai.intro.regenerate": "Generate again",
@@ -54,6 +54,13 @@ export const ai = {
   "ai.intro.reject": "Reject",
   "ai.intro.never": "Nothing is ever sent without your approval.",
   "ai.intro.meta": "{model} · estimated {cost}",
+  "ai.intro.model.opus": "Claude Opus 5.5",
+  "ai.intro.model.haiku": "Claude Haiku 5.5",
+  "ai.intro.approvedInUse":
+    "Emails currently use the approved text; if you approve the new draft below, it replaces it:",
+  "ai.settings.reack":
+    "Cost approval is now tied to the selected model. Approve the cost note once more to use real Claude intros.",
+  "ai.settings.reack.button": "Approve again",
   "ai.intro.meta.demo": "Demo text · free",
   "ai.intro.toast.generated": "Draft ready. Read it, edit if needed, then approve.",
   "ai.intro.toast.approved": "Intro approved; emails in this language will use it.",
@@ -65,6 +72,8 @@ export const ai = {
   "ai.external.provider": "Service",
   "ai.external.provider.hunter": "Hunter.io",
   "ai.external.provider.snov": "Snov.io",
+  "findEmails.useExternalProvider":
+    "Also use the external service ({provider}) for those not found",
   "ai.external.snovId.help": "The User ID (client ID) under snov.io → Account settings → API.",
   "ai.external.snovSecret.help":
     "The API Secret (client secret) in the same section. Stored encrypted on this computer.",

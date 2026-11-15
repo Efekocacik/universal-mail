@@ -98,18 +98,28 @@ export function useIntroAction(leadId: number) {
 }
 
 /**
- * Bir dil için gösterilecek giriş: onaylı varsa o, yoksa en yeni taslak; ikisi de yoksa en yeni reddedilen
- * (kullanıcı neyi reddettiğini görür ve yeniden oluşturabilir). Liste yeniden eskiye sıralıdır.
+ * Bir dil için gösterilecek giriş: onaylı ve taslak girişlerden EN YENİSİ (onaydan sonra "Yeniden oluştur" ile gelen
+ * taslak, eski onaylı metnin arkasında kaybolmaz; kullanıcı onu okuyup onaylayabilir — onaylayınca eskisinin yerine
+ * geçer). İkisi de yoksa en yeni reddedilen (kullanıcı neyi reddettiğini görür ve yeniden oluşturabilir). Sunucu listeyi
+ * yeniden eskiye sıralar; burada da kimliğe göre sıralanır (sıra varsayımına bağlı kalınmaz).
  */
 export function currentIntro(
   intros: readonly LeadIntro[],
   language: IntroLanguageId,
 ): LeadIntro | null {
-  const forLang = intros.filter((i) => i.language === language);
-  return (
-    forLang.find((i) => i.status === "approved") ??
-    forLang.find((i) => i.status === "draft") ??
-    forLang[0] ??
-    null
-  );
+  const forLang = intros.filter((i) => i.language === language).sort((a, b) => b.id - a.id);
+  return forLang.find((i) => i.status === "approved" || i.status === "draft") ?? forLang[0] ?? null;
+}
+
+/**
+ * Gösterilen giriş daha yeni bir taslaksa, e-postada hâlâ kullanılan onaylı metin (yoksa null). Panel bunu "Onaylı metin"
+ * notuyla gösterir: yeni taslak onaylanana kadar `{{kisisel_giris}}` bu metinle dolar.
+ */
+export function supersededApproved(
+  intros: readonly LeadIntro[],
+  language: IntroLanguageId,
+): LeadIntro | null {
+  const current = currentIntro(intros, language);
+  if (!current || current.status !== "draft") return null;
+  return intros.find((i) => i.language === language && i.status === "approved") ?? null;
 }

@@ -19,9 +19,25 @@ export type IntroIssue =
 
 const WRAPPING_QUOTES = /^["'“”‘’«»„]+|["'“”‘’«»„]+$/g;
 
-/** Model çıktısını sadeleştirir: kenar boşlukları, sarmalayan tırnaklar, satır sonları → tek boşluk. */
+/**
+ * Görünmez biçim (Unicode Cf: sıfır genişlikli boşluk/birleştirici, yön işaretleri U+202A–U+202E, U+2066–U+2069) ve
+ * denetim (Cc) karakterleri. Rakam veya telefon kuralını atlatmak (`20\u200b24`) ve e-posta gövdesinde metni görsel
+ * olarak yeniden sıralamak (U+202E) için kullanılabilirler; kurallar çalışmadan ÖNCE silinir.
+ */
+const INVISIBLE_RE = /[\p{Cf}\p{Cc}]/gu;
+
+/**
+ * Model çıktısını sadeleştirir: satır sonu/sekme dahil boşluklar → tek boşluk, görünmez biçim ve denetim karakterleri
+ * silinir, sarmalayan tırnaklar ve kenar boşlukları atılır.
+ */
 export function normalizeIntroText(raw: string): string {
-  return raw.replace(/\s+/g, " ").trim().replace(WRAPPING_QUOTES, "").trim();
+  return raw
+    .replace(/\s+/g, " ")
+    .replace(INVISIBLE_RE, "")
+    .replace(/ {2,}/g, " ")
+    .trim()
+    .replace(WRAPPING_QUOTES, "")
+    .trim();
 }
 
 const EMAIL_RE = /[^\s@]+@[^\s@]+/;
@@ -105,14 +121,26 @@ const EXCERPT_REDACT_EMAIL = /[^\s@]+@[^\s@]+/g;
 const EXCERPT_REDACT_PHONE = /\+?\d[\d\s().-]{5,}\d/g;
 
 /**
- * Ana sayfa HTML'inden görünür metin: betik/stil/gizli öğeler atılır, boşluklar sadeleşir, e-posta ve telefon benzeri
- * dizgiler silinir, en çok 3000 karakter. Metin yoksa null.
+ * Satır içi stille gizlenmiş öğe: `display:none`, `visibility:hidden`, `font-size:0`, `opacity:0` veya ekran dışına
+ * itilmiş konum (`left/top/text-indent: -9999px` gibi). Site sahibi buraya kullanıcıya görünmeyen "talimat" yazabilir;
+ * istem yalnızca ziyaretçinin gördüğü metni almalıdır. (Stil sayfasıyla gizleme burada çözülmez; güvenilmeyen veri
+ * sistem talimatı, çıktı doğrulayıcı ve insan onayı ayrıca korur.)
+ */
+const HIDDEN_STYLE_RE =
+  /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*(?:hidden|collapse)|font-size\s*:\s*0(?:[a-z%]+)?\s*(?:!important)?\s*(?:;|$)|opacity\s*:\s*0(?:\.0+)?\s*(?:!important)?\s*(?:;|$)|(?:left|top|right|text-indent)\s*:\s*-\d{3,}(?:\.\d+)?(?:px|em|rem)?|clip\s*:\s*rect\(\s*0)/i;
+
+/**
+ * Ana sayfa HTML'inden görünür metin: betik/stil/gizli öğeler (öznitelikle veya satır içi stille gizlenenler dahil)
+ * atılır, boşluklar sadeleşir, e-posta ve telefon benzeri dizgiler silinir, en çok 3000 karakter. Metin yoksa null.
  */
 export function visibleTextExcerpt(html: string, max = SITE_EXCERPT_MAX_CHARS): string | null {
   const $ = cheerio.load(html);
   $(
     "script, style, noscript, template, svg, iframe, head, form, [hidden], [aria-hidden=true]",
   ).remove();
+  $("[style]")
+    .filter((_, el) => HIDDEN_STYLE_RE.test($(el).attr("style") ?? ""))
+    .remove();
   const text = $("body")
     .text()
     .replace(EXCERPT_REDACT_EMAIL, " ")

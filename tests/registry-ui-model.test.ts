@@ -73,7 +73,8 @@ describe("çalışma özeti", () => {
     const done = runSummary(run());
     expect(done.rate).toContain("40");
     expect(done.error).toBeNull();
-    expect(done.window).toContain("2026-10-16");
+    // Takvim günleri yerelleştirilir (ham YYYY-AA-GG değil)
+    expect(done.window).toBe("Kuruluş: 16 Eki 2026 – 15 Kas 2026");
     const failed = runSummary(run({ status: "failed", errorCode: "REGISTRY_AUTH" }));
     expect(failed.rate).toBeNull();
     expect(failed.error).toBe(tr["registry.error.REGISTRY_AUTH"]);

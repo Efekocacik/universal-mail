@@ -167,6 +167,27 @@ test("lead ayrıntısı: Oluştur → düzenle → Onayla; şablon ön izlemesi 
   expect(body.html).toContain("send a few packaging samples");
 });
 
+test("onaydan sonra Yeniden oluştur: yeni taslak görünür, onaylı metin notta kalır, yeni taslak onaylanabilir", async () => {
+  await page.goto(`/?lead=${leadId}`);
+  const panel = page.getByTestId("lead-intro-panel").first();
+  const status = panel.getByTestId("lead-intro-status");
+  const text = panel.getByLabel("Giriş metni");
+  await expect(status).toHaveText("Onaylandı");
+  await expect(text).toHaveValue(EDITED);
+
+  await panel.getByRole("button", { name: "Yeniden oluştur" }).click();
+  await expect(status).toHaveText("Onay bekliyor");
+  await expect(text).not.toHaveValue(EDITED);
+  const inUse = panel.getByTestId("lead-intro-approved-in-use");
+  await expect(inUse).toContainText(EDITED);
+  const draft = await text.inputValue();
+
+  await panel.getByRole("button", { name: "Onayla" }).click();
+  await expect(status).toHaveText("Onaylandı");
+  await expect(text).toHaveValue(draft);
+  await expect(inUse).toHaveCount(0);
+});
+
 test("dar ekran (390 px): panel taşmadan görünür", async () => {
   await page.setViewportSize({ width: 390, height: 844 });
   try {

@@ -100,8 +100,9 @@ const aiIntroSchema = z
     model: z.enum(AI_INTRO_MODELS),
     costAckAt: z.number().int().nullable(),
     /**
-     * Onayın verildiği model (sunucu da denetler: onaydan sonra daha pahalı modele geçilmişse canlı üretim yeni onay ister).
-     * Eski kayıtlarda yoktur; yokluk mevcut onayı geçerli sayar.
+     * Onayın verildiği model. `costAckAt` ve bu alan SUNUCUDA damgalanır (`stampAiIntroAck`; istemcinin gönderdiği değer
+     * yalnızca "yeni onay" işaretidir). Canlı üretim, onaydan sonra daha pahalı modele geçildiyse VEYA bu alan yoksa
+     * (Faz 5 öncesi kayıt) yeni onay ister (`aiGate`).
      */
     costAckModel: z.enum(AI_INTRO_MODELS).nullable().optional(),
   })
@@ -109,6 +110,26 @@ const aiIntroSchema = z
     message: "Maliyet notu onaylanmadan yapay zekâ girişi açılamaz.",
     path: ["costAckAt"],
   });
+
+type AiIntroSetting = z.infer<typeof aiIntroSchema>;
+
+/**
+ * Maliyet onayını SUNUCUDA damgalar (ayarlar API'si yazmadan önce çağırır). İstemcinin `costAckAt` değeri yalnızca bir
+ * işarettir: önceki kayıttan FARKLI bir değer "kullanıcı onay penceresini şimdi onayladı" demektir ve onay sunucu saati
+ * ile KAYDEDİLEN model için yazılır. Değer aynıysa önceki onay (zamanı ve modeli) aynen korunur; istemcinin gönderdiği
+ * `costAckModel` yok sayılır. Böylece doğrudan API çağrısıyla onay modeli eski/boş bırakılıp pahalı modele geçilemez.
+ * `costAckAt: null` onayı geri alır.
+ */
+export function stampAiIntroAck(
+  prev: AiIntroSetting,
+  next: AiIntroSetting,
+  now: number,
+): AiIntroSetting {
+  if (next.costAckAt === null) return { ...next, costAckAt: null, costAckModel: null };
+  const fresh = prev.costAckAt === null || next.costAckAt !== prev.costAckAt;
+  if (fresh) return { ...next, costAckAt: now, costAckModel: next.model };
+  return { ...next, costAckAt: prev.costAckAt, costAckModel: prev.costAckModel ?? null };
+}
 
 /** Açılma izleme (varsayılan KAPALI). Açmak gizlilik notunun ("açılma verisi kesin değildir") onayını ister. */
 const trackingOpensSchema = z

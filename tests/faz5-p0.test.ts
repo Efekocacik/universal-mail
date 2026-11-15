@@ -167,11 +167,11 @@ describe("Faz 5 ayarları: API", () => {
         })
       ).status,
     ).toBe(200);
-    expect(await getSetting(db, "ai.intro")).toEqual({
-      enabled: true,
-      model: "claude-haiku-5-5",
-      costAckAt: now,
-    });
+    // Onay sunucuda damgalanır: zaman sunucu saatidir (istemci değeri yalnızca işarettir), model kaydedilen modeldir.
+    const stamped = await getSetting(db, "ai.intro");
+    expect(stamped).toMatchObject({ enabled: true, model: "claude-haiku-5-5" });
+    expect(stamped.costAckModel).toBe("claude-haiku-5-5");
+    expect(stamped.costAckAt).toBeGreaterThanOrEqual(now);
 
     const secretValue = "sk-test-faz5-0123456789";
     await setSecret("anthropic.apiKey", secretValue);

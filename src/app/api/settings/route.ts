@@ -13,6 +13,7 @@ import {
   getSettings,
   setSetting,
   settingSchemas,
+  stampAiIntroAck,
   USER_SETTING_KEYS,
   type UserSettingKey,
 } from "@/lib/settings";
@@ -107,13 +108,20 @@ export const PUT = route(async (req: Request) => {
     // Masaüstü bildirimleri açılıyorsa kapalıyken biriken bildirimler masaüstünde topluca gösterilmez (zilde kalır).
     if (patch["notifications.os"] === true && !(await getSetting(tx, "notifications.os")))
       await skipOsBacklog(tx);
+    // Yapay zekâ maliyet onayı sunucu saatiyle ve kaydedilen modelle damgalanır (istemci değeri yalnızca işarettir).
+    const aiIntro = patch["ai.intro"];
+    const aiIntroStamped = aiIntro
+      ? stampAiIntroAck(await getSetting(tx, "ai.intro"), aiIntro, Date.now())
+      : undefined;
     for (const [key, value] of entries) {
       const normalized =
         key === "targets.countries"
           ? (value as string[]).map((c) => c.toUpperCase())
           : key === "maps.mapId"
             ? normalizeMapId(value as string)
-            : value;
+            : key === "ai.intro"
+              ? aiIntroStamped
+              : value;
       await setSetting(tx, key as UserSettingKey, normalized as never);
     }
     await audit(tx, "settings.updated", "settings", undefined, {

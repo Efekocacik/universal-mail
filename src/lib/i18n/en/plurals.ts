@@ -90,4 +90,5 @@ export const enOne: Partial<Record<TrKey, string>> = {
     "{n} record will be added or strengthened because of unsubscribe or complaint ({domains} of them block an entire domain). These records cannot be removed later.",
   "sup.import.confirm.body":
     "{n} record will be added or strengthened because of unsubscribe or complaint; {domains} of them block an entire domain. These blocks cannot be removed later by an ordinary action. If you are not sure, set the reason of these rows to “manual” in the file.",
+  "registry.stats.inSearch": "In this search: {n} record",
 };

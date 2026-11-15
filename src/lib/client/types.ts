@@ -297,12 +297,17 @@ export interface FindEmailsPreview {
   optedOut: number;
   willSearch: number;
   google: { load: boolean; places: number; estimatedCostUsd: number; remainingBudgetUsd: number };
-  external: { enabled: boolean; configured: boolean; available: boolean };
+  external: {
+    enabled: boolean;
+    provider: ExternalEmailProviderId;
+    configured: boolean;
+    available: boolean;
+  };
 }
 
 export interface EnrichmentStatusResponse {
   jobs: { queued: number; running: number; scheduled: number };
   states: Record<string, number>;
-  external: { enabled: boolean; provider: "hunter"; configured: boolean };
+  external: { enabled: boolean; provider: ExternalEmailProviderId; configured: boolean };
   concurrency: number;
 }

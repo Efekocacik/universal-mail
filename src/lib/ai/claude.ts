@@ -1,3 +1,4 @@
+import { readJsonCapped, type StreamedBody } from "@/lib/http/capped";
 import { buildIntroUserPrompt, INTRO_SYSTEM_PROMPT, validateIntroText } from "./intro";
 import { estimateCostUsd } from "./pricing";
 import {
@@ -19,7 +20,9 @@ import {
  *    de gönderilmez.
  *  - Yanıtta önce `stop_reason` denetlenir; yalnızca `text` blokları birleştirilir (`thinking`/`fallback` yok sayılır).
  *
- * Anahtar yalnızca `x-api-key` başlığında gider; hiçbir hata iletisine, günlüğe veya yanıta yazılmaz.
+ * Anahtar yalnızca `x-api-key` başlığında gider; hiçbir hata iletisine, günlüğe veya yanıta yazılmaz. Yönlendirme
+ * izlenmez (`redirect: "error"`): fetch özel başlıkları başka ana makineye taşırdı. Yanıt gövdesi en çok
+ * `CLAUDE_MAX_BODY_BYTES` okunur.
  */
 
 export const ANTHROPIC_API = "https://api.anthropic.com/v1";
@@ -27,6 +30,8 @@ export const ANTHROPIC_VERSION = "2026-10-21";
 export const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 export const CLAUDE_TIMEOUT_MS = 30_000;
 export const INTRO_MAX_TOKENS = 2048;
+/** Yanıt gövdesi üst sınırı: tek girişlik yanıt birkaç KB'tır. */
+export const CLAUDE_MAX_BODY_BYTES = 256 * 1024;
 
 /** Sunucu tarafı yedeği destekleyen modeller (claude-api: Opus 5.5 evet, Haiku 5.5 hayır). */
 const FALLBACK_MODELS: ReadonlySet<IntroModel> = new Set(["claude-opus-5-5"]);
@@ -37,9 +42,10 @@ export type ClaudeFetch = (
     method: "GET" | "POST";
     headers: Record<string, string>;
     body?: string;
+    redirect: "error";
     signal: AbortSignal;
   },
-) => Promise<{ status: number; json(): Promise<unknown> }>;
+) => Promise<StreamedBody & { status: number; json(): Promise<unknown> }>;
 
 export interface ClaudeClientOptions {
   apiKey: string;
@@ -96,6 +102,7 @@ async function call(
       method,
       headers: claudeHeaders(o.apiKey, o.model),
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      redirect: "error",
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
   } catch (e) {
@@ -105,7 +112,7 @@ async function call(
   }
   let data: Record<string, unknown> = {};
   try {
-    const raw = await res.json();
+    const raw = await readJsonCapped(res, CLAUDE_MAX_BODY_BYTES);
     if (raw && typeof raw === "object") data = raw as Record<string, unknown>;
   } catch {
     if (res.status >= 200 && res.status < 300)

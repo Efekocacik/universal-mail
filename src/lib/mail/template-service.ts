@@ -23,8 +23,10 @@ import {
   renderTemplate,
   TemplateRenderError,
   validateTemplate,
+  type PreviewMarkerLocale,
   type TemplateIssue,
 } from "./template-engine";
+import { getSetting } from "@/lib/settings";
 
 /**
  * Şablon servisi: kaydetme, güncelleme, arşivleme ve ön izleme. API rotası veya arayüz yoktur; GERÇEK GÖNDERİM
@@ -549,6 +551,11 @@ interface ComposeInput {
    * döner. Takip iletisinin konusu (`threadSubject`) varyanttan bağımsızdır.
    */
   subjectVariant?: SubjectVariant;
+  /**
+   * Ön izleme işaretlerinin (`[eksik: x]` / `[missing: x]`) dili. Verilmezse ön izlemede arayüz dili ayarı
+   * (`ui.language`) okunur; gönderimde işaret üretilmez.
+   */
+  markerLocale?: PreviewMarkerLocale;
 }
 
 type ComposeSource = Pick<
@@ -651,6 +658,10 @@ async function composeCore(
         ? "a"
         : null
     : null;
+  const markerLocale =
+    input.purpose === "preview"
+      ? (input.markerLocale ?? (await getSetting(db, "ui.language")))
+      : undefined;
   let body;
   try {
     body = renderTemplate(
@@ -658,6 +669,7 @@ async function composeCore(
       { ...ctx.values, cikis_linki: footer?.unsubscribeUrl ?? null },
       {
         markMissing: input.purpose === "preview",
+        ...(markerLocale ? { markerLocale } : {}),
         ...(ctx.introPending ? { pendingKeys: new Set(["kisisel_giris"] as const) } : {}),
       },
     );

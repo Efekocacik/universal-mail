@@ -8,9 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label, Select, Textarea } from "@/components/ui/input";
 import { HelpTip } from "@/components/ui/tooltip";
+import { LoadError } from "@/features/campaigns/parts";
 import {
   currentIntro,
   INTRO_LANGUAGES,
+  supersededApproved,
   useGenerateIntro,
   useIntroAction,
   useLeadIntros,
@@ -44,10 +46,32 @@ export function LeadIntroPanel({
   const [genError, setGenError] = useState<string | null>(null);
 
   const ai = settings.data?.settings["ai.intro"];
+  const headingId = `lead-intro-${leadId}`;
+  // Yükleme hatası sessizce paneli gizlemez: kullanıcı bölümün neden boş olduğunu görür ve yeniden deneyebilir.
+  if ((intros.isError && !intros.data) || (settings.isError && !settings.data))
+    return (
+      <section
+        aria-labelledby={headingId}
+        className="mx-4 my-3 space-y-2"
+        data-testid="lead-intro-panel"
+      >
+        <h3 id={headingId} className="flex items-center gap-1.5 text-[13px] font-semibold">
+          <Sparkles className="size-3.5 text-primary" aria-hidden />
+          {t("ai.intro.title")}
+        </h3>
+        <LoadError
+          error={intros.error ?? settings.error}
+          onRetry={() => {
+            void intros.refetch();
+            void settings.refetch();
+          }}
+        />
+      </section>
+    );
   if (!ai || !intros.data) return null;
   const list = intros.data;
   const current = currentIntro(list, language);
-  const headingId = `lead-intro-${leadId}`;
+  const approvedInUse = supersededApproved(list, language);
 
   return (
     <section
@@ -115,6 +139,15 @@ export function LeadIntroPanel({
               {genError}
             </p>
           )}
+          {approvedInUse && (
+            <p
+              className="rounded-md bg-muted px-2.5 py-2 text-[12px] text-muted-foreground"
+              data-testid="lead-intro-approved-in-use"
+            >
+              <span className="font-medium text-foreground">{t("ai.intro.approvedInUse")}</span> “
+              {approvedInUse.text}”
+            </p>
+          )}
           {current ? (
             <IntroEditor
               key={`${current.id}:${current.status}:${current.text}`}
@@ -130,6 +163,12 @@ export function LeadIntroPanel({
     </section>
   );
 }
+
+/** Kayıttaki model kimliği → Ayarlar'daki kullanıcı dostu ad (ham kimlik gösterilmez). */
+const MODEL_LABEL_KEY: Record<Exclude<LeadIntro["model"], "demo">, TrKey> = {
+  "claude-opus-5-5": "ai.intro.model.opus",
+  "claude-haiku-5-5": "ai.intro.model.haiku",
+};
 
 const STATUS: Record<
   LeadIntro["status"],
@@ -170,7 +209,10 @@ function IntroEditor({ leadId, intro }: { leadId: number; intro: LeadIntro }) {
         <span className="text-[12px] text-muted-foreground">
           {intro.model === "demo"
             ? t("ai.intro.meta.demo")
-            : t("ai.intro.meta", { model: intro.model, cost: fmtUsd(intro.estCostUsd) })}
+            : t("ai.intro.meta", {
+                model: t(MODEL_LABEL_KEY[intro.model]),
+                cost: fmtUsd(intro.estCostUsd),
+              })}
         </span>
       </div>
       <Label htmlFor={id} className="text-[12px]">

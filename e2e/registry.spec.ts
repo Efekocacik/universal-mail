@@ -112,6 +112,22 @@ test("BK demo çalışması: oran ≥ %30, eşleşmeyen kayıt lead olur ve Keş
   await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
 });
 
+test("arama: oran ve Yeniden eşleştir aramadan etkilenmez; sonuçsuz aramada doğru boş metin", async () => {
+  await page.goto("/scans/registry");
+  const rate = page.getByTestId("registry-match-rate");
+  await expect(rate).toHaveText(/\d/, { timeout: 30_000 });
+  const before = await rate.textContent();
+  await page.getByLabel("Sicil adında ara").fill("zzzz-sonuc-yok");
+  await expect(page.getByTestId("registry-in-search")).toHaveText("Bu aramada: 0 kayıt");
+  await expect(page.getByTestId("registry-empty-noResults").first()).toBeVisible();
+  await expect(page.getByText("Bu sicil kayıtlarının hepsi")).toHaveCount(0);
+  await expect(rate).toHaveText(before ?? "");
+  await expect(page.getByRole("button", { name: "Yeniden eşleştir" })).toBeEnabled();
+  // Kuruluş tarihleri yerelleştirilmiş görünür (ham YYYY-AA-GG değil)
+  await page.getByLabel("Sicil adında ara").fill("");
+  await expect(page.getByTestId("registry-runs")).not.toContainText(/\d{4}-\d{2}-\d{2}/);
+});
+
 test("EN: sicil sayfası İngilizce metinlerle açılır", async () => {
   await page.goto("/settings#appearance");
   await page.getByTestId("language-switch").getByRole("radio", { name: "English" }).click();

@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import {
+  keepPreviousData,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -13,7 +14,7 @@ import { tr } from "@/lib/i18n/tr";
 import type { CompanyStats, RegistryCompanyDto, RegistryRunDto } from "@/lib/registry/service";
 import type { RegistrySource } from "@/lib/registry/types";
 import { api, toSearchParams } from "./api";
-import { fmtNumber } from "./format";
+import { fmtIsoDay, fmtNumber } from "./format";
 
 /**
  * Resmî sicil istemcisi (paket R).
@@ -97,7 +98,7 @@ export function runSummary(r: RegistryRunDto): {
   const rate = formatRate(runMatchRate(r));
   return {
     status: t(`registry.status.${r.status}`),
-    window: t("registry.runs.window", { from: r.windowFrom, to: r.windowTo }),
+    window: t("registry.runs.window", { from: fmtIsoDay(r.windowFrom), to: fmtIsoDay(r.windowTo) }),
     counts: t("registry.runs.counts", {
       fetched: fmtNumber(r.fetchedCount),
       new: fmtNumber(r.newCount),
@@ -180,7 +181,20 @@ export function useRegistryAutoRefresh(
 export interface CompanyPage {
   items: RegistryCompanyDto[];
   nextCursor: string | null;
+  /** Kapsamın tamamı (arama metninden bağımsız): eşleşme oranı ve "Yeniden eşleştir" buna bakar. */
   stats: CompanyStats;
+  /** Arama varken yalnızca aramaya uyanlar; aramasızken null. */
+  searchStats: CompanyStats | null;
+}
+
+/**
+ * Sonuç listesi boşken gösterilecek durum (saf): hiç kayıt yok / bu aramada sonuç yok / sekmenin kendi boş metni.
+ * "Hepsi eşleşti" yalnızca kayıt VARSA ve arama yokken söylenir (ilk ziyarette yanlış söylenmez).
+ */
+export type EmptyListKind = "none" | "noResults" | "tab";
+export function emptyListKind(stats: CompanyStats | undefined, searching: boolean): EmptyListKind {
+  if (!stats || stats.total === 0) return "none";
+  return searching ? "noResults" : "tab";
 }
 
 export function useRegistryCompanies(
@@ -194,6 +208,8 @@ export function useRegistryCompanies(
   };
   return useInfiniteQuery({
     queryKey: registryKeys.companies(query),
+    // Arama değişince eski liste yeni yanıt gelene dek kalır (iskelete düşüp sayaçlar "(0)" olmaz).
+    placeholderData: keepPreviousData,
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) =>
       api<CompanyPage>(

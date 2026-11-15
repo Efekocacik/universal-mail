@@ -35,6 +35,10 @@ export const variants = {
     "Bu dildeki şablonlar yalnızca bilgi amaçlıdır ve kampanyada kullanılamaz (ülke kuralları gönderimi engeller).",
   "tplEditor.category":
     "Kategori varyantı: kampanyada {name} işletmelerine bu şablon gider, diğerlerine genel şablon.",
+  "tplEditor.categoryVariant": "Kategori (varyant)",
+  "tplEditor.categoryVariant.none": "Genel (tüm kategoriler)",
+  "tplEditor.categoryVariant.hint":
+    "İsteğe bağlı. Bir kategori seçerseniz kampanyada o kategorideki işletmelere bu şablon, diğerlerine genel şablon gider.",
   "tplPreview.variant": "Önizlenen konu",
   "tplPreview.variant.a": "Konu A",
   "tplPreview.variant.b": "Konu B",

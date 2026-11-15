@@ -35,6 +35,10 @@ export const variants = {
     "Templates in this language are for information only and cannot be used in campaigns (country rules block sending).",
   "tplEditor.category":
     "Category variant: in a campaign, {name} businesses get this template and everyone else gets the general one.",
+  "tplEditor.categoryVariant": "Category (variant)",
+  "tplEditor.categoryVariant.none": "General (all categories)",
+  "tplEditor.categoryVariant.hint":
+    "Optional. If you pick a category, businesses in that category get this template in a campaign and everyone else gets the general one.",
   "tplPreview.variant": "Subject shown",
   "tplPreview.variant.a": "Subject A",
   "tplPreview.variant.b": "Subject B",

@@ -304,22 +304,20 @@ export async function loadExistingKeys(
       for (const r of crawled) if (r.d && !SHARED_SITE_DOMAINS.has(r.d)) domains.add(r.d);
     }
     // Kullanıcının verdiği siteler: yalnızca içe aktarma/sicil lead'leri (Google lead'lerinde bu sütun hep boştur);
-    // `leads_source_idx` ile tüm tablo taranmaz. Anahtar saklanmadığı için yalnızca adresinde dosyadaki bir anahtarın
-    // geçtiği satırlar okunur (alt dize süzgeci, aday üst kümesi); kesin karşılaştırma bellekte `websiteKey` ile.
+    // `leads_source_idx` ile tüm tablo taranmaz. Anahtar saklanmadığı için adresler TEK doğrusal okumayla gelir ve
+    // `websiteKey` bellekte bir kez hesaplanıp dosyanın anahtar kümesinde (Set, O(1)) aranır: O(lead + dosya).
+    // Önceki `EXISTS (json_each(...) WHERE instr(...))` süzgeci her satırı her alan adıyla karşılaştırıyordu
+    // (O(lead × dosya); 20 bin lead × 5 bin satır ≈ 100 milyon `instr`, yazma işlemi kilidinin içinde).
+    const wanted = new Set(probe.domains);
     const own = await tx
       .select({ w: leads.website })
       .from(leads)
       .where(
-        and(
-          notArchived,
-          inArray(leads.source, ["import", "registry"]),
-          isNotNull(leads.website),
-          sql`EXISTS (SELECT 1 FROM json_each(${JSON.stringify(probe.domains)}) WHERE instr(lower(${leads.website}), value) > 0)`,
-        ),
+        and(notArchived, inArray(leads.source, ["import", "registry"]), isNotNull(leads.website)),
       );
     for (const r of own) {
       const d = websiteKey(r.w);
-      if (d) domains.add(d);
+      if (d && wanted.has(d)) domains.add(d);
     }
   }
   if (probe.emails.length) {

@@ -1,3 +1,4 @@
+import { BodyTooLargeError, readCappedText } from "@/lib/http/capped";
 import { RegistryProviderError } from "./types";
 
 /**
@@ -112,31 +113,16 @@ const tooLarge = () =>
   new RegistryProviderError("REGISTRY_BAD_RESPONSE", "Sicil yanıtı beklenenden büyük.");
 
 /**
- * Gövdeyi BAYT sayarak okur ve sınır aşılır aşılmaz akışı iptal eder: bozuk/düşmanca bir uç (araya giren portal, hatalı
- * kenar sunucusu) işçi belleğine sınırsız veri dolduramaz. `Content-Length` sınırı aşıyorsa hiç okunmaz.
+ * Gövdeyi BAYT sayarak okur ve sınır aşılır aşılmaz akışı iptal eder (ortak katman: `@/lib/http/capped`). Sınır aşımı
+ * sicil hatasına (`REGISTRY_BAD_RESPONSE`) çevrilir.
  */
 export async function readCapped(res: Response, maxBytes: number): Promise<string> {
-  const declared = Number(res.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > maxBytes) {
-    await res.body?.cancel().catch(() => undefined);
-    throw tooLarge();
+  try {
+    return await readCappedText(res, maxBytes);
+  } catch (e) {
+    if (e instanceof BodyTooLargeError) throw tooLarge();
+    throw e;
   }
-  if (!res.body) return "";
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder("utf-8");
-  let total = 0;
-  let out = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      await reader.cancel().catch(() => undefined);
-      throw tooLarge();
-    }
-    out += decoder.decode(value, { stream: true });
-  }
-  return out + decoder.decode();
 }
 
 /** 'YYYY-MM-DD' geçerli bir takvim günü mü? */

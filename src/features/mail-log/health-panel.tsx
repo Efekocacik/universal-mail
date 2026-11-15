@@ -19,15 +19,7 @@ import type { LeadRow } from "@/lib/client/types";
 import { t } from "@/lib/i18n";
 import { MailboxHealthCard, ReadinessCard } from "./mailbox-health-card";
 import { bpToPercent, dnsCodeLabel, dnsStatusLabel, dnsStatusVariant, percentToBp } from "./model";
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
+import { useDebounced } from "@/lib/client/use-debounced";
 
 /* Otomatik durdurma eşikleri ------------------------------------------------------------------------ */
 

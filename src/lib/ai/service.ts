@@ -311,8 +311,10 @@ export function aiGate(
   if (!mode.enabled) return "AI_DISABLED";
   if (mode.demo) return null;
   if (mode.costAckAt === null) return "AI_COST_ACK_REQUIRED";
-  // Onay daha ucuz bir model için verildiyse pahalı modele geçiş yeni onay ister (istemcideki pencerenin sunucu karşılığı).
-  if (mode.model && mode.costAckModel && modelChangeNeedsCostAck(mode.costAckModel, mode.model))
+  // Onay modele bağlıdır (sunucu damgalar): onay modeli bilinmiyorsa (Faz 5 öncesi kayıt) veya onay daha ucuz bir model
+  // için verildiyse canlı üretim yeni onay ister (istemcideki pencerenin sunucu karşılığı).
+  if (!mode.costAckModel) return "AI_COST_ACK_REQUIRED";
+  if (mode.model && modelChangeNeedsCostAck(mode.costAckModel, mode.model))
     return "AI_COST_ACK_REQUIRED";
   if (!hasKey) return "AI_KEY_MISSING";
   return null;

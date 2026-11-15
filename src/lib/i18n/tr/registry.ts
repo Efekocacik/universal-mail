@@ -75,6 +75,12 @@ export const registry = {
   "registry.list.empty.unmatchedBody":
     "Bu sicil kayıtlarının hepsi haritadaki bir işletmeyle eşleşti.",
   "registry.list.incorporated": "Kuruluş: {date}",
+  "registry.list.empty.none": "Henüz sicil kaydı yok",
+  "registry.list.empty.noneBody":
+    "Yukarıdaki formla bir sicil taraması başlatın; bulunan kayıtlar burada listelenir.",
+  "registry.list.empty.noResults": "Bu aramada sonuç yok",
+  "registry.list.empty.noResultsBody": "Başka bir ad deneyin veya arama kutusunu temizleyin.",
+  "registry.stats.inSearch": "Bu aramada: {n} kayıt",
   "registry.list.score": "Benzerlik: {score}",
   "registry.list.openLead": "Haritadaki işletmeyi aç",
   "registry.list.addLead": "Lead olarak ekle",

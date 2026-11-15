@@ -867,28 +867,35 @@ function escapeLike(s: string): string {
 export async function listCompanies(
   db: Db,
   q: CompanyListQuery,
-): Promise<{ items: RegistryCompanyDto[]; nextCursor: string | null; stats: CompanyStats }> {
+): Promise<{
+  items: RegistryCompanyDto[];
+  nextCursor: string | null;
+  stats: CompanyStats;
+  /** Arama (`q`) varken yalnızca aramaya uyan kayıtların sayaçları; aramasızken null. */
+  searchStats: CompanyStats | null;
+}> {
   const limit = Math.min(Math.max(q.limit ?? 50, 1), 100);
-  const base: SQL[] = [];
-  if (q.source) base.push(eq(registryCompanies.source, q.source));
-  if (q.country) base.push(eq(registryCompanies.countryCode, q.country));
-  if (q.runId !== undefined) base.push(eq(registryCompanies.lastRunId, q.runId));
-  if (q.q?.trim()) {
-    const p = `%${escapeLike(q.q.trim())}%`;
-    base.push(
-      or(
-        sql`${registryCompanies.name} LIKE ${p} ESCAPE '\\'`,
-        sql`${registryCompanies.tradingName} LIKE ${p} ESCAPE '\\'`,
-      )!,
-    );
-  }
+  // Kapsam (kaynak/ülke/çalışma/lead) üst sayaçları belirler; arama metni üst sayaçları DEĞİŞTİRMEZ (eşleşme oranı Faz 5
+  // kabul ölçütüdür, yazarken oynamamalı). Arama yalnızca listeyi ve ayrı "bu aramada" sayaçlarını süzer.
+  const scope: SQL[] = [];
+  if (q.source) scope.push(eq(registryCompanies.source, q.source));
+  if (q.country) scope.push(eq(registryCompanies.countryCode, q.country));
+  if (q.runId !== undefined) scope.push(eq(registryCompanies.lastRunId, q.runId));
   if (q.leadId !== undefined)
-    base.push(
+    scope.push(
       or(
         eq(registryCompanies.leadId, q.leadId),
         sql`${registryCompanies.matchedPlaceId} = (SELECT place_id FROM leads WHERE id = ${q.leadId})`,
       )!,
     );
+  const term = q.q?.trim();
+  const search = term
+    ? or(
+        sql`${registryCompanies.name} LIKE ${`%${escapeLike(term)}%`} ESCAPE '\\'`,
+        sql`${registryCompanies.tradingName} LIKE ${`%${escapeLike(term)}%`} ESCAPE '\\'`,
+      )!
+    : null;
+  const base: SQL[] = search ? [...scope, search] : scope;
   const filtered = [...base];
   if (q.match?.length)
     filtered.push(
@@ -923,10 +930,20 @@ export async function listCompanies(
   const nextCursor =
     rows.length > limit && last ? encodeCursor(last.c.incorporatedOn, last.c.id) : null;
 
+  return {
+    items: page.map((r) => toCompanyDto(r.c, r.matchedLeadId ?? null)),
+    nextCursor,
+    stats: await companyStats(db, scope),
+    searchStats: search ? await companyStats(db, base) : null,
+  };
+}
+
+/** Durum başına sayaç (tek gruplu sorgu). */
+async function companyStats(db: Db, where: SQL[]): Promise<CompanyStats> {
   const groups = await db
     .select({ s: registryCompanies.matchStatus, n: sql<number>`count(*)` })
     .from(registryCompanies)
-    .where(base.length ? and(...base) : undefined)
+    .where(where.length ? and(...where) : undefined)
     .groupBy(registryCompanies.matchStatus);
   const count = (f: MatchFilter) =>
     groups.filter((g) => STATUS_GROUP[f].includes(g.s)).reduce((a, g) => a + Number(g.n), 0);
@@ -936,11 +953,7 @@ export async function listCompanies(
     pending: count("pending"),
   };
   const total = stats.matched + stats.unmatched + stats.pending;
-  return {
-    items: page.map((r) => toCompanyDto(r.c, r.matchedLeadId ?? null)),
-    nextCursor,
-    stats: { total, ...stats, matchRate: total ? stats.matched / total : 0 },
-  };
+  return { total, ...stats, matchRate: total ? stats.matched / total : 0 };
 }
 
 /* ------------------------------------------------ lead'e dönüştürme ----------------------------------------- */

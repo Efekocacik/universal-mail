@@ -282,9 +282,16 @@ describe("ayar kapıları", () => {
     expect(aiGate({ enabled: true, demo: false, costAckAt: null }, true)).toBe(
       "AI_COST_ACK_REQUIRED",
     );
-    expect(aiGate({ enabled: true, demo: false, costAckAt: 1 }, false)).toBe("AI_KEY_MISSING");
-    expect(aiGate({ enabled: true, demo: false, costAckAt: 1 }, true)).toBeNull();
-    // Onay Haiku için verildi, sonra Opus seçildi: canlıda yeni onay gerekir; tersi ve eski kayıt (model yok) serbest.
+    const acked = {
+      enabled: true,
+      demo: false,
+      costAckAt: 1,
+      costAckModel: "claude-opus-5-5",
+    } as const;
+    expect(aiGate(acked, false)).toBe("AI_KEY_MISSING");
+    expect(aiGate(acked, true)).toBeNull();
+    // Onay Haiku için verildi, sonra Opus seçildi: canlıda yeni onay gerekir; tersi serbest. Onay modeli bilinmeyen
+    // (Faz 5 öncesi / API ile damgasız yazılmış) kayıt canlıda yeniden onay ister; demo serbest.
     const live = { enabled: true, demo: false, costAckAt: 1 } as const;
     expect(
       aiGate({ ...live, model: "claude-opus-5-5", costAckModel: "claude-haiku-5-5" }, true),
@@ -292,7 +299,11 @@ describe("ayar kapıları", () => {
     expect(
       aiGate({ ...live, model: "claude-haiku-5-5", costAckModel: "claude-opus-5-5" }, true),
     ).toBeNull();
-    expect(aiGate({ ...live, model: "claude-opus-5-5", costAckModel: null }, true)).toBeNull();
+    expect(aiGate({ ...live, model: "claude-opus-5-5", costAckModel: null }, true)).toBe(
+      "AI_COST_ACK_REQUIRED",
+    );
+    expect(aiGate({ ...live, model: "claude-haiku-5-5" }, true)).toBe("AI_COST_ACK_REQUIRED");
+    expect(aiGate({ ...live, demo: true, costAckModel: null }, false)).toBeNull();
     expect(
       aiGate(
         { ...live, demo: true, model: "claude-opus-5-5", costAckModel: "claude-haiku-5-5" },

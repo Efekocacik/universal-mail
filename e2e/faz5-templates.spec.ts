@@ -291,3 +291,33 @@ test("demo gönderim: /stats A/B gönderimi ve açılma özeti sıfırdan büyü
     /\d+ \/ [1-9]\d* ileti açıldı/,
   );
 });
+
+test("editör: kategori varyantı arayüzden seçilir, kaydedilir ve 'Genel'e geri alınır", async () => {
+  const general = (await templatesApi()).find(
+    (t) => t.builtIn && t.language === "en" && t.kind === "initial" && t.categoryKey === null,
+  )!;
+  const dup = await page.request.post(`/api/templates/${general.id}/duplicate`, {
+    headers,
+    data: {},
+  });
+  expect(dup.status()).toBe(201);
+  const id = (await dup.json()).id as number;
+
+  await page.goto(`/templates/${id}`);
+  const category = page.getByLabel("Kategori (varyant)");
+  await expect(category).toHaveValue("");
+  await category.selectOption("restaurant");
+  await expect(page.getByText(/Kategori varyantı: kampanyada Restoran/)).toBeVisible();
+  await page.getByRole("button", { name: "Kaydet" }).first().click();
+  await expect(page.getByText("Şablon kaydedildi.")).toBeVisible();
+  const read = async () =>
+    ((await (await page.request.get(`/api/templates/${id}`)).json()) as Tpl).categoryKey;
+  await expect.poll(read).toBe("restaurant");
+
+  // Geri al (sonraki dosyaların kampanyaları bu kopyayı varyant olarak görmesin)
+  await page.reload();
+  await expect(category).toHaveValue("restaurant");
+  await category.selectOption("");
+  await page.getByRole("button", { name: "Kaydet" }).first().click();
+  await expect.poll(read).toBeNull();
+});

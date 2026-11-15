@@ -1,3 +1,5 @@
+import { readJsonCapped, type StreamedBody } from "@/lib/http/capped";
+
 /**
  * Harici e-posta bulma servisi (SRS 4.5 adım 2, FR-ENR-04): yalnızca kullanıcı açıkça etkinleştirir ve kendi API
  * anahtarını girerse, yerel taramada adres bulunamayan işletmeler için çalışır. Servise yalnızca işletmenin alan adı
@@ -39,13 +41,22 @@ export interface ExternalEmailProvider {
   quota(): Promise<ExternalQuota>;
 }
 
+/**
+ * Yönlendirme izlenmez (`redirect: "error"`): fetch yalnızca Authorization/Cookie başlıklarını ayıklar; `X-API-KEY`
+ * başka bir ana makineye taşınırdı. Gövde en çok `EXTERNAL_MAX_BODY_BYTES` okunur (`@/lib/http/capped`).
+ */
 type FetchLike = (
   url: string,
-  init: { headers: Record<string, string>; signal: AbortSignal },
-) => Promise<{
-  status: number;
-  json(): Promise<unknown>;
-}>;
+  init: { headers: Record<string, string>; redirect: "error"; signal: AbortSignal },
+) => Promise<
+  StreamedBody & {
+    status: number;
+    json(): Promise<unknown>;
+  }
+>;
+
+/** Hunter/Snov yanıt gövdesi üst sınırı (alan adı başına en çok birkaç düzine adres). */
+export const EXTERNAL_MAX_BODY_BYTES = 512 * 1024;
 
 const HUNTER = "https://api.hunter.io/v2";
 
@@ -64,6 +75,7 @@ export function createHunterProvider(
     try {
       res = await fetchImpl(`${HUNTER}${path}`, {
         headers: { "X-API-KEY": apiKey, accept: "application/json" },
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {
@@ -80,7 +92,7 @@ export function createHunterProvider(
       );
     let body: unknown;
     try {
-      body = await res.json();
+      body = await readJsonCapped(res, EXTERNAL_MAX_BODY_BYTES);
     } catch {
       throw new ExternalProviderError(
         "bad_response",
@@ -171,9 +183,10 @@ export type SnovFetch = (
     method?: "GET" | "POST";
     headers: Record<string, string>;
     body?: string;
+    redirect: "error";
     signal: AbortSignal;
   },
-) => Promise<{ status: number; json(): Promise<unknown> }>;
+) => Promise<StreamedBody & { status: number; json(): Promise<unknown> }>;
 
 export interface SnovOptions {
   clientId: string;
@@ -230,6 +243,7 @@ export function createSnovProvider(o: SnovOptions): ExternalEmailProvider {
           ...init.headers,
         },
         ...(payload ? { body: payload.text } : {}),
+        redirect: "error",
         signal: AbortSignal.timeout(10_000),
       });
     } catch (e) {
@@ -237,7 +251,7 @@ export function createSnovProvider(o: SnovOptions): ExternalEmailProvider {
     }
     let body: unknown = {};
     try {
-      body = await res.json();
+      body = await readJsonCapped(res, EXTERNAL_MAX_BODY_BYTES);
     } catch {
       if (res.status >= 200 && res.status < 300)
         throw new ExternalProviderError(

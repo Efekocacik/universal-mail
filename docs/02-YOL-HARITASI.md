@@ -143,17 +143,19 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 **Hedef:** Google'dan önce yakala; daha fazla ülke ve dil.
 
-- [ ] UK Companies House Advanced Search entegrasyonu (SIC listesi yapılandırılabilir, `incorporated_from` kayan pencere).
-- [ ] Fransa INSEE Sirene entegrasyonu (NAF listesi; 2027 NAF 2025 geçişi notu).
-- [ ] Sicil ↔ Google bulanık eşleştirme (ad normalizasyonu + şehir/posta kodu); eşleşmeyenler için ayrı liste.
-- [ ] Şablon dilleri: DE, FR, ES, IT, NL, PT, PL hazır şablonlar (DE yalnızca bilgi amaçlı; gönderim `blocked`).
-- [ ] Kategori bazlı varyantlar ve A/B konu satırı.
-- [ ] Opsiyonel Claude API ile `{{kisisel_giris}}` üretimi; her zaman insan onayı.
-- [ ] Opsiyonel Hunter/Snov entegrasyonu (kullanıcı anahtarı ile).
-- [ ] CSV/XLSX içe aktarma (harici listeler).
-- [ ] Açılma takibi (varsayılan kapalı).
+- [x] UK Companies House Advanced Search entegrasyonu (SIC listesi yapılandırılabilir, `incorporated_from` kayan pencere).
+- [x] Fransa INSEE Sirene entegrasyonu (NAF listesi; 2027 NAF 2025 geçişi notu).
+- [x] Sicil ↔ Google bulanık eşleştirme (ad normalizasyonu + şehir/posta kodu); eşleşmeyenler için ayrı liste.
+- [x] Şablon dilleri: DE, FR, ES, IT, NL, PT, PL hazır şablonlar (DE yalnızca bilgi amaçlı; gönderim `blocked`).
+- [x] Kategori bazlı varyantlar ve A/B konu satırı.
+- [x] Opsiyonel Claude API ile `{{kisisel_giris}}` üretimi; her zaman insan onayı.
+- [x] Opsiyonel Hunter/Snov entegrasyonu (kullanıcı anahtarı ile).
+- [x] CSV/XLSX içe aktarma (harici listeler).
+- [x] Açılma takibi (varsayılan kapalı).
 
 **Kabul:** Son 30 günde kurulmuş UK kafe şirketleri listelenir; en az %30'u Google kayıtlarıyla eşleşir.
+
+**Durum (15 Kasım 2026):** Kodlandı ve test edildi; kabul sahte Companies House sunucusu ve demo taramasıyla kanıtlandı (%40). Gerçek Companies House / INSEE / Claude / Hunter / Snov anahtarlarıyla deneme ve canlı açılma izleme entegrasyon bekliyor; ayrıntı ve açık kalanlar: [`12-FAZ5-NOTLARI.md`](12-FAZ5-NOTLARI.md).
 
 ---
 

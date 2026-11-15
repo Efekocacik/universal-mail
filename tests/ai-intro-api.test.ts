@@ -11,6 +11,7 @@ import { getDb, type Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, leadEnrichment, leadIntros, leads, places } from "@/lib/db/schema";
+import { currentIntro, supersededApproved, type LeadIntro } from "@/lib/client/ai";
 import { buildRenderContext } from "@/lib/mail/render-context";
 import { renderTemplate } from "@/lib/mail/template-engine";
 import { previewTemplateDraft } from "@/lib/mail/template-service";
@@ -72,6 +73,7 @@ async function setup(provider: "mock" | "google" = "mock", ai = true) {
       enabled: true,
       model: "claude-opus-5-5",
       costAckAt: Date.now(),
+      costAckModel: "claude-opus-5-5",
     });
 }
 
@@ -136,7 +138,12 @@ describe("POST /api/leads/:id/intro — kapılar", () => {
     expect(off.status).toBe(400);
     expect((await json(off)).code).toBe("AI_DISABLED");
 
-    await setSetting(db, "ai.intro", { enabled: true, model: "claude-opus-5-5", costAckAt: 1 });
+    await setSetting(db, "ai.intro", {
+      enabled: true,
+      model: "claude-opus-5-5",
+      costAckAt: 1,
+      costAckModel: "claude-opus-5-5",
+    });
     const bare = await addLead({ displayName: null, city: null, categoryKey: null });
     const noCtx = await post(bare);
     expect(noCtx.status).toBe(422);
@@ -214,6 +221,16 @@ describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {
     expect(pending.ok && pending.composed.introPending).toBe(true);
     expect(pending.ok && pending.composed.html).toContain("[onay bekliyor: kisisel_giris]");
     expect(pending.ok && pending.composed.html).not.toContain("[eksik: kisisel_giris]");
+    // İşaret arayüz diliyle yazılır (İngilizce arayüzde e-posta gövdesinde Türkçe işaret görünmez)
+    await setSetting(db, "ui.language", "en");
+    const pendingEn = await previewTemplateDraft(
+      db,
+      { name: "P", language: "en", kind: "initial", subject: "Hello", bodyHtml: tpl.bodyHtml },
+      leadId,
+    );
+    expect(pendingEn.ok && pendingEn.composed.html).toContain("[awaiting approval: kisisel_giris]");
+    expect(pendingEn.ok && pendingEn.composed.html).not.toContain("onay bekliyor");
+    await setSetting(db, "ui.language", "tr");
 
     const edited = "We noticed your café in Leeds and would love to send you some samples.";
     const saved = await patch(leadId, i1.id, { action: "save", text: `  ${edited} ` });
@@ -238,8 +255,15 @@ describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {
     expect(pv.ok && pv.composed.html).toContain("would love to send you some samples");
     expect(pv.ok && pv.composed.introPending).toBe(false);
 
-    // İkinci taslak onaylanınca ilki reddedilene iner
+    // Onaydan sonra "Yeniden oluştur": panel YENİ taslağı gösterir (eski onaylı metnin arkasında kaybolmaz) ve hâlâ
+    // kullanılan onaylı metni ayrıca bildirir; e-posta yeni taslak onaylanana kadar onaylı metinle dolar.
     const i2 = (await json(await post(leadId, { language: "en" }))).intro;
+    const afterRegen = (await list(leadId)) as LeadIntro[];
+    expect(currentIntro(afterRegen, "en")).toMatchObject({ id: i2.id, status: "draft" });
+    expect(supersededApproved(afterRegen, "en")).toMatchObject({ id: i1.id, status: "approved" });
+    expect((await buildRenderContext(db, leadId, "en")).values.kisisel_giris).toBe(edited);
+
+    // İkinci taslak onaylanınca ilki reddedilene iner
     const ap2 = await patch(leadId, i2.id, { action: "approve" });
     expect(ap2.status).toBe(200);
     const rows = await list(leadId);

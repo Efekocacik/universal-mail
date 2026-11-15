@@ -13,13 +13,15 @@ import { Skeleton } from "@/components/ui/misc";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { Segmented } from "@/components/ui/segmented";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LoadError } from "@/features/campaigns/parts";
 import { ScansSubnav } from "@/features/scans/scans-subnav";
 import { errorText } from "@/lib/client/api";
-import { fmtNumber } from "@/lib/client/format";
+import { fmtIsoDay, fmtNumber } from "@/lib/client/format";
 import { useSettings } from "@/lib/client/queries";
 import {
   codeLabel,
   companyTitle,
+  emptyListKind,
   formatRate,
   isRunActive,
   reasonText,
@@ -32,9 +34,11 @@ import {
   useRegistryAutoRefresh,
   useRegistryRuns,
   useRematch,
+  type CompanyStats,
   type RegistryCompanyDto,
   type RegistrySource,
 } from "@/lib/client/registry";
+import { useDebounced } from "@/lib/client/use-debounced";
 import { t } from "@/lib/i18n";
 import { codesForScheme } from "@/lib/registry/codes";
 
@@ -220,7 +224,7 @@ function RunForm({ demo }: { demo: boolean }) {
 }
 
 function RunsCard() {
-  const { data, isLoading } = useRegistryRuns();
+  const { data, isLoading, isError, error, refetch } = useRegistryRuns();
   return (
     <Card>
       <CardHeader>
@@ -237,6 +241,8 @@ function RunsCard() {
       <CardContent className="pt-3">
         {isLoading ? (
           <Skeleton className="h-16" />
+        ) : isError && !data ? (
+          <LoadError error={error} onRetry={() => void refetch()} />
         ) : !data?.runs.length ? (
           <EmptyState
             compact
@@ -282,12 +288,17 @@ function RunsCard() {
 function ResultsCard({ busy }: { busy: boolean }) {
   const [tab, setTab] = useState<"matched" | "open">("matched");
   const [q, setQ] = useState("");
+  // Her tuşta iki yeni sorgu başlamasın; üst sayaçlar (oran, özet, Yeniden eşleştir) aramadan bağımsızdır.
+  const search = useDebounced(q.trim(), 300);
   const rematch = useRematch();
-  const matched = useRegistryCompanies({ match: "matched", q }, busy);
-  const open = useRegistryCompanies({ match: "open", q }, busy);
-  const stats = matched.data?.pages[0]?.stats ?? open.data?.pages[0]?.stats;
-  const matchedCount = stats?.matched ?? 0;
-  const openCount = (stats?.unmatched ?? 0) + (stats?.pending ?? 0);
+  const matched = useRegistryCompanies({ match: "matched", q: search }, busy);
+  const open = useRegistryCompanies({ match: "open", q: search }, busy);
+  const first = matched.data?.pages[0] ?? open.data?.pages[0];
+  const stats = first?.stats;
+  // Sekme sayaçları listeyle tutarlıdır: arama varken aramaya uyanlar.
+  const tabStats = (search ? first?.searchStats : null) ?? stats;
+  const matchedCount = tabStats?.matched ?? 0;
+  const openCount = (tabStats?.unmatched ?? 0) + (tabStats?.pending ?? 0);
   const rate = stats && stats.total > 0 ? formatRate(stats.matchRate) : null;
 
   return (
@@ -307,6 +318,11 @@ function ResultsCard({ busy }: { busy: boolean }) {
                   matched: fmtNumber(stats.matched),
                   total: fmtNumber(stats.total),
                 })}
+              </p>
+            )}
+            {search && first?.searchStats && (
+              <p className="text-[12px] text-muted-foreground" data-testid="registry-in-search">
+                {t("registry.stats.inSearch", { n: fmtNumber(first.searchStats.total) })}
               </p>
             )}
           </div>
@@ -352,10 +368,10 @@ function ResultsCard({ busy }: { busy: boolean }) {
             </TabsTrigger>
           </TabsList>
           <TabsContent value="matched">
-            <CompanyList query={matched} kind="matched" />
+            <CompanyList query={matched} kind="matched" stats={stats} searching={!!search} />
           </TabsContent>
           <TabsContent value="open">
-            <CompanyList query={open} kind="open" />
+            <CompanyList query={open} kind="open" stats={stats} searching={!!search} />
           </TabsContent>
         </Tabs>
       </CardContent>
@@ -363,31 +379,47 @@ function ResultsCard({ busy }: { busy: boolean }) {
   );
 }
 
+const EMPTY_COPY = {
+  none: { title: "registry.list.empty.none", body: "registry.list.empty.noneBody" },
+  noResults: { title: "registry.list.empty.noResults", body: "registry.list.empty.noResultsBody" },
+  matched: { title: "registry.list.empty.matched", body: "registry.list.empty.matchedBody" },
+  open: { title: "registry.list.empty.unmatched", body: "registry.list.empty.unmatchedBody" },
+} as const;
+
 function CompanyList({
   query,
   kind,
+  stats,
+  searching,
 }: {
   query: ReturnType<typeof useRegistryCompanies>;
   kind: "matched" | "open";
+  stats: CompanyStats | undefined;
+  searching: boolean;
 }) {
   const items = useMemo(() => query.data?.pages.flatMap((p) => p.items) ?? [], [query.data]);
   if (query.isLoading) return <Skeleton className="mt-3 h-24" />;
-  if (items.length === 0)
+  // API hatası boş durum gibi görünmez ("hepsi eşleşti" yanlış söylenmez).
+  if (query.isError && !query.data)
+    return (
+      <div className="mt-3">
+        <LoadError error={query.error} onRetry={() => void query.refetch()} />
+      </div>
+    );
+  if (items.length === 0) {
+    const k = emptyListKind(stats, searching);
+    const copy = EMPTY_COPY[k === "tab" ? kind : k];
     return (
       <EmptyState
         compact
         className="mt-3"
         icon={Landmark}
-        title={t(
-          kind === "matched" ? "registry.list.empty.matched" : "registry.list.empty.unmatched",
-        )}
-        body={t(
-          kind === "matched"
-            ? "registry.list.empty.matchedBody"
-            : "registry.list.empty.unmatchedBody",
-        )}
+        title={t(copy.title)}
+        body={t(copy.body)}
+        testId={`registry-empty-${k === "tab" ? kind : k}`}
       />
     );
+  }
   return (
     <div className="mt-2 space-y-2">
       <ul className="divide-y" data-testid={`registry-list-${kind}`}>
@@ -433,7 +465,7 @@ function CompanyRow({ c, kind }: { c: RegistryCompanyDto; kind: "matched" | "ope
         <p className="text-[12px] text-muted-foreground">
           {[c.locality, c.postcode].filter(Boolean).join(" · ")}
           {c.locality || c.postcode ? " · " : ""}
-          {t("registry.list.incorporated", { date: c.incorporatedOn })}
+          {t("registry.list.incorporated", { date: fmtIsoDay(c.incorporatedOn) })}
         </p>
         {reason && (
           <p className="text-[12px] text-muted-foreground">

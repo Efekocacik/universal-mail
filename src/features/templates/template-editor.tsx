@@ -17,6 +17,7 @@ import { EmailPreview } from "@/features/campaigns/email-preview";
 import { CampaignStatusBadge, LoadError, Notice } from "@/features/campaigns/parts";
 import { useSafeMutation } from "@/features/campaigns/use-safe-mutation";
 import { api } from "@/lib/client/api";
+import { useCategories } from "@/lib/client/queries";
 import { categoryLabel, countryLabel } from "@/lib/client/format";
 import { shouldRetryQuery, queryRetryDelay, type MutationErrorInfo } from "@/lib/client/retry";
 import {
@@ -33,6 +34,7 @@ import { t } from "@/lib/i18n";
 import {
   changedFields,
   draftReady,
+  draftCategoryKey,
   EMPTY_DRAFT,
   hasSubjectB,
   insertAt,
@@ -49,17 +51,9 @@ import {
   type Draft,
 } from "./model";
 import { editedSince, savePatch, saveSnapshot, type SaveVars } from "./save-snapshot";
+import { useDebounced } from "@/lib/client/use-debounced";
 
 const INVALIDATE = [tk.all] as const;
-
-function useDebounced<T>(value: T, ms: number): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(id);
-  }, [value, ms]);
-  return v;
-}
 
 type IssueLike = { code: string; field?: string; where?: string; detail?: string };
 
@@ -114,7 +108,7 @@ function PreviewPanel({ draft }: { draft: Draft }) {
     enabled: ready,
     queryFn: ({ signal }) =>
       templateApi.preview(
-        { ...debounced, categoryKey: null } as TemplateDraftInput,
+        { ...debounced, categoryKey: draftCategoryKey(debounced) } as TemplateDraftInput,
         leadId!,
         signal,
         variant,
@@ -251,6 +245,50 @@ function PreviewPanel({ draft }: { draft: Draft }) {
   );
 }
 
+/* Kategori varyantı ---------------------------------------------------------------------------------- */
+
+/**
+ * Faz 5: ilk e-posta şablonunu bir kategoriye bağlar ("Genel" = varyant yok). Kampanya sihirbazı, seçili dillerde bu
+ * kategoriye özel şablon varsa onu önerir; kullanıcı her dil × kategori için kendi varyantını oluşturabilir.
+ */
+function CategoryVariantField({
+  value,
+  disabled,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (categoryKey: string) => void;
+}) {
+  const categories = useCategories();
+  const list = categories.data ?? [];
+  // Listede olmayan (ör. silinmiş) kayıtlı anahtar da seçili görünür; kullanıcı "Genel"e çevirebilir.
+  const known = value === "" || list.some((c) => c.key === value);
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="tpl-category">{t("tplEditor.categoryVariant")}</Label>
+      <Select
+        id="tpl-category"
+        value={value}
+        disabled={disabled || categories.isLoading}
+        aria-describedby="tpl-category-hint"
+        data-testid="tpl-category"
+        onChange={(e) => onChange(e.target.value)}
+        className="max-w-sm"
+      >
+        <option value="">{t("tplEditor.categoryVariant.none")}</option>
+        {!known && <option value={value}>{categoryLabel(value, value)}</option>}
+        {list.map((c) => (
+          <option key={c.key} value={c.key}>
+            {categoryLabel(c.key, c.name)}
+          </option>
+        ))}
+      </Select>
+      <FieldHint id="tpl-category-hint">{t("tplEditor.categoryVariant.hint")}</FieldHint>
+    </div>
+  );
+}
+
 /* Düzenleyici ---------------------------------------------------------------------------------------- */
 
 export function TemplateEditor({ id }: { id?: number }) {
@@ -293,7 +331,10 @@ export function TemplateEditor({ id }: { id?: number }) {
   const save = useSafeMutation(
     async (sent: SaveVars): Promise<{ created: boolean; id: number; version: number }> => {
       if (sent.id === undefined) {
-        const r = await templateApi.create({ ...sent.draft, categoryKey: null });
+        const r = await templateApi.create({
+          ...sent.draft,
+          categoryKey: draftCategoryKey(sent.draft),
+        });
         return { created: true, id: r.id, version: r.version };
       }
       const r = await templateApi.update(sent.id, sent.baseVersion, savePatch(sent));
@@ -418,9 +459,11 @@ export function TemplateEditor({ id }: { id?: number }) {
             <p>{t("tplEditor.infoOnly")}</p>
           </Notice>
         )}
-        {d?.categoryKey && (
+        {draftCategoryKey(draft) && (
           <Notice>
-            {t("tplEditor.category", { name: categoryLabel(d.categoryKey, d.categoryKey) })}
+            {t("tplEditor.category", {
+              name: categoryLabel(draftCategoryKey(draft)!, draftCategoryKey(draft)!),
+            })}
           </Notice>
         )}
         {reason && (
@@ -529,6 +572,13 @@ export function TemplateEditor({ id }: { id?: number }) {
               </div>
             </div>
             <FieldHint>{t("tplEditor.kind.hint")}</FieldHint>
+            {draft.kind === "initial" && (
+              <CategoryVariantField
+                value={draft.categoryKey}
+                disabled={readOnly}
+                onChange={(categoryKey) => setDraft({ ...draft, categoryKey })}
+              />
+            )}
             {draft.kind === "followup" && (
               <label className="flex items-start gap-2 text-[13px]" data-testid="tpl-reuse-subject">
                 <Checkbox

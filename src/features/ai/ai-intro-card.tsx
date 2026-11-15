@@ -85,6 +85,19 @@ export function AiIntroCard() {
           {t("ai.settings.ackedAt", { date: fmtDate(ai.costAckAt) })}
         </p>
       )}
+      {ai.enabled && !demo && !ai.costAckModel && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-md bg-warning/10 px-2.5 py-2 text-[12px]"
+          role="status"
+          data-testid="ai-reack"
+        >
+          <CircleAlert className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1">{t("ai.settings.reack")}</span>
+          <Button size="sm" variant="outline" onClick={() => setConfirm({ model: ai.model })}>
+            {t("ai.settings.reack.button")}
+          </Button>
+        </div>
+      )}
 
       <div className="space-y-1.5">
         <Label htmlFor="ai-intro-model">{t("ai.settings.model")}</Label>
