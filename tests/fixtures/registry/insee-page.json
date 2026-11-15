@@ -1,0 +1,80 @@
+{
+  "header": {
+    "statut": 200,
+    "total": 4,
+    "debut": 0,
+    "nombre": 4,
+    "curseur": "*",
+    "curseurSuivant": "AoE-next"
+  },
+  "etablissements": [
+    {
+      "siret": "00000000000011",
+      "statutDiffusionEtablissement": "O",
+      "dateCreationEtablissement": "2026-10-30",
+      "uniteLegale": {
+        "denominationUniteLegale": "EXEMPLE BRULERIE SAS",
+        "categorieJuridiqueUniteLegale": "5710"
+      },
+      "adresseEtablissement": {
+        "numeroVoieEtablissement": "7",
+        "typeVoieEtablissement": "RUE",
+        "libelleVoieEtablissement": "DE L EXEMPLE",
+        "codePostalEtablissement": "75011",
+        "libelleCommuneEtablissement": "PARIS"
+      },
+      "periodesEtablissement": [
+        {
+          "dateFin": null,
+          "enseigne1Etablissement": "Brûlerie Exemple",
+          "activitePrincipaleEtablissement": "56.30Z",
+          "etatAdministratifEtablissement": "A"
+        },
+        {
+          "dateFin": "2026-10-29",
+          "enseigne1Etablissement": "Ancien nom",
+          "activitePrincipaleEtablissement": "56.10A",
+          "etatAdministratifEtablissement": "A"
+        }
+      ]
+    },
+    {
+      "siret": "00000000000022",
+      "statutDiffusionEtablissement": "P",
+      "dateCreationEtablissement": "2026-10-30",
+      "uniteLegale": {
+        "denominationUniteLegale": "NON DIFFUSIBLE SAS",
+        "categorieJuridiqueUniteLegale": "5710"
+      },
+      "periodesEtablissement": [{ "dateFin": null, "activitePrincipaleEtablissement": "56.30Z" }]
+    },
+    {
+      "siret": "00000000000033",
+      "statutDiffusionEtablissement": "O",
+      "dateCreationEtablissement": "2026-10-30",
+      "uniteLegale": { "denominationUniteLegale": null, "categorieJuridiqueUniteLegale": "1000" },
+      "periodesEtablissement": [{ "dateFin": null, "activitePrincipaleEtablissement": "56.30Z" }]
+    },
+    {
+      "siret": "00000000000044",
+      "statutDiffusionEtablissement": "O",
+      "dateCreationEtablissement": "2026-10-25",
+      "uniteLegale": {
+        "denominationUniteLegale": "BISTROT FICTIF SARL",
+        "categorieJuridiqueUniteLegale": "5499"
+      },
+      "adresseEtablissement": {
+        "codePostalEtablissement": "75002",
+        "libelleCommuneEtablissement": "PARIS"
+      },
+      "periodesEtablissement": [
+        {
+          "dateFin": null,
+          "denominationUsuelleEtablissement": "Le Bistrot Fictif",
+          "activitePrincipaleEtablissement": "56.30Z",
+          "etatAdministratifEtablissement": "A"
+        }
+      ]
+    }
+  ]
+}
