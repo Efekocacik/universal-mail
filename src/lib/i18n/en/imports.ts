@@ -101,6 +101,8 @@ export const imports = {
   "imports.undo.done": "Removed from the list: {changed}",
   "imports.undo.skipped": "Kept because they are in an active campaign: {skipped}",
   "imports.restore.done": "Restored: {changed}",
+  "imports.restore.skippedDuplicate":
+    "Left in the archive because the same business is already in the list: {skipped}",
   "apiError.IMPORT_TOO_LARGE":
     "The file is larger than 5 MB. Split the list and upload it in parts.",
   "apiError.IMPORT_UNSUPPORTED": "This file type is not supported. Choose a CSV or XLSX file.",

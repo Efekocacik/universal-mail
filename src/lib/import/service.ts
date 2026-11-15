@@ -5,6 +5,7 @@ import { audit } from "@/lib/db/audit";
 import { placeCache } from "@/lib/db/cache-schema";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import {
+  auditLog,
   campaignLeads,
   categorySets,
   importBatches,
@@ -14,6 +15,7 @@ import {
   leads,
 } from "@/lib/db/schema";
 import { classifyKind, domainMatchesSite, parseEmail } from "@/lib/email/address";
+import { SHARED_SITE_DOMAINS } from "@/lib/email/lists";
 import { isKnownCountry } from "@/lib/geo/countries";
 import { chunk } from "@/lib/util";
 import { csvParser } from "./csv";
@@ -24,7 +26,7 @@ import {
   normaliseName,
   normaliseWebsite,
   resolveCountry,
-  websiteDomain,
+  websiteKey,
 } from "./normalise";
 import {
   detectImportFormat,
@@ -138,10 +140,12 @@ export interface ImportCandidate {
   website: string | null;
   email: string | null;
   notes: string | null;
+  /** `domain`: web sitesi kopya anahtarı (`websiteKey`: kayıtlı alan adı veya paylaşımlı platformda sunucu + yol). */
   keys: { domain: string | null; email: string | null; name: string };
 }
 
 export interface ExistingKeys {
+  /** Web sitesi kopya anahtarları (`websiteKey`). */
   domains: ReadonlySet<string>;
   emails: ReadonlySet<string>;
   names: ReadonlySet<string>;
@@ -220,7 +224,7 @@ export function classifyRows(
     const categoryKey = (categoryRaw && opts.resolveCategory(categoryRaw)) || opts.categoryKey;
 
     const keys = {
-      domain: websiteDomain(website),
+      domain: websiteKey(website),
       email,
       name: nameKey(displayName, countryCode, city),
     };
@@ -281,29 +285,40 @@ export async function loadExistingKeys(
     for (const r of rows) {
       if (r.name && r.country) names.add(nameKey(r.name, r.country, r.city));
       for (const w of [r.website, r.cacheWebsite]) {
-        const d = w ? websiteDomain(normaliseWebsite(w)) : null;
+        const d = w ? websiteKey(normaliseWebsite(w)) : null;
         if (d) domains.add(d);
       }
     }
   }
   if (probe.domains.length) {
     // Başka ülkedeki aynı site de kopyadır: kendi taramamızın alan adı (dizinli) ve kullanıcı siteleri.
-    const crawled = await tx
-      .select({ d: leadEnrichment.siteDomain })
-      .from(leadEnrichment)
-      .innerJoin(leads, eq(leads.id, leadEnrichment.leadId))
-      .where(and(notArchived, sql`${leadEnrichment.siteDomain} IN ${jsonList(probe.domains)}`));
-    for (const r of crawled) if (r.d) domains.add(r.d);
+    // Taramada yalnızca kayıtlı alan adı saklanır: paylaşımlı platformlar (facebook.com…) işletmeyi tanımlamadığı
+    // için bu sorguya girmez; onlar yalnızca sunucu + yol anahtarıyla karşılaştırılır.
+    const plain = probe.domains.filter((d) => !d.includes("/") && !SHARED_SITE_DOMAINS.has(d));
+    if (plain.length) {
+      const crawled = await tx
+        .select({ d: leadEnrichment.siteDomain })
+        .from(leadEnrichment)
+        .innerJoin(leads, eq(leads.id, leadEnrichment.leadId))
+        .where(and(notArchived, sql`${leadEnrichment.siteDomain} IN ${jsonList(plain)}`));
+      for (const r of crawled) if (r.d && !SHARED_SITE_DOMAINS.has(r.d)) domains.add(r.d);
+    }
     // Kullanıcının verdiği siteler: yalnızca içe aktarma/sicil lead'leri (Google lead'lerinde bu sütun hep boştur);
-    // `leads_source_idx` ile tüm tablo taranmaz. Alan adı saklanmadığı için karşılaştırma bellekte yapılır.
+    // `leads_source_idx` ile tüm tablo taranmaz. Anahtar saklanmadığı için yalnızca adresinde dosyadaki bir anahtarın
+    // geçtiği satırlar okunur (alt dize süzgeci, aday üst kümesi); kesin karşılaştırma bellekte `websiteKey` ile.
     const own = await tx
       .select({ w: leads.website })
       .from(leads)
       .where(
-        and(notArchived, inArray(leads.source, ["import", "registry"]), isNotNull(leads.website)),
+        and(
+          notArchived,
+          inArray(leads.source, ["import", "registry"]),
+          isNotNull(leads.website),
+          sql`EXISTS (SELECT 1 FROM json_each(${JSON.stringify(probe.domains)}) WHERE instr(lower(${leads.website}), value) > 0)`,
+        ),
       );
     for (const r of own) {
-      const d = websiteDomain(r.w);
+      const d = websiteKey(r.w);
       if (d) domains.add(d);
     }
   }
@@ -332,6 +347,11 @@ export interface ImportBatchDto {
   createdAt: number;
   /** Partinin hâlâ listede (arşivlenmemiş) olan lead sayısı. */
   activeCount: number;
+  /**
+   * "Geri al" ile arşivlenmiş ve henüz geri getirilmemiş lead sayısı ("Geri getir" bunları hedefler). Kullanıcının
+   * tek tek veya toplu arşivlediği lead'ler sayılmaz, geri getirilmez.
+   */
+  restorableCount: number;
 }
 
 export interface ImportResult {
@@ -356,7 +376,7 @@ function probeOf(table: ParsedTable, mapping: ImportMapping, defaultCountry: str
   for (const r of table.rows) {
     const c = mapping.country === null ? null : resolveCountry(r[mapping.country]);
     if (c) countries.add(c);
-    const d = mapping.website === null ? null : websiteDomain(normaliseWebsite(r[mapping.website]));
+    const d = mapping.website === null ? null : websiteKey(normaliseWebsite(r[mapping.website]));
     if (d) domains.add(d);
     const e =
       mapping.email === null
@@ -522,14 +542,16 @@ export async function commitImport(
       },
       now,
     );
-    result.batch = { ...toDto(batch!), activeCount: result.created };
+    result.batch = { ...toDto(batch!), activeCount: result.created, restorableCount: 0 };
     return result;
   };
   // Kontrol (dryRun) yazmaz: yazma kilidi almadan okur. Gerçek içe aktarma okuma + yazmayı tek işlemde yapar.
   return dryRun ? run(db) : db.transaction(run);
 }
 
-function toDto(b: typeof importBatches.$inferSelect): Omit<ImportBatchDto, "activeCount"> {
+function toDto(
+  b: typeof importBatches.$inferSelect,
+): Omit<ImportBatchDto, "activeCount" | "restorableCount"> {
   return {
     id: b.id,
     filename: b.filename,
@@ -548,6 +570,61 @@ function toDto(b: typeof importBatches.$inferSelect): Omit<ImportBatchDto, "acti
 // Tek tablolu SELECT'te drizzle sütunları nitelemeden yazar; ilişkili alt sorguda dış sütun açıkça nitelenir.
 const activeCountSql = sql<number>`(SELECT count(*) FROM "import_batch_leads" ibl INNER JOIN "leads" l ON l."id" = ibl."lead_id" WHERE ibl."batch_id" = "import_batches"."id" AND l."archived_at" IS NULL)`;
 
+const ARCHIVE_ACTION = "import.archive";
+
+/**
+ * Partilerin "Geri al" zamanları (denetim kaydından: `import.archive` satırının `at` değeri, arşivlenen lead'lerin
+ * `archived_at` değerine eşittir). Şemaya sütun eklemeden geri getirmenin yalnızca geri alma ile arşivlenen lead'leri
+ * hedeflemesini sağlar. Tek sorgu.
+ */
+async function undoTimes(
+  tx: DbExecutor,
+  batchIds: readonly number[],
+): Promise<Map<number, number[]>> {
+  const out = new Map<number, number[]>();
+  if (!batchIds.length) return out;
+  const rows = await tx
+    .select({ id: auditLog.entityId, at: auditLog.at })
+    .from(auditLog)
+    .where(
+      and(
+        eq(auditLog.action, ARCHIVE_ACTION),
+        eq(auditLog.entity, "import_batch"),
+        sql`${auditLog.entityId} IN ${jsonList(batchIds.map(String))}`,
+      ),
+    );
+  for (const r of rows) {
+    const id = Number(r.id);
+    out.set(id, [...(out.get(id) ?? []), r.at]);
+  }
+  return out;
+}
+
+/** Partiler başına geri getirilebilir (geri alma ile arşivlenmiş) lead sayısı: tek gruplu sorgu + bellekte eşleme. */
+async function restorableCounts(
+  tx: DbExecutor,
+  batchIds: readonly number[],
+): Promise<Map<number, number>> {
+  const out = new Map<number, number>();
+  const times = await undoTimes(tx, batchIds);
+  if (!times.size) return out;
+  const rows = await tx
+    .select({ b: importBatchLeads.batchId, at: leads.archivedAt, n: sql<number>`count(*)` })
+    .from(importBatchLeads)
+    .innerJoin(leads, eq(leads.id, importBatchLeads.leadId))
+    .where(
+      and(
+        sql`${importBatchLeads.batchId} IN ${jsonList([...times.keys()].map(String))}`,
+        isNotNull(leads.archivedAt),
+      ),
+    )
+    .groupBy(importBatchLeads.batchId, leads.archivedAt);
+  for (const r of rows)
+    if (r.at !== null && times.get(r.b)?.includes(r.at))
+      out.set(r.b, (out.get(r.b) ?? 0) + Number(r.n));
+  return out;
+}
+
 /** Son partiler (yeniden eskiye). Etkin sayı tek sorguda, ilişkili alt sorgu ile (PK önekiyle dizinli). */
 export async function listImportBatches(db: Db, limit = 20): Promise<ImportBatchDto[]> {
   const rows = await db
@@ -555,7 +632,15 @@ export async function listImportBatches(db: Db, limit = 20): Promise<ImportBatch
     .from(importBatches)
     .orderBy(desc(importBatches.createdAt), desc(importBatches.id))
     .limit(Math.min(Math.max(limit, 1), 50));
-  return rows.map((r) => ({ ...toDto(r.b), activeCount: Number(r.active) }));
+  const restorable = await restorableCounts(
+    db,
+    rows.map((r) => r.b.id),
+  );
+  return rows.map((r) => ({
+    ...toDto(r.b),
+    activeCount: Number(r.active),
+    restorableCount: restorable.get(r.b.id) ?? 0,
+  }));
 }
 
 export async function getImportBatch(db: DbExecutor, id: number): Promise<ImportBatchDto | null> {
@@ -563,7 +648,9 @@ export async function getImportBatch(db: DbExecutor, id: number): Promise<Import
     .select({ b: importBatches, active: activeCountSql })
     .from(importBatches)
     .where(eq(importBatches.id, id));
-  return r ? { ...toDto(r.b), activeCount: Number(r.active) } : null;
+  if (!r) return null;
+  const restorable = await restorableCounts(db, [id]);
+  return { ...toDto(r.b), activeCount: Number(r.active), restorableCount: restorable.get(id) ?? 0 };
 }
 
 export class ImportBatchNotFoundError extends Error {
@@ -577,8 +664,13 @@ export interface BatchArchiveResult {
   batch: ImportBatchDto;
   /** Bu çağrıda arşivlenen (veya geri getirilen) lead sayısı. */
   changed: number;
-  /** Etkin kampanya dizisinde olduğu için arşivlenmeyen lead sayısı. */
+  /** Etkin kampanya dizisinde olduğu için arşivlenmeyen lead sayısı (yalnızca geri almada). */
   skippedActive: number;
+  /**
+   * Geri getirmede: listede artık aynı işletme (aynı web sitesi, e-posta veya ad + ülke + şehir) bulunduğu için
+   * arşivde bırakılan lead sayısı (ör. geri alındıktan sonra aynı dosya yeniden içe aktarıldıysa). Geri almada 0.
+   */
+  skippedDuplicate: number;
 }
 
 const batchLeadIds = (batchId: number) =>
@@ -588,7 +680,12 @@ const inActiveSequence = sql`EXISTS (SELECT 1 FROM ${campaignLeads} WHERE ${camp
 /**
  * Partiyi geri alır: partinin lead'leri ARŞİVLENİR (yumuşak silme, keşif listesinden kalkar; "Geri getir" ile döner).
  * Etkin kampanya dizisindeki lead'ler arşivlenmez (`skippedActive`; toplu arşivle aynı kural). Koşul UPDATE'in
- * içindedir: tekrar çağrı değişiklik yapmaz (idempotent).
+ * içindedir: tekrar çağrı değişiklik yapmaz (idempotent). `archived_at` = denetim satırının `at` değeridir.
+ *
+ * Geri getirme yalnızca bu partinin GERİ ALMA ile arşivlenmiş lead'lerini döndürür (kullanıcının ayrıca arşivlediği
+ * lead'ler arşivde kalır) ve dönmeden önce kopya denetimi yapar: listede artık aynı işletme varsa (ör. geri alındıktan
+ * sonra aynı dosya yeniden içe aktarıldı) o lead arşivde kalır (`skippedDuplicate`); aynı işletme iki kez listelenip
+ * iki kez iletişime geçilmez. Tekrar çağrı değişiklik yapmaz.
  */
 export async function setBatchArchived(
   db: Db,
@@ -598,32 +695,116 @@ export async function setBatchArchived(
 ): Promise<BatchArchiveResult> {
   return db.transaction(async (tx) => {
     if (!(await getImportBatch(tx, batchId))) throw new ImportBatchNotFoundError();
-    const changed = await tx
-      .update(leads)
-      .set({ archivedAt: archived ? now : null, updatedAt: now })
-      .where(
-        archived
-          ? and(batchLeadIds(batchId), isNull(leads.archivedAt), sql`NOT ${inActiveSequence}`)
-          : and(batchLeadIds(batchId), isNotNull(leads.archivedAt)),
-      )
-      .returning({ id: leads.id });
+    let changed = 0;
     let skippedActive = 0;
+    let skippedDuplicate = 0;
     if (archived) {
+      const rows = await tx
+        .update(leads)
+        .set({ archivedAt: now, updatedAt: now })
+        .where(and(batchLeadIds(batchId), isNull(leads.archivedAt), sql`NOT ${inActiveSequence}`))
+        .returning({ id: leads.id });
+      changed = rows.length;
       const [r] = await tx
         .select({ n: sql<number>`count(*)` })
         .from(leads)
         .where(and(batchLeadIds(batchId), isNull(leads.archivedAt), inActiveSequence));
       skippedActive = Number(r?.n ?? 0);
+    } else {
+      const r = await restoreBatchLeads(tx, batchId, now);
+      changed = r.changed;
+      skippedDuplicate = r.skippedDuplicate;
     }
+    // Geri almanın `at` değeri, arşivlenen lead'lerin `archived_at` değeridir: geri getirme hedefini buradan bulur.
     await audit(
       tx,
-      archived ? "import.archive" : "import.restore",
+      archived ? ARCHIVE_ACTION : "import.restore",
       "import_batch",
       batchId,
-      { changed: changed.length, skippedActive },
+      archived ? { changed, skippedActive } : { changed, skippedDuplicate },
       now,
     );
     const batch = (await getImportBatch(tx, batchId))!;
-    return { batch, changed: changed.length, skippedActive };
+    return { batch, changed, skippedActive, skippedDuplicate };
   });
+}
+
+/** Geri getirme: hedef lead'ler, kopya denetimi (mevcut etkin lead'ler + geri dönenlerin kendi aralarında), tek UPDATE. */
+async function restoreBatchLeads(
+  tx: DbExecutor,
+  batchId: number,
+  now: number,
+): Promise<{ changed: number; skippedDuplicate: number }> {
+  const times = (await undoTimes(tx, [batchId])).get(batchId) ?? [];
+  if (!times.length) return { changed: 0, skippedDuplicate: 0 };
+  const targets = await tx
+    .select({
+      id: leads.id,
+      name: leads.displayName,
+      country: leads.countryCode,
+      city: leads.city,
+      website: leads.website,
+    })
+    .from(leads)
+    .where(
+      and(
+        batchLeadIds(batchId),
+        sql`${leads.archivedAt} IN (SELECT value FROM json_each(${JSON.stringify(times)}))`,
+      ),
+    )
+    .orderBy(leads.id);
+  if (!targets.length) return { changed: 0, skippedDuplicate: 0 };
+  const emailsBy = new Map<number, string[]>();
+  for (const part of chunk(targets, WRITE_CHUNK)) {
+    const rows = await tx
+      .select({ leadId: leadEmails.leadId, email: leadEmails.email })
+      .from(leadEmails)
+      .where(
+        inArray(
+          leadEmails.leadId,
+          part.map((x) => x.id),
+        ),
+      );
+    for (const r of rows) emailsBy.set(r.leadId, [...(emailsBy.get(r.leadId) ?? []), r.email]);
+  }
+  const keyed = targets.map((x) => ({
+    id: x.id,
+    site: websiteKey(x.website),
+    emails: emailsBy.get(x.id) ?? [],
+    name: x.name && x.country ? nameKey(x.name, x.country, x.city) : null,
+    country: x.country,
+  }));
+  // Geri getirilecekler şu an arşivde olduğu için `loadExistingKeys` (yalnızca arşivlenmemişler) onları saymaz.
+  const existing = await loadExistingKeys(tx, {
+    countries: [...new Set(keyed.flatMap((k) => (k.country ? [k.country] : [])))],
+    domains: [...new Set(keyed.flatMap((k) => (k.site ? [k.site] : [])))],
+    emails: [...new Set(keyed.flatMap((k) => k.emails))],
+  });
+  const seen = { domains: new Set<string>(), emails: new Set<string>(), names: new Set<string>() };
+  const ok: number[] = [];
+  let skippedDuplicate = 0;
+  for (const k of keyed) {
+    const clash =
+      (k.site !== null && (existing.domains.has(k.site) || seen.domains.has(k.site))) ||
+      k.emails.some((e) => existing.emails.has(e) || seen.emails.has(e)) ||
+      (k.name !== null && (existing.names.has(k.name) || seen.names.has(k.name)));
+    if (clash) {
+      skippedDuplicate++;
+      continue;
+    }
+    if (k.site) seen.domains.add(k.site);
+    for (const e of k.emails) seen.emails.add(e);
+    if (k.name) seen.names.add(k.name);
+    ok.push(k.id);
+  }
+  let changed = 0;
+  for (const part of chunk(ok, WRITE_CHUNK)) {
+    const rows = await tx
+      .update(leads)
+      .set({ archivedAt: null, updatedAt: now })
+      .where(inArray(leads.id, part))
+      .returning({ id: leads.id });
+    changed += rows.length;
+  }
+  return { changed, skippedDuplicate };
 }

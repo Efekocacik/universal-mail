@@ -15,6 +15,7 @@ import {
   normaliseWebsite,
   resolveCountry,
   websiteDomain,
+  websiteKey,
 } from "@/lib/import/normalise";
 import {
   categoryResolver,
@@ -89,6 +90,28 @@ describe("normalleştirme", () => {
     expect(websiteDomain("https://shop.cafe-one.example/x")).toBe("cafe-one.example");
     expect(websiteDomain(null)).toBeNull();
     expect(websiteDomain("::")).toBeNull();
+  });
+
+  it("web sitesi kopya anahtarı: olağan sitede alan adı, paylaşımlı platformda sunucu + ayırt edici yol", () => {
+    const k = (v: string) => websiteKey(normaliseWebsite(v));
+    expect(k("https://shop.cafe-one.example/menu")).toBe("cafe-one.example");
+    expect(k("www.facebook.com/KafeA")).toBe("facebook.com/kafea");
+    expect(k("https://m.facebook.com/kafea/")).toBe("facebook.com/kafea");
+    expect(k("facebook.com/kafeb")).toBe("facebook.com/kafeb");
+    expect(k("https://www.facebook.com/pages/Kafe-C/123")).toBe("facebook.com/pages/kafe-c");
+    expect(k("instagram.com/kafe.a")).toBe("instagram.com/kafe.a");
+    expect(k("https://linktr.ee/kafea")).toBe("linktr.ee/kafea");
+    expect(k("https://sites.google.com/view/kafea/home")).toBe("sites.google.com/view/kafea");
+    expect(k("https://www.youtube.com/@kafea")).toBe("youtube.com/@kafea");
+    expect(k("https://kafea.wixsite.com/home")).toBe("kafea.wixsite.com");
+    expect(k("https://kafea.wixsite.com/kafe-sitesi")).toBe("kafea.wixsite.com/kafe-sitesi");
+    expect(k("https://kafe-a.business.site")).toBe("kafe-a.business.site");
+    // Ayırt edici parça yok: web sitesiyle kopya denetimi yapılmaz.
+    expect(k("https://www.facebook.com/")).toBeNull();
+    expect(k("https://www.facebook.com/profile.php?id=1")).toBeNull();
+    expect(k("https://sites.google.com/")).toBeNull();
+    expect(websiteKey(null)).toBeNull();
+    expect(websiteKey("::")).toBeNull();
   });
 
   it("metin temizleme ve şehir anahtarı", () => {
@@ -218,6 +241,30 @@ describe("satır sınıflandırma", () => {
     ).toEqual(["cafe", "cafe", "cafe", "cafe", "cafe"]);
     expect(resolveCategory("bar")).toBe("pub");
     expect(resolveCategory("otel")).toBeNull();
+  });
+
+  it("paylaşımlı platform siteleri (Facebook, Instagram…) farklı işletmeleri kopya saymaz", () => {
+    const rows = [
+      ["Kafe A", "GB", "London", "facebook.com/kafea", "", "", ""], // 2
+      ["Kafe B", "GB", "London", "https://www.facebook.com/kafeb", "", "", ""], // 3
+      ["Kafe C", "GB", "London", "https://www.facebook.com/", "", "", ""], // 4: anahtarsız
+      ["Kafe D", "GB", "London", "https://www.facebook.com/profile.php?id=9", "", "", ""], // 5
+      ["Kafe E", "GB", "London", "https://m.facebook.com/KafeA", "", "", ""], // 6: 2 ile aynı sayfa
+      ["Kafe F", "GB", "London", "instagram.com/kafef", "", "", ""], // 7: mevcut Google lead'i ile aynı
+      ["Kafe G", "GB", "London", "instagram.com/kafeg", "", "", ""], // 8
+    ];
+    const c = classifyRows(
+      { headers: ["a", "b", "c", "d", "e", "f", "g"], rows },
+      MAP,
+      { defaultCountry: null, categoryKey: null, resolveCategory },
+      // Mevcut kayıtlarda paylaşımlı platform: yalnızca aynı sayfa kopyadır (alan adının tamamı değil).
+      { domains: new Set(["instagram.com/kafef"]), emails: new Set(), names: new Set() },
+    );
+    expect(c.duplicates).toEqual([
+      { row: 6, reason: "in_file" },
+      { row: 7, reason: "same_website" },
+    ]);
+    expect(c.candidates.map((x) => x.row)).toEqual([2, 3, 4, 5, 8]);
   });
 
   it("ülke sütunu yoksa varsayılan ülke; satır numarası tablodan gelir", () => {

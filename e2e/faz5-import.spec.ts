@@ -148,6 +148,40 @@ test.describe("Listeden içe aktarma (Faz 5 paket I)", () => {
     ).toBeVisible();
   });
 
+  test("geç gelen eski önizleme, sonra seçilen dosyanın yerini almaz", async () => {
+    await page.goto("/scans/import");
+    let first = true;
+    const pattern = "**/api/imports/preview";
+    await page.route(pattern, async (route) => {
+      // İlk (eski) dosyanın önizlemesi ikinciden SONRA yanıtlanır.
+      if (first) {
+        first = false;
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      await route.continue();
+    });
+    try {
+      const input = page.getByTestId("import-file");
+      await input.setInputFiles({
+        name: "eski.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from("Eski Ad;Eski Şehir\nX;Y\n", "utf8"),
+      });
+      await input.setInputFiles({
+        name: "yeni.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from("Yeni Ad;Ülke\nZ;GB\n", "utf8"),
+      });
+      await expect(page.getByTestId("import-summary")).toContainText("yeni.csv");
+      await page.waitForTimeout(3000); // eski yanıt bu arada gelir
+      await expect(page.getByTestId("import-summary")).toContainText("yeni.csv");
+      await expect(page.getByRole("table").first()).toContainText("Yeni Ad");
+      await expect(page.getByRole("table").first()).not.toContainText("Eski Ad");
+    } finally {
+      await page.unroute(pattern);
+    }
+  });
+
   test("geçmişten geri al: lead'ler arşivlenir, geri getirilebilir", async () => {
     await page.goto("/scans/import");
     const row = page
@@ -158,6 +192,9 @@ test.describe("Listeden içe aktarma (Faz 5 paket I)", () => {
     await page.getByRole("button", { name: "Listeden kaldır" }).click();
     await expect(page.getByText("Listeden kaldırılan: 2")).toBeVisible();
     await expect(row).toContainText("Listede 0/2");
-    await expect(row.getByRole("button", { name: /^Geri getir/ })).toBeVisible();
+    await row.getByRole("button", { name: /^Geri getir/ }).click();
+    await expect(page.getByText("Geri getirilen: 2")).toBeVisible();
+    await expect(row).toContainText("Listede 2/2");
+    await expect(row.getByRole("button", { name: /^Geri getir/ })).toHaveCount(0);
   });
 });

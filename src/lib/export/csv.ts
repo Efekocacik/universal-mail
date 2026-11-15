@@ -38,6 +38,8 @@ export const CSV_COLUMNS: readonly CsvColumn[] = [
   { key: "city", header: "sehir_tahmini", origin: "own" },
   { key: "country", header: "ulke_tahmini", origin: "own" },
   { key: "maps_url", header: "google_haritalar_baglantisi", origin: "own" },
+  // Faz 5: kullanıcının içe aktardığı veya sicilden gelen web sitesi (Google içeriği değil; Google lead'lerinde boş)
+  { key: "own_website", header: "kayitli_web_sitesi", origin: "own" },
   // Faz 2: işletmenin kendi web sitesinden bulunan bilgiler (bizim verimiz)
   { key: "email", header: "eposta", origin: "own" },
   { key: "email_status", header: "eposta_durumu", origin: "own" },
@@ -95,7 +97,8 @@ export async function* exportLeadsCsv(
     const rows = await db
       .select({ lead: leads, place: places, cache: placeCache, enrichment: leadEnrichment })
       .from(leads)
-      .innerJoin(places, eq(leads.placeId, places.placeId))
+      // Faz 5: yer kimliği olmayan lead'ler (içe aktarma/sicil) de dışa aktarılır; yer alanları boş kalır.
+      .leftJoin(places, eq(leads.placeId, places.placeId))
       .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
       .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
       .where(cond)
@@ -125,7 +128,7 @@ export async function* exportLeadsCsv(
         contactsBy.get(lead.id)?.find((c) => c.type === type)?.url ?? "";
       const values: Record<string, unknown> = {
         lead_id: lead.id,
-        place_id: place.placeId,
+        place_id: lead.placeId ?? "",
         novelty_score: lead.noveltyScore,
         novelty_label: lead.noveltyLabel,
         novelty_reasons: lead.noveltySignals.map((s) => s.reason).join(" | "),
@@ -133,17 +136,16 @@ export async function* exportLeadsCsv(
         tags: lead.tags.join(";"),
         notes: lead.notes ?? "",
         source: lead.source,
-        first_seen: iso(place.firstSeenAt),
-        detected_new: iso(place.newDetectedAt),
+        first_seen: iso(place?.firstSeenAt),
+        detected_new: iso(place?.newDetectedAt),
         display_name: lead.displayName,
         category: lead.categoryKey,
         city: lead.city,
         country: lead.countryCode,
-        maps_url: googleMapsUrl(place.placeId, {
-          source: place.source,
-          lat: place.lat,
-          lng: place.lng,
-        }),
+        maps_url: place
+          ? googleMapsUrl(place.placeId, { source: place.source, lat: place.lat, lng: place.lng })
+          : "",
+        own_website: lead.website,
         email: primary?.email,
         email_status: enrichment ? (enrichment.emailStatus ?? enrichment.status) : "unchecked",
         email_kind: primary?.kind,
@@ -158,8 +160,8 @@ export async function* exportLeadsCsv(
         contact_form: contact("contact_form"),
         name: cache?.name,
         address: cache?.formattedAddress,
-        lat: place.lat,
-        lng: place.lng,
+        lat: place?.lat,
+        lng: place?.lng,
         type: cache?.primaryType,
         business_status: cache?.businessStatus,
         opening_date: cache?.openingDate,

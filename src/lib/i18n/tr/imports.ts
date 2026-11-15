@@ -99,6 +99,8 @@ export const imports = {
   "imports.undo.done": "Listeden kaldırılan: {changed}",
   "imports.undo.skipped": "Etkin kampanyada olduğu için kaldırılmayan: {skipped}",
   "imports.restore.done": "Geri getirilen: {changed}",
+  "imports.restore.skippedDuplicate":
+    "Listede aynı işletme zaten olduğu için arşivde bırakılan: {skipped}",
   "apiError.IMPORT_TOO_LARGE": "Dosya 5 MB'tan büyük. Listeyi bölüp parça parça yükleyin.",
   "apiError.IMPORT_UNSUPPORTED": "Bu dosya türü desteklenmiyor. CSV veya XLSX dosyası seçin.",
   "apiError.IMPORT_PARSE":

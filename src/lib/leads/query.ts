@@ -186,7 +186,8 @@ const LIST_COLUMNS = {
   noveltyScore: leads.noveltyScore,
   noveltyLabel: leads.noveltyLabel,
   leadStatus: leads.status,
-  website: placeCache.website,
+  // Faz 5: Google sitesi yoksa kullanıcının verdiği site (içe aktarma/sicil `leads.website`; Google lead'lerinde boş).
+  website: sql<string | null>`coalesce(${placeCache.website}, ${leads.website})`,
   phone: placeCache.phone,
   userRatingCount: placeCache.userRatingCount,
   firstSeenAt: places.firstSeenAt,
@@ -245,8 +246,10 @@ export async function buildWhere(_db: Db, f: LeadFilters): Promise<SQL | undefin
       lte(places.lng, f.bbox.east),
     );
   }
-  if (f.hasWebsite === true) conds.push(sql`${placeCache.website} IS NOT NULL`);
-  if (f.hasWebsite === false) conds.push(sql`${placeCache.website} IS NULL`);
+  if (f.hasWebsite === true)
+    conds.push(sql`coalesce(${placeCache.website}, ${leads.website}) IS NOT NULL`);
+  if (f.hasWebsite === false)
+    conds.push(sql`coalesce(${placeCache.website}, ${leads.website}) IS NULL`);
   if (f.ratingMin !== undefined) conds.push(gte(placeCache.userRatingCount, f.ratingMin));
   if (f.ratingMax !== undefined) conds.push(lte(placeCache.userRatingCount, f.ratingMax));
   if (f.scanId !== undefined) {

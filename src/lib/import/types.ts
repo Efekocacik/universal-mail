@@ -22,6 +22,11 @@ export const IMPORT_LIMITS = {
   zipMaxEntries: 2000,
   zipMaxTotalBytes: 50 * 1024 * 1024,
   zipMaxRatio: 200,
+  /**
+   * XLSX: tek bir XML parçasının (sayfa, paylaşılan metinler) en büyük açılmış boyutu; DOM'a çevrilmeden önce
+   * denetlenir. Sayfadaki `<row>` öğesi sayısı da (boş satırlar atıldıktan sonra) `maxRows × 4` ile sınırlıdır.
+   */
+  xlsxMaxXmlBytes: 20 * 1024 * 1024,
 } as const;
 
 /** Ayrıştırılmış tablo: ilk satır başlık; hücreler metin (boş hücre ""). */

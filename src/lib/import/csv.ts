@@ -75,8 +75,9 @@ export function sniffDelimiter(text: string): CsvDelimiter {
 }
 
 /**
- * Kayıtlara böler. Kapanmamış tırnak `IMPORT_PARSE`. Boş olmayan kayıt sayısı başlık + `maxRows`'u aşınca okuma
- * durur ve `IMPORT_TOO_MANY_ROWS` atılır (büyük dosya bellekte tümüyle kayda çevrilmez).
+ * Boş olmayan kayıtlara böler (tümüyle boş kayıtlar atlanır; satır numaraları fiziksel satırı korur). Kapanmamış tırnak
+ * `IMPORT_PARSE`. Kayıt sayısı başlık + `maxRows`'u aşınca okuma durur ve `IMPORT_TOO_MANY_ROWS` atılır (büyük dosya
+ * bellekte tümüyle kayda çevrilmez).
  */
 export function parseCsvRecords(
   text: string,
@@ -100,13 +101,15 @@ export function parseCsvRecords(
   };
   const endRow = () => {
     endField();
+    // Tümüyle boş kayıtlar saklanmaz (yalnızca satır sayacı ilerler): yalnızca satır sonlarından oluşan 5 MB'lık bir
+    // dosya milyonlarca boş kayıt ve satır numarası üretip belleği şişirmesin.
     if (row.some((c) => c.trim() !== "")) {
       nonEmpty++;
       if (nonEmpty > maxRecords)
         throw new ImportError("IMPORT_TOO_MANY_ROWS", `En çok ${IMPORT_LIMITS.maxRows} satır.`);
+      records.push(row);
+      lineNumbers?.push(recordLine);
     }
-    records.push(row);
-    lineNumbers?.push(recordLine);
     row = [];
     recordLine = line;
   };

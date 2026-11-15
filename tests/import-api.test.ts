@@ -1,9 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import * as archiveRoute from "@/app/api/imports/[id]/archive/route";
 import * as restoreRoute from "@/app/api/imports/[id]/restore/route";
 import * as previewRoute from "@/app/api/imports/preview/route";
 import * as importsRoute from "@/app/api/imports/route";
+import * as exportRoute from "@/app/api/export/leads/route";
+import * as leadsRoute from "@/app/api/leads/route";
 import type { Db } from "@/lib/db/client";
 import { placeCache } from "@/lib/db/cache-schema";
 import { initDatabase } from "@/lib/db/init";
@@ -405,6 +407,134 @@ describe("POST /api/imports", () => {
   });
 });
 
+describe("paylaşımlı platform siteleri", () => {
+  it("iki farklı facebook.com/<sayfa> satırı da eklenir; yalnızca aynı sayfa kopyadır (Google ve içe aktarma lead'leri)", async () => {
+    await completeSetup();
+    await db.insert(places).values({
+      placeId: "demo:fb",
+      source: "demo",
+      lat: 51.5,
+      lng: -0.12,
+      coordsFetchedAt: T,
+      firstSeenAt: T,
+      createdAt: T,
+      updatedAt: T,
+    });
+    await db.insert(leads).values({
+      placeId: "demo:fb",
+      source: "demo",
+      countryCode: "GB",
+      city: "London",
+      createdAt: T,
+      updatedAt: T,
+    });
+    // Google lead'inin (oturum önbelleğindeki) sitesi bir Facebook sayfası: tüm facebook.com satırlarını engellememeli.
+    await db.insert(placeCache).values({
+      placeId: "demo:fb",
+      name: "Kafe X",
+      website: "https://www.facebook.com/kafe-x",
+      types: [],
+      fetchedAt: T,
+    });
+    await db.insert(leads).values({
+      source: "import",
+      displayName: "Kafe Y",
+      countryCode: "TR",
+      city: "Bursa",
+      website: "https://www.facebook.com/kafe-y",
+      createdAt: T,
+      updatedAt: T,
+    });
+    const csv =
+      "Ad;Ülke;Şehir;Web\n" +
+      "Kafe A;GB;London;facebook.com/kafea\n" +
+      "Kafe B;GB;London;https://www.facebook.com/kafeb/\n" +
+      "Kafe Z;GB;Leeds;https://m.facebook.com/Kafe-X\n" + // Google lead'iyle aynı sayfa
+      "Kafe W;GB;Leeds;facebook.com/kafe-y\n" + // başka ülkedeki içe aktarma lead'iyle aynı sayfa
+      "Kafe V;GB;Leeds;https://www.facebook.com/\n"; // sayfasız: yalnızca ad+şehir denetlenir
+    const r = await commit(
+      meta({
+        mapping: {
+          name: 0,
+          country: 1,
+          city: 2,
+          website: 3,
+          email: null,
+          category: null,
+          notes: null,
+        },
+      }),
+      { name: "fb.csv", bytes: csv },
+    );
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject({ created: 3, duplicateCount: 2, invalidCount: 0 });
+    expect(r.body.duplicates).toEqual([
+      { row: 4, reason: "same_website" },
+      { row: 5, reason: "same_website" },
+    ]);
+    const names = (await db.select().from(leads).where(eq(leads.source, "import")))
+      .map((l) => l.displayName)
+      .sort();
+    expect(names).toEqual(["Kafe A", "Kafe B", "Kafe V", "Kafe Y"]);
+  });
+});
+
+describe("Keşif ve dışa aktarma (yer kimliği olmayan lead'ler)", () => {
+  it("GET /api/leads?source=import içe aktarılan lead'leri ad, şehir ve web sitesiyle döndürür; CSV dışa aktarmada da çıkar", async () => {
+    await completeSetup();
+    const r = await commit(meta());
+    expect(r.body.created).toBe(3);
+    const list = await read(
+      await leadsRoute.GET(new Request(`${ORIGIN}/api/leads?source=import&limit=50`), undefined),
+    );
+    expect(list.status).toBe(200);
+    expect(list.body.total).toBe(3);
+    const rows = list.body.rows as {
+      placeId: string | null;
+      name: string;
+      displayName: string;
+      city: string;
+      website: string | null;
+      source: string;
+    }[];
+    expect(rows.every((x) => x.source === "import" && x.placeId === null)).toBe(true);
+    expect(rows.find((x) => x.displayName === "Çınar Kahve")).toMatchObject({
+      name: "Çınar Kahve",
+      city: "İzmir",
+      website: "https://www.cinar-kahve.example",
+    });
+    expect(rows.map((x) => x.displayName).sort()).toEqual([
+      "Batı Lokanta",
+      "Kuzey Pub Ltd",
+      "Çınar Kahve",
+    ]);
+    // Web sitesi süzgeci kullanıcının verdiği siteyi de sayar.
+    const withSite = await read(
+      await leadsRoute.GET(
+        new Request(`${ORIGIN}/api/leads?source=import&hasWebsite=true`),
+        undefined,
+      ),
+    );
+    expect(withSite.body.total).toBe(2);
+
+    const csv = await (
+      await exportRoute.GET(new Request(`${ORIGIN}/api/export/leads?source=import`), undefined)
+    ).text();
+    const [header, ...lines] = csv.replace("\ufeff", "").split("\r\n").filter(Boolean);
+    const cols = header!.split(",");
+    expect(lines).toHaveLength(3);
+    const row = lines
+      .map((l) => l.split(","))
+      .find((c) => c[cols.indexOf("gorunen_ad")] === "Çınar Kahve")!;
+    expect(row[cols.indexOf("place_id")]).toBe("");
+    expect(row[cols.indexOf("google_haritalar_baglantisi")]).toBe("");
+    expect(row[cols.indexOf("kayitli_web_sitesi")]).toBe("https://www.cinar-kahve.example");
+    expect(row[cols.indexOf("sehir_tahmini")]).toBe("İzmir");
+    expect(row[cols.indexOf("eposta")]).toBe("info@cinar-kahve.example");
+    expect(cols).not.toContain("ad"); // Google alanları kapalı
+  });
+});
+
 describe("geçmiş, geri al ve geri getir", () => {
   it("liste, arşivleme (etkin kampanya hariç), idempotentlik ve geri getirme", async () => {
     await completeSetup();
@@ -452,6 +582,71 @@ describe("geçmiş, geri al ve geri getir", () => {
     expect(
       (await read(await restoreRoute.POST(post(`/api/imports/x/restore`), ctx("x")))).status,
     ).toBe(400);
+  });
+
+  it("geri al → aynı dosyayı yeniden içe aktar → geri getir: kopyalar arşivde kalır; tek tek arşivlenen geri gelmez", async () => {
+    await completeSetup();
+    const first = await commit(meta());
+    const b1 = first.body.batch.id as number;
+    const ids = (await db.select().from(importBatchLeads)).map((x) => x.leadId);
+    // Kullanıcı bir lead'i ayrıca (toplu arşivle) arşivlemiş: partinin geri getirmesi onu döndürmemeli.
+    await db
+      .update(leads)
+      .set({ archivedAt: T - 1000 })
+      .where(eq(leads.id, ids[0]!));
+
+    const arch = await read(await archiveRoute.POST(post(`/api/imports/${b1}/archive`), ctx(b1)));
+    expect(arch.body).toMatchObject({
+      changed: 2,
+      batch: { activeCount: 0, restorableCount: 2 },
+    });
+
+    // Arşivlenmişler kopya sayılmadığından yeniden içe aktarma aynı üç işletmeyi yeniden oluşturur.
+    const second = await commit(meta());
+    expect(second.body.created).toBe(3);
+    const b2 = second.body.batch.id as number;
+
+    const rest = await read(await restoreRoute.POST(post(`/api/imports/${b1}/restore`), ctx(b1)));
+    expect(rest).toMatchObject({
+      status: 200,
+      body: { changed: 0, skippedDuplicate: 2, skippedActive: 0, batch: { activeCount: 0 } },
+    });
+    const active = await db
+      .select()
+      .from(leads)
+      .where(and(eq(leads.source, "import"), isNull(leads.archivedAt)));
+    expect(active).toHaveLength(3); // her işletme bir kez
+    const activeEmails = await db
+      .select({ e: leadEmails.email })
+      .from(leadEmails)
+      .innerJoin(leads, eq(leads.id, leadEmails.leadId))
+      .where(isNull(leads.archivedAt));
+    expect(new Set(activeEmails.map((x) => x.e)).size).toBe(activeEmails.length);
+
+    // İkinci parti geri alınınca ilk parti geri getirilebilir; tek tek arşivlenen lead arşivde kalır.
+    await archiveRoute.POST(post(`/api/imports/${b2}/archive`), ctx(b2));
+    const rest2 = await read(await restoreRoute.POST(post(`/api/imports/${b1}/restore`), ctx(b1)));
+    expect(rest2.body).toMatchObject({
+      changed: 2,
+      skippedDuplicate: 0,
+      batch: { activeCount: 2, restorableCount: 0 },
+    });
+    const [own] = await db.select().from(leads).where(eq(leads.id, ids[0]!));
+    expect(own!.archivedAt).toBe(T - 1000);
+    const list = await read(
+      await importsRoute.GET(new Request(`${ORIGIN}/api/imports?limit=5`), undefined),
+    );
+    expect(list.body.batches).toEqual([
+      expect.objectContaining({ id: b2, activeCount: 0, restorableCount: 3 }),
+      expect.objectContaining({ id: b1, activeCount: 2, restorableCount: 0 }),
+    ]);
+    const restoreAudit = (await db.select().from(auditLog)).filter(
+      (a) => a.action === "import.restore",
+    );
+    expect(restoreAudit.map((a) => a.detail)).toEqual([
+      { changed: 0, skippedDuplicate: 2 },
+      { changed: 2, skippedDuplicate: 0 },
+    ]);
   });
 
   it("limit sınırlanır, boş liste", async () => {

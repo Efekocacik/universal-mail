@@ -1,4 +1,5 @@
 import { COUNTRY_CODES } from "@/lib/geo/countries";
+import { SHARED_SITE_DOMAINS } from "@/lib/email/lists";
 import { registrableDomain } from "@/lib/novelty/rdap";
 
 /**
@@ -177,6 +178,94 @@ export function websiteDomain(website: string | null | undefined): string | null
   } catch {
     return null;
   }
+}
+
+/** Paylaşımlı platform sunucularında işletmeyi tanımlamayan önekler (`www.`, mobil ve kısa bağlantı alt adları). */
+const SHARED_HOST_PREFIX = /^(?:www|m|mobile|web|touch|l|lm)\./;
+/** Platformların kendi alt adları (işletmeye özgü değil). */
+const GENERIC_HOST_LABELS: ReadonlySet<string> = new Set([
+  "sites",
+  "business",
+  "maps",
+  "plus",
+  "support",
+]);
+/**
+ * Paylaşımlı platform yollarında işletmeyi tanımlamayan parçalar ("pages", "biz", "view"…). Bunlar atlanır ve ilk
+ * ayırt edici parçaya kadar (en çok 3 parça) yol anahtara girer. İki harfli parçalar (ülke/dil: "gb", "en") da atlanır.
+ */
+const GENERIC_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  "pages",
+  "pg",
+  "p",
+  "people",
+  "profile.php",
+  "groups",
+  "home",
+  "view",
+  "site",
+  "sites",
+  "s",
+  "biz",
+  "business",
+  "company",
+  "in",
+  "user",
+  "users",
+  "channel",
+  "c",
+  "hotel",
+  "restaurant",
+  "restaurants",
+  "menu",
+  "store",
+  "shop",
+]);
+
+/**
+ * İçe aktarma kopya anahtarı (normalleştirilmiş web sitesinden):
+ *  - Olağan sitede kayıtlı alan adı (`www.` ve alt alan adları aynı işletme sayılır): `cafe-one.example`.
+ *  - Paylaşımlı platformda (`SHARED_SITE_DOMAINS`: Facebook, Instagram, Linktree, Wix, Google Sites…) alan adı
+ *    işletmeyi tanımlamaz: anahtar sunucu + ilk ayırt edici yol parçasıdır (`facebook.com/kafe-a`,
+ *    `sites.google.com/view/kafe-a`); yol yoksa ve sunucu kullanıcıya özgü bir alt ad ise yalnızca sunucu
+ *    (`kafe-a.wixsite.com`). Ayırt edici parça bulunamazsa (`facebook.com`, `facebook.com/profile.php`) `null`: o
+ *    satırda web sitesiyle kopya denetimi yapılmaz, ad + ülke + şehir ve e-posta denetimi sürer.
+ * Anahtar küçük harftir ve "/" içermesi paylaşımlı platform anahtarı olduğunu gösterir.
+ */
+export function websiteKey(website: string | null | undefined): string | null {
+  if (!website) return null;
+  let url: URL;
+  try {
+    url = new URL(website);
+  } catch {
+    return null;
+  }
+  const domain = registrableDomain(url.hostname);
+  if (!domain || !SHARED_SITE_DOMAINS.has(domain)) return domain;
+  let host = url.hostname.toLowerCase().replace(/\.$/, "");
+  while (SHARED_HOST_PREFIX.test(host) && host !== domain)
+    host = host.replace(SHARED_HOST_PREFIX, "");
+  const segs = url.pathname
+    .split("/")
+    .filter(Boolean)
+    .map((s) => {
+      try {
+        return decodeURIComponent(s).toLowerCase();
+      } catch {
+        return s.toLowerCase();
+      }
+    });
+  const distinctive = (s: string) =>
+    s.startsWith("@") ? s.length > 1 : s.length > 2 && !GENERIC_PATH_SEGMENTS.has(s);
+  const picked: string[] = [];
+  for (const s of segs.slice(0, 3)) {
+    picked.push(s);
+    if (distinctive(s)) return `${host}/${picked.join("/")}`;
+  }
+  // Yol ayırt edici değil: kullanıcıya özgü alt ad (`kafe-a.wixsite.com`) tek başına anahtardır; platformun kendi
+  // alt adları (`sites.google.com`, `business.site` kökü) değildir.
+  const sub = host === domain ? "" : host.slice(0, -domain.length - 1);
+  return sub && !GENERIC_HOST_LABELS.has(sub) ? host : null;
 }
 
 /** Görünen metni temizler: kontrol karakterleri atılır, boşluklar tekleşir, uzunluk kesilir. Boşsa `null`. */

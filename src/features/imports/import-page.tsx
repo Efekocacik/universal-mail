@@ -69,8 +69,12 @@ export function ImportPage() {
   const [inputKey, setInputKey] = useState(0);
   const qc = useQueryClient();
   const resultRef = useRef<HTMLHeadingElement>(null);
+  // En son seçilen dosya: geç gelen eski önizleme/kontrol yanıtları (dosya A yavaş, sonra B seçildi) yok sayılır;
+  // aksi hâlde ekranda B görünürken A'nın önizlemesi ve eşlemesi kurulur, "İçe aktar" A'yı yükler.
+  const latestFile = useRef<File | null>(null);
 
   const reset = () => {
+    latestFile.current = null;
     setFile(null);
     setPreview(null);
     setProblem(null);
@@ -86,11 +90,14 @@ export function ImportPage() {
     mutationFn: (f: File) => importsApi.preview(f),
     retry: false,
     onSuccess: (p, f) => {
+      if (f !== latestFile.current) return;
       setPreview(p);
       setMapping({ ...p.suggestedMapping });
       setFile(f);
     },
-    onError: (e) => setProblem(errorText(e)),
+    onError: (e, f) => {
+      if (f === latestFile.current) setProblem(errorText(e));
+    },
   });
 
   const options: ImportOptions | null = mapping
@@ -100,7 +107,9 @@ export function ImportPage() {
   const checker = useMutation({
     mutationFn: (v: { file: File; o: ImportOptions }) => importsApi.check(v.file, v.o),
     retry: false,
-    onSuccess: setCheck,
+    onSuccess: (r, v) => {
+      if (v.file === latestFile.current) setCheck(r);
+    },
     onError: (e) => toast.error(errorText(e)),
   });
   const importer = useMutation({
@@ -152,6 +161,7 @@ export function ImportPage() {
                 setMapping(null);
                 setCheck(null);
                 setFile(null);
+                latestFile.current = f;
                 if (!f) return;
                 const p = fileProblem(f);
                 if (p) return setProblem(t(p));
@@ -658,7 +668,12 @@ function HistorySection() {
     retry: false,
     onSuccess: (r) => {
       after();
-      toast.success(t("imports.restore.done", { changed: fmtNumber(r.changed) }));
+      toast.success(t("imports.restore.done", { changed: fmtNumber(r.changed) }), {
+        description:
+          r.skippedDuplicate > 0
+            ? t("imports.restore.skippedDuplicate", { skipped: fmtNumber(r.skippedDuplicate) })
+            : undefined,
+      });
     },
     onError: (e) => toast.error(errorText(e)),
   });
@@ -729,7 +744,7 @@ function HistorySection() {
                     <Undo2 /> {t("imports.history.undo")}
                   </Button>
                 )}
-                {b.activeCount < b.createdCount && (
+                {b.restorableCount > 0 && (
                   <Button
                     size="sm"
                     variant="outline"

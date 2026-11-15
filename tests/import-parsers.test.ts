@@ -84,6 +84,18 @@ describe("CSV", () => {
     expect(code(() => parseCsv(enc("ad,şehir\n\n\n")))).toBe("IMPORT_EMPTY");
   });
 
+  it("yalnızca satır sonlarından oluşan büyük dosya boş kayıt biriktirmez; satır numaraları korunur", () => {
+    // ~5 MB satır sonu: eskiden her biri bir `[""]` kaydı + satır numarasıydı (milyonlarca nesne).
+    const blank = "\n".repeat(IMPORT_LIMITS.maxBytes - 16);
+    const lines: number[] = [];
+    expect(parseCsvRecords(blank, ",", undefined, lines)).toEqual([]);
+    expect(lines).toEqual([]);
+    expect(code(() => parseCsv(enc(blank)))).toBe("IMPORT_EMPTY");
+    const t = parseCsv(enc(`ad\n${blank}Son Kafe\n`));
+    expect(t.rows).toEqual([["Son Kafe"]]);
+    expect(t.rowNumbers).toEqual([IMPORT_LIMITS.maxBytes - 16 + 2]);
+  });
+
   it("5000 satır geçer, 5001 IMPORT_TOO_MANY_ROWS", () => {
     const body = (n: number) => `ad\n${Array.from({ length: n }, (_, i) => `K${i}`).join("\n")}`;
     expect(parseCsv(enc(body(IMPORT_LIMITS.maxRows))).rows).toHaveLength(IMPORT_LIMITS.maxRows);
@@ -242,6 +254,54 @@ describe("XLSX", () => {
       ...Array.from({ length: IMPORT_LIMITS.maxRows + 1 }, (_, i) => [`K${i}`]),
     ];
     expect(code(() => parseXlsx(writeXlsx(rows, { inline: true })))).toBe("IMPORT_TOO_MANY_ROWS");
+  });
+
+  const sheet = (rows: string) =>
+    `<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${rows}</sheetData></worksheet>`;
+  const cell = (r: number, v: string) =>
+    `<row r="${r}"><c r="A${r}" t="inlineStr"><is><t>${v}</t></is></c></row>`;
+
+  it("boş satırlar DOM'a girmez ve sayılmaz; numaralar korunur", () => {
+    const n = IMPORT_LIMITS.maxRows * 6; // satır öğesi sınırının (maxRows × 4) üstünde ama hepsi boş
+    let empties = "";
+    for (let r = 2; r < n; r++)
+      empties += r % 2 ? `<row r="${r}"/>` : `<row r="${r}" spans="1:3" s="2"></row>`;
+    const t = parseXlsx(
+      writeXlsx([], {
+        rawSheet: sheet(cell(1, "ad") + empties + cell(n, "Son Kafe")),
+        sheetMethod: 0,
+      }),
+    );
+    expect(t.rows).toEqual([["Son Kafe"]]);
+    expect(t.rowNumbers).toEqual([n]);
+  });
+
+  it("numarasız boş satır öğeleri sınırı aşarsa IMPORT_TOO_MANY_ROWS; dev XML parçası IMPORT_PARSE", () => {
+    const many = "<row/>".repeat(IMPORT_LIMITS.maxRows * 4 + 1);
+    expect(
+      code(() =>
+        parseXlsx(writeXlsx([], { rawSheet: sheet(cell(1, "ad") + many), sheetMethod: 0 })),
+      ),
+    ).toBe("IMPORT_TOO_MANY_ROWS");
+    // `<rowBreaks>` gibi öğeler satır sayılmaz.
+    expect(
+      parseXlsx(
+        writeXlsx([], {
+          rawSheet: sheet(cell(1, "ad") + cell(2, "Kafe")).replace(
+            "</worksheet>",
+            `<rowBreaks count="1"><brk id="2"/></rowBreaks></worksheet>`,
+          ),
+        }),
+      ).rows,
+    ).toEqual([["Kafe"]]);
+    const pad = " ".repeat(IMPORT_LIMITS.xlsxMaxXmlBytes);
+    expect(
+      code(() =>
+        parseXlsx(
+          writeXlsx([], { rawSheet: sheet(cell(1, "ad") + cell(2, "Kafe") + pad), sheetMethod: 0 }),
+        ),
+      ),
+    ).toBe("IMPORT_PARSE");
   });
 
   it("yardımcılar: sütun harfi ve parça yolu", () => {

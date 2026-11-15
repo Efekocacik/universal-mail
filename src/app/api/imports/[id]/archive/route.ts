@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 /**
  * İçe aktarmayı geri al: partinin lead'leri arşivlenir (keşiften kalkar; "Geri getir" ile döner). Etkin kampanya
- * dizisindekiler arşivlenmez. İdempotent. 200 `{batch, changed, skippedActive}`; 404 NOT_FOUND.
+ * dizisindekiler arşivlenmez. İdempotent. 200 `{batch, changed, skippedActive, skippedDuplicate: 0}`; 404 NOT_FOUND.
  */
 export const POST = importRoute(async (_req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const db = await database();

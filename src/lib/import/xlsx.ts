@@ -19,10 +19,40 @@ function stripElementPrefixes(xml: string): string {
   return xml.replace(/<(\/?)[A-Za-z_][\w.-]*:(?=[A-Za-z_])/g, "<$1");
 }
 
-function loadXml(zip: ZipArchive, name: string): cheerio.CheerioAPI | null {
+/** XML parçasını metin olarak okur; boyut sınırı DOM kurulmadan önce denetlenir. */
+function readXmlText(zip: ZipArchive, name: string): string | null {
   const buf = zip.read(name);
   if (!buf) return null;
-  return cheerio.load(stripElementPrefixes(buf.toString("utf8")), { xml: true });
+  if (buf.byteLength > IMPORT_LIMITS.xlsxMaxXmlBytes) fail("XML parçası çok büyük");
+  return stripElementPrefixes(buf.toString("utf8"));
+}
+
+function loadXml(zip: ZipArchive, name: string): cheerio.CheerioAPI | null {
+  const xml = readXmlText(zip, name);
+  return xml === null ? null : cheerio.load(xml, { xml: true });
+}
+
+/** Satır numarası taşıyan boş `<row>` öğeleri (biçimli ama hücresiz satırlar): DOM'a hiç girmez. */
+const EMPTY_ROW = /<row\b(?=[^>]*\sr="\d+")[^>]*?(?:\/>|>\s*<\/row>)/g;
+
+/**
+ * Sayfa XML'i: boş satırlar atılır, kalan `<row>` öğeleri sayılır (`maxRows × 4`'ü aşarsa `IMPORT_TOO_MANY_ROWS`),
+ * sonra DOM kurulur. Böylece binlerce boş satırdan oluşan bir sayfa belleği şişirmez.
+ */
+function loadSheet(zip: ZipArchive, name: string): cheerio.CheerioAPI | null {
+  const raw = readXmlText(zip, name);
+  if (raw === null) return null;
+  const xml = raw.replace(EMPTY_ROW, "");
+  const maxRowElements = IMPORT_LIMITS.maxRows * 4;
+  let n = 0;
+  for (let i = xml.indexOf("<row"); i !== -1; i = xml.indexOf("<row", i + 4)) {
+    const next = xml.charCodeAt(i + 4);
+    // `<row` ardından boşluk, `>` veya `/` gelmeli (`<rowBreaks>` gibi öğeler sayılmaz).
+    if (next === 32 || next === 9 || next === 10 || next === 13 || next === 62 || next === 47) n++;
+    if (n > maxRowElements)
+      throw new ImportError("IMPORT_TOO_MANY_ROWS", `En çok ${IMPORT_LIMITS.maxRows} satır.`);
+  }
+  return cheerio.load(xml, { xml: true });
 }
 
 /** `xl/workbook.xml` ile göreli hedefi birleştirir (`worksheets/sheet1.xml`, `../x`, `/xl/...`). */
@@ -95,7 +125,7 @@ export function parseXlsx(bytes: Uint8Array): ParsedTable {
         .map((si) => richText(sst$, si))
     : [];
 
-  const $ = loadXml(zip, sheetPart) ?? fail("sayfa dosyası yok");
+  const $ = loadSheet(zip, sheetPart) ?? fail("sayfa dosyası yok");
   const records: string[][] = [];
   const numbers: number[] = [];
   let nonEmpty = 0;
@@ -123,11 +153,11 @@ export function parseXlsx(bytes: Uint8Array): ParsedTable {
       while (cells.length < col) cells.push("");
       cells[col] = value;
     }
-    if (cells.some((x) => x.trim() !== "")) {
-      nonEmpty++;
-      if (nonEmpty > IMPORT_LIMITS.maxRows + 1)
-        throw new ImportError("IMPORT_TOO_MANY_ROWS", `En çok ${IMPORT_LIMITS.maxRows} satır.`);
-    }
+    // Boş satırlar saklanmaz (yalnızca numara ilerler).
+    if (!cells.some((x) => x.trim() !== "")) continue;
+    nonEmpty++;
+    if (nonEmpty > IMPORT_LIMITS.maxRows + 1)
+      throw new ImportError("IMPORT_TOO_MANY_ROWS", `En çok ${IMPORT_LIMITS.maxRows} satır.`);
     records.push(cells);
     numbers.push(rowNo);
   }

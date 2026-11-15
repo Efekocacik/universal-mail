@@ -92,7 +92,15 @@ const colName = (i: number): string => {
  */
 export function writeXlsx(
   rows: (string | number | boolean | null)[][],
-  opts: { inline?: boolean; secondSheet?: boolean; sheetTarget?: string } = {},
+  opts: {
+    inline?: boolean;
+    secondSheet?: boolean;
+    sheetTarget?: string;
+    /** Sayfa XML'ini olduğu gibi kullanır (`rows` yok sayılır); sınır senaryoları için. */
+    rawSheet?: string;
+    /** Sayfa girdisinin sıkıştırma yöntemi (0 = saklı; oran sınırına takılmadan büyük XML). */
+    sheetMethod?: 0 | 8;
+  } = {},
 ): Buffer {
   const shared: string[] = [];
   const sIndex = (s: string) => {
@@ -134,7 +142,11 @@ export function writeXlsx(
       name: "xl/_rels/workbook.xml.rels",
       data: `<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/><Relationship Id="rId7" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="${target}"/><Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/></Relationships>`,
     },
-    { name: `xl/${target.replace(/^\/xl\//, "")}`, data: sheetXml(rows) },
+    {
+      name: `xl/${target.replace(/^\/xl\//, "")}`,
+      data: opts.rawSheet ?? sheetXml(rows),
+      method: opts.sheetMethod,
+    },
   ];
   if (opts.secondSheet)
     files.push({ name: "xl/worksheets/sheet2.xml", data: sheetXml([["DECOY"], ["DECOY"]]) });
