@@ -13,6 +13,7 @@ import {
   mailboxes,
   templates,
 } from "@/lib/db/schema";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import { pickTemplateLanguage, suggestLanguage } from "@/lib/mail/language";
 import { isMailSchedulerEnabled } from "@/lib/mail/scheduler/job";
 import { effectiveMailboxCap } from "@/lib/mail/scheduler/throttle";
@@ -145,6 +146,7 @@ async function stepsStillValid(db: DbExecutor, campaignId: number): Promise<bool
       r.tLanguage !== null &&
       r.tArchivedAt === null &&
       r.tInfoOnly !== true &&
+      !isInfoOnlyLanguage(r.tLanguage) &&
       r.tLanguage === r.language &&
       r.tKind === (r.stepIndex === 0 ? "initial" : "followup"),
   );

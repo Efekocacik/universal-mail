@@ -92,7 +92,12 @@ export function CampaignStatsCard({
                     <th scope="row" className="py-1.5 pr-3 text-left font-medium">
                       {t(`campaignStats.variant.${v}`)}
                     </th>
-                    <td className="py-1.5 pr-3 text-right">{fmtNumber(rows[v].sent)}</td>
+                    <td
+                      className="py-1.5 pr-3 text-right"
+                      data-testid={`campaign-stats-ab-sent-${v}`}
+                    >
+                      {fmtNumber(rows[v].sent)}
+                    </td>
                     <td className="py-1.5 pr-3 text-right">{fmtNumber(rows[v].replied)}</td>
                     <td className="py-1.5 pr-3 text-right">{replyRate(rows[v])}</td>
                     {s.opens.enabled && (

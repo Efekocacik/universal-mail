@@ -16,6 +16,7 @@ import {
   type SequenceStopReason,
 } from "@/lib/db/schema";
 import { effectiveStopReasonSql } from "@/lib/mail/inbound/complaint-sql";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import { isSupportedLanguage } from "@/lib/mail/language";
 import { MIN_GAP_S } from "@/lib/mail/scheduler/throttle";
 import { DEFAULT_SEND_WINDOW, effectiveWindow } from "@/lib/mail/scheduler/window";
@@ -288,7 +289,7 @@ async function validateSteps(db: DbExecutor, steps: readonly StepInput[]): Promi
     const t = rows.find((r) => r.id === s.templateId);
     if (!t) fail("Şablon bulunamadı.", { templateId: s.templateId });
     if (t!.archivedAt !== null) fail("Arşivlenmiş şablon kullanılamaz.", { templateId: t!.id });
-    if (t!.infoOnly) infoOnly(t!.id);
+    if (t!.infoOnly || isInfoOnlyLanguage(t!.language)) infoOnly(t!.id);
     if (t!.language !== s.language)
       fail("Şablon dili adım diliyle aynı olmalıdır.", { templateId: t!.id });
     const kind = s.stepIndex === 0 ? "initial" : "followup";
@@ -308,7 +309,7 @@ async function validateSteps(db: DbExecutor, steps: readonly StepInput[]): Promi
       const ct = rows.find((r) => r.id === c.templateId);
       if (!ct) fail("Şablon bulunamadı.", { templateId: c.templateId });
       if (ct!.archivedAt !== null) fail("Arşivlenmiş şablon kullanılamaz.", { templateId: ct!.id });
-      if (ct!.infoOnly) infoOnly(ct!.id);
+      if (ct!.infoOnly || isInfoOnlyLanguage(ct!.language)) infoOnly(ct!.id);
       if (ct!.language !== s.language || ct!.kind !== kind) {
         throw new CampaignError(
           "category_template_mismatch",

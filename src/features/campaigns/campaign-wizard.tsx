@@ -24,6 +24,7 @@ import {
 import { categoryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
 import type { MutationErrorInfo } from "@/lib/client/retry";
 import { t } from "@/lib/i18n";
+import { isInfoOnlyLanguage } from "@/lib/mail/info-only";
 import {
   dayLabel,
   DEFAULT_WINDOW,
@@ -35,6 +36,8 @@ import {
 import {
   categoryTemplatesFor,
   hasAbSubject,
+  preservedFollowupVariants,
+  pruneVariantSelection,
   selectionFromSteps,
   suggestVariants,
   variantKey,
@@ -464,14 +467,33 @@ function StepsStep({
 
   const langs = Object.keys(selected).filter((l) => selected[l]);
   const options = variantOptions(allTemplates, langs);
+  // Şablon listesi yüklenene kadar hiçbir seçim ayıklanmaz (yoksa taslak varyantsız kaydedilirdi).
+  const loaded = templates.data !== undefined;
+  const pruned = loaded
+    ? pruneVariantSelection(variants, options, langs)
+    : { kept: variants, stale: [] };
+  // API ile takip adımlarına yazılmış varyantlar korunur (sihirbaz yalnızca adım 0 için seçtirir).
+  const kept = useMemo(
+    () => (loaded ? preservedFollowupVariants(existing, allTemplates) : null),
+    [loaded, existing, allTemplates],
+  );
+  const followVariants = (l: string, stepIndex: number) =>
+    loaded
+      ? (kept?.byStep[`${l}|${stepIndex}`] ?? [])
+      : (existing.find((s) => s.language === l && s.stepIndex === stepIndex)?.categoryTemplates ??
+        []);
+  const stale = [
+    ...pruned.stale,
+    ...(kept?.stale ?? []).filter((v) => langs.includes(v.language) && v.stepIndex <= extra),
+  ];
   const steps: StepInput[] = langs.flatMap((l) => [
     {
       stepIndex: 0,
       language: l,
       templateId: selected[l]!,
       delayDays: 0,
-      ...(categoryTemplatesFor(l, variants).length > 0
-        ? { categoryTemplates: categoryTemplatesFor(l, variants) }
+      ...(categoryTemplatesFor(l, pruned.kept).length > 0
+        ? { categoryTemplates: categoryTemplatesFor(l, pruned.kept) }
         : {}),
     },
     ...Array.from({ length: extra }, (_, i) => ({
@@ -479,8 +501,14 @@ function StepsStep({
       language: l,
       templateId: followups[l]?.[i] ?? 0,
       delayDays: delays[i] ?? 5,
+      ...(followVariants(l, i + 1).length > 0
+        ? { categoryTemplates: followVariants(l, i + 1) }
+        : {}),
     })),
   ]);
+  const followupVariantCount = steps
+    .filter((s) => s.stepIndex > 0)
+    .reduce((n, s) => n + (s.categoryTemplates?.length ?? 0), 0);
   const valid =
     steps.length > 0 &&
     steps.every((s) => s.templateId > 0) &&
@@ -538,7 +566,9 @@ function StepsStep({
                   className="text-[12px] text-warning-text"
                   data-testid={`cw-lang-blocked-${l}`}
                 >
-                  {t("wizard.steps.infoOnly", { lang: l.toUpperCase() })}
+                  {isInfoOnlyLanguage(l)
+                    ? t("wizard.steps.infoOnly", { lang: l.toUpperCase() })
+                    : t("wizard.steps.noUsable", { lang: l.toUpperCase() })}
                 </p>
               ) : (
                 <Select
@@ -611,6 +641,28 @@ function StepsStep({
               </div>
             );
           })
+        )}
+        {!readOnly && stale.length > 0 && (
+          <div data-testid="cw-variants-stale">
+            <Notice tone="warning">
+              <ul className="space-y-0.5">
+                {stale.map((v) => (
+                  <li key={`${v.stepIndex}|${v.language}|${v.categoryKey}`}>
+                    {t("wizard.variants.stale", {
+                      step: t("queue.step", { n: v.stepIndex + 1 }),
+                      lang: v.language.toUpperCase(),
+                      category: categoryLabel(v.categoryKey, v.categoryKey),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          </div>
+        )}
+        {followupVariantCount > 0 && (
+          <p className="text-[12px] text-muted-foreground" data-testid="cw-variants-followup">
+            {t("wizard.variants.followupKept")}
+          </p>
         )}
       </fieldset>
 

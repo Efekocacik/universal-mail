@@ -39,6 +39,8 @@ export const variants = {
   "composeError.template_info_only": "The template is for information only and cannot be sent",
 
   "wizard.steps.infoOnly": "{lang}: for information only, sending blocked",
+  "wizard.steps.noUsable":
+    "{lang}: there is no usable general first-email template (it may be archived). Add one on the Templates page.",
   "wizard.steps.ab":
     "{lang}: A/B subject test is on. Recipients alternate between the two subjects.",
   "wizard.variants.title": "Category variants (first email)",
@@ -47,6 +49,12 @@ export const variants = {
   "wizard.variants.none": "There are no category templates in the selected languages.",
   "wizard.variants.use": "{lang} · separate template for {category} businesses",
   "wizard.variants.template": "{lang} {category} variant template",
+  "wizard.variants.stale":
+    "{step} · {lang} · {category}: the variant template is archived or no longer suitable. It will be removed when you save.",
+  "wizard.variants.followupKept":
+    "Category variants set for follow-up steps are kept. You can see all of them in the campaign details.",
+  "campaign.stepVariant": "{category} → {template}",
+  "campaign.stepVariants": "Category variants",
 
   "campaignStats.title": "Subject test and opens",
   "campaignStats.ab.title": "A/B subject test (first email)",

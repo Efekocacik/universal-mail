@@ -4,8 +4,12 @@ import { expect, test, type APIRequestContext, type Page } from "@playwright/tes
  * Faz 5 (paket T) uçtan uca, demo; geçici veri klasörü; ağa çıkılmaz:
  *  - hazır DE şablonları "yalnızca bilgi amaçlı" rozetiyle listelenir ve sihirbazda DE seçilemez;
  *  - editörde Konu B kaydedilir ve önizlemede A/B arasında geçilir;
- *  - kafe kategori varyantı ve A/B konulu kampanya başlatılır; genel bakışta Konu A/Konu B satırları görünür;
- *  - Ayarlar'da açılma izleme onay penceresiyle açılır; kampanya kartında kesinlik uyarısı görünür.
+ *  - Ayarlar'da açılma izleme onay penceresiyle açılır (açılmalar gönderim anında belirlendiği için başlatmadan ÖNCE);
+ *  - kafe kategori varyantı ve A/B konulu kampanya başlatılır; genel bakışta adımın varyantı listelenir;
+ *  - demo gönderim gerçekten olur (Londra'da gönderim penceresi açıkken): `/stats` A/B gönderimi ve açılma özeti
+ *    sıfırdan büyük, tablo aynı sayıları gösterir.
+ *    `subject_variant` yalnızca çözülen şablonda B konusu varsa yazılır ve genel EN şablonunda B konusu yoktur; yani
+ *    varyantlı gönderim kafe şablonunun kullanıldığını kanıtlar.
  * Sonda kampanya iptal edilir ve açılma izleme yeniden kapatılır.
  */
 test.describe.configure({ mode: "serial" });
@@ -155,6 +159,20 @@ test("editör: Konu B kaydedilir; önizlemede Konu B seçilebilir", async () => 
   expect(saved.subjectB).toBe("E2E second subject for {{sehir}}");
 });
 
+test("ayarlar: açılma izleme onay penceresiyle açılır (kampanya başlamadan önce)", async () => {
+  await page.goto("/settings#tracking");
+  const toggle = page.locator("#tracking-opens");
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  const dialog = page.getByRole("dialog", { name: "Açılma izleme açılsın mı?" });
+  await dialog.getByRole("button", { name: "Anladım, aç" }).click();
+  await expect(page.getByTestId("tracking-state")).toContainText("Açık");
+  const body = (await (await page.request.get("/api/settings")).json()) as {
+    settings: Record<string, { enabled?: boolean }>;
+  };
+  expect(body.settings["tracking.opens"]?.enabled).toBe(true);
+});
+
 test("sihirbaz: DE engelli; kafe varyantı ve A/B konulu kampanya başlatılır", async () => {
   await page.goto("/campaigns");
   await page.getByRole("link", { name: "Yeni kampanya" }).first().click();
@@ -202,27 +220,74 @@ test("sihirbaz: DE engelli; kafe varyantı ve A/B konulu kampanya başlatılır"
   await expect(page).toHaveURL(new RegExp(`/campaigns/${campaignId}$`));
 });
 
-test("genel bakış: A/B tablosunda Konu A ve Konu B satırları; açılma izleme kapalı notu", async () => {
+/**
+ * Gönderim penceresi uyum kuralıdır (yalnızca hafta içi 09.00–17.00, alıcının yerel saati; genişletilemez) ve sunucuda
+ * test saati yoktur. Demo lead'ler Londra'dadır: pencere dışında gönderim olamaz, o testte gönderim adımı atlanır.
+ * Aynı senaryo saatten bağımsız olarak `tests/ab-variants.test.ts` ("uçtan uca (sunucu)") içinde doğrulanır.
+ */
+function londonWindowOpen(now = new Date()): boolean {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Europe/London",
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(now)
+      .map((p) => [p.type, p.value]),
+  );
+  const minutes = Number(parts.hour) * 60 + Number(parts.minute);
+  return !["Sat", "Sun"].includes(parts.weekday!) && minutes >= 9 * 60 && minutes < 16 * 60 + 50;
+}
+
+test("genel bakış: adımın kafe varyantı listelenir; A/B tablosu ve açılma sütunu görünür", async () => {
+  const copy = (await (await page.request.get(`/api/templates/${copyId}`)).json()) as Tpl;
+  await expect(page.getByTestId("cd-step-variants-0-en")).toContainText(
+    `Kafe / kahveci → ${copy.name}`,
+  );
   const ab = page.getByTestId("campaign-stats-ab");
   await expect(ab.getByRole("rowheader", { name: "Konu A" })).toBeVisible();
   await expect(ab.getByRole("rowheader", { name: "Konu B" })).toBeVisible();
-  await expect(page.getByTestId("campaign-stats-opens")).toContainText("Açılma izleme kapalı");
+  await expect(ab.getByRole("columnheader", { name: "Açılma" })).toBeVisible();
+  await expect(page.getByTestId("campaign-stats-opens")).toContainText(
+    "Açılma verisi kesin değildir",
+  );
 });
 
-test("ayarlar: açılma izleme onay penceresiyle açılır; kampanya kartı kesinlik uyarısını gösterir", async () => {
-  await page.goto("/settings#tracking");
-  const toggle = page.locator("#tracking-opens");
-  await expect(toggle).not.toBeChecked();
-  await toggle.click();
-  const dialog = page.getByRole("dialog", { name: "Açılma izleme açılsın mı?" });
-  await dialog.getByRole("button", { name: "Anladım, aç" }).click();
-  await expect(page.getByTestId("tracking-state")).toContainText("Açık");
+test("demo gönderim: /stats A/B gönderimi ve açılma özeti sıfırdan büyük; tablo aynı sayıları gösterir", async () => {
+  test.skip(
+    !londonWindowOpen(),
+    "Londra'da gönderim penceresi kapalı (hafta içi 09.00–17.00 dışı)",
+  );
+  test.setTimeout(330_000);
+  type Stats = {
+    ab: { a: { sent: number }; b: { sent: number } } | null;
+    opens: { enabled: boolean; sent: number; opened: number };
+  };
+  const stats = async () =>
+    (await (await page.request.get(`/api/campaigns/${campaignId}/stats`)).json()) as Stats;
+  // Kutu düzeyi aralık (90–240 sn) ve başka spec'lerin gönderimleri nedeniyle ilk ileti birkaç dakika sürebilir.
+  await expect
+    .poll(
+      async () => {
+        const s = await stats();
+        return (s.ab ? s.ab.a.sent + s.ab.b.sent : 0) > 0 && s.opens.sent > 0;
+      },
+      { timeout: 300_000, intervals: [2000, 5000] },
+    )
+    .toBe(true);
+  const s = await stats();
+  expect(s.opens.enabled).toBe(true);
+  const abSent = s.ab!.a.sent + s.ab!.b.sent;
 
-  await page.goto(`/campaigns/${campaignId}`);
-  const opens = page.getByTestId("campaign-stats-opens");
-  await expect(opens).toContainText(/\d+ \/ \d+ ileti açıldı/);
-  await expect(opens).toContainText("Açılma verisi kesin değildir");
-  await expect(
-    page.getByTestId("campaign-stats-ab").getByRole("columnheader", { name: "Açılma" }),
-  ).toBeVisible();
+  await page.reload();
+  const cell = async (v: "a" | "b") =>
+    Number((await page.getByTestId(`campaign-stats-ab-sent-${v}`).innerText()).replace(/\D/g, ""));
+  await expect
+    .poll(async () => (await cell("a")) + (await cell("b")))
+    .toBeGreaterThanOrEqual(abSent);
+  await expect(page.getByTestId("campaign-stats-opens")).toContainText(
+    /\d+ \/ [1-9]\d* ileti açıldı/,
+  );
 });

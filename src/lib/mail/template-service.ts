@@ -407,7 +407,7 @@ export async function listTemplates(
       subject: t.subject,
       followupReuseSubject: t.followupReuseSubject,
       subjectB: t.subjectB,
-      infoOnly: t.infoOnly,
+      infoOnly: t.infoOnly || isInfoOnlyLanguage(t.language),
       archived: t.archivedAt !== null,
       updatedAt: t.updatedAt,
       lockedBy: lockSets.get(t.id)?.size ?? 0,
@@ -436,7 +436,7 @@ export async function getTemplateDetail(db: DbExecutor, id: number): Promise<Tem
     subject: t.subject,
     followupReuseSubject: t.followupReuseSubject,
     subjectB: t.subjectB,
-    infoOnly: t.infoOnly,
+    infoOnly: t.infoOnly || isInfoOnlyLanguage(t.language),
     archived: t.archivedAt !== null,
     updatedAt: t.updatedAt,
     bodyHtml: t.bodyHtml,
@@ -601,7 +601,8 @@ async function composeCore(
     return empty;
   }
   if (tpl.archivedAt !== null) errors.push({ code: "template_archived" });
-  if (tpl.infoOnly === true && input.purpose === "send")
+  // Bayrak VE dil: Faz 5 öncesi DE şablonu `info_only=0` kalmış olabilir (seed v3 işaretler; bu ikinci güvence).
+  if ((tpl.infoOnly === true || isInfoOnlyLanguage(tpl.language)) && input.purpose === "send")
     errors.push({ code: "template_info_only" });
   if (!isSupportedLanguage(tpl.language)) {
     errors.push({ code: "unsupported_language" });

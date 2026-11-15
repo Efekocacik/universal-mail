@@ -17,6 +17,7 @@ import {
   demoOpenDecision,
   demoOpenPixelUrl,
   MAX_OPEN_COUNT,
+  pixelMessageQuery,
   pixelRateLimited,
   recordPixelOpen,
   resetPixelRateLimitForTests,
@@ -275,6 +276,27 @@ describe("GET /api/t/o/:token", () => {
 
     (globalThis as Record<string, unknown>)[HANDLE] = Promise.reject(new Error("db down"));
     await gif(tok);
+  });
+
+  it("ileti araması kısmi idempotency dizinini kullanır (tablo taraması yok); gönderilmemiş ileti sayılmaz", async () => {
+    const q = pixelMessageQuery(db, { campaignLeadId: 7, stepIndex: 0 }).toSQL();
+    const plan = await client.execute({
+      sql: `EXPLAIN QUERY PLAN ${q.sql}`,
+      args: q.params as never,
+    });
+    const detail = plan.rows.map((r) => String(r.detail)).join("\n");
+    expect(detail).toContain("messages_idempotency_uq");
+    expect(detail).not.toMatch(/SCAN messages/);
+
+    await enable();
+    const campaignId = await createCampaign(db, { steps: 1 });
+    const { s, m } = await sendOne(campaignId);
+    const tok = createOpenToken({ campaignLeadId: s.cl, stepIndex: 0 });
+    await db.update(messages).set({ status: "unknown" }).where(eq(messages.id, m.id));
+    expect(await recordPixelOpen(db, tok)).toBe("unknown_message");
+    // (Demo gönderimi benzetim açılması yazmış olabilir; piksel kaynaklı satır olmamalı.)
+    const opens = await db.select().from(messageOpens);
+    expect(opens.filter((o) => o.source === "pixel")).toHaveLength(0);
   });
 
   it("hız sınırı dakikada 120 kayıt", () => {

@@ -18,8 +18,12 @@ import {
   messages,
   templates,
 } from "@/lib/db/schema";
+import { demoOpenDecision } from "@/lib/mail/open-tracking";
 import { FakeMailProvider } from "@/lib/mail/provider/fake-provider";
+import { MailDispatcher } from "@/lib/mail/scheduler/dispatcher";
+import { setSetting } from "@/lib/settings";
 import { seedCategories } from "@/lib/scan/categories";
+import { seedBuiltinTemplates } from "@/lib/mail/seed";
 import { sendCampaignStep } from "@/lib/mail/send-service";
 import {
   assignSubjectVariant,
@@ -459,6 +463,53 @@ describe("gönderim: kategori varyantı + A/B konu (demo)", () => {
   });
 });
 
+describe("uçtan uca (sunucu): API ile kafe varyantı + A/B + açılma izleme, zamanlayıcı gönderir", () => {
+  it("/stats A ve B satırlarında gönderim, açılmalar demo benzetimiyle tutarlı; hepsi kafe şablonuyla", async () => {
+    await setSetting(db, "tracking.opens", { enabled: true, ackAt: T0 });
+    const general = await tpl("en", "initial", null);
+    const cafe = await tpl("en", "initial", "cafe");
+    expect(general.subjectB).toBeNull();
+    expect(cafe.subjectB).not.toBeNull();
+
+    const c = await draftCampaign();
+    const put = await putSteps(c.id, c.updatedAt, [
+      {
+        stepIndex: 0,
+        language: "en",
+        templateId: general.id,
+        delayDays: 0,
+        categoryTemplates: [{ categoryKey: "cafe", templateId: cafe.id }],
+      },
+    ]);
+    expect(put.status).toBe(200);
+    await db
+      .update(campaigns)
+      .set({ status: "running", startConfirmedAt: T0, startedAt: T0 })
+      .where(eq(campaigns.id, c.id));
+    for (let i = 0; i < 4; i++) await addSequence(db, c.id);
+
+    const d = new MailDispatcher(db);
+    const p = new FakeMailProvider({ now: () => T0 });
+    for (let i = 0; i < 12; i++) await d.dispatchOnce({ now: () => T0 + i * 300_000, provider: p });
+
+    const sent = await db.select().from(messages).where(eq(messages.campaignId, c.id));
+    expect(sent).toHaveLength(4);
+    expect(sent.every((m) => m.templateId === cafe.id && m.status === "sent")).toBe(true);
+
+    const stats = await call(statsRoute.GET(req("GET", `/api/campaigns/${c.id}/stats`), ctx(c.id)));
+    expect(stats.status).toBe(200);
+    const body = stats.body as {
+      ab: { a: { sent: number; opened: number }; b: { sent: number; opened: number } };
+      opens: { enabled: boolean; sent: number; opened: number };
+    };
+    expect(body.ab.a.sent).toBe(2);
+    expect(body.ab.b.sent).toBe(2);
+    const opened = sent.filter((m) => demoOpenDecision(m.id).opened).length;
+    expect(body.opens).toMatchObject({ enabled: true, sent: 4, opened });
+    expect(body.ab.a.opened + body.ab.b.opened).toBe(opened);
+  });
+});
+
 describe("başlatma özeti: varyantlar denetlenir ve belirtece girer", () => {
   it("arşivlenen varyant şablonu steps_invalid; varyant değişince belirteç değişir", async () => {
     const general = await tpl("en", "initial", null);
@@ -487,5 +538,92 @@ describe("başlatma özeti: varyantlar denetlenir ve belirtece girer", () => {
     await db.update(templates).set({ archivedAt: T0 }).where(eq(templates.id, cafe.id));
     const archived = await computeStartPlan(db, c.id, { now: T0, env });
     expect(archived.blockers).toContain("steps_invalid");
+  });
+});
+
+describe("Faz 5 öncesi DE kullanıcı şablonu (info_only=0 kalmış)", () => {
+  /** 0005 sütunu varsayılan 0 ile ekledi: Faz 5 öncesi kullanıcı DE şablonu bayraksız kalır. */
+  async function legacyDe(kind: "initial" | "followup" = "initial"): Promise<number> {
+    const [row] = await db
+      .insert(templates)
+      .values({
+        name: "Eski DE şablonu",
+        language: "de",
+        kind,
+        subject: "Betreff",
+        bodyHtml: "<p>Hallo {{firma}}</p>",
+        bodyText: "Hallo {{firma}}",
+        infoOnly: false,
+        builtIn: false,
+        createdAt: T0,
+        updatedAt: T0,
+      })
+      .returning({ id: templates.id });
+    return row!.id;
+  }
+  const flagOf = async (id: number) =>
+    (await db.select().from(templates).where(eq(templates.id, id)))[0]!.infoOnly;
+
+  it("seed v3 yükseltmesi var olan DE şablonlarını bilgi amaçlı işaretler (diğer dillere dokunmaz)", async () => {
+    await setSetting(db, "seed.faz3", { templates: 2, demoMailbox: 1 });
+    const id = await legacyDe();
+    const en = await tpl("en", "initial", null);
+    expect(await flagOf(id)).toBe(false);
+    await seedBuiltinTemplates(db, T0);
+    expect(await flagOf(id)).toBe(true);
+    expect(await flagOf(en.id)).toBe(false);
+    // İkinci çalıştırma (bayrak 3) hiçbir şeyi değiştirmez.
+    expect(await seedBuiltinTemplates(db, T0)).toBe(0);
+  });
+
+  it("bayrak işaretlenmemiş olsa bile dil üzerinden: rozet, adım kaydı, başlatma ve gönderim reddedilir", async () => {
+    const id = await legacyDe();
+    expect(await flagOf(id)).toBe(false);
+
+    // Rozet: liste ve ayrıntı `infoOnly: true` döner.
+    const list = await call(templatesRoute.GET(req("GET", "/api/templates"), undefined));
+    const item = (list.body.items as { id: number; infoOnly: boolean }[]).find((i) => i.id === id);
+    expect(item?.infoOnly).toBe(true);
+    const det = await call(templateRoute.GET(req("GET", `/api/templates/${id}`), ctx(id)));
+    expect(det.body.infoOnly).toBe(true);
+
+    // Adım kaydı: 400 TEMPLATE_INFO_ONLY.
+    const c = await draftCampaign();
+    const put = await putSteps(c.id, c.updatedAt, [
+      { stepIndex: 0, language: "de", templateId: id, delayDays: 0 },
+    ]);
+    expect(put.status).toBe(400);
+    expect(put.body.code).toBe("TEMPLATE_INFO_ONLY");
+
+    // Başlatma özeti: doğrudan yazılmış adım `steps_invalid`.
+    await db
+      .insert(campaignSteps)
+      .values({ campaignId: c.id, stepIndex: 0, language: "de", templateId: id, delayDays: 0 });
+    const env = { FAZ3_DEMO_SCHEDULER_ENABLED: "1" } as unknown as NodeJS.ProcessEnv;
+    expect((await computeStartPlan(db, c.id, { now: T0, env })).blockers).toContain(
+      "steps_invalid",
+    );
+
+    // Gönderim: compose_failed + template_info_only, ileti yok.
+    const campaignId = await createCampaign(db, { steps: 1 });
+    const s = await addSequence(db, campaignId);
+    const [step] = await db
+      .select()
+      .from(campaignSteps)
+      .where(eq(campaignSteps.campaignId, campaignId));
+    await db
+      .update(templates)
+      .set({ language: "de", infoOnly: false })
+      .where(eq(templates.id, step!.templateId));
+    const r = await sendCampaignStep(
+      db,
+      { campaignLeadId: s.cl, stepIndex: 0 },
+      { provider: new FakeMailProvider({ now: () => T0 }), now: () => T0 },
+    );
+    expect(r).toMatchObject({ outcome: "not_sendable", code: "compose_failed" });
+    expect((r as { errors: { code: string }[] }).errors.map((e) => e.code)).toContain(
+      "template_info_only",
+    );
+    expect(await db.select().from(messages)).toHaveLength(0);
   });
 });

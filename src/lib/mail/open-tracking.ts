@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { DbExecutor } from "@/lib/db/client";
 import { messageOpens, messages } from "@/lib/db/schema";
 import { resolveMasterKey } from "@/lib/secrets/store";
@@ -82,6 +82,32 @@ export async function openTrackingEnabled(db: DbExecutor): Promise<boolean> {
   return (await getSetting(db, "tracking.opens")).enabled === true;
 }
 
+/**
+ * Belirtecin bağlandığı kampanya iletisi. `status <> 'failed'` terimi kısmi tekil dizinin
+ * (`messages_idempotency_uq ... WHERE idempotency_key IS NOT NULL AND status <> 'failed'`) kullanılması içindir:
+ * SQLite bunu `status = 'sent'`ten çıkarmaz ve her piksel isteği tabloyu baştan sona tarardı. Bu koşulda anahtar
+ * başına en çok bir satır vardır; `sent` denetimi çağıranda yapılır.
+ */
+export function pixelMessageQuery(db: DbExecutor, ref: OpenRef) {
+  return db
+    .select({
+      id: messages.id,
+      campaignId: messages.campaignId,
+      sentAt: messages.sentAt,
+      status: messages.status,
+    })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.idempotencyKey, `cl:${ref.campaignLeadId}:s:${ref.stepIndex}`),
+        ne(messages.status, "failed"),
+        eq(messages.direction, "out"),
+        eq(messages.purpose, "campaign"),
+      ),
+    )
+    .limit(1);
+}
+
 export type PixelOutcome = "recorded" | "disabled" | "invalid" | "unknown_message";
 
 /**
@@ -97,19 +123,8 @@ export async function recordPixelOpen(
   if (!(await openTrackingEnabled(db))) return "disabled";
   const ref = verifyOpenToken(token);
   if (!ref) return "invalid";
-  const [msg] = await db
-    .select({ id: messages.id, campaignId: messages.campaignId, sentAt: messages.sentAt })
-    .from(messages)
-    .where(
-      and(
-        eq(messages.idempotencyKey, `cl:${ref.campaignLeadId}:s:${ref.stepIndex}`),
-        eq(messages.status, "sent"),
-        eq(messages.direction, "out"),
-        eq(messages.purpose, "campaign"),
-      ),
-    )
-    .limit(1);
-  if (!msg || msg.campaignId === null) return "unknown_message";
+  const [msg] = await pixelMessageQuery(db, ref);
+  if (!msg || msg.status !== "sent" || msg.campaignId === null) return "unknown_message";
   // Açılma gönderimden önce olamaz (saat kayması): en erken gönderim anı.
   const at = Math.max(now, msg.sentAt ?? now);
   await db

@@ -39,6 +39,8 @@ export const variants = {
   "composeError.template_info_only": "Şablon yalnızca bilgi amaçlı; gönderimde kullanılamaz",
 
   "wizard.steps.infoOnly": "{lang}: yalnızca bilgi amaçlı, gönderim engelli",
+  "wizard.steps.noUsable":
+    "{lang}: kullanılabilir genel ilk e-posta şablonu yok (arşivlenmiş olabilir). Şablonlar sayfasından bir şablon ekleyin.",
   "wizard.steps.ab": "{lang}: A/B konu denemesi açık. Alıcılar iki konuya dönüşümlü dağıtılır.",
   "wizard.variants.title": "Kategori varyantları (ilk e-posta)",
   "wizard.variants.help":
@@ -46,6 +48,12 @@ export const variants = {
   "wizard.variants.none": "Seçili dillerde kategoriye özel şablon yok.",
   "wizard.variants.use": "{lang} · {category} işletmelerine ayrı şablon",
   "wizard.variants.template": "{lang} {category} varyant şablonu",
+  "wizard.variants.stale":
+    "{step} · {lang} · {category}: varyant şablonu arşivlenmiş veya artık uygun değil. Kaydettiğinizde bu varyant kaldırılır.",
+  "wizard.variants.followupKept":
+    "Takip adımları için tanımlı kategori varyantları korunur. Hepsini kampanya ayrıntısında görebilirsiniz.",
+  "campaign.stepVariant": "{category} → {template}",
+  "campaign.stepVariants": "Kategori varyantları",
 
   "campaignStats.title": "Konu denemesi ve açılmalar",
   "campaignStats.ab.title": "A/B konu denemesi (ilk e-posta)",

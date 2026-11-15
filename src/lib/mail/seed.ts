@@ -1,8 +1,13 @@
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "@/lib/db/client";
 import { mailboxes, settings, templates } from "@/lib/db/schema";
 import { getSetting, settingSchemas, type SettingKey, type SettingValue } from "@/lib/settings";
-import { BUILTIN_TEMPLATES, isInfoOnlyLanguage, textToHtml } from "./builtin-templates";
+import {
+  BUILTIN_TEMPLATES,
+  INFO_ONLY_LANGUAGES,
+  isInfoOnlyLanguage,
+  textToHtml,
+} from "./builtin-templates";
 
 /**
  * Hazır şablon seed sürümü. 1: ilk e-posta şablonları (Faz 3). 2: TR/EN takip şablonları (Faz 4, 9b; EKLEMELİ).
@@ -52,7 +57,8 @@ function templateRow(t: BuiltinRow, now: number) {
  *  - Sürüm 2 ve 3 (takip şablonları; Faz 5 dilleri ve kategori varyantları): yalnızca `since >= 2` şablonlarından
  *    EKSİK olanlar (hazır + dil + tür + ad) eklenir. Var olan hiçbir şablon değiştirilmez; ikinci çalıştırma 0 ekler.
  *
- * Ekleme ve bayrak aynı `batch` içinde (atomik) yazılır. Bayrak tek güvence değildir: `seed.faz3` okunamazsa (bozuk
+ * Sürüm 3 ayrıca bilgi amaçlı dildeki (DE) var olan şablonları `info_only=1` yapar (Faz 5 öncesi kullanıcı şablonları).
+ * Ekleme, işaretleme ve bayrak aynı `batch` içinde (atomik) yazılır. Bayrak tek güvence değildir: `seed.faz3` okunamazsa (bozuk
  * değer varsayılana döner) var olan hazır şablonlar yeniden eklenmez, yalnızca eksik sürüm 2 şablonları tamamlanır.
  */
 export async function seedBuiltinTemplates(db: Db, now = Date.now()): Promise<number> {
@@ -67,11 +73,23 @@ export async function seedBuiltinTemplates(db: Db, now = Date.now()): Promise<nu
     t.since === 1 ? existing.length === 0 : !has.has(`${t.language}|${t.kind}|${t.name}`),
   );
   const flag = markSeeded(db, { ...applied, templates: TEMPLATE_SEED_VERSION }, now);
+  // Faz 5 öncesinde oluşturulmuş bilgi amaçlı dildeki (DE) şablonlar `info_only=0` ile kalmıştı (sütun 0005'te
+  // varsayılan 0 ile eklendi). Aynı `batch` içinde işaretlenir; sunucu denetimleri ayrıca dili de denetler.
+  const backfill = db
+    .update(templates)
+    .set({ infoOnly: true })
+    .where(
+      and(inArray(templates.language, [...INFO_ONLY_LANGUAGES]), eq(templates.infoOnly, false)),
+    );
   if (toInsert.length === 0) {
-    await flag;
+    await db.batch([backfill, flag]);
     return 0;
   }
-  await db.batch([db.insert(templates).values(toInsert.map((t) => templateRow(t, now))), flag]);
+  await db.batch([
+    db.insert(templates).values(toInsert.map((t) => templateRow(t, now))),
+    backfill,
+    flag,
+  ]);
   return toInsert.length;
 }
 
