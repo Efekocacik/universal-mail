@@ -9,6 +9,9 @@ no_bundle = true
 compatibility_date = "2025-09-01"
 # nodejs_compat GEREKMEZ: aktarıcı yalnızca WebCrypto (Ed25519, SHA-256) kullanır.
 workers_dev = true
+# Panelden eklenen düz metin değişkenleri (ör. adres değişikliğinden sonra RELAY_PUBLIC_ORIGIN) `wrangler deploy`
+# sırasında SİLİNMESİN; aksi halde eski e-postalardaki çıkış bağlantıları 503 alırdı. Gizli değerler zaten korunur.
+keep_vars = true
 
 # İstek günlükleri (Workers Logs) isteğin tam adresini, yani çıkış belirtecini de kaydeder; kapalı tutun.
 [observability]

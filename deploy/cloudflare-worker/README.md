@@ -38,9 +38,12 @@ Alan adı, DNS kaydı, sertifika veya sunucu **gerekmez**; HTTPS'i Cloudflare sa
 2. **Create** → ad olarak `um-relay` yazın → **Create**.
 3. Açılan veritabanı sayfasında **Console** sekmesine geçin.
 4. `schema.sql` dosyasını bir metin düzenleyiciyle açın, **tamamını** kopyalayıp konsola yapıştırın ve **Execute**'a
-   basın. (Konsol birden çok komutu kabul etmezse `CREATE` ile başlayan her bloğu ayrı ayrı çalıştırın.)
-5. Denetim: konsolda `SELECT name FROM sqlite_master WHERE type = 'table';` çalıştırın. `spool_events`,
-   `spool_corrupt` ve `replay_jti` görünmelidir.
+   basın. (Konsol birden çok komutu kabul etmezse dosyadaki komutları **sırayla** tek tek çalıştırın; her komut
+   `CREATE` veya `INSERT` ile başlar ve `;` ile biten satırda biter. `CREATE TRIGGER … BEGIN … END;` satırı TEK
+   komuttur, içindeki `;` yerinden bölünmez.)
+5. Denetim: konsolda `SELECT name FROM sqlite_master WHERE type IN ('table', 'trigger');` çalıştırın.
+   `spool_events`, `spool_meta`, `spool_corrupt`, `replay_jti` tabloları ve `spool_events_count_insert`,
+   `spool_events_count_delete` tetikleyicileri görünmelidir.
 
 Şemayı ikinci kez çalıştırmak zararsızdır; var olan kayıtlara dokunmaz.
 
@@ -58,10 +61,12 @@ Alan adı, DNS kaydı, sertifika veya sunucu **gerekmez**; HTTPS'i Cloudflare sa
 1. Worker sayfasında **Settings → Bindings → Add binding → D1 database**.
 2. **Variable name**: `DB` (tam olarak böyle, büyük harfle). **D1 database**: `um-relay`. Kaydedin / **Deploy**.
 
-## Adım 4 — İstek günlüklerini kapalı tutun (önerilir)
+## Adım 4 — İstek günlüklerini kapatın (zorunlu)
 
-**Settings → Observability** altında **Workers Logs** kapalı olmalıdır. Açıksa Cloudflare her isteğin tam adresini,
-yani çıkış belirtecini de kaydeder. Worker'ın kendi yazdığı satırlarda belirteç veya adres yoktur.
+**Settings → Observability** altında **Workers Logs**'u (ve varsa **Logpush**/**Traces**'i) **kapatın** ve kaydedin.
+Panelden oluşturulan yeni Worker'larda bu ayar açık gelebilir. Açıkken Cloudflare her isteğin tam adresini, yani
+çıkış belirtecini de saklar; "belirteç günlüğe yazılmaz" güvencesi yalnızca bu ayar kapalıyken geçerlidir.
+Worker'ın kendi yazdığı satırlarda belirteç veya adres yoktur.
 
 ## Adım 5 — Uygulamada adres ve anahtar dosyası
 
@@ -81,6 +86,10 @@ yani çıkış belirtecini de kaydeder. Worker'ın kendi yazdığı satırlarda 
 Anahtar yenilediğinizde, iptal ettiğinizde veya adresi değiştirdiğinizde dosyayı yeniden indirin ve `RELAY_KEYS`
 değerini aynı yerden **Edit** ile güncelleyip yeniden dağıtın.
 
+Cloudflare bir gizli değişkeni en çok **5 KB** kabul eder. Normal bir dosya bunun çok altındadır; ancak iptal
+edilmeden biriken çok sayıda eski anahtar dosyayı büyütebilir ve panel değeri reddeder. Bu durumda uygulamada artık
+kullanılmayan eski anahtarları iptal edip dosyayı yeniden indirin.
+
 ## Adım 7 — Denetleyin
 
 1. Tarayıcıda `https://um-relay.<hesap>.workers.dev/healthz` adresini açın. `{"ok":true}` görmelisiniz.
@@ -91,6 +100,7 @@ değerini aynı yerden **Edit** ile güncelleyip yeniden dağıtın.
 2. Uygulamada **Uçtan uca doğrula** → **Doğrula**. "Uç nokta doğrulandı." görmelisiniz. Bu deneme gerçek bir tek
    tıklamalı çıkış isteği gönderir ve talebi uygulamaya geri çeker; **hiçbir alıcıya dokunmaz**.
 3. **Kuyruğu denetle** → "Kuyruk sağlıklı." ve **Talepleri düzenli çek**'i açın.
+4. Worker → **Settings → Observability**: **Workers Logs** kapalı olmalı (Adım 4).
 
 ---
 
@@ -101,9 +111,12 @@ Cloudflare'in güncel sınırlarını kendi sayfasından denetleyin; bu belge ya
 - **Workers**: günde 100.000 istek, istek başına 10 ms işlemci süresi.
 - **D1**: günde 5 milyon okunan satır, 100.000 yazılan satır, toplam 5 GB depolama.
 
-Uygulama dakikada bir talep çeker (günde ~1.500 istek); her çıkış birkaç satır yazar. Küçük ve orta kampanyalar için
-bu sınırlar fazlasıyla yeterlidir. Sınır aşılırsa Worker hata verir ve uygulama talepleri çekemez; uygulama bunu
-"Kuyruğu denetle" ve uyarı bandıyla gösterir, canlı gönderim kendiliğinden ertelenir.
+Uygulama açıkken dakikada bir tur atar; her tur en az iki istektir (talepleri çek + kuyruk durumu), yani günde
+**~3.000 istek** ve birkaç bin okunan satır. Her çıkış (kayıt + uygulamanın onayı) dizinlerle birlikte yaklaşık
+8–10 satır yazar ve birkaç satır okur; bekleyen talep sayısı ayrı bir sayaç satırında tutulduğu için kuyruk (uygulama
+kapalıyken) birikse bile çıkış başına okuma **artmaz**. Bu, günde ~10.000 çıkışa kadar ücretsiz katman içinde kalır;
+küçük ve orta kampanyalar için fazlasıyla yeterlidir. Sınır aşılırsa Worker hata verir ve uygulama talepleri çekemez; uygulama bunu "Kuyruğu denetle" ve uyarı
+bandıyla gösterir, canlı gönderim kendiliğinden ertelenir.
 
 ## İsteğe bağlı: kendi alt alan adınız
 
@@ -142,6 +155,8 @@ npx wrangler secret put RELAY_KEYS --config deploy/cloudflare-worker/wrangler.to
 ```
 
 `wrangler.toml` bir şablondur; içine gizli değer veya kişisel bilgi yazmayın (`database_id` gizli değildir).
+`keep_vars = true` sayesinde panelden eklenen düz metin değişkenleri (ör. `RELAY_PUBLIC_ORIGIN`) `wrangler deploy`
+ile silinmez; isterseniz bunları `[vars]` altına da yazabilirsiniz.
 
 ## Güvenlik notları
 
