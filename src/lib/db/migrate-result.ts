@@ -103,21 +103,40 @@ export function readMigrateResult(dataDir: string): MigrateResult | null {
   return out;
 }
 
-/** Geçiş hatasını koda çevirir (ileti metnine değil, hata türüne ve SQLite koduna bakar). */
+/** Başka bir sürecin veritabanını tuttuğunu gösteren hata adları (bakım kilidi, migrate.lock, K4 yoklaması). */
+const BLOCKED_NAMES = new Set([
+  "MigrationBlockedError",
+  "MaintenanceError",
+  "FileLockTimeoutError",
+]);
+
+/**
+ * Geçiş hatasını koda çevirir (ileti metnine değil, hata türüne ve SQLite koduna bakar; `withBackupPath` sarmalı
+ * yüzünden asıl hata `cause` zincirinde olabilir). Başka bir sürecin kilidi / SQLITE_BUSY / SQLITE_LOCKED → BLOCKED:
+ * Electron bunun için yedeğe dönüş SUNMAZ (veritabanı başka bir süreçte açıkken dosya değiştirilmemeli).
+ */
 export function classifyMigrationError(e: unknown): MigrateResultCode {
-  const err = e as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown } | null;
-  const name = typeof err?.name === "string" ? err.name : "";
-  if (name === "MigrationBlockedError") return "BLOCKED";
-  if (name === "MigrationVerificationError") return "VERIFY_FAILED";
+  const names: string[] = [];
   const codes: string[] = [];
+  let busyText = false;
   for (let x: unknown = e, i = 0; x && typeof x === "object" && i < 5; i++) {
-    const c = (x as { code?: unknown }).code;
-    if (typeof c === "string") codes.push(c);
-    x = (x as { cause?: unknown }).cause;
+    const o = x as { name?: unknown; code?: unknown; message?: unknown; cause?: unknown };
+    if (typeof o.name === "string") names.push(o.name);
+    if (typeof o.code === "string") codes.push(o.code);
+    if (
+      typeof o.message === "string" &&
+      /database is locked|SQLITE_BUSY|SQLITE_LOCKED/i.test(o.message)
+    )
+      busyText = true;
+    x = o.cause;
   }
+  if (names.some((n) => n === "MigrationVerificationError")) return "VERIFY_FAILED";
+  if (names.some((n) => BLOCKED_NAMES.has(n))) return "BLOCKED";
   if (codes.some((c) => c === "ENOSPC" || c.startsWith("SQLITE_FULL"))) return "DISK_FULL";
   if (codes.some((c) => c.startsWith("SQLITE_CORRUPT") || c.startsWith("SQLITE_NOTADB")))
     return "CORRUPT";
+  if (busyText || codes.some((c) => c.startsWith("SQLITE_BUSY") || c.startsWith("SQLITE_LOCKED")))
+    return "BLOCKED";
   return "FAILED";
 }
 

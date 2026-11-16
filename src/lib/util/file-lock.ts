@@ -12,6 +12,14 @@ export function isProcessAlive(pid: number): boolean {
   }
 }
 
+/** Kilit süresi içinde alınamadı (başka bir süreç tutuyor). Geçiş sonucu bunu BLOCKED olarak sınıflar. */
+export class FileLockTimeoutError extends Error {
+  constructor(message = "Veritabanı kilidi alınamadı (zaman aşımı).") {
+    super(message);
+    this.name = "FileLockTimeoutError";
+  }
+}
+
 const STALE_MS = 120_000;
 const HEARTBEAT_MS = 10_000;
 
@@ -29,6 +37,15 @@ function isStale(lockPath: string): boolean {
   const pid = lockHolderPid(lockPath);
   if (pid !== null && isProcessAlive(pid)) return false;
   return Date.now() - fs.statSync(lockPath).mtimeMs > (pid === null ? STALE_MS : 0);
+}
+
+/** Kilit şu anda canlı bir süreçte mi? (Yoksa, bayatsa veya okunamıyorsa false; hiçbir şey silmez.) */
+export function isFileLockHeld(lockPath: string): boolean {
+  try {
+    return fs.statSync(lockPath).isDirectory() && !isStale(lockPath);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -61,8 +78,7 @@ export async function withFileLock<T>(
       } catch {
         continue; // kilit bu sırada kaldırıldı
       }
-      if (Date.now() - started > timeoutMs)
-        throw new Error("Veritabanı kilidi alınamadı (zaman aşımı).");
+      if (Date.now() - started > timeoutMs) throw new FileLockTimeoutError();
       await new Promise((r) => setTimeout(r, 150));
     }
   }
