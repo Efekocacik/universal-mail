@@ -10,6 +10,8 @@ import {
   startUnsubscribeDrain,
 } from "@/lib/unsubscribe/drain-job";
 import { FIRST_TICK_DELAY_MS, scheduleTick } from "@/lib/scan/schedule";
+import { onWorkerStarted } from "@/lib/backup/auto";
+import { registerLifecycleJobs } from "@/lib/lifecycle/jobs";
 import {
   bindEmailEvents,
   registerCoreHandlers,
@@ -45,6 +47,8 @@ async function main(): Promise<void> {
   registerEmailHandlers();
   registerScanBackgroundHandlers();
   registerFaz5Handlers();
+  // Faz 6 (paket Y): otomatik yedek ve saklama süresi işleri.
+  registerLifecycleJobs();
   bindEmailEvents();
   const db = await getDb();
   // Faz 3 gönderim zamanlayıcısı: varsayılan KAPALI. Demo bayrağı (FAZ3_DEMO_SCHEDULER_ENABLED) veya canlı gönderim
@@ -86,6 +90,10 @@ async function main(): Promise<void> {
     onError: (e) => console.error("[worker] bakım turu başarısız:", e),
     log: hkLog,
   });
+  // Faz 6 (paket Y): açılış yedeği (günde en çok bir; tekilleştirmeli). Hata işçiyi düşürmez.
+  await onWorkerStarted(db, { now: Date.now() }).catch((e) =>
+    console.error("[worker] açılış yedeği planlanamadı:", e),
+  );
   // Zamanlanmış taramalar: ilk tick açılıştan 60 sn sonra (tekil; kuyrukta varsa eklenmez).
   // Başarısız olursa işçi çökmez: bakım turunun `tick` adımı zinciri yeniden kurar.
   await withShortRetry(

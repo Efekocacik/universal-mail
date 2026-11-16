@@ -32,6 +32,12 @@ const SKIP_CODES = new Set([
 /** Zamanlanmış taramanın kendi kendine durma nedenleri (`scan.paused` + `code`). Kod yoksa eski "yeniden başlatma" metni. */
 const PAUSE_CODES = new Set(["SCAN_RETRYING", "SCAN_BUDGET_STOPPED", "SCAN_PAUSED"]);
 const BACKGROUND_CODES = new Set(["PLACES_KEY_MISSING", "BUDGET_BLOCKED", "CONSENT_REQUIRED"]);
+/** Faz 6: otomatik yedeğin kullanıcıya özel metin gösterilen hata kodları; diğerleri genel metne düşer. */
+const BACKUP_FAILED_CODES = new Set([
+  "BACKUP_PASSPHRASE_REQUIRED",
+  "BACKUP_FOLDER_UNWRITABLE",
+  "BACKUP_DISK_FULL",
+]);
 
 function count(params: NotificationParams, locale: Locale): string {
   const n = typeof params.n === "number" && Number.isFinite(params.n) ? params.n : 0;
@@ -96,6 +102,20 @@ export function renderNotification(
           : tt("notif.backgroundSkipped.body.other"),
       };
     }
+    case "backup.failed": {
+      const c = code(p);
+      return {
+        title: tt("notif.backupFailed.title"),
+        body: BACKUP_FAILED_CODES.has(c)
+          ? tt(`notif.backupFailed.body.${c}` as TrKey)
+          : tt("notif.backupFailed.body.other"),
+      };
+    }
+    case "retention.purged":
+      return {
+        title: tt("notif.retentionPurged.title", { n: count(p, locale) }),
+        body: tt("notif.retentionPurged.body"),
+      };
   }
 }
 

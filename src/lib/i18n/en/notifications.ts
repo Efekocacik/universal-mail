@@ -58,4 +58,16 @@ export const notifications = {
     "The background check did not run because the terms of use have not been accepted.",
   "notif.backgroundSkipped.body.other":
     "The background check could not run this time; it will be retried.",
+  "notif.backupFailed.title": "Automatic backup failed",
+  "notif.backupFailed.body.BACKUP_PASSPHRASE_REQUIRED":
+    "No backup password is set. Choose one in Settings → Backups.",
+  "notif.backupFailed.body.BACKUP_FOLDER_UNWRITABLE":
+    "The backup folder cannot be written to. Check the folder in Settings → Backups or switch back to the default.",
+  "notif.backupFailed.body.BACKUP_DISK_FULL":
+    "The disk is full. Free up some space, then back up now from Settings → Backups.",
+  "notif.backupFailed.body.other":
+    "The backup could not finish this time; it will be retried. If it keeps failing, check Settings → Backups.",
+  "notif.retentionPurged.title": "Old records deleted: {n}",
+  "notif.retentionPurged.body":
+    "Businesses you never contacted and that are past the retention period were deleted. You can see the period in Settings → Backups.",
 } as const satisfies EnFragment<typeof TrNotifications>;

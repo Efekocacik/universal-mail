@@ -40,6 +40,7 @@ import { AiIntroCard } from "@/features/ai/ai-intro-card";
 import { ExternalEmailCard } from "@/features/ai/external-email-card";
 import { RegistrySettingsCard } from "@/features/registry/registry-settings-card";
 import { OpenTrackingCard } from "@/features/templates/open-tracking-card";
+import { BackupSection } from "@/features/settings/backup-section";
 import { GoogleRetentionCard } from "./google-retention-card";
 import {
   FieldError,
@@ -1098,6 +1099,7 @@ const SECTIONS = [
   { id: "unsubscribe", key: "settings.nav.unsubscribe" },
   { id: "tracking", key: "settings.nav.tracking" },
   { id: "data", key: "settings.nav.data" },
+  { id: "backup", key: "settings.nav.backup" },
   { id: "novelty", key: "settings.nav.novelty" },
 ] as const;
 
@@ -1251,6 +1253,10 @@ export function SettingsPage() {
                 </div>
                 <div id="data" className="scroll-mt-16 lg:scroll-mt-6">
                   <DataSection />
+                </div>
+                {/* Faz 6 yuvası: bölüm paket Y'ye aittir; bu dosya dondurulmuştur. */}
+                <div id="backup" className="scroll-mt-16 lg:scroll-mt-6">
+                  <BackupSection />
                 </div>
                 <details
                   className="group space-y-3"

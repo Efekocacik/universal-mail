@@ -12,6 +12,12 @@ import { contextBridge, ipcRenderer } from "electron";
  *    (paketsiz geliştirme sürümünde destek yoktur; anahtar gösterilip hiçbir şey yapmaması önlenir).
  *  Arayüze genel bir "bildirim göster" işlevi BİLEREK açılmaz: bildirimleri yalnızca ana süreç, yerel sunucudan
  *  sahiplenerek gösterir (electron/notify.ts).
+ *
+ * Faz 6 (electron/lifecycle.ts; ana süreç yalnızca yerel kökenden gelen çağrıyı kabul eder):
+ *  - `relaunch`: güvenli kapanış + yeniden başlatma (geri yükleme / verileri silme bekleyen işlemi uygulansın diye).
+ *  - `chooseFolder`: yedek klasörü seçme penceresi (iptal → null).
+ *  - `chooseBackupFile`: `.umbk` yedek dosyası seçme penceresi (iptal → null). Yol yalnızca sunucuya iletilir; sunucu
+ *    yolu yeniden doğrular (mutlak, `.umbk`, normal dosya, boyut sınırı).
  */
 contextBridge.exposeInMainWorld("universalMail", {
   platform: process.platform,
@@ -21,4 +27,7 @@ contextBridge.exposeInMainWorld("universalMail", {
     ipcRenderer.invoke("um:desktop-caps"),
   setUiPrefs: (prefs: unknown): Promise<{ ok: boolean; openAtLogin?: boolean | null }> =>
     ipcRenderer.invoke("um:set-ui-prefs", prefs),
+  relaunch: (): Promise<void> => ipcRenderer.invoke("um:relaunch").then(() => undefined),
+  chooseFolder: (): Promise<string | null> => ipcRenderer.invoke("um:choose-folder"),
+  chooseBackupFile: (): Promise<string | null> => ipcRenderer.invoke("um:choose-backup-file"),
 });

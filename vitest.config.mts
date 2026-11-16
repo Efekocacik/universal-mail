@@ -24,6 +24,11 @@ export default defineConfig({
         "src/lib/registry/**",
         "src/lib/ai/**",
         "src/lib/import/**",
+        // Faz 6: yedek/yaşam döngüsü/kurulum/ağ dizinleri (paketler K, Y, G) eşiğe tabidir.
+        "src/lib/backup/**",
+        "src/lib/lifecycle/**",
+        "src/lib/onboarding/**",
+        "src/lib/net/**",
       ],
       thresholds: { lines: 80, functions: 80, statements: 80, branches: 70 },
     },

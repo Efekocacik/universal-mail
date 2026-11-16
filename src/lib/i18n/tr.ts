@@ -10,6 +10,9 @@ import { registry } from "./tr/registry";
 import { variants } from "./tr/variants";
 import { ai } from "./tr/ai";
 import { imports } from "./tr/imports";
+import { backup } from "./tr/backup";
+import { install } from "./tr/install";
+import { security } from "./tr/security";
 
 /**
  * Türkçe sözlük (birincil dil). Paket başına PARÇA dosyalarından birleştirilir; böylece paralel çalışan Faz 4 paketleri
@@ -27,6 +30,9 @@ import { imports } from "./tr/imports";
  *   tr/variants.ts       Faz 5 T (P0 başlattı): şablon dilleri, A/B konu, kategori varyantı, açılma izleme
  *   tr/ai.ts             Faz 5 A (P0 başlattı): Claude kişisel giriş, Hunter/Snov
  *   tr/imports.ts        Faz 5 I (P0 başlattı): CSV/XLSX içe aktarma
+ *   tr/backup.ts         Faz 6 Y (P0 başlattı): yedekler, geri yükleme, saklama süresi, verileri silme
+ *   tr/install.ts        Faz 6 K (P0 başlattı): kurulum listesi, geçiş hatası kurtarma, menü
+ *   tr/security.ts       Faz 6 G (P0 başlattı): güvenlik ve gizlilik metinleri
  *
  * Bir anahtar iki parçada birden olamaz (`tests/i18n.test.ts`). Her Türkçe parçanın İngilizce karşılığı `en/<aynı ad>.ts`.
  */
@@ -43,6 +49,9 @@ export const tr = {
   ...variants,
   ...ai,
   ...imports,
+  ...backup,
+  ...install,
+  ...security,
 } as const;
 
 /** Parça adı → parça (kapsam raporu ve çakışma testi için). */
@@ -59,6 +68,9 @@ export const TR_FRAGMENTS = {
   variants,
   ai,
   imports,
+  backup,
+  install,
+  security,
 } as const;
 export type FragmentName = keyof typeof TR_FRAGMENTS;
 export type TrKey = keyof typeof tr;

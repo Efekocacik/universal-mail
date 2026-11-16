@@ -308,6 +308,13 @@ export const leads = sqliteTable(
     index("leads_source_idx").on(t.source),
     index("leads_country_city_idx").on(t.countryCode, t.city),
     index("leads_category_idx").on(t.categoryKey),
+    /**
+     * Faz 6 (0006): saklama süresi (FR-CMPL-04) önizlemesi ve silmesi: hiç temas edilmemiş lead'ler oluşturulma anına
+     * göre. Kısmi: temas edilmiş (son temas dolu) lead'ler saklama silmesinin dışındadır.
+     */
+    index("leads_retention_idx")
+      .on(t.createdAt)
+      .where(sql`${t.lastContactedAt} IS NULL`),
     check("leads_website_ck", sql`website IS NULL OR length(website) BETWEEN 4 AND 300`),
   ],
 );
@@ -1033,6 +1040,9 @@ export const NOTIFICATION_KINDS = [
   "place.opened",
   "schedule.skipped",
   "background.skipped",
+  /* Faz 6 (paket Y): otomatik yedek başarısız (`code`: BACKUP_* hata kodu), saklama silmesi yapıldı (`n`: silinen lead). */
+  "backup.failed",
+  "retention.purged",
 ] as const;
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number];
 export type NotificationParams = Record<string, string | number | boolean | null>;
@@ -1464,5 +1474,67 @@ export const messageOpens = sqliteTable(
     index("message_opens_campaign_idx").on(t.campaignId),
     check("message_opens_source_ck", sql`source IN ('pixel', 'relay', 'demo_simulated')`),
     check("message_opens_count_ck", sql`open_count >= 1 AND last_opened_at >= first_opened_at`),
+  ],
+);
+
+/* ---------------------------------------------------------------------------
+ * Faz 6 (0006): şifreli yedeklerin KAYDI. Dosyanın kendisi (`.umbk`, parola ile şifreli) yedek klasöründedir; bu tablo
+ * yalnızca ad, boyut, özet ve durumu tutar (kişisel veri yok). Kısmi tekil indeks aynı anda en çok BİR yedeğin
+ * sürmesini veritabanı düzeyinde garanti eder (web sunucusu ve işçi aynı anda başlatsa bile). Dosya adı yol ayırıcı
+ * içeremez: indirme/silme yolu yalnızca satırdan (klasör + ad) kurulur, istek girdisinden asla.
+ * ------------------------------------------------------------------------- */
+
+export const BACKUP_KINDS = ["manual", "startup", "weekly"] as const;
+export type BackupKind = (typeof BACKUP_KINDS)[number];
+export const BACKUP_STATUSES = ["running", "ok", "failed"] as const;
+export type BackupStatus = (typeof BACKUP_STATUSES)[number];
+
+export const backups = sqliteTable(
+  "backups",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    kind: text("kind").$type<BackupKind>().notNull(),
+    status: text("status").$type<BackupStatus>().notNull(),
+    fileName: text("file_name").notNull(),
+    /** Yedeğin yazıldığı klasör (mutlak yol; ayar değişse de eski yedekler bulunur). */
+    folder: text("folder").notNull(),
+    sizeBytes: integer("size_bytes"),
+    /** Şifreli dosyanın SHA-256 özeti (onaltılık, 64). */
+    sha256: text("sha256"),
+    appVersion: text("app_version").notNull(),
+    /** Yedeklenen veritabanındaki uygulanmış migrasyon sayısı (geri yüklemede "daha yeni şema" denetimi). */
+    schemaMigrations: integer("schema_migrations").notNull(),
+    includesSecrets: integer("includes_secrets", { mode: "boolean" }).notNull().default(false),
+    errorCode: text("error_code"),
+    createdAt: integer("created_at").notNull(),
+    finishedAt: integer("finished_at"),
+  },
+  (t) => [
+    uniqueIndex("backups_file_name_uq").on(t.fileName),
+    uniqueIndex("backups_running_uq")
+      .on(t.status)
+      .where(sql`${t.status} = 'running'`),
+    index("backups_kind_created_idx").on(t.kind, t.createdAt),
+    check("backups_kind_ck", sql`kind IN ('manual', 'startup', 'weekly')`),
+    check("backups_status_ck", sql`status IN ('running', 'ok', 'failed')`),
+    check(
+      "backups_file_name_ck",
+      sql`length(file_name) BETWEEN 10 AND 120 AND file_name NOT GLOB '*[/\\]*'`,
+    ),
+    check("backups_folder_ck", sql`length(folder) BETWEEN 1 AND 1024`),
+    check("backups_sha_ck", sql`sha256 IS NULL OR length(sha256) = 64`),
+    check("backups_size_ck", sql`size_bytes IS NULL OR size_bytes >= 0`),
+    check("backups_version_ck", sql`length(app_version) BETWEEN 1 AND 40`),
+    check("backups_schema_ck", sql`schema_migrations >= 0`),
+    check("backups_secrets_ck", sql`includes_secrets IN (0, 1)`),
+    check(
+      "backups_error_ck",
+      sql`error_code IS NULL OR (length(error_code) BETWEEN 1 AND 40 AND error_code NOT GLOB '*[^A-Z0-9_]*')`,
+    ),
+    check(
+      "backups_ok_ck",
+      sql`status <> 'ok' OR (size_bytes IS NOT NULL AND sha256 IS NOT NULL AND finished_at IS NOT NULL)`,
+    ),
+    check("backups_failed_ck", sql`status <> 'failed' OR error_code IS NOT NULL`),
   ],
 );

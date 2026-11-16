@@ -12,7 +12,7 @@
  * `--worker` (npm run build:worker): YALNIZCA Cloudflare Worker aktarıcısını derler (src/relay/worker.ts →
  * dist/cloudflare-worker/worker.js, tek dosyalık ES modülü; `--outdir=<dizin>` ile başka dizine, `--metafile` ile
  * yanına esbuild girdi listesi). `dist/worker/` masaüstü uygulamasının arka plan işçisine aittir; karışmasın diye
- * ayrı dizin kullanılır ve masaüstü paketine (electron-builder.yml) girmez. Workers çalışma ortamı için
+ * ayrı dizin kullanılır ve masaüstü paketine (electron-builder.config.cjs) girmez. Workers çalışma ortamı için
  * tarayıcı platformuyla derlenir: hiçbir `node:` modülü, libsql/drizzle/next İÇEREMEZ (içerirse derleme başarısız
  * olur; bkz. tests/unsubscribe-worker.test.ts). Dağıtım: deploy/cloudflare-worker/README.md.
  */

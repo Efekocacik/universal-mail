@@ -173,6 +173,52 @@ export function stampTrackingOpensAck(
   return { enabled: true, ackAt: now };
 }
 
+/* ------------------------------------------------------------- Faz 6 (P0) ------------------------------------------------------------- */
+
+/**
+ * Otomatik şifreli yedek zamanlaması (paket Y). `auto` ana anahtardır; açılış yedeği günde en çok bir, haftalık yedek
+ * ISO haftasında bir kez alınır. Saklama sayıları yalnızca otomatik yedeklere uygulanır (elle alınanlar silinmez).
+ */
+export const backupScheduleSchema = z.object({
+  auto: z.boolean(),
+  onStartup: z.boolean(),
+  weekly: z.boolean(),
+  keepStartup: z.number().int().min(1).max(30),
+  keepWeekly: z.number().int().min(1).max(52),
+  includeSecrets: z.boolean(),
+});
+
+/**
+ * Yedek klasörü: `null` = veri klasöründeki `backups/`. Değer yalnızca biçim olarak doğrulanır (mutlak, en çok 1024);
+ * var olma, yazılabilirlik ve uygulama paketi dışında olma denetimini yedek servisi YAZMADAN önce yapar.
+ */
+export const backupFolderSchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((v) => !v.includes("\0"), { message: "Geçersiz klasör yolu." })
+  .nullable();
+
+/** FR-CMPL-04: temas edilmemiş lead'lerin saklama süresi. Sahip yalnızca KISALTABİLİR (en çok 12 ay). */
+export const retentionLeadsSchema = z.object({
+  enabled: z.boolean(),
+  months: z.number().int().min(1).max(12),
+});
+
+/** Son saklama silmesinin özeti (yalnızca sayılar; kişisel veri yok). */
+const retentionLastRunSchema = z
+  .object({
+    at: z.number().int(),
+    cutoff: z.number().int(),
+    deleted: z.number().int().min(0),
+  })
+  .nullable();
+
+/** "Kurulumu tamamlayın" kartı (paket K): gizlendiği an; `null` = görünür. */
+const onboardingChecklistSchema = z.object({
+  dismissedAt: z.number().int().nullable(),
+});
+
 export const settingSchemas = {
   "setup.completed": z.boolean(),
   consent: consentSchema.nullable(),
@@ -372,6 +418,18 @@ export const settingSchemas = {
   "ai.intro": aiIntroSchema,
   /** Açılma izleme: aç/kapa ve gizlilik notu onayı (bu sürümde yalnızca demo). Sahibi: paket T. */
   "tracking.opens": trackingOpensSchema,
+
+  /* ---------------------------------------------------------------- Faz 6 (P0) ---------------------------------------------------------------- */
+  /** İÇ: otomatik yedek zamanlaması. Yalnızca yedek servisi yazar (`PUT /api/backups/settings`). Sahibi: paket Y. */
+  "backup.schedule": backupScheduleSchema,
+  /** İÇ: yedek klasörü (`null` = varsayılan). Yalnızca yedek servisi doğrulayıp yazar. Sahibi: paket Y. */
+  "backup.folder": backupFolderSchema,
+  /** İÇ: temas edilmemiş lead saklama süresi (1–12 ay). Yalnızca saklama servisi yazar. Sahibi: paket Y. */
+  "retention.leads": retentionLeadsSchema,
+  /** İÇ: son saklama silmesinin özeti. Yalnızca saklama işi yazar. Sahibi: paket Y. */
+  "retention.lastRun": retentionLastRunSchema,
+  /** İÇ: kurulum listesi kartının gizlenme anı. Yalnızca onboarding servisi yazar. Sahibi: paket K. */
+  "onboarding.checklist": onboardingChecklistSchema,
 } as const;
 
 export type SettingKey = keyof typeof settingSchemas;
@@ -424,6 +482,18 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "registry.insee": { enabled: false, nafCodes: ["56.30Z"], windowDays: 30, scheme: "NAFRev2" },
   "ai.intro": { enabled: false, model: "claude-opus-5-5", costAckAt: null },
   "tracking.opens": { enabled: false, ackAt: null },
+  "backup.schedule": {
+    auto: true,
+    onStartup: true,
+    weekly: true,
+    keepStartup: 7,
+    keepWeekly: 4,
+    includeSecrets: true,
+  },
+  "backup.folder": null,
+  "retention.leads": { enabled: true, months: 12 },
+  "retention.lastRun": null,
+  "onboarding.checklist": { dismissedAt: null },
 };
 
 /**

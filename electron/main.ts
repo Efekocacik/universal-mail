@@ -6,6 +6,7 @@ import {
   Menu,
   nativeTheme,
   Notification,
+  type OpenDialogOptions,
   powerMonitor,
   safeStorage,
   session,
@@ -21,6 +22,10 @@ import path from "node:path";
 import { SESSION_CACHE_FILENAME, WORKER_STATUS_FILENAME } from "../src/lib/config/paths";
 import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
 import { t, type TrKey } from "../src/lib/i18n";
+import { MIGRATE_RESULT_FILENAME, readMigrateResult } from "../src/lib/db/migrate-result";
+import { childEnv } from "./child-env";
+import { hardenSession, hardenWebContents } from "./hardening";
+import { applyPendingLifecycleInMain, registerLifecycleIpc } from "./lifecycle";
 import { rotateIfLarge } from "./logs";
 import {
   loadOrRecoverMasterKey,
@@ -28,6 +33,7 @@ import {
   MasterKeyQuit,
   SECRETS_FILENAME,
 } from "./master-key";
+import { handleMigrationFailure } from "./migration-recovery";
 import {
   createWakeSignal,
   isNotifyMessage,
@@ -65,7 +71,7 @@ let mainWindow: BrowserWindow | null = null;
 
 app.setName("Universal Mail");
 if (process.env.UM_USER_DATA_DIR) app.setPath("userData", process.env.UM_USER_DATA_DIR);
-// Windows bildirimleri uygulama kimliği olmadan sessizce gösterilmez (electron-builder.yml appId ile aynı).
+// Windows bildirimleri uygulama kimliği olmadan sessizce gösterilmez (electron-builder.config.cjs appId ile aynı).
 if (process.platform === "win32") app.setAppUserModelId("com.universalmail.app");
 
 /* ------------------------------ arayüz tercihleri ------------------------------ */
@@ -195,23 +201,6 @@ function loadMasterKeyUnsafe(): string {
 }
 
 /* ------------------------------ alt süreçler ------------------------------ */
-
-function childEnv(port: number, masterKey: string): NodeJS.ProcessEnv {
-  const dir = serverDir();
-  return {
-    ...process.env,
-    ELECTRON_RUN_AS_NODE: "1",
-    NODE_ENV: "production",
-    NEXT_TELEMETRY_DISABLED: "1",
-    HOSTNAME: "127.0.0.1",
-    PORT: String(port),
-    UM_DATA_DIR: dataDir(),
-    UM_MASTER_KEY: masterKey,
-    UM_REQUIRE_MASTER_KEY: "1",
-    UM_MIGRATIONS_DIR: path.join(dir, "drizzle"),
-    UM_STATIC_DATA_DIR: path.join(dir, "data"),
-  };
-}
 
 function spawnChild(name: string, script: string, env: NodeJS.ProcessEnv): ChildProcess {
   const child = fork(path.join(serverDir(), script), [], {
@@ -356,18 +345,66 @@ function startWorker(env: NodeJS.ProcessEnv): void {
   });
 }
 
+/** Kullanıcı geçiş hatası iletişim kutusunda "Çık"ı seçti (iletişim kutusu zaten gösterildi; ek hata kutusu yok). */
+class MigrationQuit extends Error {
+  constructor() {
+    super("Veritabanı hazırlanamadı; kullanıcı kapatmayı seçti.");
+    this.name = "MigrationQuit";
+  }
+}
+/** "Yeniden dene" döngüsünün güvenlik sınırı (asıl sınır electron/migration-recovery.ts'tedir). */
+const MIGRATION_MAX_ATTEMPTS = 4;
+
+/**
+ * Şema geçişi alt süreci (öncesinde otomatik yedek alınır). Başarısızlıkta `migrate-result.json` okunur ve kurtarma
+ * iletişim kutusu (electron/migration-recovery.ts) "yeniden dene" veya "çık" döndürür. Duman testinde iletişim kutusu
+ * gösterilmez: hata doğrudan fırlatılır.
+ */
+async function runMigrateChild(env: NodeJS.ProcessEnv): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    // Önceki çalıştırmanın sonucu yanlışlıkla okunmasın.
+    fs.rmSync(path.join(dataDir(), MIGRATE_RESULT_FILENAME), { force: true });
+    // Önceki oturumdan kalan Google önbelleği (çökme/zorla kapanma olasılığına karşı) açılışta da silinir.
+    const migrate = spawnChild("migrate", "migrate.cjs", { ...env, UM_WIPE_SESSION: "1" });
+    const code = await waitForExit(migrate, 120_000);
+    if (code === 0) return;
+    const message = `Veritabanı hazırlanamadı (kod=${code}). Ayrıntı için günlük dosyasına bakın.`;
+    if (SMOKE || attempt >= MIGRATION_MAX_ATTEMPTS) throw new Error(message);
+    const action = await handleMigrationFailure(readMigrateResult(dataDir()), {
+      dataDir: dataDir(),
+      logDir,
+      attempt,
+      exitCode: code,
+      t: tl,
+      showMessageBox: (spec) => dialog.showMessageBoxSync(spec),
+      showErrorBox: (title, body) => dialog.showErrorBox(title, body),
+      openPath: (p) => void shell.openPath(p),
+      exists: (p) => fs.existsSync(p),
+      copyFile: (from, to) => fs.copyFileSync(from, to),
+      rename: (from, to) => fs.renameSync(from, to),
+      readdir: (dir) => fs.readdirSync(dir),
+      now: () => Date.now(),
+      log: (m) => log("main", m),
+    });
+    log("main", `Geçiş hatası (deneme ${attempt}): kullanıcı seçimi=${action}`);
+    if (action !== "retry") throw new MigrationQuit();
+  }
+}
+
 async function startBackend(): Promise<string> {
   if (DEV_URL) return DEV_URL;
   const masterKey = loadMasterKey();
   const port = await freePort();
-  const env = childEnv(port, masterKey);
+  const env = childEnv({
+    port,
+    masterKey,
+    dataDir: dataDir(),
+    serverDir: serverDir(),
+    baseEnv: process.env,
+  });
 
-  // 1) şema geçişi (öncesinde otomatik yedek alınır)
-  // Önceki oturumdan kalan Google önbelleği (çökme/zorla kapanma olasılığına karşı) açılışta da silinir.
-  const migrate = spawnChild("migrate", "migrate.cjs", { ...env, UM_WIPE_SESSION: "1" });
-  const code = await waitForExit(migrate, 120_000);
-  if (code !== 0)
-    throw new Error(`Veritabanı hazırlanamadı (kod=${code}). Ayrıntı için günlük dosyasına bakın.`);
+  // 1) şema geçişi (öncesinde otomatik yedek alınır; bekleyen geri yükleme migrate içinde uygulanır)
+  await runMigrateChild(env);
 
   // 2) web sunucusu
   listenForNotify(spawnChild("server", "server.js", env));
@@ -406,16 +443,7 @@ function createWindow(url: string): BrowserWindow {
       webSecurity: true,
     },
   });
-  win.webContents.setWindowOpenHandler(({ url: target }) => {
-    if (/^https?:/i.test(target) && !isLocal(target)) void shell.openExternal(target);
-    return { action: "deny" };
-  });
-  win.webContents.on("will-navigate", (e, target) => {
-    if (!isLocal(target)) {
-      e.preventDefault();
-      if (/^https?:/i.test(target)) void shell.openExternal(target);
-    }
-  });
+  // Yeni pencere/gezinme kuralları her WebContents için `web-contents-created` içinde uygulanır (electron/hardening.ts).
   // Sayfada kaydedilmemiş değişiklik varken (`beforeunload`, ör. kampanya sihirbazı) kapatma veya yenileme: Electron
   // iletişim kutusu göstermeden engeller; burada Türkçe yerel bir soru sorulur. "Değişiklikleri at" seçilirse
   // `preventDefault` ile kapanış/yenileme SÜRER; aksi halde pencere açık kalır.
@@ -723,8 +751,38 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
       `Universal Mail ${app.getVersion()} başlıyor (${process.platform}/${process.arch}, paketli=${app.isPackaged})`,
     );
 
-    session.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
-    ipcMain.handle("um:open-data-folder", () => shell.openPath(dataDir()));
+    hardenSession(session.defaultSession);
+    // Yalnızca uygulamanın kendi penceresinden (yerel köken) gelen istek kabul edilir.
+    ipcMain.handle("um:open-data-folder", (e) => {
+      if (!origin || !isLocal(e.senderFrame?.url ?? "")) return "";
+      return shell.openPath(dataDir());
+    });
+    // Faz 6: yeniden başlatma (geri yükleme/verileri silme sonrası), klasör ve yedek dosyası seçimi.
+    registerLifecycleIpc(ipcMain, {
+      isLocal: (url) => !!origin && isLocal(url),
+      relaunch: async () => {
+        await shutdown();
+        app.relaunch();
+        app.exit(0);
+      },
+      chooseFolder: async () => {
+        const opts: OpenDialogOptions = { properties: ["openDirectory", "createDirectory"] };
+        const r = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, opts)
+          : await dialog.showOpenDialog(opts);
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+      chooseFile: async () => {
+        const opts: OpenDialogOptions = {
+          properties: ["openFile"],
+          filters: [{ name: tl("backup.fileFilter"), extensions: ["umbk"] }],
+        };
+        const r = mainWindow
+          ? await dialog.showOpenDialog(mainWindow, opts)
+          : await dialog.showOpenDialog(opts);
+        return r.canceled ? null : (r.filePaths[0] ?? null);
+      },
+    });
     // Yalnızca uygulamanın kendi penceresinden (yerel köken) gelen tercih değişikliği kabul edilir.
     ipcMain.handle("um:set-ui-prefs", (e, input: unknown) => {
       if (!origin || !isLocal(e.senderFrame?.url ?? "")) return { ok: false, openAtLogin: null };
@@ -745,8 +803,22 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     buildMenu();
 
     try {
+      // Faz 6: bekleyen "tüm verilerimi sil" işlemi ana anahtar yüklenmeden ÖNCE uygulanır (electron/lifecycle.ts).
+      if (!DEV_URL)
+        await applyPendingLifecycleInMain({
+          userDataDir: app.getPath("userData"),
+          dataDir: dataDir(),
+          log: (m) => log("main", m),
+        });
       origin = new URL(await startBackend()).origin;
     } catch (e) {
+      if (e instanceof MigrationQuit) {
+        // Kurtarma iletişim kutusu zaten gösterildi; ek hata kutusu gösterilmez.
+        log("main", e.message);
+        await shutdown();
+        app.exit(1);
+        return;
+      }
       if (e instanceof MasterKeyQuit) {
         // Kullanıcının bilinçli seçimi: ek hata kutusu gösterilmez, hiçbir dosya değiştirilmedi.
         log("main", e.message);
@@ -777,6 +849,14 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
     else startNotifications();
   });
 
+  // Her WebContents (pencere, olası alt çerçeveler) aynı kurallarla sertleştirilir.
+  app.on("web-contents-created", (_e, wc) =>
+    hardenWebContents(wc, {
+      isLocal,
+      openExternal: (url) => void shell.openExternal(url),
+      log: (m) => log("main", m),
+    }),
+  );
   app.on("window-all-closed", () => app.quit());
   app.on("before-quit", (e) => {
     if (quitting) return;
