@@ -158,11 +158,11 @@ describe("yedek biçimi (.umbk)", () => {
     ).toBe("BACKUP_FILE_MISSING");
   });
 
-  it("aralık dışı scrypt maliyeti (log2N 21 veya 13) ve geçersiz meta BAD_FORMAT", async () => {
+  it("aralık dışı scrypt maliyeti (log2N 19 veya 13) ve geçersiz meta BAD_FORMAT", async () => {
     const { out } = await make(Buffer.from("veri"));
     const orig = fs.readFileSync(out);
     const target = path.join(dir, "o.db");
-    for (const v of [13, 21]) {
+    for (const v of [13, 19, 20]) {
       const f = Buffer.from(orig);
       f[10] = v;
       fs.writeFileSync(out, f);

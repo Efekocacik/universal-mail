@@ -8,8 +8,10 @@ import { getSetting, getSettings, setSetting, type SettingValue } from "@/lib/se
 /**
  * Faz 6 (paket Y.5, FR-CMPL-04): temas edilmemiş lead'lerin saklama süresi.
  *
- * Aday: `last_contacted_at IS NULL AND created_at < kesim AND status IN ('new','enriched','not_interested')` ve hiç
- * kampanya satırı (`campaign_leads`) ya da iletisi (`messages`) YOK. Bilerek korunanlar: `do_not_contact`, temas
+ * Aday: `last_contacted_at IS NULL AND created_at < kesim AND status IN ('new','enriched')` ve hiç
+ * kampanya satırı (`campaign_leads`) ya da iletisi (`messages`) YOK. Bilerek korunanlar: `do_not_contact` ve
+ * `not_interested` (ikisi de uygulamanın geri kalanında iletişim yasağı sayılır ve engel listesine yazılmaz; lead
+ * silinirse yeniden tarama/içe aktarma aynı işletmeyi 'new' olarak geri getirip yeniden uygun kılardı), temas
  * edilmiş lead'ler (gönderim geçmişi ve yasal denetim), engel listesi (`suppressions`), `audit_log` ve sicil satırları
  * (bağlantıları FK ile NULL olur). Silme 500'lük gruplar hâlinde yazma işleminde yapılır; koşul her grupta aynı ifadede
  * yeniden değerlendirilir. Bağlı kayıtlar (e-postalar, kişiler, zenginleştirme, içe aktarma bağı, tanıtım) FK
@@ -19,7 +21,7 @@ import { getSetting, getSettings, setSetting, type SettingValue } from "@/lib/se
  */
 
 export const RETENTION_BATCH = 500;
-export const RETENTION_STATUSES = ["new", "enriched", "not_interested"] as const;
+export const RETENTION_STATUSES = ["new", "enriched"] as const;
 
 /** Yerel takvimde `months` ay öncesi (ayın son gününe kırpılır: 31 Mart − 1 ay = 28/29 Şubat). */
 export function retentionCutoff(now: number, months: number): number {
@@ -41,7 +43,7 @@ export function retentionCutoff(now: number, months: number): number {
 const predicate = (cutoff: number) => sql`
   leads.last_contacted_at IS NULL
   AND leads.created_at < ${cutoff}
-  AND leads.status IN ('new', 'enriched', 'not_interested')
+  AND leads.status IN ('new', 'enriched')
   AND NOT EXISTS (SELECT 1 FROM campaign_leads cl WHERE cl.lead_id = leads.id)
   AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.lead_id = leads.id)`;
 
@@ -118,7 +120,7 @@ export async function runRetention(
         kind: "retention.purged",
         dedupeKey: `retention.purged:${now}`,
         params: { n: deleted },
-        url: "/settings",
+        url: "/settings#backup",
       },
       { now },
     );

@@ -153,8 +153,10 @@ export const backup = {
   "backup.ret.months": "Retention period",
   "backup.ret.monthsValue": "{months} month(s)",
   "backup.ret.kept":
-    "Kept: businesses that were emailed or added to a campaign, those marked “do not contact”, the block list and legal records.",
+    "Kept: businesses that were emailed or added to a campaign, those marked “do not contact” or “Not interested”, the block list and legal records.",
   "backup.ret.preview": "Would be deleted now: {n}",
+  "backup.ret.previewOff":
+    "Expired records: {n} (automatic deletion is off; they are deleted only if you press “Apply now”)",
   "backup.ret.previewHint": "Records added before {date}.",
   "backup.ret.run": "Apply now",
   "backup.ret.run.title": "Delete old records now?",

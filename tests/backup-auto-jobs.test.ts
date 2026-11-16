@@ -136,7 +136,7 @@ describe("işleyici", () => {
       .where(eq(notifications.kind, "backup.failed"));
     expect(n).toHaveLength(1);
     expect(n[0]!.params).toEqual({ code: "BACKUP_PASSPHRASE_REQUIRED" });
-    expect(n[0]!.url).toBe("/settings");
+    expect(n[0]!.url).toBe("/settings#backup");
   });
 
   it("geçici hata yeniden denenir (NonRetryable değil); başka yedek sürüyorsa bildirimsiz yeniden denenir", async () => {

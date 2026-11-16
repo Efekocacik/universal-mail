@@ -174,14 +174,14 @@ describe("Faz 6 ayarları: şemalar, varsayılanlar, iç anahtarlar", () => {
         kind: "backup.failed",
         dedupeKey: "backup.failed:2026-11-16",
         params: { code: "BACKUP_DISK_FULL" },
-        url: "/settings",
+        url: "/settings#backup",
       });
       expect(a.created).toBe(true);
       const b = await notify(db, {
         kind: "retention.purged",
         dedupeKey: "retention.purged:2026-11-16",
         params: { n: 1234 },
-        url: "/settings",
+        url: "/settings#backup",
       });
       expect(b.created).toBe(true);
     });

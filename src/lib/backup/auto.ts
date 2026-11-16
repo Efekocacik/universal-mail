@@ -146,7 +146,7 @@ export function makeAutoBackupHandler(deps: BackupDeps = {}, clock: () => number
           kind: "backup.failed",
           dedupeKey: `backup.failed:${localDayKey(now)}`,
           params: { code },
-          url: "/settings",
+          url: "/settings#backup",
         },
         { now },
       ).catch(() => undefined);

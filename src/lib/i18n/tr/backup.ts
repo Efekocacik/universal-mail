@@ -155,8 +155,10 @@ export const backup = {
   "backup.ret.months": "Saklama süresi",
   "backup.ret.monthsValue": "{months} ay",
   "backup.ret.kept":
-    "Korunanlar: e-posta gönderilmiş veya kampanyaya eklenmiş işletmeler, “iletişim kurma” işaretliler, engel listesi ve yasal kayıtlar.",
+    "Korunanlar: e-posta gönderilmiş veya kampanyaya eklenmiş işletmeler, “iletişim kurma” ve “İlgilenmiyor” işaretliler, engel listesi ve yasal kayıtlar.",
   "backup.ret.preview": "Şu an silinecek: {n}",
+  "backup.ret.previewOff":
+    "Süresi dolmuş kayıt: {n} (otomatik silme kapalı; yalnızca “Şimdi uygula”ya basarsanız silinir)",
   "backup.ret.previewHint": "{date} öncesinde eklenmiş kayıtlar.",
   "backup.ret.run": "Şimdi uygula",
   "backup.ret.run.title": "Eski kayıtlar şimdi silinsin mi?",

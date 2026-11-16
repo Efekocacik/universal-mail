@@ -97,6 +97,8 @@ describe("kurulum listesi adımları", () => {
     expect(c.items.map((i) => i.href)).toEqual(
       ONBOARDING_ITEM_IDS.map((id) => ONBOARDING_HREFS[id]),
     );
+    // Test e-postası Ayarlar'da değil, Gönderim günlüğü → Gönderim sağlığı sekmesinde ("Kendime test gönder").
+    expect(ONBOARDING_HREFS.testEmail).toBe("/mail-log?tab=health");
     expect(c.items.every((i) => !i.done && i.demo === undefined)).toBe(true);
     expect(c).toMatchObject({ done: 0, total: 7, allDone: false, dismissedAt: null });
     // Demo posta kutusu (açılış seed'i) "posta kutusu bağlı" sayılmaz.

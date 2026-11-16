@@ -111,16 +111,22 @@ describe("saklama süresi", () => {
     const f = await fixture();
     const p = await previewRetention(env.db, NOW);
     expect(p.settings).toEqual({ enabled: true, months: 12 });
-    expect(p.preview.leads).toBe(3);
-    const r = await runRetention(env.db, { now: NOW, expectedMax: 3, manual: true });
-    expect(r).toEqual({ deleted: 3, cutoff: p.preview.cutoff });
+    expect(p.preview.leads).toBe(2);
+    const r = await runRetention(env.db, { now: NOW, expectedMax: 2, manual: true });
+    expect(r).toEqual({ deleted: 2, cutoff: p.preview.cutoff });
     const left = (await env.db.select({ id: leads.id }).from(leads))
       .map((x) => x.id)
       .sort((a, b) => a - b);
     expect(left).toEqual(
-      [f.oldDnc, f.oldContacted, f.oldCustomer, f.recent, f.campaignLead, f.withMsg].sort(
-        (a, b) => a - b,
-      ),
+      [
+        f.oldNotInterested,
+        f.oldDnc,
+        f.oldContacted,
+        f.oldCustomer,
+        f.recent,
+        f.campaignLead,
+        f.withMsg,
+      ].sort((a, b) => a - b),
     );
     expect(await env.db.select().from(leadEmails).where(eq(leadEmails.leadId, f.oldNew))).toEqual(
       [],
@@ -130,16 +136,17 @@ describe("saklama süresi", () => {
     expect(await getSetting(env.db, "retention.lastRun")).toEqual({
       at: NOW,
       cutoff: r.cutoff,
-      deleted: 3,
+      deleted: 2,
     });
     const a = await env.db.select().from(auditLog).where(eq(auditLog.action, "retention.run"));
-    expect(a[0]!.detail).toEqual({ cutoff: r.cutoff, deleted: 3, months: 12, manual: true });
+    expect(a[0]!.detail).toEqual({ cutoff: r.cutoff, deleted: 2, months: 12, manual: true });
     const n = await env.db
       .select()
       .from(notifications)
       .where(eq(notifications.kind, "retention.purged"));
     expect(n).toHaveLength(1);
-    expect(n[0]!.params).toEqual({ n: 3 });
+    expect(n[0]!.params).toEqual({ n: 2 });
+    expect(n[0]!.url).toBe("/settings#backup");
     expect(await countRetentionCandidates(env.db, r.cutoff)).toBe(0);
     // Hiçbir şey silinmezse bildirim eklenmez.
     expect((await runRetention(env.db, { now: NOW + 1000 })).deleted).toBe(0);
@@ -149,13 +156,13 @@ describe("saklama süresi", () => {
   it("bayat önizleme: aday sayısı onaylanandan fazlaysa hiçbir şey silinmez (409 kodu)", async () => {
     await fixture();
     try {
-      await runRetention(env.db, { now: NOW, expectedMax: 2 });
+      await runRetention(env.db, { now: NOW, expectedMax: 1 });
       expect.unreachable();
     } catch (e) {
       expect((e as LifecycleError).code).toBe("RETENTION_PREVIEW_STALE");
       expect((e as LifecycleError).status).toBe(409);
     }
-    expect((await previewRetention(env.db, NOW)).preview.leads).toBe(3);
+    expect((await previewRetention(env.db, NOW)).preview.leads).toBe(2);
   });
 
   it("süre kısaltılınca önizleme büyür; 0 ve 13 ay geçersiz", async () => {

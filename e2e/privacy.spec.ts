@@ -197,7 +197,9 @@ test("ayarlar: Güvenlik ve gizlilik kartı her hizmeti ve ne zaman bağlandığ
   const card = page.getByTestId("privacy-card");
   await expect(card).toBeInViewport();
   await expect(card.getByRole("heading", { name: "Güvenlik ve gizlilik" })).toBeVisible();
-  await expect(card.getByText("Demo modunda uygulama internete hiç bağlanmaz.")).toBeVisible();
+  await expect(
+    card.getByText(/Demo veri kaynağında Google'a ve diğer veri servislerine bağlanılmaz/),
+  ).toBeVisible();
   await expect(card.locator("tr[data-service]")).toHaveCount(12);
   await expect(card.getByRole("rowheader", { name: "Google Places" })).toBeVisible();
   await expect(card.getByText("places.googleapis.com")).toBeVisible();

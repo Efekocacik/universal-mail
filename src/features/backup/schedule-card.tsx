@@ -145,13 +145,14 @@ export function ScheduleCard({ data }: { data: BackupOverview }) {
       <div className="space-y-1.5">
         <Label htmlFor="backup-folder">{t("backup.folder.label")}</Label>
         {chooseFolder ? (
-          <p
+          // Masaüstünde yol yalnızca "Klasör seç…" ile değişir: salt okunur alan (etiket `for` ile bağlanabilir öğe).
+          <Input
             id="backup-folder"
-            className="truncate rounded-md border bg-muted/40 px-3 py-2 font-mono text-[12px]"
+            readOnly
+            className="truncate bg-muted/40 font-mono text-[12px]"
             title={form.folder ?? data.defaultFolder}
-          >
-            {form.folder ?? `${t("backup.folder.default")} · ${data.defaultFolder}`}
-          </p>
+            value={form.folder ?? `${t("backup.folder.default")} · ${data.defaultFolder}`}
+          />
         ) : (
           <Input
             id="backup-folder"

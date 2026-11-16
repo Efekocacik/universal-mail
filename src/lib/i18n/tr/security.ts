@@ -13,7 +13,8 @@ export const security = {
     "Uygulamanın iç sunucusu yalnızca bu bilgisayardan açılabilir; ağdaki başka bir cihaz bağlanamaz.",
   "security.point.secrets":
     "API anahtarlarınız ve Gmail bağlantı bilgileriniz şifreli saklanır. Şifreyi çözen anahtar işletim sisteminizin anahtar zincirindedir; dosyalar başka bir bilgisayara kopyalansa da okunamaz.",
-  "security.point.demo": "Demo modunda uygulama internete hiç bağlanmaz.",
+  "security.point.demo":
+    "Demo veri kaynağında Google'a ve diğer veri servislerine bağlanılmaz; bağladığınız Gmail kutusu ve çıkış sunucusu yine kullanılır.",
   "security.point.noTelemetry":
     "Kullanım istatistiği, hata raporu ya da arka planda güncelleme denetimi yoktur.",
   "security.services.title": "Uygulamanın bağlanabileceği hizmetler",

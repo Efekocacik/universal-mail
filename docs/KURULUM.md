@@ -110,10 +110,15 @@ yalnızca uygulama açıkken işlendiği için Ayarlar → Görünüm ve dil →
 
 ### 3.2 Kurulum sihirbazı
 
-1. Dil Türkçe seçili gelir. **Tamam** veya **İleri**'ye basın.
-2. Kurulum yeri olarak önerilen klasörü değiştirmeden **Yükle**'ye basın. (Yönetici parolası istenmez; uygulama
-   yalnızca sizin kullanıcı hesabınıza kurulur.)
-3. Kurulum bitince **Universal Mail'i çalıştır** işaretliyken **Son**'a basın. Uygulama açılır.
+Sihirbazın dili Windows'un diline göre kendiliğinden seçilir (ayrı bir dil sorusu çıkmaz).
+
+1. İlk sayfa **İngilizce** bir **"Choose Installation Options"** sayfasıdır (bu sayfanın Türkçesi yoktur). **Only for
+   me** seçeneğini işaretleyip **Next**'e basın. **"Anyone who uses this computer (all users)"** seçeneğini
+   **seçmeyin**: yönetici izni ister ve uygulamayı bilgisayardaki herkese kurar; bu rehberin geri kalanı "yalnızca
+   benim için" kurulumu anlatır.
+2. Kurulum yeri olarak önerilen klasörü değiştirmeden **Yükle**'ye (İngilizce Windows'ta **Install**) basın.
+   ("Only for me" seçildiyse yönetici parolası istenmez; uygulama yalnızca sizin kullanıcı hesabınıza kurulur.)
+3. Kurulum bitince **Universal Mail'i çalıştır** işaretliyken **Son**'a (**Finish**) basın. Uygulama açılır.
 
 Masaüstünde ve Başlat menüsünde **Universal Mail** kısayolu oluşur.
 
@@ -152,12 +157,15 @@ Uygulama ilk açıldığında kurulum sihirbazı başlar. Adımlar ve ekran gör
 Ardından **Gösterge paneli → Kurulumu tamamlayın** kartı kalan adımları (ilk tarama, Gmail bağlantısı, test e-postası,
 çıkış sunucusu, yedek parolası) sırayla gösterir.
 
-Verileriniz şu klasörde tutulur (uygulamada **Yardım → Veri klasörünü aç**):
+Verileriniz şu klasörde tutulur (uygulamada **Yardım → Veri klasörünü aç** tam bu klasörü açar):
 
 | Sistem | Veri klasörü |
 | --- | --- |
-| macOS | `~/Library/Application Support/Universal Mail` |
-| Windows | `%APPDATA%\Universal Mail` |
+| macOS | `~/Library/Application Support/Universal Mail/data` |
+| Windows | `%APPDATA%\Universal Mail\data` |
+
+Günlükler aynı yerin `logs` alt klasöründedir; uygulamanın bütün dosyaları (veri, günlükler, pencere ayarları) bir üst
+klasörde, `~/Library/Application Support/Universal Mail` (Windows: `%APPDATA%\Universal Mail`) altında durur.
 
 ---
 
@@ -171,8 +179,8 @@ Yeni sürüm, eskisinin **üzerine kurulur**; verileriniz, ayarlarınız, anahta
 4. Kurun:
    - **macOS:** `.dmg` dosyasını açıp **Universal Mail**'i **Applications** klasörüne sürükleyin. "Aynı adlı öğe var"
      sorusunda **Değiştir**'i seçin.
-   - **Windows:** `.exe` dosyasını çalıştırıp kurulum adımlarını izleyin. Eski sürüm kendiliğinden değiştirilir;
-     verilerin silinmesi **sorulmaz**.
+   - **Windows:** `.exe` dosyasını çalıştırıp kurulum adımlarını izleyin ("Choose Installation Options" sayfasında
+     yine **Only for me**). Eski sürüm kendiliğinden değiştirilir; verilerin silinmesi **sorulmaz**.
 5. Uygulamayı açın. İlk açılışta (gerekirse) güvenlik uyarısını [2.3](#23-açılış-güvenlik-uyarısı) veya
    [3.3](#33-smartscreen-uyarısı)'teki gibi bir kez daha onaylayın; anahtarlık izni sorulursa **Her Zaman İzin Ver**.
 
@@ -200,13 +208,17 @@ alır. Bir sorun olursa **"Veritabanı güncellenemedi"** penceresi çıkar: ön
 **Verilerle birlikte kaldırmak için** (bilgisayarı devrederken önerilir):
 
 1. Uygulamada **Ayarlar → Yedekler → Tüm verilerimi sil** ile verileri silin (ayrıntı:
-   [Kullanım Kılavuzu → Tüm verilerimi sil](KULLANIM.md#52-tüm-verilerimi-sil)) ve uygulamayı kapatıp açarak silmeyi
-   tamamlayın.
-2. Uygulamadan çıkın (**⌘Q**).
+   [Kullanım Kılavuzu → Tüm verilerimi sil](KULLANIM.md#52-tüm-verilerimi-sil)). Bilgisayarı devrediyorsanız
+   pencerede **Yedek dosyalarını da sil** kutusunu **işaretleyin** (varsayılan olarak işaretsizdir; işaretlemezseniz
+   şifreli yedekler, kayıtlı anahtarlar ve Gmail bağlantısıyla birlikte bilgisayarda kalır). Uygulamayı kapatıp
+   açarak silmeyi tamamlayın.
+2. Uygulamadan çıkın (**⌘Q**). Silmeden sonraki açılış boş bir veri klasörü ve günlük dosyaları oluşturur; bunları
+   da kaldırmak için Finder'da **Git → Klasöre Git…** ile `~/Library/Application Support` klasörünü açıp içindeki
+   **Universal Mail** klasörünü Çöp Sepeti'ne taşıyın.
 3. **Finder → Uygulamalar**'da **Universal Mail**'i Çöp Sepeti'ne sürükleyin ve Çöp Sepeti'ni boşaltın.
 4. İsteğe bağlı: **Anahtar Zinciri Erişimi** uygulamasını açın, "Universal Mail Safe Storage" kaydını arayıp silin.
 
-**Verileri saklayarak kaldırmak için:** yalnızca 2. ve 3. adımı yapın. Veriler
+**Verileri saklayarak kaldırmak için:** yalnızca 3. adımı yapın (önce uygulamadan **⌘Q** ile çıkın). Veriler
 `~/Library/Application Support/Universal Mail` klasöründe kalır; yeniden kurarsanız kaldığı yerden devam eder.
 
 ---
@@ -218,7 +230,7 @@ Temiz bir bilgisayarda, anahtarlar önceden hazırsa:
 | Süre | Adım | Tamam |
 | --- | --- | --- |
 | 0–5 dk | GitHub Release sayfasından doğru dosyayı indir (Mac: `mac-arm64.dmg`, Windows: `win-x64.exe`) | ☐ |
-| 5–10 dk | Kur ([2](#2-macose-kurulum) / [3](#3-windowsa-kurulum)); güvenlik uyarısını bir kez onayla; anahtarlık iznini ver | ☐ |
+| 5–10 dk | Kur ([2](#2-macose-kurulum) / [3](#3-windowsa-kurulum)); Windows'ta İngilizce "Choose Installation Options" sayfasında **Only for me** → **Next**; güvenlik uyarısını bir kez onayla; anahtarlık iznini ver | ☐ |
 | 10–15 dk | Kurulum sihirbazı: onay, firma bilgileri, hedef pazarlar, Google anahtarı (**Anahtarı test et** → "Anahtar çalışıyor"), bütçe | ☐ |
 | 15–20 dk | İlk tarama: Keşif → Yeni tarama → bir şehir, bir-iki kategori → maliyet "ücretsiz kota içinde" → **Taramayı başlat** | ☐ |
 | 20–25 dk | Tarama bitince listede ve haritada işletmeler görünüyor; birkaç işletmede **E-posta bul** | ☐ |

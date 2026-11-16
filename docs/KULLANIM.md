@@ -362,8 +362,9 @@ kurallarını gösterir. **Google verilerini sil** ile bilgisayardaki Google kay
 ![Ayarlar: Veriler ve gizlilik](img/kullanim/27-ayarlar-veriler.png)
 
 **Güvenlik ve gizlilik** bölümü, uygulamanın hangi hizmetlere **ne zaman** bağlandığını listeler. Bir hizmete yalnızca
-siz onu açtığınızda veya anahtarını girdiğinizde bağlanılır; demo modunda internete hiç çıkılmaz. Kullanım istatistiği,
-hata raporu veya arka planda güncelleme denetimi yoktur.
+siz onu açtığınızda veya anahtarını girdiğinizde bağlanılır. Demo veri kaynağında Google'a ve diğer veri servislerine
+(sicil, e-posta bulma, yapay zekâ) bağlanılmaz; ancak bağladığınız Gmail kutusu ve çıkış sunucusu demo veri kaynağında
+da kullanılır. Kullanım istatistiği, hata raporu veya arka planda güncelleme denetimi yoktur.
 
 ![Ayarlar: Güvenlik ve gizlilik](img/kullanim/28-ayarlar-guvenlik.png)
 
@@ -388,12 +389,17 @@ Yedekler **Ayarlar → Yedekler** bölümündedir. Yedekler şifrelidir: yedek p
    **unutursanız yedekler açılamaz ve kimse kurtaramaz.**
 2. **Otomatik yedek** açık kalsın: uygulama her gün ilk açılışta ve haftada bir kendiliğinden yedek alır. Eski
    otomatik yedekler kendiliğinden silinir; elle aldıklarınız silinmez.
-3. **Yedek klasörü** olarak harici bir disk veya bilgisayarınızla eşitlenen bir bulut klasörü seçin. Bilgisayar
-   arızalanırsa yedekler de kaybolmasın.
+3. **Yedek klasörü** olarak harici bir disk veya bilgisayarınızla eşitlenen bir bulut klasörü seçin: masaüstü
+   uygulamasında **Klasör seç…** ile klasörü seçip alttaki **Kaydet**'e basın (Kaydet'e basmazsanız seçim
+   kaybolur). Bilgisayar arızalanırsa yedekler de kaybolmasın.
 4. **Kayıtlı anahtarları da yedekle** açıkken Google ve Gmail anahtarları da yedeğe şifreli eklenir; başka bir
    bilgisayara geçerken yeniden girmeniz gerekmez.
 
 ![Yedekler: parola ve otomatik yedek](img/kullanim/29-yedek-parola.png)
+
+> Ekran görüntüleri tarayıcı görünümünden alınmıştır: klasör alanı orada yazılabilir bir kutu olarak görünür.
+> Masaüstü uygulamasında klasör yolu salt okunur gösterilir ve yanında **Klasör seç…** düğmesi bulunur; geri yükleme
+> bölümünde de dosya için **Dosya seç…** düğmesi vardır.
 
 ### 4.2 Elle yedek almak
 
@@ -443,7 +449,8 @@ başla**.
 
 1. Pencerede kutuya **VERİLERİMİ SİL** yazın.
 2. Yedek dosyalarının da silinmesini istiyorsanız **Yedek dosyalarını da sil**'i işaretleyin (işaretlemezseniz şifreli
-   yedekler kalır, ileride geri yükleyebilirsiniz).
+   yedekler kalır, ileride geri yükleyebilirsiniz). **Bilgisayarı devrediyorsanız bu kutuyu mutlaka işaretleyin:**
+   yedekler kayıtlı anahtarlarınızı ve Gmail bağlantınızı da (parolayla şifreli) içerir.
 3. **Silmeyi planla**'ya basın, sonra uygulamayı kapatıp açın. Silme açılışta yapılır ve kurulum ekranı yeniden çıkar.
    Yeniden başlatmadan önce bantta **İşlemi iptal et** ile vazgeçebilirsiniz.
 

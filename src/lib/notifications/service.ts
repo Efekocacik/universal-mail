@@ -32,11 +32,12 @@ export { NOTIFICATION_KINDS, type NotificationKind, type NotificationParams };
 /**
  * Uygulama içi yol: `/` ile başlar; yalnızca harf, rakam ve `/_-?=&.%` (ters bölü yok). Yol kısmında (`?` öncesi) `//`,
  * `.` veya `..` bölümü ve kodlanmış eğik çizgi/ters bölü/nokta (`%2F`, `%5C`, `%2E`) YOK; böylece `/.//host`,
- * `/%2F%2Fhost`, `/a/../b` gibi değerler reddedilir.
+ * `/%2F%2Fhost`, `/a/../b` gibi değerler reddedilir. Sonda isteğe bağlı bir sayfa içi çapa (`#backup`; yalnızca harf,
+ * rakam, `_` ve `-`) olabilir.
  * Electron poller'ı (henüz yok) bunu yeniden kullanmalı VE `new URL(url, origin).origin === origin` denetlemelidir.
  */
 export const NOTIFICATION_URL_RE =
-  /^\/(?!\/)(?![^?]*\/\/)(?!(?:[^?]*\/)?\.{1,2}(?:[/?]|$))(?![^?]*%(?:2[fFeE]|5[cC]))[A-Za-z0-9/_\-?=&.%]*$/;
+  /^\/(?!\/)(?![^?#]*\/\/)(?!(?:[^?#]*\/)?\.{1,2}(?:[/?#]|$))(?![^?#]*%(?:2[fFeE]|5[cC]))[A-Za-z0-9/_\-?=&.%]*(?:#[A-Za-z0-9_-]{1,64})?$/;
 
 const DAY = 86_400_000;
 

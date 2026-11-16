@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { exportSecrets, isKnownSecretName, writeSecretsFile } from "@/lib/backup/secrets-io";
 import {
   createPending,
@@ -120,6 +120,70 @@ describe("geri yükleme yarıda düşerse", () => {
     expect(readPending(dir)).toBeNull();
     expect(readResult(dir)).toMatchObject({ kind: "restore", ok: false, code: "RESTORE_FAILED" });
     expect(logs.join("\n")).toMatch(/geri yükleme başarısız/);
+  });
+
+  it("veritabanı yerine konamazsa eski WAL/SHM geri konur (işlenmiş işlemler kaybolmaz); RESTORE_FAILED", async () => {
+    const db = path.join(dir, "universal-mail.db");
+    fs.writeFileSync(db, "MEVCUT");
+    fs.writeFileSync(`${db}-wal`, "ESKI-WAL");
+    fs.writeFileSync(`${db}-shm`, "ESKI-SHM");
+    const stageId = crypto.randomBytes(16).toString("hex");
+    const sd = stageDirOf(dir, stageId);
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, "db"), "YEDEK");
+    fs.writeFileSync(path.join(sd, "stage.json"), JSON.stringify({ v: 1 }));
+    createPending(dir, {
+      v: 1,
+      kind: "restore",
+      stageId,
+      restoreSecrets: false,
+      at: 1,
+      nonce: newNonce(),
+    });
+    const real = fs.renameSync;
+    const spy = vi.spyOn(fs, "renameSync").mockImplementation((from, to) => {
+      if (String(from).endsWith(".restore-tmp") && String(to) === db)
+        throw Object.assign(new Error("EXDEV benzetimi"), { code: "EXDEV" });
+      return real(from, to);
+    });
+    try {
+      const r = await runPreInitHooks({ dataDir: dir, log: () => undefined, now: 7 });
+      expect(r.applied).toEqual({ kind: "restore", ok: false, code: "RESTORE_FAILED" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fs.readFileSync(db, "utf8")).toBe("MEVCUT");
+    expect(fs.readFileSync(`${db}-wal`, "utf8")).toBe("ESKI-WAL");
+    expect(fs.readFileSync(`${db}-shm`, "utf8")).toBe("ESKI-SHM");
+    expect(fs.readdirSync(dir).filter((f) => /restore-(tmp|old)$/.test(f))).toEqual([]);
+  });
+
+  it("başarılı geri yüklemede eski WAL/SHM yeni veritabanının yanında kalmaz", async () => {
+    const db = path.join(dir, "universal-mail.db");
+    fs.writeFileSync(db, "MEVCUT");
+    fs.writeFileSync(`${db}-wal`, "ESKI-WAL");
+    const stageId = crypto.randomBytes(16).toString("hex");
+    const sd = stageDirOf(dir, stageId);
+    fs.mkdirSync(sd, { recursive: true });
+    fs.writeFileSync(path.join(sd, "db"), "YEDEK");
+    fs.writeFileSync(path.join(sd, "stage.json"), JSON.stringify({ v: 1 }));
+    createPending(dir, {
+      v: 1,
+      kind: "restore",
+      stageId,
+      restoreSecrets: false,
+      at: 1,
+      nonce: newNonce(),
+    });
+    const r = await runPreInitHooks({ dataDir: dir, log: () => undefined, now: 8 });
+    expect(r.applied).toMatchObject({ kind: "restore", ok: true });
+    expect(fs.readFileSync(db, "utf8")).toBe("YEDEK");
+    expect(fs.existsSync(`${db}-wal`)).toBe(false);
+    expect(fs.readdirSync(dir).filter((f) => /restore-(tmp|old)$/.test(f))).toEqual([]);
+    // Eski WAL geri yükleme öncesi kopyanın yanında saklanır.
+    expect(
+      fs.readdirSync(path.join(dir, "backups")).filter((f) => f.endsWith(".db-wal")),
+    ).toHaveLength(1);
   });
 
   it("en yeni 3 geri yükleme öncesi kopya tutulur", async () => {

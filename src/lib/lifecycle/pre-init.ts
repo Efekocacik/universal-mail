@@ -100,10 +100,34 @@ function applyRestore(
     }
     const tmp = `${dbFile}.restore-tmp`;
     copyDurable(path.join(sd, "db"), tmp);
-    for (const suffix of ["-wal", "-shm", "-journal"])
-      fs.rmSync(`${dbFile}${suffix}`, { force: true });
-    fs.renameSync(tmp, dbFile);
+    // Eski WAL/SHM/günlük yeni veritabanına uygulanmasın diye yeniden adlandırmadan ÖNCE kenara alınır (silinmez):
+    // yeniden adlandırma düşerse yerlerine geri konur, böylece eski veritabanının işlenmiş ama denetim noktasına
+    // yazılmamış işlemleri kaybolmaz. Başarıda kenardakiler silinir.
+    const aside: Array<[string, string]> = [];
+    for (const suffix of ["-wal", "-shm", "-journal"]) {
+      const f = `${dbFile}${suffix}`;
+      const moved = `${f}.restore-old`;
+      fs.rmSync(moved, { force: true });
+      if (!fs.existsSync(f)) continue;
+      fs.renameSync(f, moved);
+      aside.push([f, moved]);
+    }
+    try {
+      fs.renameSync(tmp, dbFile);
+    } catch (e) {
+      for (const [f, moved] of aside) {
+        try {
+          fs.renameSync(moved, f);
+        } catch (back) {
+          log(
+            `geri yükleme: ${path.basename(f)} geri konamadı: ${errorMessage(back).slice(0, 120)}`,
+          );
+        }
+      }
+      throw e;
+    }
     placed = true;
+    for (const [, moved] of aside) fs.rmSync(moved, { force: true });
     let secretsRestored = false;
     const stagedSecrets = path.join(sd, "secrets.json");
     if (p.restoreSecrets && fs.existsSync(stagedSecrets)) {

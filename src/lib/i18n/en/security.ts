@@ -12,7 +12,8 @@ export const security = {
     "The app's internal server can only be opened from this computer; other devices on your network cannot connect.",
   "security.point.secrets":
     "Your API keys and Gmail connection details are stored encrypted. The key that decrypts them is kept in your operating system's keychain, so the files are unreadable if copied to another computer.",
-  "security.point.demo": "In demo mode the app never connects to the internet.",
+  "security.point.demo":
+    "With the demo data source the app does not contact Google or the other data services; a Gmail mailbox and unsubscribe server you connect are still used.",
   "security.point.noTelemetry":
     "There are no usage statistics, crash reports or background update checks.",
   "security.services.title": "Services the app may connect to",

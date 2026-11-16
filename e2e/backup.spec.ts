@@ -164,6 +164,22 @@ test("saklama süresi: önizleme gösterilir, süre değiştirilir, çalıştır
       async () => (await (await page.request.get("/api/data/retention")).json()).settings.months,
     )
     .toBe(12);
+  // Otomatik silme kapalıyken önizleme "silinecek" demez; açık olduğu açıkça yazılır.
+  const toggle = card.getByLabel(T["backup.ret.enabled"]);
+  await toggle.click();
+  await expect(preview).toContainText(T["backup.ret.previewOff"].replace("{n}", "0"));
+  await expect
+    .poll(
+      async () => (await (await page.request.get("/api/data/retention")).json()).settings.enabled,
+    )
+    .toBe(false);
+  await toggle.click();
+  await expect(preview).toContainText(T["backup.ret.preview"].replace("{n}", "0"));
+  await expect
+    .poll(
+      async () => (await (await page.request.get("/api/data/retention")).json()).settings.enabled,
+    )
+    .toBe(true);
 });
 
 test("tüm verilerimi sil: ifade yazılmadan kapalı → planla → bant → iptal; yedek silinir", async () => {

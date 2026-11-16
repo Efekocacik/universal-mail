@@ -103,7 +103,9 @@ export function RetentionCard() {
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-[13px]" aria-live="polite" data-testid="retention-preview">
           <span className="font-medium">
-            {t("backup.ret.preview", { n: fmtNumber(preview.leads) })}
+            {t(settings.enabled ? "backup.ret.preview" : "backup.ret.previewOff", {
+              n: fmtNumber(preview.leads),
+            })}
           </span>{" "}
           <span className="text-muted-foreground">
             {t("backup.ret.previewHint", { date: fmtDate(preview.cutoff) })}

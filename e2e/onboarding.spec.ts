@@ -122,6 +122,9 @@ test("panel: kart 2/7 gösterir; sihirbaz ve demo veri kaynağı tamam, ilk tara
   await expect(
     page.getByTestId("onboarding-item-backup").getByRole("link", { name: /^Aç:/ }),
   ).toHaveAttribute("href", "/settings#backup");
+  await expect(
+    page.getByTestId("onboarding-item-testEmail").getByRole("link", { name: /^Aç:/ }),
+  ).toHaveAttribute("href", "/mail-log?tab=health");
 });
 
 test("demo taraması tamamlanınca kart 3/7 olur", async () => {

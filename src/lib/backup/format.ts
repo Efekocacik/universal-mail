@@ -12,7 +12,7 @@ import { lifecycleError, normalizePassphrase } from "./passphrase";
  * Faz 6 (paket Y.1): şifreli yedek dosyası biçimi `.umbk`, sürüm 1. Tüm tamsayılar büyük-endian; başlık doğrulanır.
  *
  * ```
- * 0   8  "UMBACKUP"                9  1 kdf = 1 (scrypt)     10 1 log2N (14..20)   11 1 r (=8)   12 1 p (=1)
+ * 0   8  "UMBACKUP"                9  1 kdf = 1 (scrypt)     10 1 log2N (14..18)   11 1 r (=8)   12 1 p (=1)
  * 8   1  biçim sürümü = 1          13 16 tuz
  * 29  12 doğrulayıcı nonce         41 32 doğrulayıcı = AES-256-GCM(anahtar, 16 sıfır bayt, AAD = bayt[0..29)) (16+16)
  * 73  12 yük nonce                 85 4  metaLen (≤ 4096)      89 …  meta JSON (kişisel veri yok)
@@ -30,8 +30,10 @@ export const MAGIC = Buffer.from("UMBACKUP", "ascii");
 export const FORMAT_VERSION = 1;
 export const KDF_SCRYPT = 1;
 export const LOG2N_MIN = 14;
-export const LOG2N_MAX = 20;
 export const DEFAULT_LOG2N = 17;
+/** Okumada kabul edilen en yüksek scrypt maliyeti: başlık doğrulanmadan önce çalıştığı için DEFAULT+1 ile sınırlı
+ * (2^18 → ~256 MiB). Daha yükseğini bildiren dosya `BACKUP_BAD_FORMAT` (bellek/işlemci tüketme koruması). */
+export const LOG2N_MAX = DEFAULT_LOG2N + 1;
 const SCRYPT_R = 8;
 const SCRYPT_P = 1;
 const FIXED_LEN = 89;

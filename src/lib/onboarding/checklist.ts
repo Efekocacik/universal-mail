@@ -40,7 +40,7 @@ export const ONBOARDING_HREFS: Record<OnboardingItemId, string> = {
   dataSource: "/settings#google",
   firstScan: "/scans",
   mailbox: "/settings#mailbox",
-  testEmail: "/settings#mailbox",
+  testEmail: "/mail-log?tab=health",
   unsubscribe: "/settings#unsubscribe",
   backup: "/settings#backup",
 };
