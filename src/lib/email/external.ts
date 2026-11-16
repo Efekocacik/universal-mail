@@ -21,7 +21,9 @@ export interface ExternalQuota {
   resetDate: string | null;
 }
 
-export type ExternalErrorKind = "auth" | "quota" | "rate_limit" | "network" | "bad_response";
+/** `pending`: sağlayıcı sonucu yoklama süresi içinde hazırlamadı ("bulunamadı" DEĞİL; lead yeniden denenebilir kalır). */
+export type ExternalErrorKind =
+  "auth" | "quota" | "rate_limit" | "network" | "bad_response" | "pending";
 
 export class ExternalProviderError extends Error {
   constructor(
@@ -330,8 +332,12 @@ export function createSnovProvider(o: SnovOptions): ExternalEmailProvider {
             hits.push({ email: e.email, confidence: null, sourceUrl: null });
         return hits;
       }
-      // Süre içinde bitmedi: bu alan adı için sonuç yok sayılır (sonraki aramada yeniden denenebilir).
-      return [];
+      // Süre içinde bitmedi: "adres yok" ile karıştırılmasın diye ayrı hata; lead "bulunamadı" diye kapanmaz,
+      // sonraki aramada yeniden denenir (servis bu koşuda kapatılmaz).
+      throw new ExternalProviderError(
+        "pending",
+        "Snov sonucu henüz hazır değil; sonra yeniden denenecek.",
+      );
     },
     async quota() {
       const body = await authed(`${SNOV}/v1/get-balance`, "GET");

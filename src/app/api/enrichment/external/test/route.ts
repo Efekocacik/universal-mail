@@ -15,6 +15,8 @@ const ERROR: Record<ExternalErrorKind, { status: number; code: string }> = {
   rate_limit: { status: 429, code: "EXTERNAL_RATE" },
   network: { status: 502, code: "EXTERNAL_NETWORK" },
   bad_response: { status: 502, code: "UPSTREAM" },
+  // Yalnızca arama yoklamasında oluşur (kota denemesinde değil); yine de eşlenir.
+  pending: { status: 502, code: "EXTERNAL_NETWORK" },
 };
 
 /**

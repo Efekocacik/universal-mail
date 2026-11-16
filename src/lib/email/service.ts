@@ -8,7 +8,8 @@ import { chunk } from "@/lib/util";
 import { domainMatchesSite, isConsumerDomain, normalizeHost, parseEmail } from "./address";
 import { languageForCountry } from "./candidates";
 import { crawlSite, type SiteResult } from "./crawler";
-import { ExternalProviderError, type ExternalEmailProvider } from "./external";
+import { ExternalProviderError, type ExternalEmailProvider, type ExternalHit } from "./external";
+import { SHARED_SITE_DOMAINS } from "./lists";
 import type { FetchFn } from "./safe-fetch";
 import {
   getEnrichmentMap,
@@ -196,6 +197,17 @@ export async function findEmailsForLeads(
   const retryLeads: number[] = [];
   const found = new Set<number>();
   let externalDisabled = false;
+  // Harici servis (ücretli) alan adı başına koşu içinde EN ÇOK BİR kez çağrılır: aynı siteyi paylaşan şubeler/yer kayıtları
+  // aynı sözü bekler (Snov'da her çağrı ayrıca ~9 sn yoklama demektir).
+  const externalCache = new Map<string, Promise<ExternalHit[]>>();
+  const externalSearch = (host: string): Promise<ExternalHit[]> => {
+    let p = externalCache.get(host);
+    if (!p) {
+      p = deps.external!.search(host);
+      externalCache.set(host, p);
+    }
+    return p;
+  };
 
   // 1) Sınıflandır: atla / site yok / Google verisi gerek / taranacak
   type Target = { lead: LeadInfo; url: string };
@@ -263,8 +275,19 @@ export async function findEmailsForLeads(
     const ts = now();
     result.processed++;
     if (site.outcome === "ok") {
+      // Paylaşımlı platform (linktr.ee/kafe, sites.google.com/view/x, kafe.wixsite.com…): alan adı işletmenin DEĞİL
+      // platformun. Harici servise platformun alan adı sorulmaz (platform çalışanlarının adreslerini döndürür), platformun
+      // kendi adresleri (destek@, basın@) kaydedilmez ve RDAP/AI giriş için `siteDomain` yazılmaz (içe aktarma ile aynı kural).
+      const reg = registrableDomain(site.siteHost);
+      const shared = !reg || SHARED_SITE_DOMAINS.has(reg);
+      const platformAddress = (email: string): boolean => {
+        if (!shared || !reg) return false;
+        const d = parseEmail(email)?.domain;
+        return !!d && registrableDomain(d) === reg;
+      };
       const rows: NewEmail[] = [];
       for (const e of site.emails) {
+        if (platformAddress(e.email)) continue;
         const v = await verifyEmail(e.email, deps.resolver, mxCache);
         rows.push({
           email: e.email,
@@ -280,16 +303,17 @@ export async function findEmailsForLeads(
         rows.some(
           (r) => r.verifyStatus !== "invalid" && !isConsumerDomain(parseEmail(r.email)!.domain),
         );
-      if (!usable() && deps.external && !externalDisabled) {
+      let externalPending = false;
+      if (!usable() && deps.external && !externalDisabled && !shared) {
         try {
-          const hits = (await deps.external.search(site.siteHost))
+          const hits = (await externalSearch(site.siteHost))
             .filter((x) => x.confidence === null || x.confidence >= MIN_EXTERNAL_CONFIDENCE)
             .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
             .slice(0, MAX_EXTERNAL_PER_DOMAIN);
           usedExternal = true;
           for (const hit of hits) {
             const p = parseEmail(hit.email);
-            if (!p || rows.some((r) => r.email === p.email)) continue;
+            if (!p || rows.some((r) => r.email === p.email) || platformAddress(p.email)) continue;
             const v = await verifyEmail(p.email, deps.resolver, mxCache);
             let src: string | null = null;
             if (hit.sourceUrl) {
@@ -311,7 +335,11 @@ export async function findEmailsForLeads(
             });
           }
         } catch (e) {
-          if (e instanceof ExternalProviderError && e.kind !== "bad_response") {
+          if (e instanceof ExternalProviderError && e.kind === "pending") {
+            // Sağlayıcı sonucu süre içinde hazırlamadı: "bulunamadı" sayılmaz; lead yeniden denenebilir kalır.
+            externalPending = true;
+            log(`harici servis sonucu henüz hazır değil: ${site.siteHost}`);
+          } else if (e instanceof ExternalProviderError && e.kind !== "bad_response") {
             externalDisabled = e.kind !== "network" ? true : externalDisabled;
             log(`harici servis kullanılamadı (${e.kind}): ${e.message}`);
           } else log(`harici servis hatası: ${(e as Error).message}`);
@@ -319,6 +347,32 @@ export async function findEmailsForLeads(
       }
       await saveEmails(db, t.lead.id, rows, ts);
       await saveContacts(db, t.lead.id, site.contacts, ts);
+      if (externalPending && !usable()) {
+        // Ayrılmış değil (`failed`): sonraki "E-posta bul" yeniden dener; ilk denemeyse 24 saat sonra bir kez otomatik.
+        result.failed++;
+        const retry = prevAttempts === 0;
+        await upsertEnrichment(
+          db,
+          t.lead.id,
+          {
+            status: "failed",
+            attempts: prevAttempts + 1,
+            lastAttemptAt: ts,
+            nextRetryAt: retry ? ts + RETRY_DELAY_MS : null,
+            lastError: "external_pending",
+            pagesFetched: site.pages.length,
+            externalUsed: false,
+            siteDomain: shared ? null : reg,
+          },
+          ts,
+        );
+        await refreshLeadSummary(db, t.lead.id, ts);
+        if (retry) {
+          retryLeads.push(t.lead.id);
+          result.retryScheduled++;
+        }
+        return;
+      }
       await upsertEnrichment(
         db,
         t.lead.id,
@@ -332,7 +386,7 @@ export async function findEmailsForLeads(
           externalUsed: usedExternal,
           completedAt: ts,
           // Faz 4 (Paket B): RDAP alan adı yaşı için KENDİ taramamızın ulaştığı sitenin kayıtlı alan adı.
-          siteDomain: registrableDomain(site.siteHost),
+          siteDomain: shared ? null : reg,
         },
         ts,
       );

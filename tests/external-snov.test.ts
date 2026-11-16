@@ -159,13 +159,13 @@ describe("Snov istemcisi", () => {
     expect(await provider(c.fn).quota()).toEqual({ remaining: null, resetDate: null });
   });
 
-  it("yoklama süresi dolarsa sonuç yok; geçersiz görev kimliği bad_response", async () => {
+  it("yoklama süresi dolarsa boş liste değil 'pending' (bulunamadı sayılmaz); geçersiz görev kimliği bad_response", async () => {
     const pending = snovFake({
       [TOKEN]: tokenOk,
       [START]: started,
       [RESULT("abc123")]: { status: 200, body: { status: "in_progress", data: [] } },
     });
-    expect(await provider(pending.fn).search("kahve.example")).toEqual([]);
+    expect(await kindOf(provider(pending.fn).search("kahve.example"))).toBe("pending");
     expect(pending.calls.filter((c) => c.url.includes("/result/"))).toHaveLength(6);
     clearSnovTokenCache();
     const weird = snovFake({
