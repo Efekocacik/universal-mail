@@ -513,13 +513,19 @@ export async function executeFetch(
 
   // Yeniden denemede `started_at` korunur: bu çalışmanın İLK denemeden beri eklediği kayıtlar "yeni" sayılır.
   const startedAt = run.startedAt ?? clock();
+  const resumed = run.status === "running";
   if (run.status === "queued")
     await db
       .update(registryRuns)
       .set({ status: "running", startedAt })
       .where(eq(registryRuns.id, runId));
-  // Kaynak başına tek etkin çalışma (kısmi tekil indeks) → bu andan sonra ilk kez görülen kayıtlar bu çalışmanındır.
-  const countNew = async () => {
+
+  let fetched = 0;
+  // Yeni kayıt sayısı `upsertCompanies`'in döndürdüğü eklemelerin toplamıdır (sayfa başına tam kaynak taraması yok:
+  // `first_seen_at` dizinsizdir). Yarıda kalmış çalışma sürdürülüyorsa önceki denemelerin eklediği kayıtlar BİR KEZ
+  // sayılır; kaynak başına tek etkin çalışma (kısmi tekil indeks) → bu andan sonra ilk kez görülenler bu çalışmanındır.
+  let created = 0;
+  if (resumed) {
     const [r] = await db
       .select({ n: sql<number>`count(*)` })
       .from(registryCompanies)
@@ -529,11 +535,8 @@ export async function executeFetch(
           sql`${registryCompanies.firstSeenAt} >= ${startedAt}`,
         ),
       );
-    return Number(r?.n ?? 0);
-  };
-
-  let fetched = 0;
-  let created = 0;
+    created = Number(r?.n ?? 0);
+  }
   try {
     const provider = ctx.provider ?? (await providerFor(db, run.source, run.isDemo));
     let cursor: string | null = null;
@@ -551,14 +554,13 @@ export async function executeFetch(
         },
         ctx,
       );
-      await upsertCompanies(db, res.items, {
+      created += await upsertCompanies(db, res.items, {
         source: run.source,
         isDemo: run.isDemo,
         runId,
         now: clock(),
       });
       fetched += res.items.length;
-      created = await countNew();
       await db
         .update(registryRuns)
         .set({ fetchedCount: fetched, newCount: created })
