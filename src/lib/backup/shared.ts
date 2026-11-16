@@ -51,7 +51,18 @@ export interface BackupSummary {
  */
 export type LifecyclePending =
   | { v: 1; kind: "restore"; stageId: string; restoreSecrets: boolean; at: number; nonce: string }
-  | { v: 1; kind: "wipe"; deleteBackups: boolean; at: number; nonce: string };
+  | {
+      v: 1;
+      kind: "wipe";
+      deleteBackups: boolean;
+      at: number;
+      nonce: string;
+      /**
+       * Paket Y eki: özel yedek klasörü (ayar). Veritabanı açılmadan önce uygulandığı için işarette taşınır; yalnızca
+       * `deleteBackups` iken ve yalnızca `universal-mail-*.umbk` dosyaları silinir (klasörün kendisi asla).
+       */
+      customBackupFolder?: string;
+    };
 
 /** Bekleyen işlem dosyasının adı (veri klasöründe). */
 export const LIFECYCLE_PENDING_FILENAME = "lifecycle-pending.json";
