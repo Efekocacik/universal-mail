@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FieldError, FieldHint, Input, Label } from "@/components/ui/input";
+import { HelpTip } from "@/components/ui/tooltip";
 import { normalizePassphrase, PASSPHRASE_MIN, passphraseStrength } from "@/lib/backup/passphrase";
 import { api, errorText } from "@/lib/client/api";
 import { useUnsavedChanges } from "@/lib/client/locale-switch";
@@ -58,6 +59,7 @@ export function PassphraseCard({ isSet }: { isSet: boolean }) {
           <h3 className="flex items-center gap-1.5 text-[13px] font-medium">
             <KeyRound className="size-4 text-muted-foreground" aria-hidden />
             {t("backup.pass.title")}
+            <HelpTip>{t("backup.pass.help")}</HelpTip>
           </h3>
           <p className="text-[12px] text-muted-foreground">{t("backup.pass.desc")}</p>
         </div>

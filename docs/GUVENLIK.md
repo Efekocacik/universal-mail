@@ -1,6 +1,6 @@
 # Güvenlik ve Gizlilik
 
-**Durum (16 Kasım 2026, Faz 6 paket G).** Bu belge uygulamanın güvenlik önlemlerini, dışarıya hangi adreslere ne zaman bağlandığını ve bunların nasıl yeniden doğrulanacağını anlatır. Yalnızca kodla ve testle kanıtlanan şeyler "yapıldı" diye yazılır; kanıtın adı her bölümde verilir. Bir çelişki görürseniz **kod belirleyicidir**. Kullanıcıya yönelik kısa özet **Ayarlar → Güvenlik ve gizlilik** kartıdır (`src/features/settings/privacy-card.tsx`, TR+EN, gezinme etiketi `settings.nav.security` hazır). **[ENTEGRASYON BEKLİYOR: PrivacyCard]** Kart henüz Ayarlar sayfasına takılı değildir (`settings-page.tsx` P0'a aittir); takılana kadar arayüzden açılamaz ve `e2e/privacy.spec.ts`'teki kart testi `fixme`'dir. Takıldığında bu işaret ve `fixme` kaldırılır; `tests/privacy-card.test.ts` üçünün birlikte değişmesini zorunlu tutar.
+**Durum (16 Kasım 2026, Faz 6 paket G; entegrasyon feat/faz-6).** Bu belge uygulamanın güvenlik önlemlerini, dışarıya hangi adreslere ne zaman bağlandığını ve bunların nasıl yeniden doğrulanacağını anlatır. Yalnızca kodla ve testle kanıtlanan şeyler "yapıldı" diye yazılır; kanıtın adı her bölümde verilir. Bir çelişki görürseniz **kod belirleyicidir**. Kullanıcıya yönelik kısa özet **Ayarlar → Güvenlik ve gizlilik** kartıdır (`src/features/settings/privacy-card.tsx`, TR+EN). Kart Ayarlar sayfasında `#security` bölümündedir (gezinme etiketi `settings.nav.security`); `e2e/privacy.spec.ts` kartı arayüzden açıp her hizmet satırını denetler, `tests/privacy-card.test.ts` kartın takılı kaldığını zorunlu tutar.
 
 ## 1. Kısa tehdit modeli
 
@@ -38,8 +38,7 @@ Kapsam dışı: bilgisayarın kendisinin ele geçirilmesi (yönetici hakkıyla �
 
 `electron/hardening.ts` (birim testi: `tests/electron-hardening.test.ts`, sahte WebContents/Session ile):
 
-- **Pencere (bugün etkin):** `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true` (main.ts; statik test).
-- **[ENTEGRASYON BEKLİYOR: secureWebPreferences]** `secureWebPreferences(isPackaged)` ayrıca `spellcheck: false`, `navigateOnDragDrop: false`, `webviewTag: false`, `nodeIntegrationInSubFrames/InWorker: false`, `allowRunningInsecureContent: false`, `safeDialogs: true`, paketli uygulamada `devTools: false` verir; ancak **henüz main.ts'e bağlı değildir** ve `app.enableSandbox()` de çağrılmıyor. Bu ayarlar bugün yalnızca aşağıdaki oturum/olay düzeyi korumalarla (yazım denetimi kapalı, `will-attach-webview`, `will-navigate`, geliştirici araçlarının kapatılması) karşılanır. Bağlantı (P0): `webPreferences: { preload, ...secureWebPreferences(app.isPackaged) }` ve `app.whenReady()`'den önce `app.enableSandbox()`. `tests/electron-hardening.test.ts` bağlantı yapılana kadar bu işareti zorunlu tutar; bağlandığında işaret kaldırılmalıdır.
+- **Pencere:** `webPreferences: { preload, ...secureWebPreferences(app.isPackaged) }` (main.ts `createWindow`): `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false` (alt çerçeve ve işçilerde de), `webSecurity: true`, `allowRunningInsecureContent: false`, `webviewTag: false`, `spellcheck: false`, `navigateOnDragDrop: false`, `safeDialogs: true`, paketli uygulamada `devTools: false`. Ayrıca `app.whenReady()`'den önce `app.enableSandbox()` çağrılır (tüm görüntüleyiciler kum havuzunda). Aynı korumalar aşağıda oturum/olay düzeyinde de uygulanır (çifte güvence). Kanıt: `tests/electron-hardening.test.ts` (main.ts statik denetimi + yardımcının birim testi).
 - **Yeni pencere** hiçbir zaman açılmaz: dış `http(s)` bağlantısı (kimlik bilgisi içermeyen) varsayılan tarayıcıda açılır; `file:`, `javascript:`, `data:`, özel şemalar (`smb:`, `ms-settings:`…) düşürülür.
 - **Gezinme** (`will-navigate`) ve **yönlendirme** (`will-redirect`) yalnızca uygulamanın yerel kökenine; pencereye sürüklenen dosya (`file:`) da engellenir. Günlüğe yalnızca şema ve ana bilgisayar yazılır (yol/sorgu/kişisel veri yazılmaz).
 - `<webview>` eklenemez (`will-attach-webview`).
@@ -195,7 +194,5 @@ Ad sıralaması önbellek veritabanındaki (`gcache.place_cache`) adı da kullan
 |---|---|---|
 | Anahtarlı Keşfet haritasını paketli uygulamada CSP altında doğrulamak | Testler gerçek Google'a bağlanmaz; CSP Google'ın izin listesiyle hizalandı ama gerçek yükleme görülmedi | Kullanıcı: kendi Maps tarayıcı anahtarı ve Map ID'siyle paketli uygulamada Keşfet → harita; geliştirici araçlarında (paketlenmemiş çalıştırma) konsolda `Refused to` olmamalı |
 | Paketli uygulamada ağ izleme (temiz makine) | Gizlilik e2e'si Electron ana sürecini ve Chromium arka plan hizmetlerini çalıştırmaz | Temiz makinede demo kipinde aç; Little Snitch (macOS) / Kaynak İzleyicisi → Ağ (Windows) ile dışarı bağlantı olmadığını gör |
-| `secureWebPreferences` + `app.enableSandbox()` bağlantısı | main.ts P0'a ait | P0 entegrasyonu (Bölüm 4) |
-| Güvenlik ve gizlilik kartını Ayarlar'a takmak | settings-page.tsx P0'a ait | P0 entegrasyonu (belgenin başı) |
 | `tests/perf-100k.test.ts` CI ölçümü | Dal henüz itilmedi | İlk CI koşusunda `[perf]` satırlarını Bölüm 8'e işle |
 

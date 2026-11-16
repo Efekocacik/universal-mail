@@ -17,9 +17,11 @@ export { WIPE_PHRASES, wipePhraseMatches } from "./wipe-phrase";
 export const BACKUP_FILE_RE = /^universal-mail-.+\.umbk(\.part)?$/;
 /**
  * Düz (şifresiz) veritabanı kopyaları: şema geçişi ve geri yükleme öncesi kopyalar ile paket K'nin şema geçişi
- * kurtarmasının kenara aldığı başarısız veritabanı (`failed-migrate-*`).
+ * kurtarmasının kenara aldığı başarısız veritabanı (`failed-migrate-*`). Paket K kopyayı önce `.tmp` adına yazar
+ * (atomik); süreç tam o anda kapandıysa kalan yarım `.tmp` dosyası da kişisel veri taşır ve silinir.
  */
-export const PLAIN_COPY_RE = /^(pre-(migrate|restore)|failed-migrate)-.+\.db(-wal|-shm|-journal)?$/;
+export const PLAIN_COPY_RE =
+  /^(pre-(migrate|restore)|failed-migrate)-.+\.db(-wal|-shm|-journal)?(\.tmp)?$/;
 
 export interface WipeReport {
   removed: number;
@@ -84,6 +86,8 @@ export function wipeDataDir(o: WipeDataOptions): WipeReport {
     "worker-status.json",
     "migrate-result.json",
     "migrate.lock",
+    // Paket K: doğrulama bekleyen geçiş işareti (src/lib/db/migrate.ts VERIFY_PENDING_FILENAME).
+    "migrate-verify.pending",
     "maintenance.lock",
     "master.key",
     "secrets.json",

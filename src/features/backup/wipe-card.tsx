@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { FieldError, Input, Label } from "@/components/ui/input";
+import { HelpTip } from "@/components/ui/tooltip";
 import { api, errorText } from "@/lib/client/api";
 import { t } from "@/lib/i18n";
 import { wipePhraseMatches } from "@/lib/lifecycle/wipe-phrase";
@@ -58,6 +59,7 @@ export function WipeCard({ blocked }: { blocked: boolean }) {
       <h3 className="flex items-center gap-1.5 text-[13px] font-medium text-destructive">
         <AlertTriangle className="size-4" aria-hidden />
         {t("backup.wipe.title")}
+        <HelpTip>{t("backup.wipe.help")}</HelpTip>
       </h3>
       <p className="text-[12px] text-muted-foreground">{t("backup.wipe.desc")}</p>
       <Button size="sm" variant="dangerOutline" disabled={blocked} onClick={openDialog}>

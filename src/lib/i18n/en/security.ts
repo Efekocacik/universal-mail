@@ -52,4 +52,6 @@ export const security = {
   "security.service.relay": "Unsubscribe relay",
   "security.when.relay":
     "If you entered the address of a relay you set up, to collect unsubscribe requests.",
+  "security.help":
+    "This table shows where and when the app may connect on the internet. It never connects to an address that is not listed, and a service you do not use (no key entered) is never contacted.",
 } as const satisfies EnFragment<typeof TrSecurity>;

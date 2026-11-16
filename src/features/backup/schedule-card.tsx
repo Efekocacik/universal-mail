@@ -6,6 +6,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { FieldError, FieldHint, Input, Label } from "@/components/ui/input";
+import { HelpTip } from "@/components/ui/tooltip";
 import { SaveBar, ToggleRow } from "@/features/settings/shared";
 import type { BackupSchedule } from "@/lib/backup/service";
 import { api, errorText } from "@/lib/client/api";
@@ -62,6 +63,7 @@ export function ScheduleCard({ data }: { data: BackupOverview }) {
         <h3 className="flex items-center gap-1.5 text-[13px] font-medium">
           <CalendarClock className="size-4 text-muted-foreground" aria-hidden />
           {t("backup.auto.title")}
+          <HelpTip>{t("backup.auto.help")}</HelpTip>
         </h3>
         <p className="text-[12px] text-muted-foreground">{t("backup.auto.desc")}</p>
       </div>

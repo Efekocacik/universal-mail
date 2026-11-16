@@ -54,4 +54,7 @@ export const security = {
   "security.service.relay": "Abonelikten çıkma aktarıcısı",
   "security.when.relay":
     "Kendi kurduğunuz aktarıcının adresini girdiyseniz, abonelikten çıkma isteklerini almak için.",
+  /* Faz 6 entegrasyonu: Ayarlar'daki "Bu nedir?" balonu. */
+  "security.help":
+    "Bu tablo uygulamanın internette nereye, ne zaman bağlanabileceğini gösterir. Listede olmayan bir adrese bağlanılmaz; bir hizmeti kullanmıyorsanız (anahtarını girmediyseniz) ona hiç bağlanılmaz.",
 } as const;

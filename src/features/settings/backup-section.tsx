@@ -14,13 +14,13 @@ import { t } from "@/lib/i18n";
 
 /**
  * Faz 6 (paket Y.8): Ayarlar → "Yedekler" bölümü. `settings-page.tsx` bu bileşeni `#backup` bağlantısının altında
- * gösterir (o dosya dondurulmuştur). Sıra: bekleyen işlem / son sonuç bandı → yedek parolası → otomatik yedek ve klasör
+ * gösterir; bölüm ve kartlarda "Bu nedir?" balonları vardır. Sıra: bekleyen işlem / son sonuç bandı → yedek parolası → otomatik yedek ve klasör
  * → yedek listesi ve geri yükleme → saklama süresi → tüm verilerimi sil.
  */
 export function BackupSection() {
   const q = useBackups();
   return (
-    <Section title={t("backup.title")} description={t("backup.desc")}>
+    <Section title={t("backup.title")} description={t("backup.desc")} help="backup.help">
       {q.isLoading ? (
         <Skeleton className="h-64" />
       ) : !q.data ? (

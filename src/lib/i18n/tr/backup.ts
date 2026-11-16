@@ -211,4 +211,15 @@ export const backup = {
     "Yeniden başlatmayı bekleyen bir işlem var. Önce uygulamayı yeniden başlatın veya o işlemi iptal edin.",
   "apiError.RETENTION_PREVIEW_STALE":
     "Silinecek kayıt sayısı siz bakarken arttı. Güncel sayıya bakıp yeniden onaylayın.",
+  /* Faz 6 entegrasyonu: "Bu nedir?" balonları (Ayarlar → Yedekler). */
+  "backup.help":
+    "Yedek, verilerinizin (işletme listesi, kampanyalar, ayarlar) şifreli bir kopyasıdır. Bilgisayar bozulursa ya da yanlışlıkla bir şey silinirse bu kopyadan geri dönebilirsiniz. Yedekleri harici bir diskte veya bulut klasöründe tutmak en güvenlisidir.",
+  "backup.pass.help":
+    "Yedek dosyası bu parola olmadan açılamaz; dosya başkasının eline geçse bile verileriniz okunamaz. Parola hiçbir yere gönderilmez ve sıfırlanamaz.",
+  "backup.auto.help":
+    "Otomatik yedek için yedek parolası gerekir. Otomatik yedeklerin en yenileri saklanır, daha eskileri sırayla silinir; elle aldığınız yedekler hiç silinmez.",
+  "backup.ret.help":
+    "Kişisel verileri gereğinden uzun tutmamak yasal bir yükümlülüktür (KVKK, GDPR). Bu ayar, hiç iletişim kurmadığınız eski kayıtları seçtiğiniz süreden sonra siler.",
+  "backup.wipe.help":
+    "Bilgisayarı başkasına vermeden veya uygulamayı bırakmadan önce kullanın. Silme hemen değil, uygulama yeniden başlarken yapılır; o zamana kadar iptal edebilirsiniz.",
 } as const;

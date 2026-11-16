@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FieldHint, Label, Select } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/misc";
+import { HelpTip } from "@/components/ui/tooltip";
 import { ToggleRow } from "@/features/settings/shared";
 import { api, ApiError, errorText } from "@/lib/client/api";
 import { fmtDate, fmtDateTime, fmtNumber } from "@/lib/client/format";
@@ -68,6 +69,7 @@ export function RetentionCard() {
         <h3 className="flex items-center gap-1.5 text-[13px] font-medium">
           <Hourglass className="size-4 text-muted-foreground" aria-hidden />
           {t("backup.ret.title")}
+          <HelpTip>{t("backup.ret.help")}</HelpTip>
         </h3>
         <p className="text-[12px] text-muted-foreground">{t("backup.ret.desc")}</p>
       </div>

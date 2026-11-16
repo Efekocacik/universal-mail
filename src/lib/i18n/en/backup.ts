@@ -210,4 +210,14 @@ export const backup = {
     "An action is waiting for a restart. Restart the app first or cancel that action.",
   "apiError.RETENTION_PREVIEW_STALE":
     "The number of records to delete went up while you were looking. Check the new number and confirm again.",
+  "backup.help":
+    "A backup is an encrypted copy of your data (business list, campaigns, settings). If the computer breaks or something is deleted by mistake, you can go back to this copy. Keeping backups on an external drive or in a cloud folder is safest.",
+  "backup.pass.help":
+    "The backup file cannot be opened without this password, so your data stays unreadable even if someone else gets the file. The password is never sent anywhere and cannot be reset.",
+  "backup.auto.help":
+    "Automatic backups need a backup password. The newest automatic backups are kept and older ones are removed in turn; backups you take yourself are never removed.",
+  "backup.ret.help":
+    "Not keeping personal data longer than needed is a legal duty (GDPR, KVKK). This setting deletes old records you never contacted once the period you choose has passed.",
+  "backup.wipe.help":
+    "Use this before giving the computer to someone else or when you stop using the app. Nothing is deleted right away: it happens when the app restarts, and you can cancel until then.",
 } as const satisfies EnFragment<typeof TrBackup>;

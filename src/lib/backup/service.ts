@@ -8,6 +8,7 @@ import { APP_VERSION } from "@/lib/app/version";
 import { backupsDir, dataDir, dbPath, migrationsDir, toLibsqlUrl } from "@/lib/config/paths";
 import { audit } from "@/lib/db/audit";
 import type { Db, DbExecutor } from "@/lib/db/client";
+import { PRE_MIGRATE_RE } from "@/lib/db/migrate";
 import { backups, type BackupKind } from "@/lib/db/schema";
 import { WORK_DIR } from "@/lib/lifecycle/pending";
 import { BACKUP_PASSPHRASE_SECRET, getSecret, setSecret } from "@/lib/secrets/store";
@@ -516,12 +517,13 @@ export async function setBackupPassphrase(
   await audit(db, "backup.passphrase.set", "settings", "backup");
 }
 
-/** Veri klasöründeki düz şema geçişi öncesi kopyalar (`pre-migrate-*.db`). */
+/**
+ * Veri klasöründeki düz şema geçişi öncesi kopyalar (`pre-migrate-*.db`). Desen paket K'nin geçiş betiğiyle aynıdır
+ * (`PRE_MIGRATE_RE`): yalnızca tamamlanmış kopyalar sayılır, yarım `.tmp` dosyaları sayılmaz.
+ */
 export function preMigrateCount(): number {
   try {
-    return fs
-      .readdirSync(backupsDir())
-      .filter((f) => f.startsWith("pre-migrate-") && f.endsWith(".db")).length;
+    return fs.readdirSync(backupsDir()).filter((f) => PRE_MIGRATE_RE.test(f)).length;
   } catch {
     return 0;
   }

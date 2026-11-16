@@ -21,8 +21,8 @@ const ROOT = path.resolve(__dirname, "..");
 const APP = path.join(ROOT, "src", "app");
 const MUTATING = ["POST", "PUT", "PATCH", "DELETE"] as const;
 const METHODS = ["GET", "HEAD", "OPTIONS", ...MUTATING] as const;
-/** `route()` ailesi: hepsi sonunda `route()`'u çağırır (bkz. domain-route.ts, imports/http.ts). */
-const WRAPPERS = ["route", "domainRoute", "importRoute"];
+/** `route()` ailesi: hepsi sonunda `route()`'u çağırır (bkz. domain-route.ts, imports/http.ts, backups/http.ts). */
+const WRAPPERS = ["route", "domainRoute", "importRoute", "lifecycleRoute"];
 /**
  * Bilinçli olarak sarılmayan işleyiciler (gerekçeli). Yeni bir istisna buraya gerekçesiyle eklenmelidir.
  */
@@ -196,6 +196,22 @@ describe("işleyici yapısı (statik)", () => {
       const r = ROUTES.find((x) => x.rel === rel);
       expect(r, key).toBeDefined();
       expect(r!.exports.find((e) => e.method === method)?.wrapper ?? null, key).toBeNull();
+    }
+  });
+
+  it("route() dışındaki sarmalayıcılar gerçekten route()'a devreder", () => {
+    // Faz 6 entegrasyonu: yeni bir sarmalayıcı listeye eklenince tanımının route()'u çağırdığı da denetlenir.
+    const DEFINED_IN: Record<string, string> = {
+      domainRoute: "src/lib/api/domain-route.ts",
+      importRoute: "src/app/api/imports/http.ts",
+      lifecycleRoute: "src/app/api/backups/http.ts",
+    };
+    expect(Object.keys(DEFINED_IN).sort()).toEqual(WRAPPERS.filter((w) => w !== "route").sort());
+    for (const [name, file] of Object.entries(DEFINED_IN)) {
+      const src = fs.readFileSync(path.join(ROOT, file), "utf8");
+      const start = src.indexOf(`export function ${name}`);
+      expect(start, name).toBeGreaterThanOrEqual(0);
+      expect(src.slice(start, start + 600), name).toMatch(/return route(<[^>]*>)?\(/);
     }
   });
 

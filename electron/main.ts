@@ -24,7 +24,7 @@ import { wipeSessionCacheFiles } from "../src/lib/config/session-cache";
 import { t, type TrKey } from "../src/lib/i18n";
 import { MIGRATE_RESULT_FILENAME, readMigrateResult } from "../src/lib/db/migrate-result";
 import { childEnv } from "./child-env";
-import { hardenSession, hardenWebContents } from "./hardening";
+import { hardenSession, hardenWebContents, secureWebPreferences } from "./hardening";
 import { applyPendingLifecycleInMain, registerLifecycleIpc } from "./lifecycle";
 import { rotateIfLarge } from "./logs";
 import {
@@ -453,12 +453,11 @@ function createWindow(url: string): BrowserWindow {
     show: !SMOKE,
     title: "Universal Mail",
     backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
+    // Bağlam yalıtımı, kum havuzu, düğüm entegrasyonu kapalı, yazım denetimi/webview kapalı, paketli uygulamada
+    // geliştirici araçları kapalı (Faz 6, electron/hardening.ts; docs/GUVENLIK.md §4).
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webSecurity: true,
+      ...secureWebPreferences(app.isPackaged),
     },
   });
   // Yeni pencere/gezinme kuralları her WebContents için `web-contents-created` içinde uygulanır (electron/hardening.ts).
@@ -746,6 +745,9 @@ async function shutdown(): Promise<void> {
   }
 }
 
+// Tüm görüntüleyiciler işletim sistemi kum havuzunda çalışır; pencere oluşturulmadan (hazır olmadan) önce çağrılmalıdır.
+app.enableSandbox();
+
 if (!app.requestSingleInstanceLock() && !SMOKE) {
   app.quit();
 } else {
@@ -827,6 +829,17 @@ if (!app.requestSingleInstanceLock() && !SMOKE) {
           userDataDir: app.getPath("userData"),
           dataDir: dataDir(),
           log: (m) => log("main", m),
+          // Silme uygulandıysa: tercihler varsayılana döner, oturum öğesi kaldırılır, Chromium profil depolaması
+          // (yerel depolama, önbellek; ör. kampanya taslakları) temizlenir. Günlük klasörü de silindiği için yeniden açılır.
+          afterWipe: async () => {
+            fs.mkdirSync(logDir, { recursive: true });
+            prefs = parseStoredPrefs(null);
+            nativeTheme.themeSource = prefs.theme;
+            buildMenu();
+            if (loginItemAvailable()) app.setLoginItemSettings({ openAtLogin: false });
+            await session.defaultSession.clearStorageData();
+            await session.defaultSession.clearCache();
+          },
         });
       origin = new URL(await startBackend()).origin;
     } catch (e) {

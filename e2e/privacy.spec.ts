@@ -185,12 +185,17 @@ test("ayarlar: her bölüm açılır", async () => {
   await page.waitForLoadState("networkidle");
 });
 
-// Entegrasyon: `PrivacyCard` (src/features/settings/privacy-card.tsx) Ayarlar sayfasına takılınca `fixme` kaldırılır
-// (settings-page.tsx P0'a ait olduğu için paket G kartı yerleştiremez; kart içeriği tests/privacy-card.test.ts'te sınanır).
-test.fixme("ayarlar: Güvenlik ve gizlilik kartı her hizmeti ve ne zaman bağlandığını gösterir", async () => {
+// `PrivacyCard` (src/features/settings/privacy-card.tsx) Ayarlar'da `#security` bölümüdür; gezinmedeki bağlantıdan açılır.
+test("ayarlar: Güvenlik ve gizlilik kartı her hizmeti ve ne zaman bağlandığını gösterir", async () => {
   await page.goto("/settings");
+  await page
+    .getByRole("navigation", { name: "Ayar bölümleri" })
+    .locator("a:visible", { hasText: "Güvenlik ve gizlilik" })
+    .first()
+    .click();
+  await expect(page).toHaveURL(/#security$/);
   const card = page.getByTestId("privacy-card");
-  await card.scrollIntoViewIfNeeded();
+  await expect(card).toBeInViewport();
   await expect(card.getByRole("heading", { name: "Güvenlik ve gizlilik" })).toBeVisible();
   await expect(card.getByText("Demo modunda uygulama internete hiç bağlanmaz.")).toBeVisible();
   await expect(card.locator("tr[data-service]")).toHaveCount(12);
