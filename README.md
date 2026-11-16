@@ -5,6 +5,14 @@ Müşteri şirketin **yurt dışı dağıtım ağını büyütmek** için, Avrup
 Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak mendil, peçete ve benzeri sarf malzemeleri.
 
 ## Belgeler
+
+**Kullanıcı için (müşteri şirket):**
+- [Kurulum Rehberi](docs/KURULUM.md) — macOS ve Windows'a temiz kurulum, imzasız uygulama uyarısını geçme, güncelleme (eskisinin üzerine kurulur, veriler korunur), kaldırma, 30 dakikalık kurulum listesi
+- [Kullanım Kılavuzu](docs/KULLANIM.md) — ekran görüntüleriyle günlük iş akışı (tarama → liste → e-posta bulma → şablon → kampanya → yanıtlar), ayarlar, yedek ve geri yükleme, veri silme, yasal hatırlatmalar, sorun giderme
+- [Teslim Listesi](docs/TESLIM.md) — teslim paketi, kurulum günü adımları (ilk tarama ve ilk test e-postası), kısa eğitim akışı, kaynak kod ve bakım dönemi kayıtları, imza listesi
+- [Uyum Kuralları](docs/UYUM.md) — uygulamanın uyguladığı gönderim kurallarının sade özeti
+
+**Proje ve geliştirme:**
 - [Yazılım Gereksinim Spesifikasyonu (SRS)](docs/01-SRS.md) — ne yapılacak, hangi API'ler, veri modeli, yasal kurallar, kabul kriterleri
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
 - [Faz 0 Kılavuzu](docs/04-FAZ0-KILAVUZU.md) — alan adı, Workspace, Google Cloud, kota, anahtarlar ve Gmail bağlantısı için adım adım hesap kurulumu
@@ -19,7 +27,7 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Çıkış aktarıcısı: VPS kurulumu (isteğe bağlı)](deploy/relay/README.md) — aynı aktarıcının Linux sunucusuna (systemd + Caddy) kurulumu
 
 ## Kurulum modeli
-Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
+Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`); adımlar: [Kurulum Rehberi](docs/KURULUM.md). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
 
 ## Özet kararlar
 | Konu | Karar |
@@ -49,6 +57,7 @@ npm run dev:demo   # aynısı, ayrı veri klasörü (.data-demo) + demo kampanya
 npm test           # birim ve entegrasyon testleri
 npm run build && npx playwright test   # uçtan uca testler
 npm run dist       # macOS/Windows kurulum paketi (bulutta: GitHub Actions)
+npm run docs:shots # docs/img/kullanim/ kılavuz ekran görüntüleri (önce npm run build; demo, geçici veri klasörü)
 npm run build:worker # dist/cloudflare-worker/worker.js — Cloudflare Worker çıkış aktarıcısı (bkz. deploy/cloudflare-worker/README.md)
 npm run build:relay  # dist/relay/relay.cjs — VPS çıkış aktarıcısı (bkz. deploy/relay/README.md)
 ```

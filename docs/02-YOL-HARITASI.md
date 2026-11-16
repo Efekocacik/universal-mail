@@ -167,7 +167,7 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 - [ ] Şifreli yedekleme/geri yükleme; otomatik haftalık yedek.
 - [ ] Güncelleme akışı: yeni kurulum dosyası mevcut kurulumun üstüne kurulur, veri korunur; göç testleri.
 - [ ] Veri saklama süresi (12 ay) ve "veriyi sil" akışı.
-- [ ] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü.
+- [x] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü; kurulum (`docs/KURULUM.md`) ve teslim listesi (`docs/TESLIM.md`).
 - [ ] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
 - [ ] Performans testi: 100k lead ile filtreleme < 300 ms.
 - [ ] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca kullanıcı tarafından etkinleştirilen Google, işletme siteleri, sicil API'leri, posta ve gerekli çıkış hizmetlerine bağlantılar doğrulanır (geliştiriciye giden trafik yok).
