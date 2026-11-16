@@ -142,6 +142,37 @@ const trackingOpensSchema = z
     path: ["ackAt"],
   });
 
+type TrackingOpensSetting = z.infer<typeof trackingOpensSchema>;
+
+/**
+ * Ayarlar API'sinin `tracking.opens` GİRDİSİ: `ackAt` isteğe bağlıdır ve yalnızca bir işarettir (saklanan değer
+ * `stampTrackingOpensAck` ile sunucuda damgalanır). Açıkça `ackAt: null` ile açmak ("onay yok") yine reddedilir.
+ */
+export const trackingOpensInputSchema = z
+  .object({
+    enabled: z.boolean(),
+    ackAt: z.number().int().nullable().optional(),
+  })
+  .refine((v) => !v.enabled || v.ackAt !== null, {
+    message: "Açılma izleme notu onaylanmadan açılamaz.",
+    path: ["ackAt"],
+  });
+
+/**
+ * Açılma izleme onay anını SUNUCUDA damgalar (`stampAiIntroAck` ile aynı ilke; hukuki onay kaydı istemci saatine veya
+ * API çağıranın gönderdiği değere bağlı olmasın): kapalıdan açığa geçişte `ackAt` sunucu saatidir; zaten açıkken
+ * yeniden açmak saklanan onayı korur; kapatmak önceki onay anını denetim için saklar. İstemcinin `ackAt` değeri yok sayılır.
+ */
+export function stampTrackingOpensAck(
+  prev: TrackingOpensSetting,
+  next: { enabled: boolean },
+  now: number,
+): TrackingOpensSetting {
+  if (!next.enabled) return { enabled: false, ackAt: prev.ackAt };
+  if (prev.enabled && prev.ackAt !== null) return { enabled: true, ackAt: prev.ackAt };
+  return { enabled: true, ackAt: now };
+}
+
 export const settingSchemas = {
   "setup.completed": z.boolean(),
   consent: consentSchema.nullable(),

@@ -11,8 +11,8 @@ import { t } from "@/lib/i18n";
 
 /**
  * Ayarlar → Açılma izleme (Faz 5, ayar `tracking.opens`). Varsayılan KAPALI.
- *  - Açmak her zaman onay penceresinden geçer ("açılma verisi kesin değildir"); onay anı `ackAt` olarak kaydedilir
- *    (sunucu şeması onaysız açmayı 400 `VALIDATION` ile reddeder).
+ *  - Açmak her zaman onay penceresinden geçer ("açılma verisi kesin değildir"); onay anı `ackAt` olarak SUNUCU saatiyle
+ *    kaydedilir (`stampTrackingOpensAck`; açıkça `ackAt: null` ile açmak 400 `VALIDATION`).
  *  - Kapatmak onaysızdır ve hemen kaydedilir; önceki onay anı saklanır (denetim için).
  *  - Hukuki not ve "yalnızca demo" notu her zaman görünür: canlı iletilere piksel eklenmez.
  */
@@ -40,7 +40,7 @@ export function OpenTrackingCard() {
             disabled={save.isPending || settings.isError}
             onChange={(on) => {
               if (on) setConfirm(true);
-              else save.mutate({ "tracking.opens": { enabled: false, ackAt: value.ackAt } });
+              else save.mutate({ "tracking.opens": { enabled: false } });
             }}
           />
           <p
@@ -66,7 +66,8 @@ export function OpenTrackingCard() {
         confirmLabel={t("tracking.confirm.ok")}
         pending={save.isPending}
         onConfirm={async () => {
-          await save.mutateAsync({ "tracking.opens": { enabled: true, ackAt: Date.now() } });
+          // Onay anı sunucuda damgalanır (istemci saati kullanılmaz).
+          await save.mutateAsync({ "tracking.opens": { enabled: true } });
         }}
       />
     </Section>

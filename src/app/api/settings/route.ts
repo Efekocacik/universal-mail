@@ -14,6 +14,8 @@ import {
   setSetting,
   settingSchemas,
   stampAiIntroAck,
+  stampTrackingOpensAck,
+  trackingOpensInputSchema,
   USER_SETTING_KEYS,
   type UserSettingKey,
 } from "@/lib/settings";
@@ -60,6 +62,8 @@ const patchSchema = z
     ...patchShape,
     "targets.countries": z.array(z.string().length(2)).max(60).optional(),
     "maps.mapId": z.string().max(200).optional(),
+    // Onay anı sunucuda damgalanır; istemci yalnızca `{ enabled }` gönderebilir.
+    "tracking.opens": trackingOpensInputSchema.optional(),
   })
   .strict();
 
@@ -113,6 +117,11 @@ export const PUT = route(async (req: Request) => {
     const aiIntroStamped = aiIntro
       ? stampAiIntroAck(await getSetting(tx, "ai.intro"), aiIntro, Date.now())
       : undefined;
+    // Açılma izleme onayı da sunucu saatiyle damgalanır (kapalı → açık geçişi); istemcinin `ackAt` değeri yok sayılır.
+    const opens = patch["tracking.opens"];
+    const opensStamped = opens
+      ? stampTrackingOpensAck(await getSetting(tx, "tracking.opens"), opens, Date.now())
+      : undefined;
     for (const [key, value] of entries) {
       const normalized =
         key === "targets.countries"
@@ -121,7 +130,9 @@ export const PUT = route(async (req: Request) => {
             ? normalizeMapId(value as string)
             : key === "ai.intro"
               ? aiIntroStamped
-              : value;
+              : key === "tracking.opens"
+                ? opensStamped
+                : value;
       await setSetting(tx, key as UserSettingKey, normalized as never);
     }
     await audit(tx, "settings.updated", "settings", undefined, {
