@@ -19,7 +19,9 @@ import { writeResult } from "@/lib/lifecycle/pending";
 import { tr } from "@/lib/i18n/tr";
 import { en } from "@/lib/i18n/en";
 import { LIFECYCLE_ERROR_CODES } from "@/lib/backup/errors";
+import { UPLOAD_MAX_BYTES } from "@/lib/backup/restore";
 import { backupEnv, insertLead, TEST_PASS, type BackupEnv } from "./helpers/backup-env";
+import { streamedRequest } from "./helpers/stream-response";
 
 /** Rota işleyicileri bağlamsız da çağrılabilsin (bağlam kullanmayan uçlar). */
 type LooseHandler = (req?: Request, ctx?: unknown) => Promise<Response>;
@@ -283,7 +285,9 @@ describe("geri yükleme uçları", () => {
         req("POST", "/api/backups/restore", { stageId, confirm: true, restoreSecrets: true }),
       ),
     );
-    expect(r).toEqual({ status: 202, body: { restartRequired: true } });
+    // Parola ayarlı: şu anki veriler önce şifreli "Elle" yedek olarak alınır (geri dönüş yolu).
+    expect(r).toEqual({ status: 202, body: { restartRequired: true, safetyBackup: true } });
+    expect(((await read(await listRoute.GET())).body.backups as unknown[]).length).toBe(2);
     r = await read(
       await restoreRoute.POST(
         req("POST", "/api/backups/restore", { stageId, confirm: true, restoreSecrets: true }),
@@ -356,6 +360,16 @@ describe("geri yükleme uçları", () => {
     });
     r = await read(await verifyRoute.POST(cut));
     expect(r).toMatchObject({ status: 413, body: { code: "BACKUP_TOO_LARGE" } });
+    // Boyut bildirmeyen akışlı gövde sınırı (9 MiB + çok parçalı ek yük) aşınca okuma kesilir: 413.
+    const stream = streamedRequest(
+      `${ORIGIN}/api/backups/restore/verify`,
+      { method: "POST", headers: { "content-type": "multipart/form-data; boundary=x" } },
+      new Uint8Array(UPLOAD_MAX_BYTES + 256 * 1024),
+    );
+    r = await read(await verifyRoute.POST(stream));
+    expect(r).toMatchObject({ status: 413, body: { code: "BACKUP_TOO_LARGE" } });
+    // Sınır, Next ara katmanının gövde kopyalama sınırının (10 MiB) altında kalır.
+    expect(UPLOAD_MAX_BYTES + 64 * 1024).toBeLessThan(10 * 1024 * 1024);
   });
 });
 

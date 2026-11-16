@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { LifecyclePending } from "@/lib/backup/shared";
 import { api, errorText } from "@/lib/client/api";
+import { fmtNumber } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import type { LifecycleResult } from "@/lib/lifecycle/pending";
 import { desktop, useRefreshBackups } from "./data";
@@ -97,19 +98,41 @@ export function ResultBanner({ result }: { result: LifecycleResult }) {
       : result.ok
         ? t("backup.result.wipe.ok")
         : t("backup.result.wipe.partial");
-  const Icon = result.ok ? CheckCircle2 : CircleAlert;
+  // Geri yüklemeden sonra yapılan güvenlik adımları (yalnızca olanlar gösterilir).
+  const notes: string[] = [];
+  if (result.kind === "restore" && result.ok) {
+    if (result.campaignsPaused)
+      notes.push(t("backup.result.restore.paused", { n: fmtNumber(result.campaignsPaused) }));
+    if (result.suppressionsKept)
+      notes.push(t("backup.result.restore.kept", { n: fmtNumber(result.suppressionsKept) }));
+    if (result.sequencesStopped)
+      notes.push(t("backup.result.restore.stopped", { n: fmtNumber(result.sequencesStopped) }));
+    if (result.folderReset) notes.push(t("backup.result.restore.folderReset"));
+    if (result.carryFailed) notes.push(t("backup.result.restore.carryFailed"));
+  }
+  const warn = !result.ok || !!result.carryFailed;
+  const Icon = warn ? CircleAlert : CheckCircle2;
   return (
     <div
       role="status"
       data-testid="lifecycle-result"
-      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-[13px] ${result.ok ? "border-success/40 bg-success/5" : "border-destructive/40 bg-destructive/5"}`}
+      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border p-3 text-[13px] ${warn ? "border-destructive/40 bg-destructive/5" : "border-success/40 bg-success/5"}`}
     >
-      <span className="flex items-start gap-1.5">
+      <span className="flex min-w-0 flex-1 items-start gap-1.5">
         <Icon
-          className={`mt-0.5 size-4 shrink-0 ${result.ok ? "text-success" : "text-destructive"}`}
+          className={`mt-0.5 size-4 shrink-0 ${warn ? "text-destructive" : "text-success"}`}
           aria-hidden
         />
-        {text}
+        <span className="space-y-1">
+          <span className="block">{text}</span>
+          {notes.length > 0 && (
+            <ul className="list-disc space-y-0.5 pl-4" data-testid="lifecycle-result-notes">
+              {notes.map((n) => (
+                <li key={n}>{n}</li>
+              ))}
+            </ul>
+          )}
+        </span>
       </span>
       <Button
         size="sm"

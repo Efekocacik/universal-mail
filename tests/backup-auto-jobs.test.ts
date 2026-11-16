@@ -139,7 +139,7 @@ describe("işleyici", () => {
     expect(n[0]!.url).toBe("/settings");
   });
 
-  it("geçici hata yeniden denenir (NonRetryable değil); başka yedek sürüyorsa sessizce atlanır", async () => {
+  it("geçici hata yeniden denenir (NonRetryable değil); başka yedek sürüyorsa bildirimsiz yeniden denenir", async () => {
     await setSecret(BACKUP_PASSPHRASE_SECRET, TEST_PASS);
     const broken = makeAutoBackupHandler(
       {
@@ -165,8 +165,16 @@ describe("işleyici", () => {
       createdAt: NOW - 60_000,
     });
     const logs: string[] = [];
-    await makeAutoBackupHandler({}, () => NOW)(ctx({ reason: "weekly" }, logs));
+    const notifsBefore = (await env.db.select().from(notifications)).length;
+    // Başarı sayılmaz (günün tekilleştirme anahtarı harcanmasın): yeniden denenebilir hata, bildirim yok.
+    const busy = await makeAutoBackupHandler(
+      {},
+      () => NOW,
+    )(ctx({ reason: "weekly" }, logs)).catch((e: unknown) => e);
+    expect(busy).toBeInstanceOf(Error);
+    expect(busy).not.toBeInstanceOf(NonRetryableJobError);
     expect(logs[0]).toMatch(/başka bir yedek sürüyor/);
+    expect((await env.db.select().from(notifications)).length).toBe(notifsBefore);
     expect(
       fs.readdirSync(path.join(env.dir, "backups")).filter((f) => f.endsWith(".umbk")),
     ).toEqual([]);

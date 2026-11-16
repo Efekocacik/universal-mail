@@ -31,6 +31,16 @@ export const backup = {
   "backup.result.wipe.ok": "Verileriniz silindi. Uygulama ilk kurulumdaki gibi.",
   "backup.result.wipe.partial":
     "Verileriniz silindi ancak bazı dosyalar silinemedi. Ayrıntılar günlük dosyasında.",
+  "backup.result.restore.paused":
+    "Çalışan kampanyalar güvenlik için duraklatıldı ({n}). Yedekten sonra kimlere yazıldığını kontrol edip Kampanyalar sayfasından elle sürdürün.",
+  "backup.result.restore.kept":
+    "Yedekten sonra eklenen engel kayıtları (listeden çıkanlar, şikâyetler, silme talepleri) korundu: {n}.",
+  "backup.result.restore.stopped":
+    "Yedekten sonra e-posta gönderilmiş alıcıların sıradaki e-postaları iptal edildi (aynı kişiye ikinci kez yazılmasın diye): {n}.",
+  "backup.result.restore.folderReset":
+    "Yedekteki yedek klasörü bu bilgisayarda kullanılamıyor; yedekler artık varsayılan klasöre alınıyor.",
+  "backup.result.restore.carryFailed":
+    "Geri yükleme öncesindeki engel kayıtları aktarılamadı. Kampanyaları sürdürmeden önce engel listesini kontrol edin.",
   "backup.result.dismiss": "Tamam",
   "backup.pass.title": "Yedek parolası",
   "backup.pass.desc":
@@ -129,6 +139,14 @@ export const backup = {
   "backup.restore.schedule": "Geri yüklemeyi başlat",
   "backup.restore.scheduled": "Geri yükleme hazır. Uygulama yeniden başlayınca uygulanacak.",
   "backup.restore.expires": "Bu hazırlık bir saat geçerlidir.",
+  "backup.restore.after":
+    "Geri yüklemeden sonra çalışan kampanyalar duraklatılır; siz kontrol edip sürdürürsünüz. Yedekten sonra eklenen engel kayıtları ve silme talepleri korunur.",
+  "backup.restore.scheduledSafety":
+    "Geri yükleme hazır. Şu anki verileriniz de şifreli bir yedek olarak kaydedildi; gerekirse listeden ona geri dönebilirsiniz.",
+  "backup.restore.uploadLimit":
+    "Yüklenebilecek en büyük dosya {mb} MB. Daha büyük yedekleri masaüstü uygulamasında “Dosya seç…” ile açın.",
+  "campaign.pause.restore":
+    "Kampanya, yedek geri yüklendiği için duraklatıldı. Yedekten sonra kimlere yazıldığını kontrol edip devam ettirin.",
   "backup.ret.title": "Saklama süresi",
   "backup.ret.desc":
     "Hiç e-posta gönderilmemiş ve kampanyaya eklenmemiş eski işletme kayıtları bu süreden sonra kendiliğinden silinir (en çok 12 ay).",
@@ -183,7 +201,7 @@ export const backup = {
   "apiError.BACKUP_SCHEMA_NEWER":
     "Bu yedek uygulamanın daha yeni bir sürümüyle alınmış. Önce uygulamayı güncelleyin.",
   "apiError.BACKUP_TOO_LARGE":
-    "Dosya yükleme için çok büyük. Masaüstü uygulamasında “Dosya seç…” ile seçin.",
+    "Dosya yükleme için çok büyük (en çok 9 MB). Masaüstü uygulamasında “Dosya seç…” ile seçin.",
   "apiError.RESTORE_STAGE_NOT_FOUND":
     "Geri yükleme hazırlığının süresi doldu. Yedeği yeniden seçip parolayı tekrar girin.",
   "apiError.RESTORE_CONFIRM_REQUIRED": "Geri yüklemeyi başlatmak için onay kutusunu işaretleyin.",

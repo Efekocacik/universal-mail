@@ -1,11 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { reconcileBackups } from "@/lib/backup/reconcile";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
-import { backups } from "@/lib/db/schema";
 import { errorMessage } from "@/lib/util";
-import { DB_FILENAME, readPendingState, removePending, stageDirOf, writeResult } from "./pending";
+import {
+  DB_FILENAME,
+  readPendingState,
+  readResult,
+  removePending,
+  stageDirOf,
+  stagingRoot,
+  writeResult,
+} from "./pending";
+import { reconcileAfterRestore } from "./post-restore";
 import { wipeDataDir } from "./wipe";
 
 /**
@@ -25,6 +33,8 @@ import { wipeDataDir } from "./wipe";
 export interface PreInitResult {
   /** Uygulanan işlem; yoksa null. */
   applied: null | { kind: "restore" | "wipe"; ok: boolean; code?: string };
+  /** Başarılı geri yüklemede: geri yükleme öncesi kopyanın yolu (son kancada engel kayıtları buradan aktarılır). */
+  previousDb?: string;
 }
 
 export const PRE_RESTORE_KEEP = 3;
@@ -69,7 +79,7 @@ function applyRestore(
   p: { stageId: string; restoreSecrets: boolean },
   now: number,
   log: (m: string) => void,
-): { ok: boolean; code?: string; secretsRestored: boolean } {
+): { ok: boolean; code?: string; secretsRestored: boolean; previousDb?: string } {
   const sd = stageDirOf(dataDir, p.stageId);
   if (!stageValid(sd)) {
     log("geri yükleme: hazırlık bulunamadı veya bozuk; mevcut veritabanına dokunulmadı.");
@@ -78,6 +88,7 @@ function applyRestore(
   const ts = stamp(now);
   const backupDir = path.join(dataDir, "backups");
   let placed = false;
+  let previousDb: string | undefined;
   try {
     fs.mkdirSync(backupDir, { recursive: true });
     if (fs.existsSync(dbFile)) {
@@ -85,6 +96,7 @@ function applyRestore(
       copyDurable(dbFile, copy);
       if (fs.existsSync(`${dbFile}-wal`)) copyDurable(`${dbFile}-wal`, `${copy}-wal`);
       prunePreRestore(backupDir);
+      previousDb = copy;
     }
     const tmp = `${dbFile}.restore-tmp`;
     copyDurable(path.join(sd, "db"), tmp);
@@ -105,7 +117,7 @@ function applyRestore(
     }
     fs.rmSync(sd, { recursive: true, force: true });
     log(`geri yükleme uygulandı${secretsRestored ? " (gizli bilgiler dahil)" : ""}.`);
-    return { ok: true, secretsRestored };
+    return { ok: true, secretsRestored, ...(previousDb ? { previousDb } : {}) };
   } catch (e) {
     fs.rmSync(`${dbFile}.restore-tmp`, { force: true });
     log(`geri yükleme başarısız: ${errorMessage(e).slice(0, 200)}`);
@@ -114,6 +126,7 @@ function applyRestore(
       ok: placed,
       code: placed ? "SECRETS_RESTORE_FAILED" : "RESTORE_FAILED",
       secretsRestored: false,
+      ...(placed && previousDb ? { previousDb } : {}),
     };
   }
 }
@@ -126,9 +139,16 @@ export async function runPreInitHooks(opts: {
   const { dataDir, log } = opts;
   const now = opts.now ?? Date.now();
   const s = readPendingState(dataDir);
-  if (s.state === "none") return { applied: null };
+  // Bekleyen geri yüklemeye bağlı olmayan hazırlıklar (doğrulanıp planlanmamış; düz veritabanı kopyası ve yeniden
+  // şifrelenmiş anahtarlar taşır) her açılışta silinir.
+  const clearStaging = () => fs.rmSync(stagingRoot(dataDir), { recursive: true, force: true });
+  if (s.state === "none") {
+    clearStaging();
+    return { applied: null };
+  }
   if (s.state === "invalid") {
     removePending(dataDir);
+    clearStaging();
     log("bekleyen işlem dosyası bozuk; yok sayıldı ve silindi.");
     return { applied: null };
   }
@@ -140,6 +160,7 @@ export async function runPreInitHooks(opts: {
       dbFile,
       deleteBackups: p.deleteBackups,
       customBackupFolder: p.customBackupFolder,
+      customBackupFolders: p.customBackupFolders,
     });
     removePending(dataDir);
     const ok = r.failed.length === 0;
@@ -155,6 +176,7 @@ export async function runPreInitHooks(opts: {
   }
   const r = applyRestore(dataDir, dbFile, p, now, log);
   removePending(dataDir);
+  clearStaging();
   writeResult(dataDir, {
     v: 1,
     kind: "restore",
@@ -163,21 +185,63 @@ export async function runPreInitHooks(opts: {
     secretsRestored: r.secretsRestored,
     ...(r.code ? { code: r.code } : {}),
   });
-  return { applied: { kind: "restore", ok: r.ok, ...(r.code ? { code: r.code } : {}) } };
+  return {
+    applied: { kind: "restore", ok: r.ok, ...(r.code ? { code: r.code } : {}) },
+    ...(r.ok && r.previousDb ? { previousDb: r.previousDb } : {}),
+  };
 }
 
 /**
- * Veritabanı açıldıktan (ve geri yüklenen eski şema güncellendikten) sonra: denetim kaydı. Geri yüklenen anlık görüntü
- * kendi `running` yedek satırını içerir; o satır `failed/INTERRUPTED` yapılır (yoksa yeni yedekler 30 dk engellenirdi).
+ * Veritabanı açıldıktan (ve geri yüklenen eski şema güncellendikten) sonra, HER açılışta (sunucu ve işçi başlamadan):
+ *  - Başarılı geri yüklemeden sonra: kampanyalar duraklatılır, yeni engel kayıtları ve silme talepleri korunur, yedekten
+ *    sonra yazılmış alıcıların dizileri durur, kullanılamayan yedek klasörü varsayılana döner (`post-restore.ts`);
+ *    sayılar sonuç dosyasına eklenir (arayüz bandında gösterilir).
+ *  - Yedek listesi diskle eşitlenir (`reconcileBackups`): yarım kalan yedek satırı/dosyaları temizlenir, listede
+ *    olmayan yedek dosyaları eklenir; geri yüklemeden sonra dosyası silinmiş satırlar kaldırılır.
+ *  - Uygulanan işlem varsa denetim kaydı.
+ * Eşitleme hatası açılışı durdurmaz (günlüğe yazılır).
  */
-export async function runPostInitHooks(db: Db, pre: PreInitResult): Promise<void> {
+export async function runPostInitHooks(
+  db: Db,
+  pre: PreInitResult,
+  opts: { dataDir?: string; log?: (m: string) => void; now?: number } = {},
+): Promise<void> {
+  const log = opts.log ?? (() => undefined);
+  const now = opts.now ?? Date.now();
   const a = pre.applied;
+  const restored = a?.kind === "restore" && a.ok;
+  if (restored) {
+    const rep = await reconcileAfterRestore(db, {
+      previousDb: pre.previousDb ?? null,
+      now,
+      log,
+    });
+    if (opts.dataDir) {
+      const prev = readResult(opts.dataDir);
+      if (prev?.kind === "restore")
+        writeResult(opts.dataDir, {
+          ...prev,
+          ...(rep.campaignsPaused > 0 ? { campaignsPaused: rep.campaignsPaused } : {}),
+          ...(rep.suppressionsAdded > 0 ? { suppressionsKept: rep.suppressionsAdded } : {}),
+          ...(rep.sequencesStopped > 0 ? { sequencesStopped: rep.sequencesStopped } : {}),
+          ...(rep.folderReset ? { folderReset: true } : {}),
+          ...(rep.carryFailed ? { carryFailed: true } : {}),
+        });
+    }
+    log(
+      `geri yükleme sonrası: ${rep.campaignsPaused} kampanya duraklatıldı, ${rep.suppressionsAdded} engel kaydı korundu, ${rep.sequencesStopped} dizi durduruldu.`,
+    );
+  }
+  try {
+    const r = await reconcileBackups(db, { now, pruneMissing: restored });
+    if (r.added + r.recovered + r.interrupted + r.removed + r.partsRemoved > 0)
+      log(
+        `yedek listesi eşitlendi (eklenen ${r.added}, tamamlanan ${r.recovered}, yarım kalan ${r.interrupted}, kaldırılan ${r.removed}, silinen yarım dosya ${r.partsRemoved}).`,
+      );
+  } catch (e) {
+    log(`yedek listesi eşitlenemedi: ${errorMessage(e).slice(0, 200)}`);
+  }
   if (!a) return;
-  if (a.kind === "restore" && a.ok)
-    await db
-      .update(backups)
-      .set({ status: "failed", errorCode: "INTERRUPTED", finishedAt: Date.now() })
-      .where(eq(backups.status, "running"));
   await audit(
     db,
     a.kind === "restore" ? "data.restore.applied" : "data.wipe.applied",

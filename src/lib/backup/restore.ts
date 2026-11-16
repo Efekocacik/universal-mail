@@ -20,8 +20,13 @@ import { LifecycleError } from "./errors";
 import { decryptBackup } from "./format";
 import { lifecycleError, normalizePassphrase } from "./passphrase";
 import { writeSecretsFile } from "./secrets-io";
-import { BackupNotFoundError, backupFileForDownload } from "./service";
-import type { BackupSummary } from "./shared";
+import {
+  BackupNotFoundError,
+  backupFileForDownload,
+  createBackup,
+  type BackupDeps,
+} from "./service";
+import { hasBackupPassphrase, type BackupSummary } from "./shared";
 
 /**
  * Faz 6 (paket Y.3): geri yükleme HAZIRLANIR, uygulama yeniden başlarken uygulanır (açık bağlantıların altında canlı
@@ -31,9 +36,13 @@ import type { BackupSummary } from "./shared";
  */
 
 export const STAGE_TTL_MS = 3_600_000;
-/** Electron'da seçilen dosya üst sınırı (4 GiB); yükleme sınırı uçtadır (256 MiB). */
+/**
+ * Electron'da seçilen dosya üst sınırı (4 GiB). Tarayıcıdan yükleme sınırı 9 MiB: Next 15.5'in ara katmanı istek
+ * gövdesini 10 MiB'de keser (`middlewareClientMaxBodySize`); çok parçalı gövde ek yüküyle birlikte bunun altında kalır.
+ * Daha büyük yedekler masaüstünde "Dosya seç…" (yol) ile açılır.
+ */
 export const PATH_MAX_BYTES = 4 * 1024 * 1024 * 1024;
-export const UPLOAD_MAX_BYTES = 256 * 1024 * 1024;
+export const UPLOAD_MAX_BYTES = 9 * 1024 * 1024;
 
 export type RestoreSource =
   | { kind: "backup"; id: number }
@@ -133,6 +142,31 @@ async function inspectStagedDb(
 /** Bütün hazırlıkları siler (yeni doğrulama eskileri geçersiz kılar). */
 export function clearStages(dir: string = dataDir()): void {
   fs.rmSync(stagingRoot(dir), { recursive: true, force: true });
+}
+
+/**
+ * Süresi dolmuş veya okunamayan hazırlıkları siler; bekleyen geri yüklemenin hazırlığına dokunmaz. Bakım turunda
+ * çalışır (doğrulanıp planlanmayan, pencere kapandıktan sonra biten veya uygulama açık kalırken bırakılan hazırlıklar
+ * düz veritabanı kopyası ve anahtarlar taşır). Silinen sayısını döndürür.
+ */
+export function pruneExpiredStages(dir: string, now: number): number {
+  let names: string[];
+  try {
+    names = fs.readdirSync(stagingRoot(dir));
+  } catch {
+    return 0;
+  }
+  const pending = readPending(dir);
+  const keep = pending?.kind === "restore" ? pending.stageId : null;
+  let removed = 0;
+  for (const n of names) {
+    if (n === keep) continue;
+    const valid = STAGE_ID_RE.test(n) ? readStage(dir, n, now) : null;
+    if (valid) continue;
+    fs.rmSync(path.join(stagingRoot(dir), n), { recursive: true, force: true });
+    removed++;
+  }
+  return removed;
 }
 
 /** Hazırlık bilgisi; yoksa, bozuksa veya (`now` verilirse) süresi dolmuşsa null. */
@@ -238,17 +272,32 @@ export async function verifyAndStage(
   }
 }
 
-/** Hazırlanan geri yüklemeyi yeniden başlatmaya planlar. */
+/**
+ * Hazırlanan geri yüklemeyi yeniden başlatmaya planlar. Yedek parolası ayarlıysa şu anki veriler önce ŞİFRELİ bir
+ * "Elle" yedek olarak alınır (geri dönüş yolu: geri yüklemeden sonra listede görünür ve geri yüklenebilir). Bu yedek
+ * alınamazsa geri yükleme yine planlanır (düz `pre-restore-*` kopyası her durumda alınır); sonuç `safetyBackup`.
+ */
 export async function scheduleRestore(
   db: Db,
   o: { stageId: string; confirm: boolean; restoreSecrets: boolean; now?: number },
-): Promise<void> {
+  deps: BackupDeps = {},
+): Promise<{ safetyBackup: boolean }> {
   if (o.confirm !== true) throw lifecycleError("RESTORE_CONFIRM_REQUIRED");
   const now = o.now ?? Date.now();
   const dir = dataDir();
   const stage = readStage(dir, o.stageId, now);
   if (!stage) throw lifecycleError("RESTORE_STAGE_NOT_FOUND");
+  if (readPendingState(dir).state !== "none") throw lifecycleError("LIFECYCLE_PENDING");
   const restoreSecrets = o.restoreSecrets && stage.hasSecrets;
+  let safetyBackup = false;
+  if (await hasBackupPassphrase()) {
+    try {
+      await createBackup(db, { kind: "manual", now }, deps);
+      safetyBackup = true;
+    } catch {
+      safetyBackup = false; // kodu `backup.create` denetim kaydında
+    }
+  }
   const created = createPending(dir, {
     v: 1,
     kind: "restore",
@@ -261,7 +310,9 @@ export async function scheduleRestore(
   await audit(db, "backup.restore.schedule", "backup", undefined, {
     restoreSecrets,
     schemaMigrations: stage.summary.schemaMigrations,
+    safetyBackup,
   });
+  return { safetyBackup };
 }
 
 /** Hazırlığı iptal eder (idempotent). Bu hazırlığa bağlı bekleyen geri yükleme de kaldırılır. */

@@ -248,8 +248,11 @@ describe("şema sürümü", () => {
     ).toBe(total);
     const names = await env.client.execute("SELECT display_name FROM leads");
     expect(names.rows.map((r) => r.display_name)).toEqual(["Eski Şema Kafe"]);
-    // 0006 tablosu oluştu; geçiş öncesi otomatik kopya alındı.
-    expect(await env.db.select().from(backups)).toEqual([]);
+    // 0006 tablosu oluştu; geçiş öncesi otomatik kopya alındı. Listede yalnızca geri yükleme öncesi alınan şifreli
+    // güvenlik yedeği var (diskten eşitlendi; geri dönüş yolu).
+    expect(await env.db.select().from(backups)).toEqual([
+      expect.objectContaining({ kind: "manual", status: "ok", createdAt: T }),
+    ]);
     expect(
       fs.readdirSync(path.join(env.dir, "backups")).some((f) => f.startsWith("pre-migrate-")),
     ).toBe(true);

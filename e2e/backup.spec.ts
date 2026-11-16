@@ -5,7 +5,8 @@ import { backup as T } from "../src/lib/i18n/tr/backup";
 /**
  * Faz 6 (paket Y) uçtan uca, demo; geçici veri klasörü; ağa çıkılmaz. Ayarlar → Yedekler:
  *  - yedek parolası belirlenir → "Şimdi yedekle" → liste satırı → indirme (dosya `UMBACKUP` ile başlar);
- *  - listeden geri yükleme: yanlış parola hata metni, doğru parola özet → onay → bekleyen bant → iptal;
+ *  - listeden geri yükleme: yanlış parola hata metni, doğru parola özet (+ sonrası notu) → onay → güvenlik yedeği
+ *    listeye eklenir → bekleyen bant → iptal;
  *  - indirilen dosyanın yüklenerek denetlenmesi (çok parçalı yükleme) → özet → vazgeç (hazırlık silinir);
  *  - saklama süresi önizlemesi ve çalıştırma (demo verisi yeni olduğundan silinecek kayıt yoktur);
  *  - "Tüm verilerimi sil": ifade yazılmadan düğme kapalı → planla → bant → iptal;
@@ -111,8 +112,12 @@ test("listeden geri yükleme: yanlış parola → doğru parola → özet → pl
   const start = dialog.getByRole("button", { name: T["backup.restore.schedule"] });
   await expect(start).toBeDisabled();
   await dialog.getByLabel(T["backup.restore.confirm"]).check();
+  await expect(summary.getByText(T["backup.restore.after"])).toBeVisible();
+  const rowsBefore = await section.getByTestId("backup-row").count();
   await start.click();
-  await expect(page.getByText(T["backup.restore.scheduled"])).toBeVisible();
+  // Parola ayarlı: şu anki veriler önce şifreli yedek olarak alınır (geri dönüş yolu listede görünür).
+  await expect(page.getByText(T["backup.restore.scheduledSafety"])).toBeVisible();
+  await expect(section.getByTestId("backup-row")).toHaveCount(rowsBefore + 1);
 
   const banner = section.getByTestId("lifecycle-pending");
   await expect(banner.getByText(T["backup.pending.restore.title"])).toBeVisible();

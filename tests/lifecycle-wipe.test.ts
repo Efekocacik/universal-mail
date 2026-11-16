@@ -126,6 +126,41 @@ describe("veri klasörünü silme", () => {
     );
   });
 
+  it("paket K'nin kenara aldığı başarısız veritabanı ve yarım kalan geri yükleme dosyaları da silinir", () => {
+    for (const f of [
+      "backups/failed-migrate-2026-11-16T10-00-00-000Z.db",
+      "backups/failed-migrate-2026-11-16T10-00-00-000Z.db-wal",
+      "backups/failed-migrate-2026-11-16T10-00-00-000Z.db-shm",
+      "backups/pre-restore-2026-11-02.db-journal",
+      "universal-mail.db.restore-tmp",
+      "secrets.json.restore-tmp",
+    ])
+      touch(path.join(data, f));
+    const r = wipeDataDir({ dataDir: data, deleteBackups: true, customBackupFolder: custom });
+    expect(r.failed).toEqual([]);
+    // backups/ boşaldığı için klasör de kalkar.
+    expect(ls(data)).toEqual(["kullanicinin-notu.txt"]);
+  });
+
+  it("yedekleri de sil: satırlarda geçen ESKİ özel klasörlerdeki yedekler de silinir (yalnızca desenle eşleşenler)", () => {
+    const old1 = path.join(root, "Eski Klasör");
+    touch(path.join(old1, "universal-mail-20261001-080000-manual.umbk"));
+    touch(path.join(old1, "notlar.txt"));
+    const r = wipeDataDir({
+      dataDir: data,
+      deleteBackups: true,
+      customBackupFolder: custom,
+      customBackupFolders: [old1, path.join(data, "backups"), "göreli/klasör"],
+    });
+    expect(r.failed).toEqual([]);
+    expect(ls(old1)).toEqual(["notlar.txt"]);
+    expect(ls(custom)).toEqual(["baska-program.umbk", "tatil-fotografi.jpg"]);
+    // Yedekler kalsın: eski klasörlere dokunulmaz.
+    touch(path.join(old1, "universal-mail-20261002-080000-manual.umbk"));
+    wipeDataDir({ dataDir: data, deleteBackups: false, customBackupFolders: [old1] });
+    expect(ls(old1)).toEqual(["notlar.txt", "universal-mail-20261002-080000-manual.umbk"]);
+  });
+
   it("sembolik bağlantı izlenmez (desenle eşleşse bile hedef silinmez)", () => {
     const target = path.join(root, "hedef.umbk");
     touch(target);
@@ -149,6 +184,17 @@ describe("bekleyen işlem işareti", () => {
       customBackupFolder: "/mutlak",
     });
     expect(parsePending({ ...base, customBackupFolder: "göreli" })).toBeNull();
+    expect(parsePending({ ...base, customBackupFolders: ["/a", "/b"] })).toMatchObject({
+      customBackupFolders: ["/a", "/b"],
+    });
+    expect(parsePending({ ...base, customBackupFolders: ["göreli"] })).toBeNull();
+    expect(parsePending({ ...base, customBackupFolders: "/a" })).toBeNull();
+    expect(
+      parsePending({
+        ...base,
+        customBackupFolders: Array.from({ length: 21 }, (_, i) => `/k${i}`),
+      }),
+    ).toBeNull();
     expect(parsePending({ ...base, extra: 1 })).toBeNull();
     expect(parsePending({ ...base, nonce: "x" })).toBeNull();
     expect(parsePending({ ...base, kind: "format" })).toBeNull();
@@ -203,13 +249,19 @@ describe("Electron ana süreç", () => {
       customBackupFolder: custom,
     });
     const logs: string[] = [];
+    let afterWipe = 0;
     const r = await applyPendingLifecycleInMain({
       userDataDir: user,
       dataDir: data,
       log: (m) => logs.push(m),
       now: 7,
+      // Oturum öğesini kaldırma + Chromium depolamasını temizleme (main.ts bağlar).
+      afterWipe: () => {
+        afterWipe++;
+      },
     });
     expect(r).toEqual({ applied: { kind: "wipe", ok: true } });
+    expect(afterWipe).toBe(1);
     expect(ls(user)).toEqual(["Preferences", "data"]);
     expect(ls(data)).toEqual(["kullanicinin-notu.txt", "lifecycle-result.json"]);
     expect(readResult(data)).toEqual({ v: 1, kind: "wipe", ok: true, at: 7 });
@@ -220,6 +272,34 @@ describe("Electron ana süreç", () => {
     ).toEqual({
       applied: null,
     });
+  });
+
+  it("silme sonrası adım yalnızca silme uygulanınca çalışır; hatası açılışı durdurmaz", async () => {
+    let calls = 0;
+    const hook = () => {
+      calls++;
+      throw new Error("oturum öğesi kaldırılamadı");
+    };
+    const logs: string[] = [];
+    expect(
+      await applyPendingLifecycleInMain({
+        userDataDir: user,
+        dataDir: data,
+        log: () => undefined,
+        afterWipe: hook,
+      }),
+    ).toEqual({ applied: null });
+    expect(calls).toBe(0);
+    createPending(data, { v: 1, kind: "wipe", deleteBackups: false, at: 1, nonce: newNonce() });
+    const r = await applyPendingLifecycleInMain({
+      userDataDir: user,
+      dataDir: data,
+      log: (m) => logs.push(m),
+      afterWipe: hook,
+    });
+    expect(r).toEqual({ applied: { kind: "wipe", ok: true } });
+    expect(calls).toBe(1);
+    expect(logs.join("\n")).toMatch(/silme sonrası adım başarısız/);
   });
 
   it("geri yükleme işareti ve bozuk işaret ana süreçte uygulanmaz (geçiş sürecine kalır)", async () => {

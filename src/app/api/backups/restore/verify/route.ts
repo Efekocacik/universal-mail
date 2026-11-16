@@ -54,7 +54,7 @@ const badForm = () =>
 
 /**
  * Geri yükleme doğrulaması ve hazırlığı. Kaynak: JSON `{backupId, passphrase}` (listeden), `{path, passphrase}`
- * (Electron "Dosya seç…") veya `multipart/form-data` `file` + `passphrase` (≤ 256 MiB). 200 `{stageId, expiresAt,
+ * (Electron "Dosya seç…") veya `multipart/form-data` `file` + `passphrase` (≤ 9 MiB: Next ara katmanı gövdeyi 10 MiB'de keser; büyük yedekler Electron "Dosya seç…" ile yol olarak gelir). 200 `{stageId, expiresAt,
  * summary, migrationNeeded, hasSecrets}`. Hatalar: 404; 410 BACKUP_FILE_MISSING; 413 BACKUP_TOO_LARGE; 422
  * BACKUP_BAD_FORMAT / BACKUP_WRONG_PASSPHRASE / BACKUP_CORRUPT; 409 BACKUP_SCHEMA_NEWER / LIFECYCLE_PENDING.
  * Denetim: `backup.restore.verify` (sonuç ve kod; parola asla).

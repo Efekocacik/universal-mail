@@ -20,6 +20,8 @@ export const WORK_DIR = "backup-tmp";
 export const DB_FILENAME = "universal-mail.db";
 export const STAGE_ID_RE = /^[0-9a-f]{32}$/;
 const NONCE_RE = /^[0-9a-f]{32}$/;
+/** Silme işaretinde taşınan yedek klasörü sayısı üst sınırı. */
+export const MAX_WIPE_FOLDERS = 20;
 
 export function newNonce(): string {
   return crypto.randomBytes(16).toString("hex");
@@ -48,13 +50,25 @@ export function parsePending(raw: unknown): LifecyclePending | null {
     };
   }
   if (raw.kind === "wipe") {
-    const withFolder = keys === "at,customBackupFolder,deleteBackups,kind,nonce,v";
-    if (!withFolder && keys !== "at,deleteBackups,kind,nonce,v") return null;
+    const allowed = new Set([
+      "at",
+      "customBackupFolder",
+      "customBackupFolders",
+      "deleteBackups",
+      "kind",
+      "nonce",
+      "v",
+    ]);
+    if (!Object.keys(raw).every((k) => allowed.has(k))) return null;
     if (typeof raw.deleteBackups !== "boolean") return null;
-    if (withFolder) {
-      const f = raw.customBackupFolder;
-      if (typeof f !== "string" || !path.isAbsolute(f) || f.length > 1024 || f.includes("\0"))
-        return null;
+    const okFolder = (f: unknown): f is string =>
+      typeof f === "string" && path.isAbsolute(f) && f.length <= 1024 && !f.includes("\0");
+    if ("customBackupFolder" in raw && !okFolder(raw.customBackupFolder)) return null;
+    let folders: string[] | undefined;
+    if ("customBackupFolders" in raw) {
+      const fs0 = raw.customBackupFolders;
+      if (!Array.isArray(fs0) || fs0.length > MAX_WIPE_FOLDERS || !fs0.every(okFolder)) return null;
+      folders = [...fs0];
     }
     return {
       v: 1,
@@ -62,7 +76,10 @@ export function parsePending(raw: unknown): LifecyclePending | null {
       deleteBackups: raw.deleteBackups,
       at: raw.at,
       nonce: raw.nonce,
-      ...(withFolder ? { customBackupFolder: raw.customBackupFolder as string } : {}),
+      ...("customBackupFolder" in raw
+        ? { customBackupFolder: raw.customBackupFolder as string }
+        : {}),
+      ...(folders ? { customBackupFolders: folders } : {}),
     };
   }
   return null;
@@ -143,12 +160,30 @@ export interface LifecycleResult {
   code?: string;
   at: number;
   secretsRestored?: boolean;
+  /** Geri yüklemeden sonra duraklatılan kampanya sayısı (elle sürdürülmeli). */
+  campaignsPaused?: number;
+  /** Geri yükleme öncesi verilerden korunan (aktarılan) engel kaydı sayısı. */
+  suppressionsKept?: number;
+  /** Yedekten sonra e-posta gönderildiği için iptal edilen dizi sayısı. */
+  sequencesStopped?: number;
+  /** Yedekten gelen yedek klasörü bu bilgisayarda kullanılamadığı için varsayılana dönüldü. */
+  folderReset?: boolean;
+  /** Geri yükleme öncesi verilerden aktarım yapılamadı. */
+  carryFailed?: boolean;
 }
 
 export function writeResult(dataDir: string, r: LifecycleResult): void {
   const target = path.join(dataDir, RESULT_FILE);
   fs.mkdirSync(dataDir, { recursive: true });
   fs.renameSync(writeTmp(target, JSON.stringify(r)), target);
+}
+
+function countField<K extends "campaignsPaused" | "suppressionsKept" | "sequencesStopped">(
+  r: Record<string, unknown>,
+  k: K,
+): Partial<Record<K, number>> {
+  const v = r[k];
+  return isInt(v) && v > 0 ? ({ [k]: v } as Partial<Record<K, number>>) : {};
 }
 
 export function readResult(dataDir: string): LifecycleResult | null {
@@ -165,6 +200,11 @@ export function readResult(dataDir: string): LifecycleResult | null {
       at: r.at,
       ...(code ? { code } : {}),
       ...(typeof r.secretsRestored === "boolean" ? { secretsRestored: r.secretsRestored } : {}),
+      ...countField(r, "campaignsPaused"),
+      ...countField(r, "suppressionsKept"),
+      ...countField(r, "sequencesStopped"),
+      ...(r.folderReset === true ? { folderReset: true } : {}),
+      ...(r.carryFailed === true ? { carryFailed: true } : {}),
     };
   } catch {
     return null;

@@ -26,6 +26,12 @@ export async function applyPendingLifecycleInMain(opts: {
   dataDir: string;
   log: (message: string) => void;
   now?: number;
+  /**
+   * Silme uygulandıktan sonra (yalnızca o zaman) çağrılır: işletim sistemi oturum öğesinin kaldırılması
+   * (`setLoginItemSettings({openAtLogin:false})`) ve Chromium profil depolamasının (`clearStorageData`; kampanya
+   * taslakları) temizlenmesi gibi ana süreç adımları. Hatası açılışı durdurmaz, günlüğe yazılır.
+   */
+  afterWipe?: () => Promise<void> | void;
 }): Promise<LifecycleMainResult> {
   try {
     const s = readPendingState(opts.dataDir);
@@ -35,6 +41,7 @@ export async function applyPendingLifecycleInMain(opts: {
       dataDir: opts.dataDir,
       deleteBackups: p.deleteBackups,
       customBackupFolder: p.customBackupFolder,
+      customBackupFolders: p.customBackupFolders,
     });
     const user = wipeUserData(opts.userDataDir);
     removePending(opts.dataDir);
@@ -50,6 +57,13 @@ export async function applyPendingLifecycleInMain(opts: {
     opts.log(
       `tüm veriler silindi (${data.removed + user.removed} öğe${ok ? "" : `; silinemeyen ${failed}: ${[...data.failed, ...user.failed].slice(0, 10).join(", ")}`}).`,
     );
+    if (opts.afterWipe) {
+      try {
+        await opts.afterWipe();
+      } catch (e) {
+        opts.log(`silme sonrası adım başarısız: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     return { applied: { kind: "wipe", ok } };
   } catch (e) {
     opts.log(`verileri silme uygulanamadı: ${e instanceof Error ? e.message : String(e)}`);

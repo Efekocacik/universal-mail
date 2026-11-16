@@ -29,6 +29,16 @@ export const backup = {
   "backup.result.wipe.ok": "Your data was deleted. The app is as it was on first setup.",
   "backup.result.wipe.partial":
     "Your data was deleted, but some files could not be removed. Details are in the log file.",
+  "backup.result.restore.paused":
+    "Running campaigns were paused for safety ({n}). Check who was emailed after the backup, then resume them by hand on the Campaigns page.",
+  "backup.result.restore.kept":
+    "Block-list entries added after the backup (unsubscribes, complaints, erasure requests) were kept: {n}.",
+  "backup.result.restore.stopped":
+    "Upcoming emails to recipients who were emailed after the backup were cancelled, so nobody is written to twice: {n}.",
+  "backup.result.restore.folderReset":
+    "The backup folder saved in the backup can't be used on this computer; backups now go to the default folder.",
+  "backup.result.restore.carryFailed":
+    "Block-list entries from before the restore could not be carried over. Check the block list before resuming campaigns.",
   "backup.result.dismiss": "OK",
   "backup.pass.title": "Backup password",
   "backup.pass.desc":
@@ -127,6 +137,14 @@ export const backup = {
   "backup.restore.schedule": "Start restore",
   "backup.restore.scheduled": "The restore is ready. It will be applied when the app restarts.",
   "backup.restore.expires": "This preparation is valid for one hour.",
+  "backup.restore.after":
+    "After the restore, running campaigns are paused until you check and resume them. Block-list entries and erasure requests added after the backup are kept.",
+  "backup.restore.scheduledSafety":
+    "The restore is ready. Your current data was also saved as an encrypted backup; you can go back to it from the list if needed.",
+  "backup.restore.uploadLimit":
+    "The largest file you can upload is {mb} MB. Open larger backups with “Choose file…” in the desktop app.",
+  "campaign.pause.restore":
+    "This campaign was paused because a backup was restored. Check who was emailed after the backup, then resume it.",
   "backup.ret.title": "Retention period",
   "backup.ret.desc":
     "Old business records that were never emailed and never added to a campaign are deleted by themselves after this period (12 months at most).",
@@ -182,7 +200,7 @@ export const backup = {
   "apiError.BACKUP_SCHEMA_NEWER":
     "This backup was taken with a newer version of the app. Update the app first.",
   "apiError.BACKUP_TOO_LARGE":
-    "The file is too large to upload. In the desktop app, pick it with “Choose file…”.",
+    "The file is too large to upload (9 MB at most). In the desktop app, pick it with “Choose file…”.",
   "apiError.RESTORE_STAGE_NOT_FOUND":
     "The restore preparation expired. Choose the backup again and re-enter the password.",
   "apiError.RESTORE_CONFIRM_REQUIRED": "Tick the confirmation box to start the restore.",

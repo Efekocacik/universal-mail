@@ -62,6 +62,11 @@ export type LifecyclePending =
        * `deleteBackups` iken ve yalnızca `universal-mail-*.umbk` dosyaları silinir (klasörün kendisi asla).
        */
       customBackupFolder?: string;
+      /**
+       * Paket Y eki (inceleme düzeltmesi): ayarlı klasöre ek olarak, yedek satırlarında geçen bütün klasörler (en çok
+       * 20 mutlak yol). Klasör değiştirilmeden önce eski klasöre yazılmış yedekler de "yedekleri de sil" ile silinir.
+       */
+      customBackupFolders?: string[];
     };
 
 /** Bekleyen işlem dosyasının adı (veri klasöründe). */

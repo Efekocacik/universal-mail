@@ -2,7 +2,7 @@
 
 import { useMutation } from "@tanstack/react-query";
 import { CircleAlert, DatabaseBackup, Eye, EyeOff, Info } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,6 +19,15 @@ import { api, ApiError, errorText } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber, fmtRelativeDays } from "@/lib/client/format";
 import { t } from "@/lib/i18n";
 import { useRefreshBackups, type VerifyResponse } from "./data";
+
+/** Tarayıcıdan yüklenebilecek en büyük dosya (sunucudaki `UPLOAD_MAX_BYTES` ile aynı). */
+export const UPLOAD_MAX_MB = 9;
+const UPLOAD_MAX_BYTES = UPLOAD_MAX_MB * 1024 * 1024;
+
+/** Planlanmamış hazırlığı sunucuda siler (iptal idempotent; hata yok sayılır). */
+function dropStage(stageId: string): void {
+  void api(`/api/backups/restore/${stageId}`, { method: "DELETE" }).catch(() => undefined);
+}
 
 /** Geri yüklenecek yedeğin kaynağı: listedeki satır, masaüstünde seçilen dosya veya yüklenen dosya. */
 export type RestoreSource =
@@ -61,6 +70,10 @@ export function RestoreDialog({
   const [stage, setStage] = useState<VerifyResponse | null>(null);
   const [withSecrets, setWithSecrets] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
+  // Pencerenin şu an gösterdiği kaynak: denetim pencere kapandıktan (veya kaynak değiştikten) sonra biterse oluşan
+  // hazırlık kimseye gösterilmez ve hemen silinir.
+  const current = useRef<RestoreSource | null>(source);
+  current.current = source;
 
   useEffect(() => {
     // Yeni kaynak = temiz pencere.
@@ -73,17 +86,23 @@ export function RestoreDialog({
   }, [source]);
 
   const check = useMutation({
-    mutationFn: () => verify(source!, pass),
-    onSuccess: (r) => {
+    mutationFn: (src: RestoreSource) => verify(src, pass),
+    onSuccess: (r, src) => {
+      if (current.current !== src) {
+        dropStage(r.stageId);
+        return;
+      }
       setStage(r);
       setPass("");
       setError(null);
     },
-    onError: (e: Error) => setError(errorText(e)),
+    onError: (e: Error, src) => {
+      if (current.current === src) setError(errorText(e));
+    },
   });
   const schedule = useMutation({
     mutationFn: () =>
-      api("/api/backups/restore", {
+      api<{ restartRequired: boolean; safetyBackup?: boolean }>("/api/backups/restore", {
         method: "POST",
         json: {
           stageId: stage!.stageId,
@@ -91,10 +110,12 @@ export function RestoreDialog({
           restoreSecrets: withSecrets && stage!.hasSecrets,
         },
       }),
-    onSuccess: () => {
+    onSuccess: (r) => {
       setStage(null);
       refresh();
-      toast.success(t("backup.restore.scheduled"));
+      toast.success(
+        t(r.safetyBackup ? "backup.restore.scheduledSafety" : "backup.restore.scheduled"),
+      );
       onClose();
     },
     onError: (e: Error) => {
@@ -105,11 +126,9 @@ export function RestoreDialog({
   });
 
   const close = () => {
-    // Planlanmamış hazırlık sunucuda bekletilmez (iptal idempotent; hata yok sayılır).
-    if (stage)
-      void api(`/api/backups/restore/${stage.stageId}`, { method: "DELETE" }).catch(
-        () => undefined,
-      );
+    // Planlanmamış hazırlık sunucuda bekletilmez.
+    if (stage) dropStage(stage.stageId);
+    current.current = null;
     onClose();
   };
 
@@ -133,7 +152,13 @@ export function RestoreDialog({
             className="space-y-1.5"
             onSubmit={(e) => {
               e.preventDefault();
-              if (pass.trim() && !check.isPending) check.mutate();
+              if (!pass.trim() || check.isPending || !source) return;
+              // Sunucu sınırını aşan dosya hiç gönderilmez (yarıda kesilen yükleme yerine açık uyarı).
+              if (source.kind === "upload" && source.file.size > UPLOAD_MAX_BYTES) {
+                setError(t("backup.restore.uploadLimit", { mb: fmtNumber(UPLOAD_MAX_MB) }));
+                return;
+              }
+              check.mutate(source);
             }}
           >
             <Label htmlFor="restore-pass">{t("backup.restore.dialog.passphrase")}</Label>
@@ -186,6 +211,10 @@ export function RestoreDialog({
             <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
               <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
               {t("backup.restore.desc")}
+            </p>
+            <p className="flex items-start gap-1.5 text-[12px] text-muted-foreground">
+              <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              {t("backup.restore.after")}
             </p>
             {stage.migrationNeeded && <FieldHint>{t("backup.restore.migration")}</FieldHint>}
             {stage.hasSecrets && (

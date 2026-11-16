@@ -13,7 +13,7 @@ import { api, errorText, localizeApiError } from "@/lib/client/api";
 import { fmtDateTime, fmtNumber } from "@/lib/client/format";
 import { t, type TrKey } from "@/lib/i18n";
 import { desktop, fmtSize, useRefreshBackups, type BackupOverview } from "./data";
-import { RestoreDialog, type RestoreSource } from "./restore-dialog";
+import { RestoreDialog, UPLOAD_MAX_MB, type RestoreSource } from "./restore-dialog";
 
 const KIND: Record<BackupRow["kind"], TrKey> = {
   manual: "backup.kind.manual",
@@ -189,6 +189,9 @@ export function BackupListCard({ data }: { data: BackupOverview }) {
           {t("backup.restore.title")}
         </h3>
         <p className="text-[12px] text-muted-foreground">{t("backup.restore.otherHint")}</p>
+        <p className="text-[12px] text-muted-foreground">
+          {t("backup.restore.uploadLimit", { mb: fmtNumber(UPLOAD_MAX_MB) })}
+        </p>
         <div className="flex flex-wrap gap-2">
           {chooseFile && (
             <Button

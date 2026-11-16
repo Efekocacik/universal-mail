@@ -1,12 +1,15 @@
 import fs from "node:fs";
+import path from "node:path";
 import { lifecycleError } from "@/lib/backup/passphrase";
 import type { LifecyclePending } from "@/lib/backup/shared";
-import { dataDir } from "@/lib/config/paths";
+import { backupsDir, dataDir } from "@/lib/config/paths";
 import { audit } from "@/lib/db/audit";
 import type { Db } from "@/lib/db/client";
+import { backups } from "@/lib/db/schema";
 import { getSetting } from "@/lib/settings";
 import {
   createPending,
+  MAX_WIPE_FOLDERS,
   newNonce,
   readPendingState,
   readResult,
@@ -29,6 +32,13 @@ export async function scheduleWipe(
 ): Promise<void> {
   if (!wipePhraseMatches(o.confirm)) throw lifecycleError("WIPE_CONFIRM_MISMATCH");
   const folder = await getSetting(db, "backup.folder");
+  // Ayarlı klasöre ek olarak eski yedeklerin yazıldığı bütün klasörler (varsayılan klasör zaten silinir).
+  const own = path.resolve(backupsDir());
+  const others = (await db.selectDistinct({ folder: backups.folder }).from(backups))
+    .map((r) => r.folder)
+    .filter((f) => path.isAbsolute(f) && f.length <= 1024 && !f.includes("\0"))
+    .filter((f) => path.resolve(f) !== own && f !== folder)
+    .slice(0, MAX_WIPE_FOLDERS);
   const created = createPending(dataDir(), {
     v: 1,
     kind: "wipe",
@@ -36,6 +46,7 @@ export async function scheduleWipe(
     at: o.now ?? Date.now(),
     nonce: newNonce(),
     ...(folder ? { customBackupFolder: folder } : {}),
+    ...(others.length > 0 ? { customBackupFolders: others } : {}),
   });
   if (!created) throw lifecycleError("LIFECYCLE_PENDING");
   await audit(db, "data.wipe.schedule", "data", undefined, { deleteBackups: o.deleteBackups });
@@ -46,7 +57,7 @@ export function currentPending(): LifecyclePending | null {
   const s = readPendingState(dataDir());
   if (s.state !== "ok") return null;
   if (s.pending.kind === "wipe") {
-    const { customBackupFolder: _omit, ...rest } = s.pending;
+    const { customBackupFolder: _omit, customBackupFolders: _omit2, ...rest } = s.pending;
     return rest;
   }
   return s.pending;

@@ -14,12 +14,13 @@ const schema = z
   .strict();
 
 /**
- * Hazırlanan yedeği yeniden başlatmada geri yüklemeye planlar. 202 `{restartRequired:true}`. Hatalar: 400
+ * Hazırlanan yedeği yeniden başlatmada geri yüklemeye planlar (parola ayarlıysa önce şu anki verilerin şifreli
+ * yedeği alınır). 202 `{restartRequired:true, safetyBackup}`. Hatalar: 400
  * RESTORE_CONFIRM_REQUIRED; 410 RESTORE_STAGE_NOT_FOUND (süresi doldu); 409 LIFECYCLE_PENDING.
  * Denetim: `backup.restore.schedule`.
  */
 export const POST = lifecycleRoute(async (req: Request) => {
   const db = await database();
-  await scheduleRestore(db, await body(req, schema));
-  return json({ restartRequired: true }, { status: 202 });
+  const r = await scheduleRestore(db, await body(req, schema));
+  return json({ restartRequired: true, safetyBackup: r.safetyBackup }, { status: 202 });
 });

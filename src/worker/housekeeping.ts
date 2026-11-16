@@ -1,5 +1,7 @@
 import type { Db } from "@/lib/db/client";
 import { enqueueWeeklyIfDue } from "@/lib/backup/auto";
+import { pruneExpiredStages } from "@/lib/backup/restore";
+import { dataDir } from "@/lib/config/paths";
 import { enqueueJob, pruneFinishedJobs } from "@/lib/jobs/queue";
 import { enqueueRetentionIfEnabled } from "@/lib/lifecycle/jobs";
 import { pruneNotifications } from "@/lib/notifications";
@@ -123,6 +125,10 @@ export async function runHousekeeping(
   // Faz 6 (paket Y.4/Y.5): haftalık otomatik yedek (parola ayarlıysa) ve günlük saklama süresi işi.
   await step("backup", async () => {
     if ((await enqueueWeeklyIfDue(db, { now })) !== null) res.lifecycle!.push("backup.auto");
+  });
+  await step("restoreStages", async () => {
+    const n = pruneExpiredStages(dataDir(), now);
+    if (n > 0) log(`süresi dolan ${n} geri yükleme hazırlığı silindi.`);
   });
   await step("retention", async () => {
     if ((await enqueueRetentionIfEnabled(db, { now })) !== null)

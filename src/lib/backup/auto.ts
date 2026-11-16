@@ -133,9 +133,11 @@ export function makeAutoBackupHandler(deps: BackupDeps = {}, clock: () => number
       const r = await createBackup(ctx.db, { kind: reason, now }, deps);
       ctx.log(`otomatik yedek alındı (${reason}, ${r.backup.sizeBytes ?? 0} bayt).`);
     } catch (e) {
+      // Başka bir yedek sürüyor: bildirim yok, iş normal geri çekilmeyle yeniden denenir (başarı sayılırsa günün
+      // tekilleştirme anahtarı harcanır ve o gün açılış yedeği alınmazdı).
       if (e instanceof LifecycleError && e.code === "BACKUP_IN_PROGRESS") {
-        ctx.log("başka bir yedek sürüyor; otomatik yedek atlandı.");
-        return;
+        ctx.log("başka bir yedek sürüyor; otomatik yedek sonra yeniden denenecek.");
+        throw new Error("Başka bir yedek sürüyor (BACKUP_IN_PROGRESS).");
       }
       const code = e instanceof LifecycleError ? e.code : "BACKUP_FAILED";
       await notify(

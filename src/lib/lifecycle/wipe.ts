@@ -15,7 +15,11 @@ import { DB_FILENAME, PENDING_FILE, RESULT_FILE, STAGING_DIR, WORK_DIR } from ".
 export { WIPE_PHRASES, wipePhraseMatches } from "./wipe-phrase";
 
 export const BACKUP_FILE_RE = /^universal-mail-.+\.umbk(\.part)?$/;
-const PLAIN_COPY_RE = /^pre-(migrate|restore)-.+\.db(-wal|-shm)?$/;
+/**
+ * Düz (şifresiz) veritabanı kopyaları: şema geçişi ve geri yükleme öncesi kopyalar ile paket K'nin şema geçişi
+ * kurtarmasının kenara aldığı başarısız veritabanı (`failed-migrate-*`).
+ */
+export const PLAIN_COPY_RE = /^(pre-(migrate|restore)|failed-migrate)-.+\.db(-wal|-shm|-journal)?$/;
 
 export interface WipeReport {
   removed: number;
@@ -61,6 +65,8 @@ export interface WipeDataOptions {
   deleteBackups: boolean;
   /** Ayarlı özel yedek klasörü (yalnızca `deleteBackups` iken desenle eşleşen dosyalar silinir). */
   customBackupFolder?: string;
+  /** Yedek satırlarında geçen diğer klasörler (aynı kural). */
+  customBackupFolders?: string[];
 }
 
 /** Veri klasöründeki uygulama dosyaları. Bekleyen işaret SİLİNMEZ (çağıran en sonda kaldırır). İdempotent. */
@@ -68,7 +74,7 @@ export function wipeDataDir(o: WipeDataOptions): WipeReport {
   const r: WipeReport = { removed: 0, failed: [] };
   const d = o.dataDir;
   const db = o.dbFile ?? path.join(d, DB_FILENAME);
-  for (const suffix of ["", "-wal", "-shm", "-journal"])
+  for (const suffix of ["", "-wal", "-shm", "-journal", ".restore-tmp"])
     rm(`${db}${suffix}`, `${path.basename(db)}${suffix}`, r);
   const names = new Set([
     "google-session.db",
@@ -85,7 +91,7 @@ export function wipeDataDir(o: WipeDataOptions): WipeReport {
     RESULT_FILE,
   ]);
   for (const n of listSafe(d)) {
-    if (names.has(n) || /^secrets\.json\.(.+\.tmp|corrupt-.+|pre-restore-.+)$/.test(n))
+    if (names.has(n) || /^secrets\.json\.(.+\.tmp|restore-tmp|corrupt-.+|pre-restore-.+)$/.test(n))
       rm(path.join(d, n), n, r);
     else if (n.startsWith(`${PENDING_FILE}.`) && n.endsWith(".tmp")) rm(path.join(d, n), n, r);
   }
@@ -105,8 +111,14 @@ export function wipeDataDir(o: WipeDataOptions): WipeReport {
         /* klasör yok veya boş değil */
       }
     }
-    const custom = o.customBackupFolder;
-    if (custom && path.isAbsolute(custom))
+    const own = path.resolve(backups);
+    const customs = new Set(
+      [o.customBackupFolder, ...(o.customBackupFolders ?? [])]
+        .filter((f): f is string => typeof f === "string" && path.isAbsolute(f))
+        .map((f) => path.resolve(f))
+        .filter((f) => f !== own),
+    );
+    for (const custom of customs)
       for (const n of matchingFiles(custom, BACKUP_FILE_RE)) rm(path.join(custom, n), n, r);
   }
   return r;
