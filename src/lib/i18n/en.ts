@@ -11,6 +11,9 @@ import { registry } from "./en/registry";
 import { variants } from "./en/variants";
 import { ai } from "./en/ai";
 import { imports } from "./en/imports";
+import { backup } from "./en/backup";
+import { install } from "./en/install";
+import { security } from "./en/security";
 
 /**
  * İngilizce sözlük (NFR-09). Türkçe parçalarla aynı adlı parçalardan birleştirilir. Faz 4 entegrasyonundan beri TÜM
@@ -30,6 +33,9 @@ export const en: Record<TrKey, string> = {
   ...variants,
   ...ai,
   ...imports,
+  ...backup,
+  ...install,
+  ...security,
 };
 
 /** Parça adı → İngilizce parça (kapsam raporu için). */
@@ -46,4 +52,7 @@ export const EN_FRAGMENTS = {
   variants,
   ai,
   imports,
+  backup,
+  install,
+  security,
 } as const;

@@ -315,17 +315,29 @@ export async function queryLeads(
         ? [desc(places.firstSeenAt), desc(leads.id)]
         : [desc(leads.noveltyScore), desc(places.firstSeenAt), asc(leads.id)];
 
-  const base = db
+  // Faz 6 (NFR-03): geç satır okuma. Sayfanın kimlikleri önce yalnızca sıralama anahtarlarıyla seçilir; geniş liste
+  // sütunları (önbellek, zenginleştirme, birincil e-posta) yalnızca o ≤ 500 satır için okunur. Önceden sıralayıcı tüm
+  // eşleşen satırları bütün sütunlarıyla taşıyordu (100k'da derin sayfa ~230 ms). Sıralar `leads.id` ile biter, bu
+  // yüzden iç ve dış sıra aynıdır.
+  const pageIdsBase = db
+    .select({ id: leads.id })
+    .from(leads)
+    .leftJoin(places, eq(leads.placeId, places.placeId))
+    .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
+    .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
+  const pageIds = (where ? pageIdsBase.where(where) : pageIdsBase)
+    .orderBy(...order)
+    .limit(limit)
+    .offset(offset);
+  const rows = await db
     .select(LIST_COLUMNS)
     .from(leads)
     .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id))
-    .leftJoin(leadEmails, and(eq(leadEmails.leadId, leads.id), eq(leadEmails.isPrimary, true)));
-  const rows = await (where ? base.where(where) : base)
-    .orderBy(...order)
-    .limit(limit)
-    .offset(offset);
+    .leftJoin(leadEmails, and(eq(leadEmails.leadId, leads.id), eq(leadEmails.isPrimary, true)))
+    .where(inArray(leads.id, pageIds))
+    .orderBy(...order);
   const countBase = db
     .select({ n: sql<number>`count(*)` })
     .from(leads)
@@ -453,28 +465,15 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     businessStatus: undefined,
     emailStatus: undefined,
   });
-  const group = async (
-    col:
-      typeof leads.noveltyLabel | typeof leads.status | typeof DERIVED_STATUS | typeof EMAIL_STATE,
-  ) => {
-    const base = db
-      .select({ k: col, n: sql<number>`count(*)` })
-      .from(leads)
-      .leftJoin(places, eq(leads.placeId, places.placeId))
-      .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
-      .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
-    const rows = await (where ? base.where(where) : base).groupBy(col);
-    return Object.fromEntries(rows.filter((r) => r.k).map((r) => [r.k as string, Number(r.n)]));
-  };
-  // E-posta durumu sayımı kendi süzgecini hariç tutar (seçenekler ve sayıları birlikte görünsün).
-  const [novelty, leadStatus, businessStatus, emailStatus] = await Promise.all([
-    group(leads.noveltyLabel),
-    group(leads.status),
-    group(DERIVED_STATUS),
-    group(EMAIL_STATE),
-  ]);
-  const totalBase = db
+  // Faz 6 (NFR-03): dört sayım ve toplam TEK geçişte hesaplanır. Dört süzgeç de bu `where`'den çıkarıldığı için her
+  // boyutun sayımı aynı satır kümesindendir; çapraz tablo (en çok 4×9×3×12 grup) JS'te boyutlara toplanır. Önceden beş
+  // ayrı tam tarama yapılıyordu (100k'da tek bağlantıda sıralı ~270–390 ms; tek geçiş bunun yaklaşık beşte biri).
+  const crossBase = db
     .select({
+      novelty: leads.noveltyLabel,
+      status: leads.status,
+      business: DERIVED_STATUS,
+      email: EMAIL_STATE,
       n: sql<number>`count(*)`,
       // Yer kimliği olmayan (sicil/içe aktarma) lead'lerin yüklenecek Google verisi yoktur; sayılmaz.
       uncached: sql<number>`coalesce(sum(case when ${leads.placeId} IS NOT NULL AND ${placeCache.placeId} IS NULL then 1 else 0 end), 0)`,
@@ -483,7 +482,30 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     .leftJoin(places, eq(leads.placeId, places.placeId))
     .leftJoin(placeCache, eq(places.placeId, placeCache.placeId))
     .leftJoin(leadEnrichment, eq(leadEnrichment.leadId, leads.id));
-  const totals = (await (where ? totalBase.where(where) : totalBase))[0];
+  const cross = await (where ? crossBase.where(where) : crossBase).groupBy(
+    sql`1`,
+    sql`2`,
+    sql`3`,
+    sql`4`,
+  );
+  const novelty: Record<string, number> = {};
+  const leadStatus: Record<string, number> = {};
+  const businessStatus: Record<string, number> = {};
+  const emailStatus: Record<string, number> = {};
+  const add = (into: Record<string, number>, k: string | null, n: number) => {
+    if (k) into[k] = (into[k] ?? 0) + n;
+  };
+  let total = 0;
+  let uncached = 0;
+  for (const r of cross) {
+    const n = Number(r.n);
+    add(novelty, r.novelty, n);
+    add(leadStatus, r.status, n);
+    add(businessStatus, r.business, n);
+    add(emailStatus, r.email, n);
+    total += n;
+    uncached += Number(r.uncached);
+  }
 
   return {
     countries: countries.map((c) => ({ code: c.code as string, count: Number(c.n) })),
@@ -493,8 +515,8 @@ export async function queryFacets(db: Db, filters: LeadFilters): Promise<Facets>
     leadStatus,
     businessStatus,
     emailStatus,
-    total: Number(totals?.n ?? 0),
-    uncached: Number(totals?.uncached ?? 0),
+    total,
+    uncached,
   };
 }
 

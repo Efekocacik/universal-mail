@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress, Skeleton } from "@/components/ui/misc";
 import { EmptyState, PageHeader } from "@/components/ui/page";
 import { HelpTip } from "@/components/ui/tooltip";
+import { OnboardingChecklistCard } from "@/features/onboarding/checklist-card";
 import { countryLabel, typeLabel } from "@/lib/client/format";
 import {
   useDashboard,
@@ -70,6 +71,8 @@ export function DashboardPage() {
             </Button>
           }
         />
+        {/* Faz 6 yuvası: "Kurulumu tamamlayın" kartı paket K'ye aittir. */}
+        <OnboardingChecklistCard />
         {!data && q.isPending && <DashboardSkeleton />}
         {!data && q.isError && <DashboardLoadError onRetry={() => void q.refetch()} />}
         {data && <DashboardBody data={data} locale={locale} />}

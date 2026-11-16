@@ -136,7 +136,7 @@ Bütün değiştiren uçlar ara katmanda aynı-köken denetiminden geçer, gövd
 | Uç | Değişiklik |
 |---|---|
 | `GET /api/settings` | yeni ayarlar `registry.companiesHouse`, `registry.insee`, `ai.intro`, `tracking.opens`; maskeli gizli durumlar `companiesHouseKey`, `inseeKey`, `anthropicKey`, `snovClientId`, `snovClientSecret` |
-| `PUT /api/settings` | `ai.intro` maliyet onayı **sunucuda damgalanır** (`costAckAt` sunucu saati, `costAckModel` kaydedilen model; istemci değeri yalnızca "yeni onay" işareti). Onaysız açma 400; `tracking.opens` onaysız açma 400 |
+| `PUT /api/settings` | `ai.intro` maliyet onayı **sunucuda damgalanır** (`costAckAt` sunucu saati, `costAckModel` kaydedilen model; istemci değeri yalnızca "yeni onay" işareti). Onaysız açma 400; `tracking.opens` onay anı (`ackAt`) da **sunucuda damgalanır** (Faz 6: kapalı → açık geçişte sunucu saati; açıkken/kapatırken saklanan değer korunur; istemci `{ enabled }` gönderir, açıkça `ackAt: null` ile açma 400) |
 | `POST /api/enrichment/external/test` | `{provider?: hunter\|snov}`; hatalar `EXTERNAL_AUTH` 400, `EXTERNAL_QUOTA`/`EXTERNAL_RATE` 429, `EXTERNAL_NETWORK`/`UPSTREAM` 502 |
 | `GET /api/enrichment`, `POST /api/leads/find-emails` | `external.provider` (seçili servis); arama içe aktarılan lead'in `website` alanını da kullanır |
 | `POST /api/templates/preview`, şablon oluştur/güncelle | `subjectB`, `categoryKey`, `variant: a\|b`; yanıtta `introPending`; ön izleme işaretleri arayüz dilinde |

@@ -57,4 +57,17 @@ export const notifications = {
   "notif.backgroundSkipped.body.CONSENT_REQUIRED":
     "Kullanım koşulları onaylanmadığı için arka plan denetimi yapılmadı.",
   "notif.backgroundSkipped.body.other": "Arka plan denetimi bu kez yapılamadı; yeniden denenecek.",
+  /* Faz 6 (P0): otomatik yedek ve saklama süresi bildirimleri (üreten: paket Y). */
+  "notif.backupFailed.title": "Otomatik yedek alınamadı",
+  "notif.backupFailed.body.BACKUP_PASSPHRASE_REQUIRED":
+    "Yedek parolası ayarlı değil. Ayarlar → Yedekler bölümünden bir parola belirleyin.",
+  "notif.backupFailed.body.BACKUP_FOLDER_UNWRITABLE":
+    "Yedek klasörüne yazılamıyor. Ayarlar → Yedekler bölümünden klasörü denetleyin veya varsayılana dönün.",
+  "notif.backupFailed.body.BACKUP_DISK_FULL":
+    "Diskte yer kalmadı. Yer açtıktan sonra Ayarlar → Yedekler bölümünden şimdi yedek alın.",
+  "notif.backupFailed.body.other":
+    "Yedek bu kez tamamlanamadı; yeniden denenecek. Sürerse Ayarlar → Yedekler bölümüne bakın.",
+  "notif.retentionPurged.title": "Eski kayıtlar silindi: {n}",
+  "notif.retentionPurged.body":
+    "Saklama süresini aşan ve hiç iletişim kurulmamış işletmeler silindi. Ayarlar → Yedekler bölümünden süreyi görebilirsiniz.",
 } as const;

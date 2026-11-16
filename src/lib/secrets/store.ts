@@ -29,6 +29,12 @@ export const SECRET_NAMES = [
  * posta kutusu servisi yazar; maskeli değer bile döndürülmez, ortam değişkeninden de okunmaz.
  */
 export const OAUTH_CLIENT_SECRET = "gmail.oauthClientSecret" as const;
+/**
+ * Faz 6: şifreli yedek parolası (paket Y). Genel `/api/secrets` listesinde (SECRET_NAMES) DEĞİLDİR: değer — maskeli bile —
+ * hiçbir uçtan döndürülmez ve ortam değişkeninden OKUNMAZ (geliştiricinin ortamı yedek parolası sağlayamaz). Yalnızca
+ * yedek servisi yazar/okur; arayüz yalnızca "parola ayarlı mı" bilgisini görür (`secretExists`).
+ */
+export const BACKUP_PASSPHRASE_SECRET = "backup.passphrase" as const;
 /** Posta kutusu başına yenileme belirteci adı (Aşama 15.3'te yazılır); değer SQLite'a ASLA yazılmaz. */
 export type MailboxSecretName = `gmail.refreshToken.${number}`;
 const MAILBOX_SECRET_RE = /^gmail\.refreshToken\.[1-9]\d{0,8}$/;
@@ -42,6 +48,7 @@ const UNSUB_SECRET_RE = /^unsubscribe\.(signingKey|channelKey)\.[0-9a-f]{16}$/;
 export type SecretName =
   | (typeof SECRET_NAMES)[number]
   | typeof OAUTH_CLIENT_SECRET
+  | typeof BACKUP_PASSPHRASE_SECRET
   | MailboxSecretName
   | UnsubscribeKeySecretName;
 
@@ -67,6 +74,7 @@ function assertKnownName(name: string): void {
   if (
     (SECRET_NAMES as readonly string[]).includes(name) ||
     name === OAUTH_CLIENT_SECRET ||
+    name === BACKUP_PASSPHRASE_SECRET ||
     MAILBOX_SECRET_RE.test(name) ||
     UNSUB_SECRET_RE.test(name)
   ) {

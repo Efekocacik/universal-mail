@@ -1,6 +1,7 @@
 import type { Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { updateLeadIntro } from "@/lib/ai/service";
 import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, leadIntros, leads, templates } from "@/lib/db/schema";
 import { FakeMailProvider } from "@/lib/mail/provider/fake-provider";
@@ -76,6 +77,34 @@ describe("kişisel giriş onay bekliyor", () => {
     await new MailDispatcher(db).dispatchOnce({ now: () => later, provider: p });
     expect(p.calls).toBe(1);
     expect((await seq(cl)).status).not.toBe("removed");
+  });
+
+  it("onay (updateLeadIntro) ertelenmiş diziyi hemen sıraya döndürür; 60 dk beklemeden sonraki turda gönderilir", async () => {
+    const c = await createCampaign(db, { steps: 1 });
+    const { cl, leadId } = await addSequence(db, c);
+    const introId = await addIntro(leadId, "draft");
+    const p = new FakeMailProvider();
+    await new MailDispatcher(db).dispatchOnce({ now: () => T0, provider: p });
+    expect((await seq(cl)).nextSendAt).toBe(T0 + INTRO_PENDING_DEFER_MS);
+
+    const approvedAt = T0 + 5 * 60_000;
+    await updateLeadIntro(db, leadId, introId, { action: "approve" }, () => approvedAt);
+    expect((await seq(cl)).nextSendAt).toBe(approvedAt);
+
+    await new MailDispatcher(db).dispatchOnce({ now: () => approvedAt, provider: p });
+    expect(p.calls).toBe(1);
+  });
+
+  it("reddetme veya başka nedenle ertelenen dizi onaydan etkilenmez", async () => {
+    const c = await createCampaign(db, { steps: 1 });
+    const { cl, leadId } = await addSequence(db, c);
+    const introId = await addIntro(leadId, "draft");
+    await db
+      .update(campaignLeads)
+      .set({ nextSendAt: T0 + 3_600_000, lastError: "outside_window" })
+      .where(eq(campaignLeads.id, cl));
+    await updateLeadIntro(db, leadId, introId, { action: "approve" }, () => T0);
+    expect((await seq(cl)).nextSendAt).toBe(T0 + 3_600_000);
   });
 
   it("hiç giriş yoksa eksik lead değişkeni: dizi sonlandırılır (erteleme yok)", async () => {

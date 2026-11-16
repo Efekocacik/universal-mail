@@ -598,6 +598,127 @@ describe("harici servis (Hunter) yedeği", () => {
   });
 });
 
+describe("harici servis: paylaşımlı platform, alan adı başına tek çağrı, bekleyen sonuç", () => {
+  async function leadsWithSite(n: number, website: string): Promise<number[]> {
+    const ids = (await scanAndEnrich(n)).slice(0, n);
+    for (const id of ids) {
+      const pid = (await db.select().from(leads).where(eq(leads.id, id)))[0]!.placeId!;
+      await db.update(placeCache).set({ website }).where(eq(placeCache.placeId, pid));
+    }
+    return ids;
+  }
+  const page =
+    (html: string): FetchFn =>
+    async (u) =>
+      res(u, u.endsWith("/robots.txt") ? 404 : 200, html);
+  const providerWith = (search: ExternalEmailProvider["search"]): ExternalEmailProvider => ({
+    id: "hunter",
+    search,
+    quota: async () => ({ remaining: null, resetDate: null }),
+  });
+
+  it("paylaşımlı platformdaki sitede (linktr.ee/kafe) harici servis çağrılmaz, platform adresi ve siteDomain kaydedilmez", async () => {
+    const [id] = await leadsWithSite(1, "https://linktr.ee/cafe");
+    const search = vi.fn(async () => [
+      { email: "press@linktr.ee", confidence: 95, sourceUrl: "https://linktr.ee/press" },
+    ]);
+    const fetch = page(
+      `<p>Kafe</p><a href="mailto:support@linktr.ee">Linktree destek</a><a href="mailto:kafe.sahibi@gmail.com">m</a>`,
+    );
+    await findEmailsForLeads(baseDeps({ fetch, external: providerWith(search) }), [id!]);
+    expect(search).not.toHaveBeenCalled();
+    const rows = await getLeadEmails(db, id!);
+    expect(rows.some((r) => r.email.endsWith("@linktr.ee"))).toBe(false);
+    expect(rows.map((r) => r.email)).toContain("kafe.sahibi@gmail.com");
+    const enr = (await db.select().from(leadEnrichment).where(eq(leadEnrichment.leadId, id!)))[0]!;
+    expect(enr).toMatchObject({ status: "done", siteDomain: null, externalUsed: false });
+  });
+
+  it("alt alan adlı platform (kafe.wixsite.com) da paylaşımlı sayılır; olağan sitede siteDomain yazılır", async () => {
+    const [wix] = await leadsWithSite(1, "https://kafe.wixsite.com/");
+    const search = vi.fn(async () => []);
+    await findEmailsForLeads(
+      baseDeps({ fetch: page("<p>no email</p>"), external: providerWith(search) }),
+      [wix!],
+    );
+    expect(search).not.toHaveBeenCalled();
+    expect((await db.select().from(leadEnrichment))[0]!.siteDomain).toBeNull();
+    await db
+      .update(placeCache)
+      .set({ website: "https://www.kafe-own.example/" })
+      .where(
+        eq(
+          placeCache.placeId,
+          (await db.select().from(leads).where(eq(leads.id, wix!)))[0]!.placeId!,
+        ),
+      );
+    await findEmailsForLeads(
+      baseDeps({ fetch: page("<p>no email</p>"), external: providerWith(search) }),
+      [wix!],
+      { force: true },
+    );
+    expect(search).toHaveBeenCalledWith("kafe-own.example");
+    expect((await db.select().from(leadEnrichment))[0]!.siteDomain).toBe("kafe-own.example");
+  });
+
+  it("aynı siteyi paylaşan 3 lead için harici servis bir kez çağrılır; adresler üçüne de kaydedilir", async () => {
+    const ids = await leadsWithSite(3, "https://chain-empty.example/");
+    const search = vi.fn(async () => [
+      { email: "info@chain-empty.example", confidence: 90, sourceUrl: null },
+    ]);
+    const out = await findEmailsForLeads(
+      baseDeps({ fetch: page("<p>no email</p>"), external: providerWith(search) }),
+      ids,
+    );
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(out.externalUsed).toBe(3);
+    for (const id of ids)
+      expect((await getLeadEmails(db, id)).map((r) => r.email)).toEqual([
+        "info@chain-empty.example",
+      ]);
+  });
+
+  it("sonuç süre içinde hazır değilse (pending) lead 'bulunamadı' diye kapanmaz; yeniden denenir", async () => {
+    const [id] = await leadsWithSite(1, "https://slow-snov.example/");
+    const search = vi.fn<ExternalEmailProvider["search"]>(async () => {
+      throw new ExternalProviderError("pending", "henüz hazır değil");
+    });
+    const scheduled: number[][] = [];
+    const out = await findEmailsForLeads(
+      baseDeps({
+        fetch: page("<p>no email</p>"),
+        external: providerWith(search),
+        now: () => 5_000,
+      }),
+      [id!],
+      { scheduleRetry: async (leadIds) => void scheduled.push(leadIds) },
+    );
+    expect(out).toMatchObject({ notFound: 0, failed: 1, externalUsed: 0, retryScheduled: 1 });
+    expect(scheduled).toEqual([[id]]);
+    const enr = (await db.select().from(leadEnrichment))[0]!;
+    expect(enr).toMatchObject({
+      status: "failed",
+      lastError: "external_pending",
+      externalUsed: false,
+      nextRetryAt: 5_000 + RETRY_DELAY_MS,
+      siteDomain: "slow-snov.example",
+    });
+    // Ayrılmış sayılmaz: force olmadan sonraki aramada yeniden sorulur
+    search.mockImplementation(async () => [
+      { email: "hello@slow-snov.example", confidence: null, sourceUrl: null },
+    ]);
+    const again = await findEmailsForLeads(
+      baseDeps({ fetch: page("<p>no email</p>"), external: providerWith(search) }),
+      [id!],
+    );
+    expect(again).toMatchObject({ skippedDone: 0, found: 1, externalUsed: 1 });
+    expect((await db.select().from(leadEnrichment))[0]).toMatchObject({
+      status: "done",
+      lastError: null,
+    });
+  });
+});
+
 describe("yinelenen kayıt tespiti ve birincil adres kalıcılığı", () => {
   it("aynı e-postayı veya aynı işletme alan adını paylaşan lead'ler bulunur; bireysel sağlayıcılar alan adı eşleşmesi sayılmaz", async () => {
     const ids = await scanAndEnrich(4);

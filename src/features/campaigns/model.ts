@@ -412,6 +412,8 @@ export function blockerHint(code: string): string | null {
 export function pauseReasonText(reason: string | null | undefined): string | null {
   if (!reason) return null;
   if (reason === "user") return t("campaign.pause.byUser");
+  // Faz 6 (paket Y): yedek geri yüklendikten sonra güvenlik amaçlı duraklatma (`RESTORE_PAUSE_REASON`).
+  if (reason === "restore") return t("campaign.pause.restore");
   if (reason.startsWith("auto:")) {
     const codes = reason.slice(5).split(",").filter(Boolean);
     return t("campaign.pause.auto", { reasons: codes.map(reasonLabel).join(", ") });

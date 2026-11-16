@@ -5,6 +5,14 @@ Müşteri şirketin **yurt dışı dağıtım ağını büyütmek** için, Avrup
 Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak mendil, peçete ve benzeri sarf malzemeleri.
 
 ## Belgeler
+
+**Kullanıcı için (müşteri şirket):**
+- [Kurulum Rehberi](docs/KURULUM.md) — macOS ve Windows'a temiz kurulum, imzasız uygulama uyarısını geçme, güncelleme (eskisinin üzerine kurulur, veriler korunur), kaldırma, 30 dakikalık kurulum listesi
+- [Kullanım Kılavuzu](docs/KULLANIM.md) — ekran görüntüleriyle günlük iş akışı (tarama → liste → e-posta bulma → şablon → kampanya → yanıtlar), ayarlar, yedek ve geri yükleme, veri silme, yasal hatırlatmalar, sorun giderme
+- [Teslim Listesi](docs/TESLIM.md) — teslim paketi, kurulum günü adımları (ilk tarama ve ilk test e-postası), kısa eğitim akışı, kaynak kod ve bakım dönemi kayıtları, imza listesi
+- [Uyum Kuralları](docs/UYUM.md) — uygulamanın uyguladığı gönderim kurallarının sade özeti
+
+**Proje ve geliştirme:**
 - [Yazılım Gereksinim Spesifikasyonu (SRS)](docs/01-SRS.md) — ne yapılacak, hangi API'ler, veri modeli, yasal kurallar, kabul kriterleri
 - [Yol Haritası](docs/02-YOL-HARITASI.md) — 6 faz, 10–12 hafta, her fazın görev listesi
 - [Faz 0 Kılavuzu](docs/04-FAZ0-KILAVUZU.md) — alan adı, Workspace, Google Cloud, kota, anahtarlar ve Gmail bağlantısı için adım adım hesap kurulumu
@@ -15,11 +23,14 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Faz 3 Notları](docs/08-FAZ3-NOTLARI.md) — şablonlar, kampanya, gönderim, uyum; açık teknik borç ve şirketten beklenenler
 - [Faz 3 Canlı Doğrulama](docs/09-FAZ3-CANLI-DOGRULAMA.md) — yalnızca gerçek hesapla kanıtlanabilecek maddeler, kilitlerin açılma sırası, kanıt biçimi
 - [Canlıya Geçiş](docs/10-CANLIYA-GECIS.md) — şirket girdileri (nereye, ne zaman, gizli mi), paylaşım kuralları, aşamalı canlı test sırası
+- [Faz 4 Notları](docs/11-FAZ4-NOTLARI.md) — tarama motoru, keşif ekranı, arayüz cilası, takip iletileri, gösterge paneli
+- [Faz 5 Notları](docs/12-FAZ5-NOTLARI.md) — sicil kaynakları, içe aktarma, yapay zekâ girişi, şablon dilleri; entegrasyon bekleyenler
+- [Faz 6 Notları](docs/13-FAZ6-NOTLARI.md) — paketleme, şifreli yedek, saklama ve veri silme, güvenlik/performans/gizlilik; kullanıcıdan beklenenler
 - [Çıkış aktarıcısı: Cloudflare Worker kurulumu (önerilen)](deploy/cloudflare-worker/README.md) — HTTPS tek tıklamalı abonelikten çıkış aktarıcısının ücretsiz Cloudflare Worker + D1 üzerinde, sunucusuz kurulumu
 - [Çıkış aktarıcısı: VPS kurulumu (isteğe bağlı)](deploy/relay/README.md) — aynı aktarıcının Linux sunucusuna (systemd + Caddy) kurulumu
 
 ## Kurulum modeli
-Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
+Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (macOS `.dmg` / Windows `.exe`); adımlar: [Kurulum Rehberi](docs/KURULUM.md). Geliştiricinin bilgisayarında hiçbir şey çalışmaz ve yer kaplamaz: kurulum dosyaları GitHub Actions ile bulutta derlenir, müşteriye link olarak verilir. Veri müşterinin bilgisayarında kalır.
 
 ## Özet kararlar
 | Konu | Karar |
@@ -41,6 +52,8 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 
 **Faz 3 (şablonlar, kampanya, gönderim, uyum) demo olarak kodlandı; canlı entegrasyonun yazılım hazırlığı sürüyor, Faz 3 kapanmadı.** Şablonlar, kampanya sihirbazı, zamanlayıcı, ülke politikası, engel listesi, çıkış ve silme talepleri demo posta kutusuyla uçtan uca çalışır. Canlı hazırlık (Aşama 15.1–15.8: Gmail OAuth ve gönderim bağdaştırıcısı, gelen kutusu okuyucusu, Ed25519 imzalı RFC 8058 çıkış altyapısı, DNS denetimi, birleşik gönderim kapısı, ARF şikâyetleri) ve 15.10-1 migrasyonu yapıldı. **Gerçek e-posta gönderimi ve gerçek gelen kutusu okuma kodda kapalıdır**; açılmaları gerçek hesapla doğrulamaya, çıkış aktarıcısının dağıtımına, yazılı hukuki onaylara ve kayıtlı bir sürüme bağlıdır, ardından pilot (ilk hafta günde ≤ 20) gelir. Ayrıntılar: [Faz 3 Notları](docs/08-FAZ3-NOTLARI.md), [Canlı Doğrulama](docs/09-FAZ3-CANLI-DOGRULAMA.md), [Canlıya Geçiş](docs/10-CANLIYA-GECIS.md).
 
+**Faz 4–6 kodlandı ve test edildi; yol haritasındaki altı fazın tamamı kodda tamamlandı.** Açık kalanlar müşterinin hesabını, makinesini veya kararını gerektirir (kod imzalama, temiz makinede kurulum denemesi, teslim günü, bakım ve kaynak kod kararları, çıkış sunucusunun dağıtımı, Gmail erişimi): [Faz 6 Notları → Kullanıcıdan beklenenler](docs/13-FAZ6-NOTLARI.md#10-kullanıcıdan-beklenenler).
+
 ## Geliştirme
 ```bash
 npm run setup      # .env.local + veritabanı (ilk kez)
@@ -49,6 +62,7 @@ npm run dev:demo   # aynısı, ayrı veri klasörü (.data-demo) + demo kampanya
 npm test           # birim ve entegrasyon testleri
 npm run build && npx playwright test   # uçtan uca testler
 npm run dist       # macOS/Windows kurulum paketi (bulutta: GitHub Actions)
+npm run docs:shots # docs/img/kullanim/ kılavuz ekran görüntüleri (önce npm run build; demo, geçici veri klasörü)
 npm run build:worker # dist/cloudflare-worker/worker.js — Cloudflare Worker çıkış aktarıcısı (bkz. deploy/cloudflare-worker/README.md)
 npm run build:relay  # dist/relay/relay.cjs — VPS çıkış aktarıcısı (bkz. deploy/relay/README.md)
 ```

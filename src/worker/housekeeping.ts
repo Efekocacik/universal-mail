@@ -1,5 +1,9 @@
 import type { Db } from "@/lib/db/client";
+import { enqueueWeeklyIfDue } from "@/lib/backup/auto";
+import { pruneExpiredStages } from "@/lib/backup/restore";
+import { dataDir } from "@/lib/config/paths";
 import { enqueueJob, pruneFinishedJobs } from "@/lib/jobs/queue";
+import { enqueueRetentionIfEnabled } from "@/lib/lifecycle/jobs";
 import { pruneNotifications } from "@/lib/notifications";
 import { enqueueRdap } from "@/lib/novelty/rdap-job";
 import { purgeExpiredGoogleData } from "@/lib/places/cache";
@@ -30,6 +34,11 @@ export interface HousekeepingResult {
   noveltyUpdated: number;
   notificationsPruned: number;
   enqueued: string[];
+  /**
+   * Faz 6 (paket Y): yaşam döngüsü adımlarının eklediği işler (`backup.auto`, `data.retention`). `enqueued`'dan ayrı
+   * tutulur; böylece eski adımların sonucu değişmez.
+   */
+  lifecycle?: string[];
   errors: string[];
 }
 
@@ -55,6 +64,7 @@ export async function runHousekeeping(
     noveltyUpdated: 0,
     notificationsPruned: 0,
     enqueued: [],
+    lifecycle: [],
     errors: [],
   };
   const step = async (name: string, fn: () => Promise<void>) => {
@@ -111,6 +121,18 @@ export async function runHousekeeping(
     if (ids !== null) res.enqueued.push(PLACE_ID_REFRESH_JOB);
     if (s["novelty.rdap"].enabled && (await enqueueRdap(db, { runAt: now, now })) !== null)
       res.enqueued.push("novelty.rdap");
+  });
+  // Faz 6 (paket Y.4/Y.5): haftalık otomatik yedek (parola ayarlıysa) ve günlük saklama süresi işi.
+  await step("backup", async () => {
+    if ((await enqueueWeeklyIfDue(db, { now })) !== null) res.lifecycle!.push("backup.auto");
+  });
+  await step("restoreStages", async () => {
+    const n = pruneExpiredStages(dataDir(), now);
+    if (n > 0) log(`süresi dolan ${n} geri yükleme hazırlığı silindi.`);
+  });
+  await step("retention", async () => {
+    if ((await enqueueRetentionIfEnabled(db, { now })) !== null)
+      res.lifecycle!.push("data.retention");
   });
   await step("tick", async () => {
     await scheduleTick(db, { runAt: now + FIRST_TICK_DELAY_MS, now });

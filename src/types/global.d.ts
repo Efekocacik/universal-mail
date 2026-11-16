@@ -23,6 +23,12 @@ declare global {
         language?: "tr" | "en";
         openAtLogin?: boolean;
       }) => Promise<{ ok: boolean; openAtLogin?: boolean | null }>;
+      /** Faz 6: güvenli kapanış + yeniden başlatma (bekleyen geri yükleme / verileri silme uygulanır). */
+      relaunch?: () => Promise<void>;
+      /** Faz 6: yedek klasörü seçme penceresi; iptal → null. */
+      chooseFolder?: () => Promise<string | null>;
+      /** Faz 6: `.umbk` yedek dosyası seçme penceresi; iptal → null. */
+      chooseBackupFile?: () => Promise<string | null>;
     };
   }
 }

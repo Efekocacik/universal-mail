@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getDb, type Db } from "@/lib/db/client";
 import { initDatabase } from "@/lib/db/init";
 import { auditLog, jobs, leads, registryCompanies, registryRuns } from "@/lib/db/schema";
@@ -37,6 +37,7 @@ import {
   seedPlace,
 } from "./fixtures/registry/helpers";
 import { createTestDb, type TestDb } from "./helpers/db";
+import { streamedResponse } from "./helpers/stream-response";
 
 /** Uç nokta + iş entegrasyonu (geçici veritabanı, sahte HTTP, YAPAY adlar). */
 
@@ -392,6 +393,46 @@ describe("canlı akış (sahte HTTP)", () => {
     expect(await executeFetch(db, run2!.id, { ...ctx, finalAttempt: false })).toBe("done");
     const [done] = await db.select().from(registryRuns).where(eq(registryRuns.id, run2!.id));
     expect(done).toMatchObject({ status: "done", fetchedCount: 4, newCount: 3 });
+  });
+
+  it("yeni kayıt sayısı sayfa başına kaynak taraması yapmadan tutulur (çok sayfalı çalışma)", async () => {
+    await enableCh();
+    const item = (n: number) => ({
+      company_number: `7200000${n}`,
+      company_name: `PAGED ${n} CAFE LTD`,
+      date_of_creation: "2026-11-10",
+      sic_codes: ["56102"],
+      registered_office_address: { locality: "London", postal_code: "EC1A 1ZZ" },
+    });
+    fakeCh({ hits: 1, items: [item(0)] });
+    await runPost({ source: "companies_house" });
+    await drainRegistryJobs(db);
+    registryHttp.deps = {
+      sleep: async () => undefined,
+      fetchImpl: (async (input: RequestInfo | URL) => {
+        const start = Number(new URL(String(input)).searchParams.get("start_index") ?? 0);
+        const items = [item(start), item(start + 1)];
+        return streamedResponse(JSON.stringify({ hits: 10, items }), { status: 200 });
+      }) as typeof fetch,
+    };
+    await runPost({ source: "companies_house" });
+    const [, run2] = await db.select().from(registryRuns).orderBy(registryRuns.id);
+    const client = (db as unknown as { $client: { execute: (...a: unknown[]) => unknown } })
+      .$client;
+    const sqlOf = (a: unknown) =>
+      typeof a === "string" ? a : String((a as { sql?: unknown })?.sql ?? "");
+    const spy = vi.spyOn(client, "execute");
+    try {
+      const ctx = { shouldStop: () => false, log: () => undefined, finalAttempt: false };
+      expect(await executeFetch(db, run2!.id, ctx)).toBe("done");
+      const scans = spy.mock.calls.filter((c) => /"first_seen_at" >=/.test(sqlOf(c[0])));
+      expect(scans).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+    const [done] = await db.select().from(registryRuns).where(eq(registryRuns.id, run2!.id));
+    // 5 sayfa × 2 kayıt; item(0) önceki çalışmadan
+    expect(done).toMatchObject({ status: "done", fetchedCount: 10, newCount: 9 });
   });
 
   it("401 → çalışma failed REGISTRY_AUTH, iş yeniden denenmez; sına uç noktası 400", async () => {

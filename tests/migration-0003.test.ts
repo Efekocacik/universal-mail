@@ -1075,11 +1075,11 @@ describe("rollback aracı uygulamanın normal çalışma yolundan çağrılamaz"
     const offenders: string[] = [];
     for (const f of roots.flatMap((r) => walk(r))) {
       const rel = path.relative(REPO, f).replace(/\\/g, "/");
-      // Geri alma araçlarının kendileri (0003 ve onu yeniden kullanan 0004/0005) hariç.
-      if (/^(src\/lib\/db|scripts)\/rollback-000[345]\.ts$/.test(rel)) continue;
+      // Geri alma araçlarının kendileri (0003 ve onu yeniden kullanan 0004/0005/0006) hariç.
+      if (/^(src\/lib\/db|scripts)\/rollback-000[3456]\.ts$/.test(rel)) continue;
       const text = fs.readFileSync(f, "utf8");
       if (
-        /rollback-000[345]|rollbackFaz3ArfComplaint|rollbackFaz[45]|executeRollback|planRollback/.test(
+        /rollback-000[3456]|rollbackFaz3ArfComplaint|rollbackFaz[456]|executeRollback|planRollback/.test(
           text,
         )
       )

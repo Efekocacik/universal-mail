@@ -100,6 +100,8 @@ describe("notify", () => {
       "/a.b/c",
       "/x%20y",
       "/?next=%2Fscans",
+      "/settings#backup",
+      "/mail-log?tab=health#x-1",
     ])
       expect(NOTIFICATION_URL_RE.test(ok), ok).toBe(true);
     for (const bad of [
@@ -115,6 +117,12 @@ describe("notify", () => {
       "/./x",
       "/a/..",
       "/a\\b",
+      "/a/..#x",
+      "/.#x",
+      "/settings#",
+      "/settings#a/b",
+      "/settings#a#b",
+      "/settings#%2F",
     ])
       expect(NOTIFICATION_URL_RE.test(bad), bad).toBe(false);
   });

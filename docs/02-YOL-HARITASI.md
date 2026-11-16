@@ -161,19 +161,21 @@ Adım adım ekran kılavuzu: [`docs/04-FAZ0-KILAVUZU.md`](04-FAZ0-KILAVUZU.md). 
 
 ## Faz 6 — Paketleme, yedekleme, dokümantasyon (1 hafta)
 
-- [ ] Kurulum dosyalarının cilası: simge, ilk açılış rehberi, "imzasız uygulama" uyarısı için ekran görüntülü kurulum rehberi (macOS sağ tık → Aç, Windows SmartScreen).
-- [ ] Otomatik veri klasörü, açılışta otomatik yedek ve göç; "verilerimi de sil" ile kaldırma.
-- [ ] Opsiyonel: kod imzalama (Apple Developer, Windows sertifikası), uyarısız kurulum istenirse.
-- [ ] Şifreli yedekleme/geri yükleme; otomatik haftalık yedek.
-- [ ] Güncelleme akışı: yeni kurulum dosyası mevcut kurulumun üstüne kurulur, veri korunur; göç testleri.
-- [ ] Veri saklama süresi (12 ay) ve "veriyi sil" akışı.
-- [ ] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü.
-- [ ] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
-- [ ] Performans testi: 100k lead ile filtreleme < 300 ms.
-- [ ] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca kullanıcı tarafından etkinleştirilen Google, işletme siteleri, sicil API'leri, posta ve gerekli çıkış hizmetlerine bağlantılar doğrulanır (geliştiriciye giden trafik yok).
-- [ ] Teslim paketi (kurulum dosyası + rehber): kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kodun kimde kalacağı anlaşma notuna göre; bakım dönemi başlangıç tarihi yazılı.
+- [x] Kurulum dosyalarının cilası: simge, ilk açılış rehberi, "imzasız uygulama" uyarısı için ekran görüntülü kurulum rehberi (macOS sağ tık → Aç, Windows SmartScreen). *(İşletim sistemi uyarı pencerelerinin ekran görüntüleri temiz makinede eklenecek.)*
+- [x] Otomatik veri klasörü, açılışta otomatik yedek ve göç; "verilerimi de sil" ile kaldırma.
+- [ ] Opsiyonel: kod imzalama (Apple Developer, Windows sertifikası), uyarısız kurulum istenirse. *(Kancalar hazır, varsayılan kapalı; sertifika müşteri kararı.)*
+- [x] Şifreli yedekleme/geri yükleme; otomatik haftalık yedek.
+- [x] Güncelleme akışı: yeni kurulum dosyası mevcut kurulumun üstüne kurulur, veri korunur; göç testleri.
+- [x] Veri saklama süresi (12 ay) ve "veriyi sil" akışı.
+- [x] Kullanıcı rehberi (`docs/KULLANIM.md`, ekran görüntülü, Türkçe), sorun giderme bölümü; kurulum (`docs/KURULUM.md`) ve teslim listesi (`docs/TESLIM.md`).
+- [x] Güvenlik gözden geçirmesi: anahtar saklama, `127.0.0.1` bağlama, `npm audit`.
+- [x] Performans testi: 100k lead ile filtreleme < 300 ms.
+- [x] Gizlilik doğrulaması: temiz kurulumda ağ trafiği izlenir; yalnızca kullanıcı tarafından etkinleştirilen Google, işletme siteleri, sicil API'leri, posta ve gerekli çıkış hizmetlerine bağlantılar doğrulanır (geliştiriciye giden trafik yok). *(Node süreçleri ve arayüz ağ çıkışı bekçisiyle; paketli uygulamanın temiz makinede ağ izlemesi açık.)*
+- [ ] Teslim paketi (kurulum dosyası + rehber): kurulum, müşteri hesabında ilk tarama ve ilk test e-postası birlikte yapılır; kısa eğitim; kaynak kodun kimde kalacağı anlaşma notuna göre; bakım dönemi başlangıç tarihi yazılı. *(Teslim günü müşteriyle yapılır: `docs/TESLIM.md`.)*
 
 **Kabul:** Temiz bir bilgisayarda (Node/terminal olmadan) kurulum dosyasıyla 30 dakikada kurulup ilk tarama yapılır (NFR-06); geliştiricinin bilgisayarı kapalıyken de çalışır.
+
+**Durum (16 Kasım 2026):** Kodlandı ve test edildi; kabulün otomatikleştirilebilen kısmı gerçek açılış betiği ve ağ çıkışı bekçisiyle kanıtlandı (`tests/faz6-acceptance.test.ts`). Açık iki madde (kod imzalama, teslim paketi/kurulum günü) ve gerçek temiz makinede 30 dakikalık deneme müşterinin hesabını, makinesini veya kararını gerektirir. **Yol haritasındaki altı fazın tamamı kodda tamamlandı.** Ayrıntı ve "Kullanıcıdan beklenenler": [`13-FAZ6-NOTLARI.md`](13-FAZ6-NOTLARI.md).
 
 ---
 

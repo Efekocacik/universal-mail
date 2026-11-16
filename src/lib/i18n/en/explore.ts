@@ -152,4 +152,7 @@ export const explore = {
   "detail.unblock.body":
     "This business was marked because it did not want to be contacted. If you remove the mark it can be added to campaigns again. This change is recorded.",
   "detail.unblock.confirm": "Remove mark",
+
+  "enrichError.external_pending":
+    "The external lookup service has not finished yet; try “Find emails” again later",
 } as const satisfies EnFragment<typeof TrExplore>;

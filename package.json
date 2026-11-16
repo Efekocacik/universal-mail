@@ -30,12 +30,13 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "electron:dev": "npm run build:bundles && UM_DEV_URL=http://127.0.0.1:3000 electron .",
-    "dist": "npm run build && electron-builder --publish never",
-    "dist:dir": "npm run build && electron-builder --dir --publish never",
+    "dist": "npm run build && electron-builder --config electron-builder.config.cjs --publish never",
+    "dist:dir": "npm run build && electron-builder --config electron-builder.config.cjs --dir --publish never",
     "build:standalone": "node scripts/prepare-standalone.mjs",
     "smoke": "node scripts/smoke.mjs",
     "icon": "node scripts/make-icon.mjs",
-    "bench": "tsx scripts/bench.mts"
+    "bench": "tsx scripts/bench.mts",
+    "docs:shots": "playwright test --config e2e/docs/playwright.docs.config.ts"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",

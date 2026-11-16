@@ -326,6 +326,52 @@ describe("demo yaşam döngüsü ve {{kisisel_giris}}", () => {
   });
 });
 
+describe("GET /api/leads/:id/intro — onaylı giriş pencere dışında kalmaz", () => {
+  it("onaylıdan sonra 25 red ve yeni bir taslak: liste onaylıyı yine içerir, panel onu 'kullanılan metin' olarak gösterir", async () => {
+    await setup();
+    const leadId = await addLead();
+    const now = Date.now();
+    const row = (
+      status: "approved" | "rejected" | "draft",
+      i: number,
+    ): typeof leadIntros.$inferInsert => ({
+      leadId,
+      language: "en",
+      text: `We noticed your café in Leeds and wanted to say hello (${i}).`,
+      status,
+      model: "demo",
+      createdAt: now + i,
+      updatedAt: now + i,
+      approvedAt: status === "approved" ? now : null,
+    });
+    const [approved] = await db
+      .insert(leadIntros)
+      .values(row("approved", 0))
+      .returning({ id: leadIntros.id });
+    await db
+      .insert(leadIntros)
+      .values(Array.from({ length: 25 }, (_, i) => row("rejected", i + 1)));
+    const [draft] = await db
+      .insert(leadIntros)
+      .values(row("draft", 26))
+      .returning({ id: leadIntros.id });
+
+    const rows = (await list(leadId)) as LeadIntro[];
+    expect(rows).toHaveLength(INTRO_LIMITS.listLimit + 1);
+    expect(rows[0]!.id).toBe(draft!.id);
+    expect(rows.at(-1)).toMatchObject({ id: approved!.id, status: "approved" });
+    expect(currentIntro(rows, "en")).toMatchObject({ id: draft!.id, status: "draft" });
+    expect(supersededApproved(rows, "en")).toMatchObject({ id: approved!.id });
+
+    // Taslak reddedilince onaylı metin 'güncel' olarak görünür (boş ya da red satırı değil)
+    await db.update(leadIntros).set({ status: "rejected" }).where(eq(leadIntros.id, draft!.id));
+    expect(currentIntro((await list(leadId)) as LeadIntro[], "en")).toMatchObject({
+      id: approved!.id,
+      status: "approved",
+    });
+  });
+});
+
 describe("canlı Claude (sahte fetch)", () => {
   const reply = (text: string, usage = { input_tokens: 900, output_tokens: 300 }) => ({
     model: "claude-opus-5-5",

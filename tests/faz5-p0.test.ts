@@ -183,7 +183,11 @@ describe("Faz 5 ayarları: API", () => {
       sicCodes: ["56102"],
       windowDays: 14,
     });
-    expect(body.settings["tracking.opens"]).toEqual({ enabled: true, ackAt: now });
+    // Açılma izleme onayı da sunucuda damgalanır (istemcinin gönderdiği `now` değil, sunucu saati).
+    expect(body.settings["tracking.opens"]).toMatchObject({ enabled: true });
+    expect((body.settings["tracking.opens"] as { ackAt: number }).ackAt).toBeGreaterThanOrEqual(
+      now,
+    );
     for (const k of [
       "companiesHouseKey",
       "inseeKey",
@@ -194,6 +198,25 @@ describe("Faz 5 ayarları: API", () => {
       expect(body.secrets[k], k).toMatchObject({ set: expect.any(Boolean) });
     expect(body.secrets.anthropicKey).toMatchObject({ set: true, source: "store" });
     expect(JSON.stringify(body)).not.toContain(secretValue);
+  });
+
+  it("açılma izleme onay anı sunucuda damgalanır: istemcinin sahte ackAt'ı yok sayılır, yeniden açma/kapatma onayı korur", async () => {
+    const before = Date.now();
+    expect((await put({ "tracking.opens": { enabled: true, ackAt: 1 } })).status).toBe(200);
+    const first = await getSetting(db, "tracking.opens");
+    expect(first.enabled).toBe(true);
+    expect(first.ackAt).toBeGreaterThanOrEqual(before);
+    expect(first.ackAt).toBeLessThanOrEqual(Date.now());
+    // Zaten açıkken yeniden açmak saklanan onayı değiştirmez (gelecek tarihli sahte değer de yok sayılır)
+    await put({ "tracking.opens": { enabled: true, ackAt: 9_999_999_999_999 } });
+    expect((await getSetting(db, "tracking.opens")).ackAt).toBe(first.ackAt);
+    // Kapatmak önceki onay anını denetim için saklar; istemcinin null'ı onu silmez
+    await put({ "tracking.opens": { enabled: false, ackAt: null } });
+    expect(await getSetting(db, "tracking.opens")).toEqual({ enabled: false, ackAt: first.ackAt });
+    // Yalnızca `{ enabled: true }` yeterli (arayüz böyle gönderir); açıkça `ackAt: null` reddedilir
+    expect((await put({ "tracking.opens": { enabled: true, ackAt: null } })).status).toBe(400);
+    expect((await put({ "tracking.opens": { enabled: true } })).status).toBe(200);
+    expect((await getSetting(db, "tracking.opens")).ackAt).toBeGreaterThanOrEqual(first.ackAt!);
   });
 });
 

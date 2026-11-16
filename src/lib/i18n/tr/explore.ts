@@ -160,4 +160,8 @@ export const explore = {
   "detail.unblock.body":
     "Bu işletme iletişim istemediği için işaretlenmişti. İşareti kaldırırsanız yeniden kampanyalara eklenebilir. Bu değişiklik kayda geçer.",
   "detail.unblock.confirm": "İşareti kaldır",
+
+  // E-posta bulma: harici servis (Snov) sonucu süre içinde hazırlanmadı
+  "enrichError.external_pending":
+    "Harici servis sonucu henüz hazır değil; “E-posta bul” ile yeniden deneyebilirsiniz",
 } as const;

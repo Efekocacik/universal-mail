@@ -1,10 +1,11 @@
-import { and, desc, eq, gte, lt, ne, sql } from "drizzle-orm";
+import { and, desc, eq, gt, gte, inArray, lt, ne, sql } from "drizzle-orm";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { audit } from "@/lib/db/audit";
-import { auditLog, leadEnrichment, leadIntros, leads } from "@/lib/db/schema";
+import { auditLog, campaignLeads, leadEnrichment, leadIntros, leads } from "@/lib/db/schema";
 import { RobotsPolicy } from "@/lib/email/robots";
 import type { FetchFn } from "@/lib/email/safe-fetch";
 import { categoryLabel } from "@/lib/mail/render-context";
+import { wakeDispatchSafely } from "@/lib/mail/scheduler/job";
 import { suggestLanguage } from "@/lib/mail/language";
 import { registrableDomain } from "@/lib/novelty/rdap";
 import { checkCollectionReady } from "@/lib/scan/gates";
@@ -451,14 +452,25 @@ export async function generateLeadIntro(
 
 /* ----------------------------- liste ve inceleme ----------------------------- */
 
+/**
+ * Lead'in en yeni `listLimit` girişi ARTI (pencere dışında kalmış olsa da) onaylı girişleri: `{{kisisel_giris}}` onaylıyı
+ * kullanır, panel de onu göstermeli (çok sayıda yeniden üretim/red sonrasında bile). Dil başına en çok bir onaylı vardır
+ * (`lead_intros_approved_uq`), yani liste en çok `listLimit + dil sayısı` satırdır; yeniden eskiye sıralı.
+ */
 export async function listLeadIntros(db: DbExecutor, leadId: number): Promise<LeadIntroDto[]> {
-  const rows = await db
+  const recent = await db
     .select()
     .from(leadIntros)
     .where(eq(leadIntros.leadId, leadId))
     .orderBy(desc(leadIntros.id))
     .limit(INTRO_LIMITS.listLimit);
-  return rows.map(toIntroDto);
+  const approved = await db
+    .select()
+    .from(leadIntros)
+    .where(and(eq(leadIntros.leadId, leadId), eq(leadIntros.status, "approved")));
+  const byId = new Map(recent.map((r) => [r.id, r]));
+  for (const r of approved) byId.set(r.id, r);
+  return [...byId.values()].sort((a, b) => b.id - a.id).map(toIntroDto);
 }
 
 export async function leadExists(db: DbExecutor, leadId: number): Promise<boolean> {
@@ -503,6 +515,7 @@ export async function updateLeadIntro(
     throw new IntroError("INTRO_TEXT_INVALID", "Kaydedilecek metin yok.");
   }
   const ts = now();
+  let wake = false;
   try {
     const dto = await db.transaction(async (tx) => {
       const [row] = await tx
@@ -537,6 +550,21 @@ export async function updateLeadIntro(
           })
           .where(eq(leadIntros.id, introId))
           .returning();
+        // Onay bekleyen giriş yüzünden ertelenmiş diziler (dağıtıcı `intro_pending`, +60 dk) hemen sıraya döner;
+        // gönderim penceresi, günlük tavan ve aralık kuralları dağıtıcıda yine uygulanır.
+        const woken = await tx
+          .update(campaignLeads)
+          .set({ nextSendAt: ts, updatedAt: ts })
+          .where(
+            and(
+              eq(campaignLeads.leadId, leadId),
+              eq(campaignLeads.lastError, "intro_pending"),
+              inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
+              gt(campaignLeads.nextSendAt, ts),
+            ),
+          )
+          .returning({ id: campaignLeads.id });
+        wake = woken.length > 0;
         return u!;
       }
       const [u] = await tx
@@ -555,6 +583,8 @@ export async function updateLeadIntro(
       language: dto.language,
       edited: text !== undefined,
     });
+    // İşlem dışında: uyandırma başarısız olsa da onay geçerlidir (worker bakımı işi en geç birkaç dakikada kurar).
+    if (wake) await wakeDispatchSafely(db, { now: ts, source: "ai.intro.approve" });
     return toIntroDto(dto);
   } catch (e) {
     if (isUniqueViolation(e))
