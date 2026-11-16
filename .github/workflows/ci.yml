@@ -133,6 +133,10 @@ jobs:
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
       - name: Paketlenmiş uygulamanın duman testi
         run: npm run smoke
+      # Windows: imzasız derlemede de simge ve sürüm bilgisi .exe'ye gömülü olmalı (kısayollar Universal Mail simgesini taşır).
+      - name: Windows .exe simge ve sürüm bilgisi
+        if: runner.os == 'Windows'
+        run: node scripts/check-win-exe.mjs
       - uses: actions/upload-artifact@v7
         with:
           name: kurulum-${{ matrix.name }}

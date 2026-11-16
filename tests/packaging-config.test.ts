@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import { createRequire } from "node:module";
+import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 /**
@@ -26,7 +28,6 @@ const SIGN_VARS = [
   "APPLE_TEAM_ID",
   "WIN_CSC_LINK",
   "WIN_CSC_KEY_PASSWORD",
-  "UM_WIN_EDIT_EXE",
 ] as const;
 const saved: Record<string, string | undefined> = Object.fromEntries(
   SIGN_VARS.map((k) => [k, process.env[k]]),
@@ -95,12 +96,12 @@ describe("electron-builder.config.cjs", () => {
     expect(c.mac.identity).toBeNull();
     expect(c.mac.hardenedRuntime).toBe(false);
     expect(c.mac.notarize).toBe(false);
-    expect(c.win.signAndEditExecutable).toBe(false);
+    expect(c.win.signExecutable).toBe(false);
     expect(c.dmg.sign).toBe(false);
     // Boş dize de "yok" sayılır (CI'da tanımsız sır boş dize olarak gelir).
     const empty = load({ CSC_LINK: "", WIN_CSC_LINK: " ", APPLE_ID: "" });
     expect(empty.mac.identity).toBeNull();
-    expect(empty.win.signAndEditExecutable).toBe(false);
+    expect(empty.win.signExecutable).toBe(false);
   });
 
   it("macOS sertifikası verilince imzalı + sertleştirilmiş; notarize yalnızca üç Apple değişkeni birlikteyse", () => {
@@ -128,11 +129,45 @@ describe("electron-builder.config.cjs", () => {
     }
   });
 
-  it("Windows: WIN_CSC_LINK veya CSC_LINK ile imzalı; UM_WIN_EDIT_EXE=1 yalnızca simge/sürüm bilgisini açar", () => {
-    expect(load({ WIN_CSC_LINK: "x" }).win.signAndEditExecutable).toBe(true);
-    expect(load({ CSC_LINK: "x" }).win.signAndEditExecutable).toBe(true);
-    expect(load({ UM_WIN_EDIT_EXE: "1" }).win.signAndEditExecutable).toBe(true);
-    expect(load({ UM_WIN_EDIT_EXE: "0" }).win.signAndEditExecutable).toBe(false);
+  it("Windows: simge/sürüm bilgisi HER ZAMAN gömülür; imzalama yalnızca WIN_CSC_LINK veya CSC_LINK ile", () => {
+    // electron-builder 26: signAndEditExecutable=false hem imzalamayı hem simgeyi kapatır; signExecutable=false yalnızca
+    // imzalamayı. İmzasız derlemede .exe ve kısayollar Electron simgesini taşımasın.
+    for (const env of [{}, { WIN_CSC_LINK: "x" }, { CSC_LINK: "x" }])
+      expect(load(env).win.signAndEditExecutable).toBe(true);
+    expect(load().win.signExecutable).toBe(false);
+    expect(load({ WIN_CSC_LINK: "x" }).win.signExecutable).toBe(true);
+    expect(load({ CSC_LINK: "x" }).win.signExecutable).toBe(true);
+    // Kurulu electron-builder sürümü bu ayrımı gerçekten yapıyor (sürüm yükseltmesinde anlam değişirse test kırılır).
+    const winPackager = fs.readFileSync(req.resolve("app-builder-lib/out/winPackager.js"), "utf8");
+    expect(winPackager).toMatch(
+      /signExecutable === false\) \{\s+builder_util_1\.log\.info\(logFields, "file signing skipped/,
+    );
+    const signApp = winPackager.slice(winPackager.indexOf("async signApp("));
+    // Kaynak düzenlemeyi atlayan TEK koşul signAndEditExecutable === false'tur.
+    expect(signApp.slice(0, signApp.indexOf("signAndEditResources("))).not.toMatch(
+      /signExecutable === false\) \{\s+builder_util_1\.log\.info\(\{ exe/,
+    );
+  });
+
+  it("CI kontrolü: ürün adı .exe sürüm bilgisinde UTF-16 olarak aranır", async () => {
+    const { hasEmbeddedProductName } = (await import(
+      pathToFileURL(path.join(REPO, "scripts", "check-win-exe.mjs")).href
+    )) as {
+      hasEmbeddedProductName: (b: Buffer, n: string) => boolean;
+    };
+    const versionInfo = (name: string) =>
+      Buffer.concat([
+        Buffer.from([0x30, 0x00, 0x0d, 0x00, 0x01, 0x00]),
+        Buffer.from(`ProductName\0\0${name}\0`, "utf16le"),
+      ]);
+    expect(hasEmbeddedProductName(versionInfo("Universal Mail"), "Universal Mail")).toBe(true);
+    expect(hasEmbeddedProductName(versionInfo("Electron"), "Universal Mail")).toBe(false);
+    // Düz ASCII (ör. asar içeriği) sayılmaz.
+    expect(
+      hasEmbeddedProductName(Buffer.from("ProductName Universal Mail"), "Universal Mail"),
+    ).toBe(false);
+    const ci = fs.readFileSync(path.join(REPO, ".github", "workflows", "ci.yml"), "utf8");
+    expect(ci).toMatch(/if: runner\.os == 'Windows'\s+run: node scripts\/check-win-exe\.mjs/);
   });
 
   it("NSIS: kullanıcı başına, yönetici izni yok, kısayollar, kurulum sonrası çalıştır, veriler kendiliğinden silinmez", () => {
@@ -165,30 +200,82 @@ describe("electron-builder.config.cjs", () => {
     expect(c.directories.output).toBe("release");
   });
 
-  it("geliştiricinin yerel verisi (.data, .env, veritabanı, anahtar dosyaları) pakete girmez", () => {
-    // Next'in dosya izleyicisi proje kökündeki .data/ ve .env* dosyalarını .next/standalone içine kopyalayabilir.
+  it("geliştiricinin yerel verisi pakete girmez: süzgeç gerçek klasör ağacına electron-builder eşleyicisiyle uygulanır", () => {
+    // Next'in dosya izleyicisi proje kökündeki .data*/ ve .env* dosyalarını .next/standalone içine kopyalayabilir.
     const server = load().extraResources.find((r: { to: string }) => r.to === "server") as {
       from: string;
       filter: string[];
     };
     expect(server.from).toBe(".next/standalone");
     expect(server.filter[0]).toBe("**/*");
-    for (const pattern of [
-      "!node_modules/**",
-      "!.data/**",
-      "!.data-demo/**",
-      "!**/.env",
-      "!**/.env.*",
-      "!**/*.db",
-      "!**/*.db-wal",
-      "!**/*.db-shm",
-      "!**/master.key",
-      "!**/secrets.json",
-    ])
-      expect(server.filter).toContain(pattern);
-    // Paketin çalışması için gereken klasörler dışarıda bırakılmaz.
-    for (const kept of [".next", "data", "drizzle"])
-      expect(server.filter.some((f) => f === `!${kept}/**` || f === `!${kept}`)).toBe(false);
+    const root = fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), "um-pack-"));
+    try {
+      const shipped = [
+        "server.js",
+        "package.json",
+        "migrate.cjs",
+        ".next/server/app/page.js",
+        ".next/server/app/api/backups/route.js",
+        ".next/static/chunks/main.js",
+        "drizzle/0000_init.sql",
+        "drizzle/meta/_journal.json",
+        "data/cities.eu-tr.json",
+        "data/ATTRIBUTION.md",
+        "public/icon.svg",
+      ];
+      const leaked = [
+        "node_modules/x/index.js",
+        ".data/universal-mail.db",
+        ".data/master.key",
+        ".data/secrets.json",
+        ".data/ui-prefs.json",
+        ".data-demo/universal-mail.db",
+        ".data-arsiv-2026-10-18-demo/notes.json",
+        ".data-x/logs/main.log",
+        ".data-x/export.csv",
+        ".env",
+        ".env.local",
+        "data/backups/x.umbk",
+        "data/backups/pre-migrate-2026.db",
+        "data/backups/export.json",
+        "data/export-leads.csv",
+        "data/master.key.enc",
+        "data/logs/main.log",
+        "data/ui-prefs.json",
+        "yedek/x.umbk",
+        "sub/master.key.enc",
+        "sub/app.db-wal",
+      ];
+      for (const rel of [...shipped, ...leaked]) {
+        const p = path.join(root, ...rel.split("/"));
+        fs.mkdirSync(path.dirname(p), { recursive: true });
+        fs.writeFileSync(p, "x");
+      }
+      const { FileMatcher } = req("app-builder-lib/out/fileMatcher") as {
+        FileMatcher: new (
+          from: string,
+          to: string,
+          expand: (s: string) => string,
+          patterns: string[],
+        ) => { createFilter: () => (file: string, stat: fs.Stats) => boolean };
+      };
+      const filter = new FileMatcher(root, "server", (x) => x, server.filter).createFilter();
+      // electron-builder'ın kopyalama yürüyüşü gibi: süzgeçten geçmeyen klasöre girilmez.
+      const included: string[] = [];
+      const walk = (dir: string) => {
+        for (const name of fs.readdirSync(dir)) {
+          const p = path.join(dir, name);
+          const st = fs.statSync(p);
+          if (!filter(p, st)) continue;
+          if (st.isDirectory()) walk(p);
+          else included.push(path.relative(root, p).split(path.sep).join("/"));
+        }
+      };
+      walk(root);
+      expect(included.sort()).toEqual([...shipped].sort());
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("simge: 1024 px PNG (macOS için ≥ 512, Windows için ≥ 256), kare", () => {

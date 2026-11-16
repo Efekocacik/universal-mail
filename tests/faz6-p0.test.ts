@@ -412,6 +412,7 @@ describe("Electron dikişleri (enjekte bağımlılıklarla)", () => {
       logDir: "/gunluk",
       attempt: 1,
       exitCode: 1,
+      dbInUse: () => false,
       t: (k, p) => `${k}${p ? JSON.stringify(p) : ""}`,
       showMessageBox: (spec) => (boxes.push(spec.title), 0),
       showErrorBox: (title) => void errorBoxes.push(title),

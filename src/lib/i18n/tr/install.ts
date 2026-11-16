@@ -47,7 +47,7 @@ export const install = {
   "electron.migrate.body.DISK_FULL":
     "Diskte yeterli boş yer yok. Diskte yer açın (ör. büyük dosyaları silin veya Çöp Kutusu'nu boşaltın) ve «Yeniden dene»ye basın.",
   "electron.migrate.body.CORRUPT":
-    "Veritabanı dosyası bozuk görünüyor. Güncelleme öncesi yedeğe dönebilir veya günlük klasörüyle birlikte destek isteyebilirsiniz.",
+    "Veritabanı dosyası bozuk görünüyor. Güncelleme öncesi kopya (varsa) güncellemeden birkaç saniye önce aynı dosyadan alındığı için aynı sorunu taşıyor olabilir. Şifreli otomatik yedekleriniz (.umbk) veri klasöründeki «backups» klasöründe durur; ancak şimdilik yalnızca uygulama açıkken (Ayarlar → Yedekler) geri yüklenebilir. Hiçbir dosyayı silmeyin; veri klasörünün yerini ve günlük klasörünü paylaşarak destek isteyin.",
   "electron.migrate.body.VERIFY_FAILED":
     "Güncelleme uygulandı ama sonrasındaki bütünlük denetimi başarısız oldu. Güncelleme öncesi yedeğe dönmeniz önerilir.",
   "electron.migrate.body.FAILED":
@@ -72,6 +72,9 @@ export const install = {
   "electron.migrate.restored.title": "Verileriniz güncelleme öncesi hâline döndü",
   "electron.migrate.restored.body":
     "Bu sürüm veritabanını güncelleyemedi. Önceki Universal Mail sürümünü yeniden kurun veya günlük klasörüyle birlikte destek isteyin. Uygulama şimdi kapanacak.",
+  "electron.migrate.inUse.title": "Veritabanı şu an kullanımda",
+  "electron.migrate.inUse.body":
+    "Başka bir Universal Mail penceresi veya süreci veritabanını kullanıyor; dosyalar bu sırada değiştirilemez. Hiçbir şey değiştirilmedi. Diğer Universal Mail pencerelerini kapatıp yeniden deneyin.",
   "electron.migrate.restoreFailed.title": "Yedeğe dönülemedi",
   "electron.migrate.restoreFailed.body":
     "Yedeğe dönüş tamamlanamadı. Hiçbir dosya silinmedi ve veritabanınız olduğu gibi duruyor. Destek isterken günlük klasörünü paylaşın.",

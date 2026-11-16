@@ -8,10 +8,14 @@ import type { MigrateResult, MigrateResultCode } from "../src/lib/db/migrate-res
  *   "retry" → ana süreç geçişi yeniden çalıştırır; "quit" → uygulama kapanır (ek hata kutusu GÖSTERİLMEZ).
  *
  * Düğmeler (kullanıcının arayüz dilinde):
- *   1. Yeniden dene: yalnızca ilk {@link MIGRATION_RETRY_DIALOGS} gösterimde (sonsuz döngü olmaz).
- *   2. Güncelleme öncesi yedeğe dön: yalnızca sonuç dosyasındaki yedek `<dataDir>/backups/pre-migrate-*.db` ise ve
- *      diskte varsa (ilk kurulumda yedek yoktur, düğme de yoktur). Onaydan sonra mevcut veritabanı (+ -wal/-shm)
- *      SİLİNMEDEN `backups/failed-migrate-<zaman>.db` adıyla kenara alınır ve yedek yerine konur.
+ *   1. Yeniden dene: yalnızca yeniden denemenin işe yarayabileceği kodlarda ({@link RETRYABLE_CODES}: BLOCKED,
+ *      DISK_FULL, FAILED; geçiş atomik olduğundan veritabanı değişmemiştir) ve ilk {@link MIGRATION_RETRY_DIALOGS}
+ *      gösterimde. VERIFY_FAILED'da geçiş ZATEN uygulanmıştır, CORRUPT'ta dosya bozuktur: yeniden deneme sunulmaz.
+ *   2. Güncelleme öncesi yedeğe dön: yalnızca yedek `<dataDir>/backups/pre-migrate-*.db` ise ve diskte varsa (ilk
+ *      kurulumda yedek yoktur, düğme de yoktur; sonuç dosyasında yoksa aynı açılıştaki önceki denemenin yedeği
+ *      kullanılır). BLOCKED'da ASLA sunulmaz (veritabanı başka bir süreçte açık). Onaydan sonra, veritabanını hiçbir
+ *      sürecin tutmadığı yeniden denetlenir; mevcut veritabanı (+ -wal/-shm) SİLİNMEDEN
+ *      `backups/failed-migrate-<zaman>.db` adıyla kenara alınır ve yedek yerine konur.
  *   3. Günlük klasörünü aç: klasörü açar ve aynı iletişim kutusunu yeniden gösterir.
  *   4. Çık.
  *
@@ -23,6 +27,16 @@ import type { MigrateResult, MigrateResultCode } from "../src/lib/db/migrate-res
 export interface MigrationRecoveryDeps {
   dataDir: string;
   logDir: string;
+  /**
+   * Aynı açılıştaki önceki bir denemenin güncelleme öncesi yedeği (sonuç dosyasında yedek yoksa kullanılır; ör. disk
+   * dolu iken ikinci denemenin kopyası alınamadı). Bkz. {@link rememberBackup}.
+   */
+  rememberedBackup?: string | null;
+  /**
+   * Veritabanını şu anda başka bir süreç tutuyor mu (canlı bakım kilidi veya `migrate.lock`)? Yedeğe dönüşten hemen
+   * önce sorulur; true ise dosyalara dokunulmaz.
+   */
+  dbInUse: () => boolean;
   /** Bu kaçıncı deneme (1'den başlar). Sınır paket K'dedir; ana süreç ayrıca güvenlik sınırı uygular. */
   attempt: number;
   /** migrate alt sürecinin çıkış kodu (zaman aşımında null). */
@@ -60,6 +74,16 @@ export type MigrationRecoveryAction = "retry" | "quit";
  * erişilebilir kalır).
  */
 export const MIGRATION_RETRY_DIALOGS = 2;
+/**
+ * Yeniden denemenin anlamlı olduğu kodlar: geçiş tek işlemde uygulandığından bu hatalarda veritabanı değişmemiştir.
+ * VERIFY_FAILED (geçiş uygulandı; yeniden çalıştırma "bekleyen yok" deyip bozuk veritabanıyla açardı) ve CORRUPT
+ * (dosya bozuk; yeniden deneme düzeltmez) burada YOKTUR.
+ */
+export const RETRYABLE_CODES: ReadonlySet<MigrateResultCode> = new Set([
+  "BLOCKED",
+  "DISK_FULL",
+  "FAILED",
+]);
 /** Electron'da ana veritabanı dosyasının adı (src/lib/config/paths.ts `dbPath()` varsayılanı). */
 export const MAIN_DB_FILENAME = "universal-mail.db";
 const PRE_MIGRATE_RE = /^pre-migrate-[0-9A-Za-z-]+\.db$/;
@@ -85,15 +109,35 @@ export function failureCode(result: MigrateResult | null): Exclude<MigrateResult
  */
 export function restorableBackup(
   result: MigrateResult | null,
+  deps: Pick<MigrationRecoveryDeps, "dataDir" | "exists"> &
+    Partial<Pick<MigrationRecoveryDeps, "rememberedBackup">>,
+): string | null {
+  return validBackup(result?.backupPath, deps) ?? validBackup(deps.rememberedBackup, deps);
+}
+
+function validBackup(
+  p: string | null | undefined,
   deps: Pick<MigrationRecoveryDeps, "dataDir" | "exists">,
 ): string | null {
-  const p = result?.backupPath;
   if (!p) return null;
   const backupsDir = path.resolve(deps.dataDir, "backups");
   const abs = path.resolve(p);
   if (path.dirname(abs) !== backupsDir) return null;
   if (!PRE_MIGRATE_RE.test(path.basename(abs))) return null;
   return deps.exists(abs) ? abs : null;
+}
+
+/**
+ * Ana süreç her başarısız denemeden sonra çağırır: bu denemenin geçerli yedeği varsa o, yoksa öncekisi (hâlâ diskteyse)
+ * hatırlanır. Hatırlanan yedek iletişim kutusuna (`rememberedBackup`) ve sonraki denemeye (`UM_PRE_MIGRATE_BACKUP`;
+ * yeni kopya alınmaz) verilir.
+ */
+export function rememberBackup(
+  result: MigrateResult | null,
+  previous: string | null | undefined,
+  deps: Pick<MigrationRecoveryDeps, "dataDir" | "exists">,
+): string | null {
+  return validBackup(result?.backupPath, deps) ?? validBackup(previous, deps);
 }
 
 const stampOf = (ms: number) => new Date(ms).toISOString().replace(/[:.]/g, "-");
@@ -174,7 +218,10 @@ export async function handleMigrationFailure(
 ): Promise<MigrationRecoveryAction> {
   const { t } = deps;
   const code = failureCode(result);
-  const canRetry = deps.attempt <= MIGRATION_RETRY_DIALOGS;
+  const retryable = RETRYABLE_CODES.has(code);
+  const canRetry = retryable && deps.attempt <= MIGRATION_RETRY_DIALOGS;
+  // Başka bir süreç veritabanını tutarken dosya değiştirilmez (o sürecin yazmaları kaybolabilir).
+  const canRestore = code !== "BLOCKED";
   deps.log(
     `Geçiş hatası iletişim kutusu: kod=${code}, çıkış=${deps.exitCode}, deneme=${deps.attempt}, ` +
       `yeniden deneme=${canRetry ? "var" : "yok"}`,
@@ -182,7 +229,7 @@ export async function handleMigrationFailure(
 
   for (let loop = 0; loop < MAX_DIALOG_LOOPS; loop++) {
     // Yedeğin varlığı her gösterimde yeniden denetlenir (kullanıcı klasörü açıp dosyayı taşımış olabilir).
-    const backup = restorableBackup(result, deps);
+    const backup = canRestore ? restorableBackup(result, deps) : null;
     const actions: Array<"retry" | "restore" | "logs" | "quit"> = [];
     if (canRetry) actions.push("retry");
     if (backup) actions.push("restore");
@@ -194,20 +241,27 @@ export async function handleMigrationFailure(
       quit: t("electron.migrate.btn.quit"),
     };
     const detail = [
-      backup ? t("electron.migrate.backupAvailable") : t("electron.migrate.noBackup"),
-      canRetry ? null : t("electron.migrate.retryExhausted"),
+      canRestore
+        ? backup
+          ? t("electron.migrate.backupAvailable")
+          : t("electron.migrate.noBackup")
+        : null,
+      retryable && !canRetry ? t("electron.migrate.retryExhausted") : null,
+      code === "CORRUPT" ? t("electron.migrate.dataDir", { dir: deps.dataDir }) : null,
       t("electron.startError.logDir", { dir: deps.logDir }),
     ]
       .filter(Boolean)
       .join("\n\n");
     const quitIndex = actions.indexOf("quit");
+    // Enter: yeniden deneme varsa o; yoksa yedeğe dönüş (ardından ayrı onay gelir, onun varsayılanı Vazgeç); yoksa Çık.
+    const defaultId = canRetry ? 0 : backup ? actions.indexOf("restore") : quitIndex;
     const picked = deps.showMessageBox({
       type: "error",
       title: t("electron.migrate.title"),
       message: t(BODY_KEY[code]),
       detail,
       buttons: actions.map((a) => label[a]),
-      defaultId: 0,
+      defaultId,
       cancelId: quitIndex,
       noLink: true,
     });
@@ -232,6 +286,20 @@ export async function handleMigrationFailure(
       noLink: true,
     });
     if (confirmed !== 0) continue;
+    if (deps.dbInUse()) {
+      deps.log("Yedeğe dönüş yapılmadı: veritabanı başka bir süreçte açık.");
+      deps.showMessageBox({
+        type: "warning",
+        title: t("electron.migrate.inUse.title"),
+        message: t("electron.migrate.inUse.body"),
+        detail: t("electron.startError.logDir", { dir: deps.logDir }),
+        buttons: [t("electron.migrate.btn.ok")],
+        defaultId: 0,
+        cancelId: 0,
+        noLink: true,
+      });
+      continue;
+    }
     const outcome = restorePreMigrateBackup(backup!, deps, at);
     if (outcome.ok) {
       deps.showMessageBox({

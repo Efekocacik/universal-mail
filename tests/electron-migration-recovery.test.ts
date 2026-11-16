@@ -8,7 +8,9 @@ import {
   handleMigrationFailure,
   MAIN_DB_FILENAME,
   MIGRATION_RETRY_DIALOGS,
+  rememberBackup,
   restorableBackup,
+  RETRYABLE_CODES,
   restorePreMigrateBackup,
   type MigrationRecoveryDeps,
 } from "../electron/migration-recovery";
@@ -67,6 +69,8 @@ function fake(
     files?: Record<string, string>;
     failCopy?: (from: string) => boolean;
     failRename?: (from: string, to: string) => boolean;
+    dbInUse?: () => boolean;
+    remembered?: string | null;
   } = {},
 ): Fake {
   const files = new Map(Object.entries(opts.files ?? {}));
@@ -79,6 +83,8 @@ function fake(
     logDir: LOGS,
     attempt: opts.attempt ?? 1,
     exitCode: 1,
+    rememberedBackup: opts.remembered ?? null,
+    dbInUse: opts.dbInUse ?? (() => false),
     t: (key: TrKey, params?: Record<string, string | number>) => t(key, params, "tr"),
     showMessageBox: (spec) => {
       boxes.push(spec);
@@ -145,25 +151,43 @@ const LIVE = {
   [`${PRE}-wal`]: "yedek-wal",
 };
 
-describe("iletişim kutusu: her kod × her düğme", () => {
-  it.each(FAILURE_CODES)("%s: başlık, koda özel metin, dört düğme ve Esc = Çık", async (code) => {
-    const f = fake({ files: LIVE });
-    expect(await handleMigrationFailure(result(code, PRE), f.deps)).toBe("quit");
-    expect(f.boxes).toHaveLength(1);
-    const b = f.boxes[0]!;
-    expect(b.title).toBe("Veritabanı güncellenemedi");
-    expect(b.message).toBe(t(`electron.migrate.body.${code}` as TrKey, undefined, "tr"));
-    expect(b.buttons).toEqual([L.retry, L.restore, L.logs, L.quit]);
-    expect(b.cancelId).toBe(3);
-    expect(b.defaultId).toBe(0);
-    expect(b.noLink).toBe(true);
-    expect(b.detail).toContain(t("electron.migrate.backupAvailable", undefined, "tr"));
-    expect(b.detail).toContain(LOGS);
-    // Dosyalara dokunulmadı.
-    expect(Object.fromEntries(f.files)).toEqual(LIVE);
-  });
+/** Koda göre beklenen düğmeler (yedek varken, ilk deneme). */
+const EXPECTED_BUTTONS: Record<(typeof FAILURE_CODES)[number], string[]> = {
+  BLOCKED: [L.retry, L.logs, L.quit], // başka süreç açıkken yedeğe dönüş YOK
+  DISK_FULL: [L.retry, L.restore, L.logs, L.quit],
+  FAILED: [L.retry, L.restore, L.logs, L.quit],
+  CORRUPT: [L.restore, L.logs, L.quit], // yeniden deneme düzeltmez
+  VERIFY_FAILED: [L.restore, L.logs, L.quit], // geçiş zaten uygulandı
+};
+const RETRYABLE = FAILURE_CODES.filter((c) => RETRYABLE_CODES.has(c));
+const RESTORABLE = FAILURE_CODES.filter((c) => c !== "BLOCKED");
 
-  it.each(FAILURE_CODES)("%s: Yeniden dene → retry; Çık → quit", async (code) => {
+describe("iletişim kutusu: her kod × her düğme", () => {
+  it.each(FAILURE_CODES)(
+    "%s: başlık, koda özel metin, koda özel düğmeler ve Esc = Çık",
+    async (code) => {
+      const f = fake({ files: LIVE });
+      expect(await handleMigrationFailure(result(code, PRE), f.deps)).toBe("quit");
+      expect(f.boxes).toHaveLength(1);
+      const b = f.boxes[0]!;
+      expect(b.title).toBe("Veritabanı güncellenemedi");
+      expect(b.message).toBe(t(`electron.migrate.body.${code}` as TrKey, undefined, "tr"));
+      expect(b.buttons).toEqual(EXPECTED_BUTTONS[code]);
+      expect(b.cancelId).toBe(b.buttons.indexOf(L.quit));
+      // Enter: yeniden deneme varsa o, yoksa yedeğe dönüş (onu ayrıca onay izler).
+      expect(b.buttons[b.defaultId]).toBe(RETRYABLE_CODES.has(code) ? L.retry : L.restore);
+      expect(b.noLink).toBe(true);
+      if (code === "BLOCKED") {
+        expect(b.detail).not.toContain(t("electron.migrate.backupAvailable", undefined, "tr"));
+        expect(b.detail).not.toContain(t("electron.migrate.noBackup", undefined, "tr"));
+      } else expect(b.detail).toContain(t("electron.migrate.backupAvailable", undefined, "tr"));
+      expect(b.detail).toContain(LOGS);
+      // Dosyalara dokunulmadı.
+      expect(Object.fromEntries(f.files)).toEqual(LIVE);
+    },
+  );
+
+  it.each(RETRYABLE)("%s: Yeniden dene → retry; Çık → quit", async (code) => {
     expect(
       await handleMigrationFailure(
         result(code, PRE),
@@ -178,17 +202,38 @@ describe("iletişim kutusu: her kod × her düğme", () => {
     ).toBe("quit");
   });
 
+  it.each(["VERIFY_FAILED", "CORRUPT"] as const)(
+    "%s: Yeniden dene YOK (geçiş uygulanmış/dosya bozuk); Enter yedeğe dönüşe, yedek yoksa Çık'a gider",
+    async (code) => {
+      for (const attempt of [1, 2, 3]) {
+        const f = fake({ attempt, files: LIVE });
+        f.deps.showMessageBox = (spec) => (f.boxes.push(spec), spec.defaultId); // kullanıcı hep Enter'a basar
+        // Enter → yedeğe dön → onay kutusunda Enter = Vazgeç → ana kutuya döner; döngü sınırında çıkılır. Asla retry yok.
+        expect(await handleMigrationFailure(result(code, PRE), f.deps)).toBe("quit");
+        expect(f.boxes.every((b) => !b.buttons.includes(L.retry))).toBe(true);
+        expect(Object.fromEntries(f.files)).toEqual(LIVE); // onaysız hiçbir dosya değişmedi
+        expect(f.boxes[0]!.detail).not.toContain(
+          t("electron.migrate.retryExhausted", undefined, "tr"),
+        );
+      }
+      const none = fake({ files: { [DB]: "canli" } });
+      await handleMigrationFailure(result(code), none.deps);
+      expect(none.boxes[0]!.buttons).toEqual([L.logs, L.quit]);
+      expect(none.boxes[0]!.defaultId).toBe(1); // Çık
+    },
+  );
+
   it.each(FAILURE_CODES)(
     "%s: Günlük klasörünü aç → klasör açılır, iletişim kutusu yeniden gösterilir",
     async (code) => {
-      const f = fake({ files: LIVE, answers: [L.logs, L.logs, L.retry] });
-      expect(await handleMigrationFailure(result(code, PRE), f.deps)).toBe("retry");
+      const f = fake({ files: LIVE, answers: [L.logs, L.logs, L.quit] });
+      expect(await handleMigrationFailure(result(code, PRE), f.deps)).toBe("quit");
       expect(f.opened).toEqual([LOGS, LOGS]);
       expect(f.boxes).toHaveLength(3);
     },
   );
 
-  it.each(FAILURE_CODES)(
+  it.each(RESTORABLE)(
     "%s: yedeğe dön → onay → dosyalar yer değiştirir, bilgi verilir, quit",
     async (code) => {
       const f = fake({ files: LIVE, answers: [L.restore, L.yes, L.ok] });
@@ -205,10 +250,44 @@ describe("iletişim kutusu: her kod × her düğme", () => {
       expect(f.boxes.map((b) => b.type)).toEqual(["error", "warning", "info"]);
       expect(f.boxes[1]!.message).toContain(`failed-migrate-${STAMP}.db`);
       expect(f.boxes[1]!.cancelId).toBe(1); // Esc = Vazgeç
+      expect(f.boxes[1]!.defaultId).toBe(1); // Enter = Vazgeç
       expect(f.boxes[2]!.title).toBe(t("electron.migrate.restored.title", undefined, "tr"));
       expect(f.boxes[2]!.message).toContain("Universal Mail sürümünü yeniden kurun");
     },
   );
+
+  it("BLOCKED: hatırlanan yedek olsa bile yedeğe dönüş sunulmaz", async () => {
+    const f = fake({ files: LIVE, remembered: PRE });
+    await handleMigrationFailure(result("BLOCKED", PRE), f.deps);
+    expect(f.boxes[0]!.buttons).not.toContain(L.restore);
+  });
+
+  it("onaydan sonra veritabanı başka bir süreçte açıksa dosyalara dokunulmaz, kullanıcıya söylenir", async () => {
+    let checks = 0;
+    const f = fake({
+      files: LIVE,
+      answers: [L.restore, L.yes, L.ok, L.quit],
+      dbInUse: () => (checks++, true),
+    });
+    expect(await handleMigrationFailure(result("FAILED", PRE), f.deps)).toBe("quit");
+    expect(checks).toBe(1);
+    expect(Object.fromEntries(f.files)).toEqual(LIVE);
+    expect(f.boxes.map((b) => b.type)).toEqual(["error", "warning", "warning", "error"]);
+    expect(f.boxes[2]!.title).toBe(t("electron.migrate.inUse.title", undefined, "tr"));
+    expect(f.boxes[2]!.message).toBe(t("electron.migrate.inUse.body", undefined, "tr"));
+  });
+
+  it("CORRUPT metni yedeğin de bozuk olabileceğini, şifreli yedeklerin yerini ve veri klasörünü söyler", async () => {
+    const f = fake({ files: { [DB]: "canli" } });
+    await handleMigrationFailure(result("CORRUPT"), f.deps);
+    for (const lang of ["tr", "en"] as const) {
+      const body = t("electron.migrate.body.CORRUPT", undefined, lang);
+      expect(body).toContain(".umbk");
+      expect(body).toContain("backups");
+      expect(body).not.toMatch(/dönebilir|can go back/);
+    }
+    expect(f.boxes[0]!.detail).toContain(DATA);
+  });
 
   it("sonuç dosyası yoksa genel hata metni ve yedek düğmesi yok", async () => {
     const f = fake({ files: LIVE });
@@ -350,6 +429,37 @@ describe("yedeğe dönüş hataları: hiçbir dosya silinmez", () => {
   });
 });
 
+describe("aynı açılıştaki önceki yedek hatırlanır", () => {
+  it("2. denemede kopya alınamadı (disk dolu, sonuçta yedek yok): yedeğe dönüş yine sunulur", async () => {
+    const files = { ...LIVE };
+    // main.ts runMigrateChild ile aynı akış.
+    let remembered: string | null = null;
+    const attempts = [result("DISK_FULL", PRE), result("DISK_FULL"), null];
+    const boxes: Box[][] = [];
+    for (const [i, res] of attempts.entries()) {
+      const f = fake({ attempt: i + 1, files, answers: [] });
+      remembered = rememberBackup(res, remembered, f.deps);
+      f.deps.rememberedBackup = remembered;
+      await handleMigrationFailure(res, f.deps);
+      boxes.push(f.boxes);
+    }
+    expect(remembered).toBe(PRE);
+    for (const b of boxes) expect(b[0]!.buttons).toContain(L.restore);
+  });
+
+  it("hatırlanan yedek diskten silinmişse veya geçersizse kullanılmaz", () => {
+    const f = fake({ files: { [DB]: "canli" } });
+    expect(rememberBackup(result("FAILED"), PRE, f.deps)).toBeNull();
+    expect(restorableBackup(result("FAILED"), { ...f.deps, rememberedBackup: PRE })).toBeNull();
+    const g = fake({ files: { ...LIVE, "/baska/pre-migrate-1.db": "x" } });
+    expect(rememberBackup(result("FAILED"), "/baska/pre-migrate-1.db", g.deps)).toBeNull();
+    // Bu denemenin geçerli yedeği öncekinden önceliklidir.
+    const NEWER = path.join(BACKUPS, "pre-migrate-2026-11-16T11-00-00-000Z.db");
+    const h = fake({ files: { ...LIVE, [NEWER]: "y" } });
+    expect(rememberBackup(result("FAILED", NEWER), PRE, h.deps)).toBe(NEWER);
+  });
+});
+
 describe("yeniden deneme sınırı", () => {
   it(`ilk ${MIGRATION_RETRY_DIALOGS} gösterimde Yeniden dene var; sonrasında yalnızca yedek/günlük/çık`, async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -437,6 +547,7 @@ function realDeps(
     logDir,
     attempt: 1,
     exitCode: 1,
+    dbInUse: () => false,
     t: (key, params) => t(key, params, "tr"),
     showMessageBox: (spec) => {
       boxes.push(spec);
@@ -517,5 +628,38 @@ describe("uçtan uca: bozuk güncelleme → yedeğe dönüş (gerçek dosyalar)"
     // Düzeltilmiş sürüm kurulunca açılış başarılı olur.
     expect(await runMigrateScript(dataDir, SOURCE_MIGRATIONS)).toBe(0);
     expect(readMigrateResult(dataDir)).toMatchObject({ ok: true, code: "OK", applied: 1 });
+  }, 90_000);
+
+  it("VERIFY_FAILED: yeniden çalıştırma da VERIFY_FAILED + aynı yedek döner (bozuk veritabanıyla açılmaz); Yeniden dene sunulmaz", async () => {
+    const dataDir = fs.mkdtempSync(path.join(tmpBase, "um-rec-v-"));
+    const old = partialMigrations(TOTAL_MIGRATIONS - 1, "um-rec-vold-");
+    cleanup.push(dataDir, old);
+    const dbFile = path.join(dataDir, MAIN_DB_FILENAME);
+    process.env.UM_DATA_DIR = dataDir;
+    process.env.UM_DB_PATH = dbFile;
+    process.env.UM_MIGRATIONS_DIR = old;
+    const h = await openDatabase(dbFile);
+    await runMigrations(h.db, h.client);
+    await h.client.execute("PRAGMA foreign_keys = OFF");
+    await h.client.execute(
+      "INSERT INTO place_snapshots (scan_id, place_id, was_future) VALUES (424242, 'p-1', 0)",
+    );
+    await h.client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+    h.client.close();
+
+    expect(await runMigrateScript(dataDir, SOURCE_MIGRATIONS)).toBe(1);
+    const first = readMigrateResult(dataDir);
+    expect(first).toMatchObject({ ok: false, code: "VERIFY_FAILED" });
+    expect(first!.backupPath).toMatch(/pre-migrate-[^/\\]+\.db$/);
+    // Uygulamayı kapatıp yeniden açma (veya eski davranıştaki "Yeniden dene"): yine başarısız, aynı yedek.
+    expect(await runMigrateScript(dataDir, SOURCE_MIGRATIONS)).toBe(1);
+    const second = readMigrateResult(dataDir);
+    expect(second).toMatchObject({ ok: false, code: "VERIFY_FAILED" });
+    expect(second!.backupPath).toBe(first!.backupPath);
+
+    const boxes: Box[] = [];
+    await handleMigrationFailure(second, realDeps(dataDir, path.join(dataDir, "logs"), [], boxes));
+    expect(boxes[0]!.buttons).toEqual([L.restore, L.logs, L.quit]);
+    expect(boxes[0]!.defaultId).toBe(0);
   }, 90_000);
 });

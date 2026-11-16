@@ -23,8 +23,11 @@ bağlı kod imzalamanın nasıl açılacağını anlatır. Son kullanıcıya yö
 Next'in dosya izleyicisi proje kökündeki `.data/` klasörünü (geliştirme veritabanı, `master.key`, `secrets.json`) ve
 `.env*` dosyalarını `.next/standalone` içine kopyalayabilir. Yerelde `npm run dist` çalıştırıldığında bunlar kurulum
 paketine taşınırdı (Faz 6'da yerel `--dir` denemesinde görüldü). `electron-builder.config.cjs` sunucu klasörünü
-kopyalarken `.data/`, `.data-demo/`, `.env*`, `*.db*`, `master.key` ve `secrets.json` dosyalarını dışarıda bırakır;
-`tests/packaging-config.test.ts` bunu denetler. CI temiz checkout'tan derlediği için orada bu dosyalar zaten yoktur.
+kopyalarken iki katmanlı süzgeç uygular: (1) kara liste: `.data*` adlı her klasör (`.data`, `.data-demo`,
+`.data-arsiv-…`), `.env*`, `*.db*`, `master.key*`, `secrets.json`, `*.umbk`; (2) izin listesi: izleyicinin taşıdığı
+`data/` klasöründen yalnızca `data/cities.eu-tr.json` ve `data/ATTRIBUTION.md` girer (`data/backups/`, dışa
+aktarımlar, günlükler girmez). `tests/packaging-config.test.ts` süzgeci electron-builder'ın kendi eşleyicisiyle sahte
+dosyalar içeren gerçek bir klasör ağacına uygular. CI temiz checkout'tan derlediği için orada bu dosyalar zaten yoktur.
 
 ## 2. Kimlik ve veri klasörü
 
@@ -71,24 +74,32 @@ Veri klasörünün içi: `data/` (veritabanı `universal-mail.db`, `secrets.json
    (macOS). Veri klasörüne dokunulmaz.
 2. İlk açılışta Electron şema geçişi alt sürecini (`migrate.cjs` = `scripts/migrate.ts`) çalıştırır. Bekleyen geçiş
    varsa ve veritabanında veri varsa **önce otomatik yedek** alınır: `data/backups/pre-migrate-<zaman>.db` (+ `-wal`),
-   en yeni 5 tanesi saklanır. Geçiş tek işlemde uygulanır; hata olursa işlem geri alınır.
+   en yeni 5 tanesi saklanır. Kopya önce `.tmp` adına alınır ve tamamlanınca yeniden adlandırılır (disk dolarsa yarım
+   kopya kalmaz). Geçiş tek işlemde uygulanır; hata olursa işlem geri alınır. Geçişten önce
+   `data/migrate-verify.pending` işareti yazılır, geçiş sonrası bütünlük denetimi (yabancı anahtar) geçince silinir;
+   işaret kaldıysa sonraki çalıştırmada bekleyen geçiş olmasa bile denetim yeniden yapılır (bozuk veritabanıyla
+   açılmaz, yedeğe dönüş seçeneği kaybolmaz).
 3. Sonuç `data/migrate-result.json`'a yazılır (`{ok, code, backupPath, applied, total}`; kişisel veri yok).
 4. Geçiş başarısız olursa **"Veritabanı güncellenemedi"** iletişim kutusu çıkar (`electron/migration-recovery.ts`),
    metin hata koduna göre değişir:
 
-   | Kod | Anlamı | Kullanıcıya önerilen |
+   | Kod | Anlamı | Düğmeler (Enter = ilk sıradaki) |
    | --- | --- | --- |
-   | `BLOCKED` | Başka bir Universal Mail penceresi/süreci veritabanını kullanıyor | Diğer pencereleri kapatıp yeniden dene |
-   | `DISK_FULL` | Diskte yer yok | Yer açıp yeniden dene |
-   | `CORRUPT` | Veritabanı dosyası bozuk | Güncelleme öncesi yedeğe dön / destek |
-   | `VERIFY_FAILED` | Geçiş uygulandı ama bütünlük denetimi başarısız | Güncelleme öncesi yedeğe dön |
-   | `FAILED` | Diğer hatalar | Yeniden dene / yedeğe dön / destek |
+   | `BLOCKED` | Başka bir süreç veritabanını tutuyor: bakım kilidi, `migrate.lock` zaman aşımı, `SQLITE_BUSY`/`LOCKED` | Yeniden dene; yedeğe dönüş **yok** |
+   | `DISK_FULL` | Diskte yer yok | Yeniden dene, yedeğe dön |
+   | `CORRUPT` | Veritabanı dosyası bozuk | Yedeğe dön (varsa); yeniden deneme **yok**. Metin: kopya da bozuk olabilir, şifreli `.umbk` yedeklerin yeri, destek |
+   | `VERIFY_FAILED` | Geçiş uygulandı ama bütünlük denetimi başarısız | Yedeğe dön; yeniden deneme **yok** (geçiş zaten uygulandı) |
+   | `FAILED` | Diğer hatalar | Yeniden dene, yedeğe dön |
 
    Düğmeler:
-   - **Yeniden dene:** ilk iki gösterimde. Üçüncü gösterimde yalnızca aşağıdakiler kalır (sonsuz döngü olmaz; ana
+   - **Yeniden dene:** yalnızca `BLOCKED`, `DISK_FULL`, `FAILED` için ve ilk iki gösterimde. Sonraki deneme aynı
+     açılışta alınmış yedeği yeniden kullanır (`UM_PRE_MIGRATE_BACKUP`; yeni kopya alınmaz, disk dolu iken yer
+     harcanmaz, eski yedekler budanmaz). Üçüncü gösterimde yalnızca aşağıdakiler kalır (sonsuz döngü olmaz; ana
      süreç dördüncü başarısızlıkta genel hata kutusuna düşer, bu yüzden yedeğe dönüş her zaman erişilebilir kalır).
-   - **Güncelleme öncesi yedeğe dön:** yalnızca sonuç dosyasındaki yedek tam olarak `data/backups/pre-migrate-*.db`
-     ise ve diskte varsa (ilk kurulumda yedek yoktur, düğme de yoktur). Onaydan sonra: yedeğin kopyası hazırlanır,
+   - **Güncelleme öncesi yedeğe dön:** yalnızca yedek tam olarak `data/backups/pre-migrate-*.db` ise ve diskte varsa
+     (ilk kurulumda yedek yoktur, düğme de yoktur; bu denemenin sonucunda yedek yoksa aynı açılıştaki önceki denemenin
+     yedeği kullanılır). `BLOCKED`'da sunulmaz. Onay kutusunun varsayılanı Vazgeç'tir. Onaydan sonra canlı bakım kilidi
+     veya `migrate.lock` varsa dosyalara dokunulmaz ("veritabanı kullanımda"). Aksi halde: yedeğin kopyası hazırlanır,
      mevcut veritabanı (+ `-wal`/`-shm`) **silinmeden** `data/backups/failed-migrate-<zaman>.db` adıyla kenara alınır
      ve kopya yerine konur. Her adım kopyala-sonra-yeniden-adlandır'dır; bir adım yarıda kalırsa yapılan
      adlandırmalar geri alınır ve kullanıcıya "hiçbir dosya silinmedi" denir. Ardından uygulama kapanır; kullanıcı
@@ -123,12 +134,11 @@ Davranış (`electron-builder.config.cjs`):
   doğrulamasını kapatma: Electron ve libsql yerel modülü için). **Notarize** yalnızca `APPLE_ID`,
   `APPLE_APP_SPECIFIC_PASSWORD` ve `APPLE_TEAM_ID` üçü birlikte varsa açılır. Sertifika yoksa `identity: null`
   (koşucunun anahtarlığındaki bir kimlik de kullanılmaz).
-- **Windows:** `WIN_CSC_LINK` veya `CSC_LINK` varsa `signAndEditExecutable: true` (yürütülebilir dosya ve kurulum
-  programı imzalanır, simge ve sürüm bilgisi gömülür).
-- **Windows simgesi (imzasız):** electron-builder `.exe` simgesini imzalamayla aynı adımda gömer; Faz 1'den beri
-  imzasız derlemede bu adım kapalıdır, bu yüzden imzasız `.exe` ve kısayollar Electron'un varsayılan simgesini taşır
-  (kurulum programının kendi simgesi Universal Mail'dir). CI ortamına `UM_WIN_EDIT_EXE=1` eklenirse imzasız derlemede
-  de simge gömülür; bir kez CI'da denenip sonucu doğrulandıktan sonra varsayılan yapılabilir.
+- **Windows:** `signAndEditExecutable: true` her zaman: `.exe` simgesi ve sürüm bilgisi (ürün adı) imzasız derlemede
+  de gömülür, masaüstü/Başlat kısayolları Universal Mail simgesini taşır. İmzalama ayrı bir anahtardır:
+  `signExecutable` yalnızca `WIN_CSC_LINK` veya `CSC_LINK` varsa `true` (electron-builder 26: `signAndEditExecutable:
+  false` ikisini birden kapatır, `signExecutable: false` yalnızca imzalamayı). CI Windows işi `scripts/check-win-exe.mjs`
+  ile ürün adının `.exe` sürüm bilgisine gömüldüğünü doğrular (simge aynı resedit adımında gömülür).
 
 Yerelde imzalı deneme: sertifikayı anahtarlığa kurup `CSC_NAME="Developer ID Application: …" npm run dist`.
 
@@ -145,8 +155,8 @@ denetler.
 | `tests/packaging-config.test.ts` | Yapılandırma electron-builder'ın kendi şemasıyla geçerli; kimlik main.ts ile aynı; ortam boşken imzasız, doluyken imzalı/notarize; geliştirici verisi pakete girmez; NSIS seçenekleri; `installer.nsh` korumaları (`isUpdated`, `IfSilent`, varsayılan Hayır, yalnızca `$APPDATA\Universal Mail` silinir, BOM); simge boyutu; yetkiler; CI sırları yalnızca paket adımında |
 | `tests/migration-upgrade-path.test.ts` | 0000..0005 şemalarının **her birinden** güncel sürüme yükseltme: veri bire bir korunur, yedek alınır ve eski veriyi taşır, bütünlük temiz, ikinci açılış değişiklik yapmaz (fikstürler `tests/fixtures/schema/`) |
 | `tests/update-over-install.test.ts` | 0005 kullanıcı klasörünün üzerine yeni sürümün gerçek açılış adımı: ayarlar, lead'ler, kampanyalar ve aynı ana anahtarla gizli bilgiler korunur; `migrate-result.json` OK |
-| `tests/electron-migration-recovery.test.ts` | Her hata kodu × her düğme, yedek yolu doğrulaması, kopya/taşıma hataları ve geri alma, yeniden deneme sınırı; gerçek dosyalarla bozuk güncelleme → yedeğe dönüş → düzeltilmiş sürümle açılış |
-| `tests/migrate-result.test.ts` | Gerçek geçiş hatası sonuç dosyasına kod ve yedek yoluyla yansır |
+| `tests/electron-migration-recovery.test.ts` | Her hata kodu × her düğme (`VERIFY_FAILED`/`CORRUPT`'ta yeniden deneme yok, `BLOCKED`'da yedeğe dönüş yok, "kullanımda" denetimi, hatırlanan yedek), yedek yolu doğrulaması, kopya/taşıma hataları ve geri alma, yeniden deneme sınırı; gerçek dosyalarla bozuk güncelleme → yedeğe dönüş → düzeltilmiş sürümle açılış |
+| `tests/migrate-result.test.ts` | Gerçek geçiş hatası sonuç dosyasına kod ve yedek yoluyla yansır; kilit/BUSY → `BLOCKED`; doğrulama başarısızsa yeniden çalıştırma da `VERIFY_FAILED` (işaret dosyası); ENOSPC'de yarım yedek kalmaz; aynı açılıştaki yedek yeniden kullanılır |
 
 ## 9. Bilinen sınırlar
 
@@ -156,6 +166,11 @@ denetler.
   CI'da `npm run smoke` çalışır.
 - NSIS betiği ve paketler yalnızca CI'da derlenir; `makensis` yerelde çalıştırılmadı. `installer.nsh` ilk CI
   çalıştırmasında derlenecek ve kaldırma sorusu temiz bir Windows makinede elle denenmelidir.
+- `CORRUPT` iletişim kutusunda şifreli `.umbk` yedeğinden geri yükleme yolu YOK: bu yedekler yalnızca açık uygulamadan
+  (Ayarlar → Yedekler) geri yüklenebilir. Paket Y ile entegrasyon maddesi: uygulama açılamazken bir `.umbk` yedeğini
+  seçip `applyPendingLifecycleInMain`'in uyguladığı geri yükleme hazırlığına (restore staging) bağlayan bir düğme.
+- Yedeğe dönüş öncesi "veritabanı kullanımda" denetimi bakım kilidi ve `migrate.lock` işaretlerine bakar; bu
+  işaretlere uymayan (eski sürüm) bir süreci göremez. `BLOCKED` sınıflaması bu durumda yedeğe dönüşü hiç sunmaz.
 - Yalnızca Apple Silicon (arm64) macOS paketi üretilir; Intel Mac için ayrı bir x64 hedefi gerekir (karar bekliyor).
 - Gerçek "temiz makinede kurulum → güncelleme → kaldırma" denemesi ve işletim sistemi iletişim kutularının ekran
   görüntüleri kullanıcının makinelerinde yapılmalıdır.

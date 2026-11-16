@@ -33,7 +33,9 @@ import {
   MasterKeyQuit,
   SECRETS_FILENAME,
 } from "./master-key";
-import { handleMigrationFailure } from "./migration-recovery";
+import { activeMaintenance } from "../src/lib/db/maintenance";
+import { isFileLockHeld } from "../src/lib/util/file-lock";
+import { handleMigrationFailure, MAIN_DB_FILENAME, rememberBackup } from "./migration-recovery";
 import {
   createWakeSignal,
   isNotifyMessage,
@@ -361,20 +363,36 @@ const MIGRATION_MAX_ATTEMPTS = 4;
  * gösterilmez: hata doğrudan fırlatılır.
  */
 async function runMigrateChild(env: NodeJS.ProcessEnv): Promise<void> {
+  const dir = dataDir();
+  const fileDeps = { dataDir: dir, exists: (p: string) => fs.existsSync(p) };
+  // Aynı açılışta alınmış son geçerli güncelleme öncesi yedek: sonraki deneme yeni kopya ALMAZ (disk dolu iken bir kopya
+  // daha harcanmaz, eski yedekler budanmaz) ve sonuç dosyasında yedek yoksa iletişim kutusu yine de bunu sunar.
+  let remembered: string | null = null;
   for (let attempt = 1; ; attempt++) {
     // Önceki çalıştırmanın sonucu yanlışlıkla okunmasın.
-    fs.rmSync(path.join(dataDir(), MIGRATE_RESULT_FILENAME), { force: true });
+    fs.rmSync(path.join(dir, MIGRATE_RESULT_FILENAME), { force: true });
     // Önceki oturumdan kalan Google önbelleği (çökme/zorla kapanma olasılığına karşı) açılışta da silinir.
-    const migrate = spawnChild("migrate", "migrate.cjs", { ...env, UM_WIPE_SESSION: "1" });
+    const migrate = spawnChild("migrate", "migrate.cjs", {
+      ...env,
+      UM_WIPE_SESSION: "1",
+      ...(remembered ? { UM_PRE_MIGRATE_BACKUP: remembered } : {}),
+    });
     const code = await waitForExit(migrate, 120_000);
     if (code === 0) return;
     const message = `Veritabanı hazırlanamadı (kod=${code}). Ayrıntı için günlük dosyasına bakın.`;
     if (SMOKE || attempt >= MIGRATION_MAX_ATTEMPTS) throw new Error(message);
-    const action = await handleMigrationFailure(readMigrateResult(dataDir()), {
-      dataDir: dataDir(),
+    const result = readMigrateResult(dir);
+    remembered = rememberBackup(result, remembered, fileDeps);
+    const action = await handleMigrationFailure(result, {
+      dataDir: dir,
       logDir,
       attempt,
       exitCode: code,
+      rememberedBackup: remembered,
+      dbInUse: () => {
+        const db = path.join(dir, MAIN_DB_FILENAME);
+        return activeMaintenance(db) !== null || isFileLockHeld(path.join(dir, "migrate.lock"));
+      },
       t: tl,
       showMessageBox: (spec) => dialog.showMessageBoxSync(spec),
       showErrorBox: (title, body) => dialog.showErrorBox(title, body),
@@ -382,7 +400,7 @@ async function runMigrateChild(env: NodeJS.ProcessEnv): Promise<void> {
       exists: (p) => fs.existsSync(p),
       copyFile: (from, to) => fs.copyFileSync(from, to),
       rename: (from, to) => fs.renameSync(from, to),
-      readdir: (dir) => fs.readdirSync(dir),
+      readdir: (d) => fs.readdirSync(d),
       now: () => Date.now(),
       log: (m) => log("main", m),
     });

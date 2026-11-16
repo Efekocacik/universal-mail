@@ -30,13 +30,76 @@ function journalCount(folder: string): number {
   return journal.entries.length;
 }
 
+/** Güncelleme öncesi yedek adı. Yalnızca tamamlanmış kopyalar bu adı taşır (yarım kopya `.tmp` olarak kalır/silinir). */
+export const PRE_MIGRATE_RE = /^pre-migrate-[0-9A-Za-z-]+\.db$/;
+
 function pruneBackups(dir: string, keep = 5): void {
   const files = fs
     .readdirSync(dir)
-    .filter((f) => f.startsWith("pre-migrate-") && f.endsWith(".db"))
+    .filter((f) => PRE_MIGRATE_RE.test(f))
     .sort();
   for (const f of files.slice(0, Math.max(0, files.length - keep))) {
     fs.rmSync(path.join(dir, f), { force: true });
+    fs.rmSync(path.join(dir, `${f}-wal`), { force: true });
+  }
+}
+
+/**
+ * Geçiş öncesi yedeği ATOMİK alır: önce `.tmp` adlarına kopyalanır, sonra yeniden adlandırılır (ana dosya en son; bu
+ * yüzden `pre-migrate-*.db` adı varsa kopya tamdır). Kopya başarısız olursa (ör. ENOSPC) yarım dosyalar silinir ve
+ * hata fırlatılır: yarım kopya ne yedek sayılır ne de `pruneBackups`'ın 5'lik sınırına girer.
+ */
+function takeBackup(file: string, backupPath: string, withWal: boolean): void {
+  const tmp = `${backupPath}.tmp`;
+  const walTmp = `${backupPath}-wal.tmp`;
+  try {
+    fs.copyFileSync(file, tmp);
+    if (withWal) {
+      fs.copyFileSync(`${file}-wal`, walTmp);
+      fs.renameSync(walTmp, `${backupPath}-wal`);
+    }
+    fs.renameSync(tmp, backupPath);
+  } catch (e) {
+    for (const p of [tmp, walTmp, `${backupPath}-wal`]) fs.rmSync(p, { force: true });
+    throw e;
+  }
+}
+
+/**
+ * Aynı açılıştaki önceki denemenin yedeği yeniden kullanılabilir mi? Electron ana süreci "Yeniden dene"de bunu
+ * `UM_PRE_MIGRATE_BACKUP` ile verir; yalnızca geri alınmış (atomik) bir geçişten sonra yeniden denendiğinden veritabanı
+ * o yedekle aynıdır. Yalnızca `<backups>/pre-migrate-*.db` ve diskte varsa kabul edilir.
+ */
+function reusableBackup(p: string | undefined): string | undefined {
+  if (!p) return undefined;
+  const abs = path.resolve(p);
+  if (path.dirname(abs) !== path.resolve(backupsDir())) return undefined;
+  if (!PRE_MIGRATE_RE.test(path.basename(abs))) return undefined;
+  return fs.existsSync(abs) ? abs : undefined;
+}
+
+/**
+ * Doğrulama bekleyen geçiş işareti (veritabanının yanında). Geçiş SQL'inden ÖNCE yazılır, geçiş sonrası denetim
+ * geçince silinir. Denetim başarısız olur ya da süreç arada kapanırsa işaret kalır; sonraki açılışta bekleyen geçiş
+ * olmasa bile denetim YENİDEN yapılır. Böylece "Yeniden dene" veya yeniden açılış bozuk veritabanıyla açılmaz ve
+ * güncelleme öncesi yedeğe dönüş seçeneği kaybolmaz.
+ */
+export const VERIFY_PENDING_FILENAME = "migrate-verify.pending";
+const verifyMarkerFor = (dbFile: string) =>
+  path.join(path.dirname(dbFile), VERIFY_PENDING_FILENAME);
+
+function readVerifyMarker(dbFile: string): { backupPath?: string } | null {
+  let text: string;
+  try {
+    text = fs.readFileSync(verifyMarkerFor(dbFile), "utf8");
+  } catch {
+    return null;
+  }
+  try {
+    const v = JSON.parse(text) as { backupPath?: unknown };
+    return typeof v.backupPath === "string" ? { backupPath: v.backupPath } : {};
+  } catch {
+    return {}; // yarım yazılmış: yine de denetim yapılır
   }
 }
 
@@ -50,6 +113,11 @@ export interface MigrationOptions {
   probeIntervalMs?: number;
   /** Başka bir süreç şema güncellerken beklenecek azami süre (ms). */
   maintenanceTimeoutMs?: number;
+  /**
+   * Aynı açılıştaki önceki denemenin güncelleme öncesi yedeği (varsayılan: `UM_PRE_MIGRATE_BACKUP`). Geçerliyse yeni
+   * kopya alınmaz (disk dolu iken yeniden deneme bir kopya daha harcamaz; eski geçerli yedekler budanmaz).
+   */
+  reuseBackupPath?: string;
 }
 
 /** Çok sayıda ileti olan veritabanında başka bir süreç yazarken geçiş BAŞLATILMAZ (K4). */
@@ -167,9 +235,17 @@ export async function runMigrations(
 ): Promise<MigrationResult> {
   const folder = migrationsDir();
   const total = journalCount(folder);
-  if (total - (await appliedCount(client)) <= 0) return { pending: 0 };
-
   const file = dbPath();
+  if (total - (await appliedCount(client)) <= 0) {
+    const marker = readVerifyMarker(file);
+    if (marker) {
+      // Önceki geçiş uygulandı ama denetimi tamamlanmadı/başarısız oldu: yeniden denetle.
+      await verifyAfter(client, marker.backupPath);
+      fs.rmSync(verifyMarkerFor(file), { force: true });
+    }
+    return { pending: 0 };
+  }
+
   const lock = fs.existsSync(file)
     ? await acquireMaintenance(file, "schema-migration", opts.maintenanceTimeoutMs)
     : null;
@@ -184,22 +260,30 @@ export async function runMigrations(
 
     let backupPath: string | undefined;
     if (existing > 0 && fs.existsSync(file)) {
-      const cp = await client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
-      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-      backupPath = path.join(backupsDir(), `pre-migrate-${stamp}.db`);
-      fs.copyFileSync(file, backupPath);
-      // Kontrol noktası tam yapılamadıysa (okuyucu vardı) WAL'de kalan çerçeveleri de yedeğe kat.
-      if (Number(cp.rows[0]?.[0] ?? 0) !== 0 && fs.existsSync(`${file}-wal`))
-        fs.copyFileSync(`${file}-wal`, `${backupPath}-wal`);
-      pruneBackups(backupsDir());
+      backupPath = reusableBackup(opts.reuseBackupPath ?? process.env.UM_PRE_MIGRATE_BACKUP);
+      if (!backupPath) {
+        const cp = await client.execute("PRAGMA wal_checkpoint(TRUNCATE)");
+        const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+        const target = path.join(backupsDir(), `pre-migrate-${stamp}.db`);
+        // Kontrol noktası tam yapılamadıysa (okuyucu vardı) WAL'de kalan çerçeveleri de yedeğe kat.
+        takeBackup(
+          file,
+          target,
+          Number(cp.rows[0]?.[0] ?? 0) !== 0 && fs.existsSync(`${file}-wal`),
+        );
+        backupPath = target;
+        pruneBackups(backupsDir());
+      }
     }
 
     try {
+      fs.writeFileSync(verifyMarkerFor(file), JSON.stringify({ backupPath: backupPath ?? null }));
       await migrate(db, { migrationsFolder: folder });
     } catch (e) {
       throw withBackupPath(e, backupPath);
     }
     await verifyAfter(client, backupPath);
+    fs.rmSync(verifyMarkerFor(file), { force: true });
     return { pending, backupPath };
   } finally {
     lock?.release();

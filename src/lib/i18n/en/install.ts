@@ -47,7 +47,7 @@ export const install = {
   "electron.migrate.body.DISK_FULL":
     "There is not enough free disk space. Free up some space (for example delete large files or empty the Trash) and press “Try again”.",
   "electron.migrate.body.CORRUPT":
-    "The database file appears to be damaged. You can go back to the pre-update backup or ask for support and share the log folder.",
+    "The database file appears to be damaged. The pre-update copy (if any) was taken from the same file a few seconds before the update, so it may have the same problem. Your encrypted automatic backups (.umbk) are in the “backups” folder inside the data folder, but for now they can only be restored while the app is open (Settings → Backups). Do not delete any files; ask for support and share the data folder location and the log folder.",
   "electron.migrate.body.VERIFY_FAILED":
     "The update was applied but the integrity check after it failed. Going back to the pre-update backup is recommended.",
   "electron.migrate.body.FAILED":
@@ -72,6 +72,9 @@ export const install = {
   "electron.migrate.restored.title": "Your data is back to its pre-update state",
   "electron.migrate.restored.body":
     "This version could not update the database. Reinstall the previous Universal Mail version or ask for support and share the log folder. The app will now close.",
+  "electron.migrate.inUse.title": "The database is in use",
+  "electron.migrate.inUse.body":
+    "Another Universal Mail window or process is using the database, so its files cannot be changed now. Nothing was changed. Close the other Universal Mail windows and try again.",
   "electron.migrate.restoreFailed.title": "Could not go back to the backup",
   "electron.migrate.restoreFailed.body":
     "Going back to the backup could not be completed. No file was deleted and your database is unchanged. Share the log folder when you ask for support.",

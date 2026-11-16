@@ -18,31 +18,36 @@ const macSigning = has("CSC_LINK") || has("CSC_NAME");
 const macNotarize =
   macSigning && has("APPLE_ID") && has("APPLE_APP_SPECIFIC_PASSWORD") && has("APPLE_TEAM_ID");
 const winSigning = has("WIN_CSC_LINK") || has("CSC_LINK");
-/**
- * Windows .exe kaynaklarını (simge, sürüm bilgisi) düzenleme. electron-builder bunu imzalamayla aynı adımda (rcedit)
- * yapar; Faz 1'den beri imzasız derlemede KAPALIDIR, bu yüzden imzasız .exe ve kısayollar Electron'un varsayılan
- * simgesini taşır (kurulum programının kendi simgesi yine Universal Mail'dir). `UM_WIN_EDIT_EXE=1` imzasız derlemede de
- * açar; CI'da bir kez denenip doğrulandıktan sonra varsayılan yapılabilir (docs/PAKETLEME.md).
- */
-const winEditExe = winSigning || env.UM_WIN_EDIT_EXE === "1";
 
 /**
  * Geliştiricinin yerel verisi pakete GİRMEMELİ. Next'in dosya izleyicisi (output file tracing) proje kökündeki `.data/`
  * klasörünü (geliştirme veritabanı, `master.key`, `secrets.json`) ve `.env*` dosyalarını `.next/standalone` içine
  * kopyalayabilir; yerelde `npm run dist` çalıştırıldığında bunlar kurulum paketine taşınırdı. CI temiz checkout'tan
- * derlediği için orada bu dosyalar yoktur; bu süzgeç yerel derlemeyi de güvenli kılar (tests/packaging-config.test.ts).
+ * derlediği için orada bu dosyalar yoktur; bu süzgeç yerel derlemeyi de güvenli kılar (tests/packaging-config.test.ts
+ * süzgeci electron-builder'ın kendi eşleyicisiyle gerçek bir klasör ağacına uygular).
+ *
+ * İki katman:
+ *   1. Kara liste (her yerde): `.data*` adlı HER klasör (`.data`, `.data-demo`, `.data-arsiv-…`), `.env*`, SQLite
+ *      dosyaları, `master.key*`, `secrets.json`, şifreli yedekler (`*.umbk`).
+ *   2. İzin listesi (`data/`): izleyicinin taşıdığı statik veri klasöründen YALNIZCA bilinen dosyalar girer
+ *      (`staticDataDir()` yalnızca şehir listesini okur). `data/backups/`, dışa aktarımlar, günlükler vb. girmez.
+ * Sıra önemlidir: electron-builder kalıpları sırayla uygular; izin listesi en sonda olmalıdır.
  */
+const STATIC_DATA_FILES = ["data/cities.eu-tr.json", "data/ATTRIBUTION.md"];
 const DEVELOPER_DATA_EXCLUDES = [
-  "!.data/**",
-  "!.data-demo/**",
+  "!.data*",
+  "!.data*/**",
   "!**/.env",
   "!**/.env.*",
   "!**/*.db",
   "!**/*.db-wal",
   "!**/*.db-shm",
   "!**/*.db-journal",
-  "!**/master.key",
+  "!**/master.key*",
   "!**/secrets.json",
+  "!**/*.umbk",
+  "!data/**",
+  ...STATIC_DATA_FILES,
 ];
 
 module.exports = {
@@ -91,7 +96,11 @@ module.exports = {
     target: [{ target: "nsis", arch: ["x64"] }],
     // 1024×1024 PNG; electron-builder .ico dosyasını (256 px dahil) kendisi üretir.
     icon: "build/icon.png",
-    signAndEditExecutable: winEditExe,
+    // .exe kaynak düzenleme (simge, ürün adı/sürüm bilgisi) HER ZAMAN açık; imzalama yalnızca sertifika varsa. (Eskiden
+    // `signAndEditExecutable: false` ikisini birden kapatıyordu: imzasız .exe ve kısayollar Electron simgesini taşıyordu.)
+    // CI Windows işi `scripts/check-win-exe.mjs` ile ürün adının .exe'ye gömüldüğünü doğrular.
+    signAndEditExecutable: true,
+    signExecutable: winSigning,
   },
   nsis: {
     // Kullanıcı başına kurulum: yönetici izni istemez, veriler kullanıcının %APPDATA% klasöründe kalır.
