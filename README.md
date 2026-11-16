@@ -23,6 +23,9 @@ Satılan ürünler: tek kullanımlık çatal-bıçak, amerikan servis, ıslak me
 - [Faz 3 Notları](docs/08-FAZ3-NOTLARI.md) — şablonlar, kampanya, gönderim, uyum; açık teknik borç ve şirketten beklenenler
 - [Faz 3 Canlı Doğrulama](docs/09-FAZ3-CANLI-DOGRULAMA.md) — yalnızca gerçek hesapla kanıtlanabilecek maddeler, kilitlerin açılma sırası, kanıt biçimi
 - [Canlıya Geçiş](docs/10-CANLIYA-GECIS.md) — şirket girdileri (nereye, ne zaman, gizli mi), paylaşım kuralları, aşamalı canlı test sırası
+- [Faz 4 Notları](docs/11-FAZ4-NOTLARI.md) — tarama motoru, keşif ekranı, arayüz cilası, takip iletileri, gösterge paneli
+- [Faz 5 Notları](docs/12-FAZ5-NOTLARI.md) — sicil kaynakları, içe aktarma, yapay zekâ girişi, şablon dilleri; entegrasyon bekleyenler
+- [Faz 6 Notları](docs/13-FAZ6-NOTLARI.md) — paketleme, şifreli yedek, saklama ve veri silme, güvenlik/performans/gizlilik; kullanıcıdan beklenenler
 - [Çıkış aktarıcısı: Cloudflare Worker kurulumu (önerilen)](deploy/cloudflare-worker/README.md) — HTTPS tek tıklamalı abonelikten çıkış aktarıcısının ücretsiz Cloudflare Worker + D1 üzerinde, sunucusuz kurulumu
 - [Çıkış aktarıcısı: VPS kurulumu (isteğe bağlı)](deploy/relay/README.md) — aynı aktarıcının Linux sunucusuna (systemd + Caddy) kurulumu
 
@@ -48,6 +51,8 @@ Uygulama **müşterinin bilgisayarına** kurulan bir masaüstü programıdır (m
 **Faz 2 (e-posta bulma) kodlandı** (`feat/faz-2` dalı): işletmenin kendi web sitesinden nazik tarama (robots.txt, site başına ≤ 6 istek), e-posta/sosyal bağlantı çıkarma, doğrulama, isteğe bağlı Hunter.io yedeği, lead ayrıntısında düzenleme. Demo ile doğrulandı; gerçek sitelerde bulma oranı gerçek anahtarla ölçülecek. Ayrıntılar: [Faz 2 Notları](docs/06-FAZ2-NOTLARI.md).
 
 **Faz 3 (şablonlar, kampanya, gönderim, uyum) demo olarak kodlandı; canlı entegrasyonun yazılım hazırlığı sürüyor, Faz 3 kapanmadı.** Şablonlar, kampanya sihirbazı, zamanlayıcı, ülke politikası, engel listesi, çıkış ve silme talepleri demo posta kutusuyla uçtan uca çalışır. Canlı hazırlık (Aşama 15.1–15.8: Gmail OAuth ve gönderim bağdaştırıcısı, gelen kutusu okuyucusu, Ed25519 imzalı RFC 8058 çıkış altyapısı, DNS denetimi, birleşik gönderim kapısı, ARF şikâyetleri) ve 15.10-1 migrasyonu yapıldı. **Gerçek e-posta gönderimi ve gerçek gelen kutusu okuma kodda kapalıdır**; açılmaları gerçek hesapla doğrulamaya, çıkış aktarıcısının dağıtımına, yazılı hukuki onaylara ve kayıtlı bir sürüme bağlıdır, ardından pilot (ilk hafta günde ≤ 20) gelir. Ayrıntılar: [Faz 3 Notları](docs/08-FAZ3-NOTLARI.md), [Canlı Doğrulama](docs/09-FAZ3-CANLI-DOGRULAMA.md), [Canlıya Geçiş](docs/10-CANLIYA-GECIS.md).
+
+**Faz 4–6 kodlandı ve test edildi; yol haritasındaki altı fazın tamamı kodda tamamlandı.** Açık kalanlar müşterinin hesabını, makinesini veya kararını gerektirir (kod imzalama, temiz makinede kurulum denemesi, teslim günü, bakım ve kaynak kod kararları, çıkış sunucusunun dağıtımı, Gmail erişimi): [Faz 6 Notları → Kullanıcıdan beklenenler](docs/13-FAZ6-NOTLARI.md#10-kullanıcıdan-beklenenler).
 
 ## Geliştirme
 ```bash

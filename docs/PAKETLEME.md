@@ -48,6 +48,12 @@ Veri klasörünün içi: `data/` (veritabanı `universal-mail.db`, `secrets.json
 ## 3. Windows kurulumu (NSIS)
 
 - **Kullanıcı başına** kurulum (`perMachine: false`, `allowElevation: false`): yönetici parolası istemez.
+- `oneClick: false` + `perMachine: false` iken electron-builder'ın yardımlı kurulumu her zaman **"Choose Installation
+  Options"** sayfasını gösterir ("Anyone who uses this computer (all users)" / "Only for me"). Bu sayfanın metni
+  electron-builder şablonunda yalnızca İngilizcedir; yönetici hesabında "all users" seçilebilir ve UAC ile makine
+  geneline kurar. Kullanıcı rehberi (`docs/KURULUM.md` 3.2) **Only for me** seçtirir. Sayfayı tamamen kaldırmak için
+  tek tıklamalı kullanıcı başına kuruluma (`oneClick: true`) geçmek gerekir; bu, kurulum klasörü seçimini ve kurulum
+  sonu "çalıştır" seçeneğini kaldırdığı için yapılmadı.
 - Kurulum klasörü değiştirilebilir; **masaüstü kısayolu** her zaman, Başlat menüsü kısayolu oluşturulur; kurulum bitince
   uygulama açılır.
 - Dil: Türkçe (varsayılan, `1055`) ve İngilizce; işletim sisteminin diline göre seçilir.
