@@ -289,12 +289,13 @@ describe("sözlük parçaları", () => {
 });
 
 describe("paket yer tutucuları güvenle çağrılabilir (davranış yok)", () => {
-  it("işçi: açılış yedeği ve iş kaydı hiçbir şey yazmaz", async () => {
-    const db = { insert: vi.fn(), select: vi.fn() } as unknown as Db;
-    await expect(onWorkerStarted(db, { now: 1 })).resolves.toBeUndefined();
+  // Paket Y yer tutucuları doldurdu: işçi dikişinin imzası aynı kaldı; iş kaydı artık iki işleyiciyi kaydeder
+  // (davranış testleri: tests/backup-auto-jobs.test.ts, tests/retention.test.ts).
+  it("işçi: açılış yedeği dikişi aynı imzada; iş kaydı backup.auto ve data.retention işleyicilerini ekler", () => {
+    expect(onWorkerStarted).toHaveLength(2);
     expect(() => registerLifecycleJobs()).not.toThrow();
-    expect(getJobHandler("backup.auto")).toBeUndefined();
-    expect(getJobHandler("data.retention")).toBeUndefined();
+    expect(getJobHandler("backup.auto")).toBeTypeOf("function");
+    expect(getJobHandler("data.retention")).toBeTypeOf("function");
   });
 
   it("migrate kancaları: bekleyen işlem uygulanmaz", async () => {

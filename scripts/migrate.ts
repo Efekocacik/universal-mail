@@ -45,7 +45,7 @@ async function main(): Promise<void> {
   try {
     const pre = await runPreInitHooks({ dataDir: dir, log: (m) => console.log(m) });
     const r = await initDatabase();
-    await runPostInitHooks(await getDb(), pre);
+    await runPostInitHooks(await getDb(), pre, { dataDir: dir, log: (m) => console.log(m) });
     console.log(
       r.migrated.pending > 0
         ? `✔ ${r.migrated.pending} şema geçişi uygulandı${r.migrated.backupPath ? ` (yedek: ${r.migrated.backupPath})` : ""}.`
