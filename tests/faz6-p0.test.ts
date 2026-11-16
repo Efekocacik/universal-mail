@@ -402,16 +402,19 @@ describe("Electron dikişleri (enjekte bağımlılıklarla)", () => {
     expect(relaunch).toHaveBeenCalledTimes(1);
   });
 
-  it("handleMigrationFailure (yer tutucu): eski genel hata kutusu + 'quit'", async () => {
-    const boxes: [string, string][] = [];
+  it("handleMigrationFailure: genel hata kutusu yerine koda özel iletişim kutusu (ayrıntı: electron-migration-recovery)", async () => {
+    // Paket K yer tutucuyu doldurdu; tam kapsam tests/electron-migration-recovery.test.ts'tedir. Burada yalnızca dikiş:
+    // ana sürecin verdiği bağımlılıklarla çağrılır, genel hata kutusunu kullanmaz, ilk düğme "retry" döndürür.
+    const boxes: string[] = [];
+    const errorBoxes: string[] = [];
     const action = await handleMigrationFailure(null, {
       dataDir: "/veri",
       logDir: "/gunluk",
       attempt: 1,
       exitCode: 1,
       t: (k, p) => `${k}${p ? JSON.stringify(p) : ""}`,
-      showMessageBox: () => 0,
-      showErrorBox: (title, body) => void boxes.push([title, body]),
+      showMessageBox: (spec) => (boxes.push(spec.title), 0),
+      showErrorBox: (title) => void errorBoxes.push(title),
       openPath: () => {},
       exists: () => false,
       copyFile: () => {},
@@ -420,11 +423,9 @@ describe("Electron dikişleri (enjekte bağımlılıklarla)", () => {
       now: () => 0,
       log: () => {},
     });
-    expect(action).toBe("quit");
-    expect(boxes).toHaveLength(1);
-    expect(boxes[0]![0]).toBe("electron.startError.title");
-    expect(boxes[0]![1]).toContain("kod=1");
-    expect(boxes[0]![1]).toContain('"dir":"/gunluk"');
+    expect(action).toBe("retry");
+    expect(boxes).toEqual(["electron.migrate.title"]);
+    expect(errorBoxes).toEqual([]);
   });
 });
 

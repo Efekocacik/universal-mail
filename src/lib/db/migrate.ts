@@ -71,6 +71,27 @@ export class MigrationVerificationError extends Error {
   }
 }
 
+/**
+ * Faz 6 (K.2): geçiş SQL'i başarısız olursa, geçiş öncesi yedeğin yolu hataya `backupPath` olarak eklenir; böylece
+ * `scripts/migrate.ts` bunu `migrate-result.json`'a yazar ve Electron "güncelleme öncesi yedeğe dön" düğmesini sunar.
+ * Hata nesnesi değiştirilemiyorsa (dondurulmuş, ilkel değer) yol `cause` zinciri korunarak yeni bir hataya taşınır.
+ */
+export function withBackupPath(e: unknown, backupPath: string | undefined): unknown {
+  if (!backupPath) return e;
+  if (e instanceof Error && Object.isExtensible(e)) {
+    if (typeof (e as { backupPath?: unknown }).backupPath !== "string")
+      Object.defineProperty(e, "backupPath", {
+        value: backupPath,
+        enumerable: false,
+        configurable: true,
+      });
+    return e;
+  }
+  return Object.assign(new Error(e instanceof Error ? e.message : String(e), { cause: e }), {
+    backupPath,
+  });
+}
+
 const isBusy = (e: unknown) => isBusyConnectionError(e);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -173,7 +194,11 @@ export async function runMigrations(
       pruneBackups(backupsDir());
     }
 
-    await migrate(db, { migrationsFolder: folder });
+    try {
+      await migrate(db, { migrationsFolder: folder });
+    } catch (e) {
+      throw withBackupPath(e, backupPath);
+    }
     await verifyAfter(client, backupPath);
     return { pending, backupPath };
   } finally {

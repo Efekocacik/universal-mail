@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Universal Mail macOS yetkileri (Faz 6, paket K). Yalnızca imzalı derlemede kullanılır (electron-builder.config.cjs,
+  CSC_LINK/CSC_NAME). Sertleştirilmiş çalışma zamanında Electron (V8 JIT) ve libsql yerel modülü için gereken asgari
+  yetkiler; ağ, kamera, mikrofon, konum vb. yetkiler İSTENMEZ. Ayrıntı: docs/PAKETLEME.md.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+  </dict>
+</plist>
