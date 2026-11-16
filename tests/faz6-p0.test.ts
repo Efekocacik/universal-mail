@@ -340,7 +340,10 @@ describe("Electron dikişleri (enjekte bağımlılıklarla)", () => {
     hardenWebContents(
       {
         setWindowOpenHandler: (h) => void (openHandler = h),
-        on: (_ev, l) => void (navigate = l),
+        // Paket G başka olaylar da dinler (will-redirect, will-attach-webview…); burada yalnızca gezinme sınanır.
+        on: (ev: string, l: (e: { preventDefault(): void }, url: string) => void) => {
+          if (ev === "will-navigate") navigate = l;
+        },
       },
       {
         isLocal: (u) => u.startsWith("http://127.0.0.1:5000"),
