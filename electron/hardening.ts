@@ -169,8 +169,10 @@ export function hardenSession(session: HardenableSession): void {
  * Ana pencerenin güvenli `webPreferences` değerleri. `electron/main.ts` (P0'a ait) bunları `createWindow` içinde
  * yaymalıdır (`webPreferences: { preload, ...secureWebPreferences(app.isPackaged) }`); bugünkü main.ts ilk dört değeri
  * zaten elle verir, geri kalanlar (yazım denetimi, sürükle-bırak gezinmesi, webview, paketli uygulamada geliştirici
- * araçları) burada toplanır. `hardenSession` ve `hardenWebContents` aynı korumaları oturum/olay düzeyinde de uygular
- * (çifte güvence: biri unutulsa bile diğeri tutar).
+ * araçları) burada toplanır. Ayrıca `app.whenReady()`'den önce `app.enableSandbox()` çağrılmalıdır (tüm görüntüleyiciler
+ * kum havuzunda). `hardenSession` ve `hardenWebContents` aynı korumaları oturum/olay düzeyinde de uygular (çifte
+ * güvence: biri unutulsa bile diğeri tutar). Bağlantı yapılana kadar `tests/electron-hardening.test.ts` docs/GUVENLIK.md'de
+ * "ENTEGRASYON BEKLİYOR" işaretini zorunlu tutar.
  */
 export function secureWebPreferences(isPackaged: boolean) {
   return {

@@ -1,3 +1,5 @@
+import path from "node:path";
+import { createClient } from "@libsql/client";
 import { expect, test, type Browser, type BrowserContext, type Page } from "@playwright/test";
 // @ts-expect-error -- düz ESM yardımcı (tür bildirimi yok)
 import { startIsolatedServer } from "./helpers/isolated-server.mjs";
@@ -12,6 +14,10 @@ import { startIsolatedServer } from "./helpers/isolated-server.mjs";
  *  2. Tarayıcıdaki her istek kaydedilir: yalnızca `http://127.0.0.1:<port>`, `data:` ve `blob:` görülmelidir.
  *
  * Paylaşılan E2E sunucusuna dokunmaz; kendi yalıtılmış sunucusunu (`e2e/helpers/isolated-server.mjs`) açar.
+ *
+ * Kapsam: Node süreçleri (sunucu, işçi, migrasyon) ve görüntüleyici (Playwright Chrome). Electron ana süreci ve
+ * Chromium'un kendi arka plan hizmetleri burada ÇALIŞMAZ; onlar `tests/electron-hardening.test.ts` (yazım denetimi
+ * sözlüğü vb.) ile ve temiz makinede ağ izleyiciyle elle doğrulanır (docs/GUVENLIK.md §6.3).
  * Elle çalıştırma: `npm run build && npx playwright test e2e/privacy.spec.ts`
  */
 
@@ -23,6 +29,7 @@ interface EgressEntry {
 }
 interface Isolated {
   url: string;
+  dataDir: string;
   egress: () => EgressEntry[];
   output: () => string;
   stop: () => Promise<void>;
@@ -191,9 +198,85 @@ test.fixme("ayarlar: Güvenlik ve gizlilik kartı her hizmeti ve ne zaman bağla
   await expect(card.getByText("places.googleapis.com")).toBeVisible();
 });
 
+interface JobRow {
+  type: string;
+  status: string;
+  lastError: string | null;
+}
+
+/** Yalıtılmış veri klasöründeki veritabanından salt okuma sorgusu (WAL sayesinde işçiyle eşzamanlı okunabilir). */
+async function readDb<T>(
+  sql: string,
+  args: (string | number)[],
+  map: (row: Record<string, unknown>) => T,
+): Promise<T[]> {
+  const file = path.resolve(server.dataDir, "universal-mail.db").replace(/\\/g, "/");
+  const client = createClient({ url: `file:${file}` });
+  try {
+    await client.execute("PRAGMA busy_timeout = 5000");
+    const r = await client.execute({ sql, args });
+    return r.rows.map((x) => map(x as Record<string, unknown>));
+  } finally {
+    client.close();
+  }
+}
+
+/** Zamanı gelmiş işler (iş kuyruğu). */
+const jobRows = () =>
+  readDb<JobRow>(
+    "SELECT type, status, last_error FROM jobs WHERE run_at <= ? ORDER BY id",
+    [Date.now()],
+    (x) => ({
+      type: String(x.type),
+      status: String(x.status),
+      lastError: x.last_error === null ? null : String(x.last_error),
+    }),
+  );
+
+/** Bakım turunun kuyruğa aldığı (yenilik varsayılan açık: gelecek izleme, RDAP) ve elle tetiklenen arka plan işleri. */
+const BACKGROUND_JOBS = ["places.refresh_ids", "places.watch_future", "novelty.rdap"] as const;
+
+test("işçi: açılış bakım turu ve arka plan işleri demo veriyle gerçekten çalışır", async () => {
+  test.setTimeout(120_000);
+  const headers = { origin: server.url };
+  // Açılış bakım turu boş veritabanında çalıştı; işler bu yüzden boş geçmiş olabilir. Demo veri artık var: aynı işler
+  // (RDAP alan adı yaşı, yer kimliği yenileme) elle tetiklenir ve her lead için yürür.
+  expect((await page.request.post("/api/leads/rdap", { headers, data: {} })).status()).toBe(202);
+  expect(
+    (await page.request.post("/api/google-data/refresh-ids", { headers, data: {} })).status(),
+  ).toBe(202);
+  // Zamanı gelmiş hiçbir iş kuyrukta/çalışır durumda kalmayana ve her arka plan işinden en az biri bitene kadar beklenir.
+  await expect
+    .poll(
+      async () => {
+        const rows = await jobRows();
+        const busy = rows.filter((r) => r.status === "queued" || r.status === "running");
+        const missing = BACKGROUND_JOBS.filter(
+          (t) => !rows.some((r) => r.type === t && r.status === "done"),
+        );
+        return { busy: busy.map((r) => r.type), missing };
+      },
+      { timeout: 90_000, intervals: [500] },
+    )
+    .toEqual({ busy: [], missing: [] });
+  // Hiçbir iş bekçinin engellemesi yüzünden başarısız olmadı (olsaydı aşağıdaki boş kayıt da bozulurdu).
+  const rows = await jobRows();
+  const failed = rows.filter((r) => r.status === "failed");
+  expect(failed, JSON.stringify(failed)).toEqual([]);
+  // Hem açılış turunun hem elle tetiklenen turun işleri bitti (yer kimliği: günlük + elle; RDAP: açılış + elle).
+  const done = (type: string) => rows.filter((r) => r.type === type && r.status === "done").length;
+  expect(done("places.refresh_ids")).toBeGreaterThanOrEqual(2);
+  expect(done("novelty.rdap")).toBeGreaterThanOrEqual(2);
+  // RDAP işi demo lead'lerin alan adlarını gerçekten denetledi (boş geçmedi).
+  const [checked] = await readDb(
+    "SELECT COUNT(*) AS n FROM domain_registrations WHERE checked_at IS NOT NULL",
+    [],
+    (x) => Number(x.n),
+  );
+  expect(checked).toBeGreaterThan(0);
+});
+
 test("sonuç: sunucu/işçi/migrasyon ve tarayıcı bu bilgisayar dışına hiç bağlanmadı", async () => {
-  // İşçinin açılış bakım turu ve kuyruğa aldığı işler (RDAP, yakında açılacak izleme…) bu sürede çalışmış olur.
-  await page.waitForTimeout(3000);
   const egress = server.egress();
   expect(egress, JSON.stringify(egress.slice(0, 20))).toEqual([]);
   expect(foreignRenderer()).toEqual([]);

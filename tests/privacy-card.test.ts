@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { build } from "esbuild";
@@ -89,6 +90,35 @@ describe("PrivacyCard", () => {
       expect(html).not.toMatch(/security\.[a-z]/); // çevrilmemiş anahtar yok
     });
   }
+});
+
+describe("Ayarlar sayfasına yerleştirme (P0 entegrasyonu)", () => {
+  const read = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+  const page = read("src/features/settings/settings-page.tsx");
+  const doc = read("docs/GUVENLIK.md");
+  const e2e = read("e2e/privacy.spec.ts");
+  const mounted = /<PrivacyCard\b/.test(page) && /from "\.\/privacy-card"/.test(page);
+  const PENDING = "[ENTEGRASYON BEKLİYOR: PrivacyCard]";
+
+  it("kart Ayarlar'a takılı değilse belge 'bekliyor' der ve e2e testi fixme'dir; takılıysa ikisi de kalkar", () => {
+    // settings-page.tsx P0'a aittir; kart takılana kadar bu açık unutulmasın.
+    if (mounted) {
+      expect(doc).not.toContain(PENDING);
+      expect(e2e).not.toMatch(/test\.fixme\("ayarlar: Güvenlik ve gizlilik kartı/);
+      expect(page).toMatch(/\{ id: "security", key: "settings.nav.security" \}/);
+    } else {
+      expect(doc).toContain(PENDING);
+      expect(e2e).toMatch(/test\.fixme\("ayarlar: Güvenlik ve gizlilik kartı/);
+    }
+  });
+
+  it("gezinme etiketi TR ve EN'de hazır", () => {
+    setLocale("tr");
+    expect(t("settings.nav.security")).toBe("Güvenlik ve gizlilik");
+    setLocale("en");
+    expect(t("settings.nav.security")).toBe("Security and privacy");
+    setLocale("tr");
+  });
 });
 
 /** React metin kaçışı (yalnızca metinlerde geçen karakterler). */

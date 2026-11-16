@@ -1,6 +1,6 @@
 # Güvenlik ve Gizlilik
 
-**Durum (16 Kasım 2026, Faz 6 paket G).** Bu belge uygulamanın güvenlik önlemlerini, dışarıya hangi adreslere ne zaman bağlandığını ve bunların nasıl yeniden doğrulanacağını anlatır. Yalnızca kodla ve testle kanıtlanan şeyler "yapıldı" diye yazılır; kanıtın adı her bölümde verilir. Bir çelişki görürseniz **kod belirleyicidir**. Kullanıcıya yönelik kısa özet uygulamada **Ayarlar → Güvenlik ve gizlilik** kartındadır (`src/features/settings/privacy-card.tsx`).
+**Durum (16 Kasım 2026, Faz 6 paket G).** Bu belge uygulamanın güvenlik önlemlerini, dışarıya hangi adreslere ne zaman bağlandığını ve bunların nasıl yeniden doğrulanacağını anlatır. Yalnızca kodla ve testle kanıtlanan şeyler "yapıldı" diye yazılır; kanıtın adı her bölümde verilir. Bir çelişki görürseniz **kod belirleyicidir**. Kullanıcıya yönelik kısa özet **Ayarlar → Güvenlik ve gizlilik** kartıdır (`src/features/settings/privacy-card.tsx`, TR+EN, gezinme etiketi `settings.nav.security` hazır). **[ENTEGRASYON BEKLİYOR: PrivacyCard]** Kart henüz Ayarlar sayfasına takılı değildir (`settings-page.tsx` P0'a aittir); takılana kadar arayüzden açılamaz ve `e2e/privacy.spec.ts`'teki kart testi `fixme`'dir. Takıldığında bu işaret ve `fixme` kaldırılır; `tests/privacy-card.test.ts` üçünün birlikte değişmesini zorunlu tutar.
 
 ## 1. Kısa tehdit modeli
 
@@ -38,7 +38,8 @@ Kapsam dışı: bilgisayarın kendisinin ele geçirilmesi (yönetici hakkıyla �
 
 `electron/hardening.ts` (birim testi: `tests/electron-hardening.test.ts`, sahte WebContents/Session ile):
 
-- **Pencere:** `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true` (main.ts; statik test). `secureWebPreferences(isPackaged)` ayrıca `spellcheck: false`, `navigateOnDragDrop: false`, `webviewTag: false`, `nodeIntegrationInSubFrames/InWorker: false`, `allowRunningInsecureContent: false`, paketli uygulamada `devTools: false` verir (main.ts'e bağlanması entegrasyon adımındadır).
+- **Pencere (bugün etkin):** `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, `webSecurity: true` (main.ts; statik test).
+- **[ENTEGRASYON BEKLİYOR: secureWebPreferences]** `secureWebPreferences(isPackaged)` ayrıca `spellcheck: false`, `navigateOnDragDrop: false`, `webviewTag: false`, `nodeIntegrationInSubFrames/InWorker: false`, `allowRunningInsecureContent: false`, `safeDialogs: true`, paketli uygulamada `devTools: false` verir; ancak **henüz main.ts'e bağlı değildir** ve `app.enableSandbox()` de çağrılmıyor. Bu ayarlar bugün yalnızca aşağıdaki oturum/olay düzeyi korumalarla (yazım denetimi kapalı, `will-attach-webview`, `will-navigate`, geliştirici araçlarının kapatılması) karşılanır. Bağlantı (P0): `webPreferences: { preload, ...secureWebPreferences(app.isPackaged) }` ve `app.whenReady()`'den önce `app.enableSandbox()`. `tests/electron-hardening.test.ts` bağlantı yapılana kadar bu işareti zorunlu tutar; bağlandığında işaret kaldırılmalıdır.
 - **Yeni pencere** hiçbir zaman açılmaz: dış `http(s)` bağlantısı (kimlik bilgisi içermeyen) varsayılan tarayıcıda açılır; `file:`, `javascript:`, `data:`, özel şemalar (`smb:`, `ms-settings:`…) düşürülür.
 - **Gezinme** (`will-navigate`) ve **yönlendirme** (`will-redirect`) yalnızca uygulamanın yerel kökenine; pencereye sürüklenen dosya (`file:`) da engellenir. Günlüğe yalnızca şema ve ana bilgisayar yazılır (yol/sorgu/kişisel veri yazılmaz).
 - `<webview>` eklenemez (`will-attach-webview`).
@@ -51,11 +52,12 @@ Kapsam dışı: bilgisayarın kendisinin ele geçirilmesi (yönetici hakkıyla �
 
 `next.config.ts` her yanıta şu başlıkları ekler; CSP yalnızca üretim derlemesindedir (`next dev` sıcak yeniden yükleme için `eval` kullanır):
 
-- `Content-Security-Policy`: `default-src 'self'`; betikler yalnızca kendi kökenimiz ve Google Maps JavaScript API (`maps.googleapis.com`, `maps.gstatic.com`); bağlantılar (`connect-src`) ve görseller kendi kökenimiz, `data:`/`blob:` ve Google Maps alt alanları; `frame-src 'none'`, `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
-  - `'unsafe-inline'` Next'in satır içi önyükleme betikleri, `'unsafe-eval'` Google Maps JavaScript API'si için gereklidir (Google'ın Maps CSP kılavuzu). Asıl kazanç veri sızdırma yollarının (connect/img/frame/form/base) kendi kökenimizle ve Google Maps ile sınırlanmasıdır. Maps yalnızca kullanıcı bir harita anahtarı girdiğinde yüklenir.
+- `Content-Security-Policy`: `default-src 'self'`; kendi kökenimiz dışındaki her kaynak Google Maps JavaScript API içindir ve Google'ın Maps için belgelediği **izin listesi CSP'sinin** (developers.google.com/maps/documentation/javascript/content-security-policy) Maps kısımlarıyla birebir aynıdır: `script-src 'unsafe-eval' blob: https://*.googleapis.com https://maps.gstatic.com https://*.ggpht.com https://*.google.com`; `img-src` Google görsel alanları ve `data:`/`blob:`; `connect-src https://*.googleapis.com https://*.google.com https://*.gstatic.com data: blob:`; `frame-src https://*.google.com` (Maps'in kendi iç çerçeveleri; başka çerçeve kaynağı yok); `font-src https://fonts.gstatic.com`; `style-src 'unsafe-inline' https://fonts.googleapis.com`; `worker-src blob:` (vektör harita ve gelişmiş işaretçiler, `mapId`). Ayrıca `object-src 'none'`, `base-uri 'self'`, `form-action 'self'`, `frame-ancestors 'none'`.
+  - `'unsafe-inline'` Next'in satır içi önyükleme betikleri, `'unsafe-eval'` ve `blob:` Google Maps JavaScript API'si için gereklidir. Asıl kazanç veri sızdırma yollarının (connect/img/frame/form/base) kendi kökenimizle ve Google ile sınırlanmasıdır. Maps yalnızca kullanıcı bir harita anahtarı girdiğinde yüklenir.
+  - **Sınır:** anahtarlı harita bu CSP altında hiçbir otomatik testte yüklenmez (testler gerçek Google'a bağlanmaz; gizlilik denetimi demo kipindedir). `tests/security-server-bind.test.ts` Google'ın izin listesindeki her kaynağın CSP'de olduğunu denetler; gerçek doğrulama açık kalemdir (Bölüm 9).
 - `Referrer-Policy: no-referrer` (dış bağlantılara adres sızmaz), `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Cross-Origin-Opener-Policy: same-origin`, `Permissions-Policy` (kamera, mikrofon, konum, USB, seri, HID, Bluetooth kapalı).
 - Abonelikten çıkma sayfası (`/u/[token]`) kendi formunu kendi kökenine gönderir (`form-action 'self'` ile uyumlu); açılma pikseli bir GIF döndürür.
-- **Kanıt:** `tests/security-server-bind.test.ts` başlıkları yapılandırmadan okur; `tests/egress-allowlist.test.ts` CSP'deki her dış kaynağın izin listesinde ve Google Maps hizmetine bağlı olduğunu denetler; `e2e/privacy.spec.ts` üretim derlemesinde (CSP etkin) bütün ekranları dolaşır ve CSP ihlali olmadığını denetler.
+- **Kanıt:** `tests/security-server-bind.test.ts` başlıkları yapılandırmadan okur ve Google'ın Maps izin listesi CSP'sinin her kaynağını arar; `tests/egress-allowlist.test.ts` CSP'deki her dış kaynağın izin listesinde ve Google Maps hizmetine bağlı olduğunu denetler; `e2e/privacy.spec.ts` üretim derlemesinde (CSP etkin) bütün ekranları demo kipinde dolaşır ve CSP ihlali olmadığını denetler (Maps yüklenmez; yukarıdaki sınıra bakın).
 
 ## 6. Dış bağlantılar (gizlilik, NFR-01)
 
@@ -83,7 +85,7 @@ bağlanır; "bağlantı" türündeki adresler yalnızca kullanıcı tıklarsa va
 
 ### 6.2 Adres envanteri
 
-Kaynak: `src/lib/net/egress-allowlist.ts`. `tests/egress-allowlist.test.ts`: `src/` ve `electron/` altındaki **her** URL sabitinin ana bilgisayarı bu listededir; listede geliştirici/telemetri adresi yoktur; ağ modüllerini (`node:dns`, `node:net`, `node:http(s)`, `node:tls`…) yalnızca `src/lib/email/safe-fetch.ts`, `src/lib/email/verify.ts`, `src/lib/mail/dns-check.ts` ve `electron/main.ts` (yalnızca 127.0.0.1) içe aktarır; bu tablo listedeki her adresi içerir. Yeni bir dış hizmet eklendiğinde önce izin listesine, Ayarlar kartının metnine (`src/lib/i18n/{tr,en}/security.ts`) ve bu tabloya eklenmelidir; aksi hâlde test kırılır.
+Kaynak: `src/lib/net/egress-allowlist.ts`. `tests/egress-allowlist.test.ts`: `src/` ve `electron/` altındaki **her** URL sabitinin (`http(s)://…`) ve ana bilgisayar benzeri bir ada (`host`, `hostname`, `domain`, `origin`, `endpoint`, `server`, `baseUrl`, `apiBase`, `API_HOST`…) atanan her çıplak ana bilgisayar sabitinin (`"api.ornek.com"`) listede **tam** karşılığı vardır. Kaynak sabitleri için joker kabul edilmez: Google jokerleri (`*.googleapis.com` vb.) yalnızca CSP içindir, örnek jokerleri yalnızca hiçbir zaman çözülmeyen ayrılmış adlarda (`*.example`, `*.invalid`, `*.example.com`; RFC 2606) geçerlidir. Böylece kodda sabit yazılmış bir geliştirici aktarıcısı (`x.workers.dev`) ya da Google günlük/telemetri adresi "harita" veya "örnek" diye geçemez. Sınır: birleştirmeyle kurulan adresler (`"https://" + HOST`) ancak `HOST` yukarıdaki biçimde bir sabitse yakalanır; çalışma anında hesaplanan adresler gizlilik denetimiyle (6.3) denetlenir. Ayrıca listede geliştirici/telemetri adresi yoktur; ağ modüllerini (`node:dns`, `node:net`, `node:http(s)`, `node:tls`…) yalnızca `src/lib/email/safe-fetch.ts`, `src/lib/email/verify.ts`, `src/lib/mail/dns-check.ts` ve `electron/main.ts` (yalnızca 127.0.0.1) içe aktarır; bu tablo listedeki her adresi içerir. Yeni bir dış hizmet eklendiğinde önce izin listesine, Ayarlar kartının metnine (`src/lib/i18n/{tr,en}/security.ts`) ve bu tabloya eklenmelidir; aksi hâlde test kırılır.
 
 | Adres | Tür | Hizmet | Açıklama |
 |---|---|---|---|
@@ -123,13 +125,14 @@ Kaynak: `src/lib/net/egress-allowlist.ts`. `tests/egress-allowlist.test.ts`: `sr
 | `www.youtube.com` | Yalnızca tıklarsanız (tarayıcıda) | – | İşletmenin sosyal medya bağlantısı |
 | `www.w3.org` | Hiç bağlanılmaz (örnek/yer tutucu) | – | SVG XML ad alanı |
 | `firma.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek alan adı |
-| `*.firma.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek alan adı |
-| `*.firmaniz.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek alan adı |
-| `*.firma.example` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek alan adı (.example ayrılmış) |
-| `*.example` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Demo verisi (.example ayrılmış) |
-| `*.invalid` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Geçersiz adres (.invalid ayrılmış) |
-| `*.yourcompany.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek alan adı |
-| `*.workers.dev` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek Cloudflare Worker adresi |
+| `cikis.firma.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek çıkış aktarıcısı adresi |
+| `cikis.firmaniz.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek çıkış aktarıcısı adresi (Ayarlar ipucu) |
+| `unsubscribe.yourcompany.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek çıkış aktarıcısı adresi (İngilizce ipucu) |
+| `um-relay.hesabiniz.workers.dev` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek Cloudflare Worker adresi (Türkçe ipucu) |
+| `um-relay.youraccount.workers.dev` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek Cloudflare Worker adresi (İngilizce ipucu) |
+| `*.example` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Demo verisi ve örnekler (.example ayrılmış, RFC 2606) |
+| `*.example.com` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Örnek adres (example.com ayrılmış, RFC 2606) |
+| `*.invalid` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Geçersiz adres (.invalid ayrılmış, RFC 2606) |
 | `ana.makine` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Açıklamada örnek ana bilgisayar |
 | `host` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Açıklamada örnek ana bilgisayar |
 | `başka` | Hiç bağlanılmaz (örnek/yer tutucu) | – | Açıklamada örnek ana bilgisayar (aktarıcı) |
@@ -143,9 +146,11 @@ npm run build
 npx playwright test e2e/privacy.spec.ts
 ```
 
-`e2e/privacy.spec.ts` kendi yalıtılmış sunucusunu açar (`e2e/helpers/isolated-server.mjs`: geçici veri klasörü, ayrı bağlantı noktası, kullanıcının ortam değişkenleri/anahtarları taşınmaz). Migrasyon, web sunucusu ve işçi `scripts/egress-guard.cjs` ile (`NODE_OPTIONS=--require`, `UM_EGRESS_MODE=block`) çalışır: bekçi `net.Socket.connect` (http, https, tls ve `fetch`), `dns.lookup`, `dns.resolve*`/`Resolver` ve UDP gönderimini yakalar; yerel olmayan her denemeyi **ağa çıkmadan** reddeder ve `egress.jsonl`'e yazar. Akış: temiz açılış → kurulum sihirbazı (demo) → gösterge paneli → demo tarama → Keşfet listesi/harita → lead ayrıntısı → e-posta bulma ve elle e-posta ekleme → taramalar, şablonlar, kampanyalar, gönderim günlüğü, uyum → Ayarlar'ın her bölümü → işçinin bakım turu. Beklenen sonuç: bekçi kaydı **boş**, tarayıcının gördüğü her istek `http://127.0.0.1:<port>`, `data:` veya `blob:`, CSP ihlali yok. Son adım pozitif kontroldür: Google modu + sahte anahtarla "anahtarı sına" çağrılır ve bekçinin `places.googleapis.com` denemesini engelleyip kaydettiği görülür (denetimin gerçekten etkin olduğunun kanıtı).
+`e2e/privacy.spec.ts` kendi yalıtılmış sunucusunu açar (`e2e/helpers/isolated-server.mjs`: geçici veri klasörü, ayrı bağlantı noktası, kullanıcının ortam değişkenleri/anahtarları taşınmaz). Migrasyon, web sunucusu ve işçi `scripts/egress-guard.cjs` ile (`NODE_OPTIONS=--require`, `UM_EGRESS_MODE=block`) çalışır: bekçi `net.Socket.connect` (http, https, tls ve `fetch`), `dns.lookup`, `dns.resolve*`/`Resolver` ve UDP gönderimini yakalar; yerel olmayan her denemeyi **ağa çıkmadan** reddeder ve `egress.jsonl`'e yazar. Akış: temiz açılış → kurulum sihirbazı (demo) → gösterge paneli → demo tarama → Keşfet listesi/harita → lead ayrıntısı → e-posta bulma ve elle e-posta ekleme → taramalar, şablonlar, kampanyalar, gönderim günlüğü, uyum → Ayarlar'ın her bölümü → işçinin arka plan işleri. Son adımda sabit bir süre beklenmez: açılış bakım turu boş veritabanında çalıştığı için RDAP (alan adı yaşı) ve yer kimliği yenileme demo veriyle yeniden tetiklenir; test iş kuyruğunu (yalıtılmış veri klasöründeki veritabanı, salt okuma) okuyup zamanı gelmiş hiçbir işin kuyrukta/çalışır durumda kalmadığını, `places.refresh_ids`, `places.watch_future` ve `novelty.rdap` işlerinin **bittiğini** (`done`; yer kimliği ve RDAP için açılış + elle tetiklenen tur), RDAP'nin demo alan adlarını gerçekten denetlediğini ve hiçbir işin başarısız olmadığını görene kadar bekler; bekçi kaydı ancak ondan sonra okunur. Beklenen sonuç: bekçi kaydı **boş**, tarayıcının gördüğü her istek `http://127.0.0.1:<port>`, `data:` veya `blob:`, CSP ihlali yok. Son adım pozitif kontroldür: Google modu + sahte anahtarla "anahtarı sına" çağrılır ve bekçinin `places.googleapis.com` denemesini engelleyip kaydettiği görülür (denetimin gerçekten etkin olduğunun kanıtı).
 
-Bekçinin kendisi: `tests/egress-guard.test.ts` (ayrı süreçte; yerel `fetch` geçer, dış `fetch`/`https.get`/TCP/DNS/UDP engellenir ve kaydedilir; gerçek ağa çıkılmaz).
+Bekçinin kendisi: `tests/egress-guard.test.ts` (ayrı süreçte; yerel `fetch` geçer, dış `fetch`/`https.get`/TCP/DNS/UDP engellenir ve kaydedilir; gerçek ağa çıkılmaz). UDP gönderiminde bağımsız değişkenler Node'un imzasıyla ayrıştırılır (ileti hiçbir zaman adres sayılmaz ve kaydedilmez; bağlı sokette hedef `remoteAddress()`); IP sabitinin "çözümlenmesi" (ağa çıkmaz) ve `::ffff:127.*` yerel sayılır.
+
+**Kapsam sınırı.** Bu denetim Node süreçlerini (sunucu, işçi, migrasyon) ve görüntüleyiciyi (Playwright'ın Chrome'u) kapsar. **Electron ana süreci ve Chromium'un kendi arka plan hizmetleri** (yazım denetimi sözlüğü, `shell.openExternal` yolları vb.) burada çalışmaz; onlar yalnızca sahte oturumla birim testindedir (`tests/electron-hardening.test.ts`). "Uygulama internete hiç bağlanmaz" önermesinin paketli uygulama için kanıtı temiz makine denemesidir (Bölüm 9).
 
 ## 7. npm audit
 
@@ -166,7 +171,7 @@ Bekçinin kendisi: `tests/egress-guard.test.ts` (ayrı süreçte; yerel `fetch` 
 
 - Veri: `tests/helpers/seed-leads.ts` (belirlenimci, 100 000 lead; 8 şehir, 7 tür, iki tarama, %40 e-posta, %60 zenginleştirme, %30 önbellek, %1 sicil; yalnızca `firma.com` örnek alan adları).
 - Durumlar (`tests/helpers/perf-cases.ts`): her süzgeç tek başına × üç sıralama (yenilik, ad, en yeni), 12 temsilî birleşim ("tüm süzgeçler birden" dahil), derin sayfa (50 000. kayıt), her süzgeç ve birleşim için süzgeç sayımları (facet), harita noktaları (kutulu/kutusuz), toplu seçim sayısı ve kimlikleri.
-- Otomatik test: `tests/perf-100k.test.ts` (normal pakette; her durum bir ısınma + 3 ölçümün ortancası < 300 ms; eşiği aşan durumlar tüm durumlardan sonra en çok iki tur daha ölçülür). İki kip: uygulamanın gerçek durumu (istatistik tablosu yok; uygulama `ANALYZE` çalıştırmaz) ve `ANALYZE` sonrası. Ayrıca süreden bağımsız bir koruma: sorgu planlarında otomatik indeks ve sürücü tablo dışında indekssiz tam tarama yoktur; liste sayfası geniş sütunları yalnızca sayfadaki kimlikler için okur.
+- Otomatik test: `tests/perf-100k.test.ts` (normal pakette; her durum bir ısınma + 3 ölçümün ortancası; eşiği aşan durumlar tüm durumlardan sonra en çok iki tur daha ölçülür). Süre eşiği yerelde ve `UM_PERF_STRICT=1` ile **300 ms**; CI'da (`CI` tanımlı: paylaşılan koşucu, kapsam ölçümü açık, paralel test dosyaları) yalnızca kaba gerileme koruması **900 ms** ve 300 ms'yi aşan durumlar `[perf]` satırıyla günlüğe yazılır. CI'ın asıl kapısı süreden bağımsız plan korumalarıdır (aşağıda). İki kip: uygulamanın gerçek durumu (istatistik tablosu yok; uygulama `ANALYZE` çalıştırmaz) ve `ANALYZE` sonrası. Ayrıca süreden bağımsız bir koruma: sorgu planlarında otomatik indeks ve sürücü tablo dışında indekssiz tam tarama yoktur; liste sayfası geniş sütunları yalnızca sayfadaki kimlikler için okur.
 - Faz 6 iyileştirmeleri (`src/lib/leads/query.ts`): **geç satır okuma** (sayfa kimlikleri önce yalnızca sıralama anahtarlarıyla seçilir, geniş sütunlar yalnızca o ≤ 500 satır için okunur) ve **tek geçişli süzgeç sayımları** (dört sayım ve toplam tek `GROUP BY` çapraz tablosundan; önceden beş ayrı tam tarama). Yeni indeks gerekmedi.
 - Elle ölçüm: `npm run bench` (`BENCH_N=200000` ile kayıt sayısı, `BENCH_NO_ANALYZE=1` ile istatistiksiz). Windows'ta ve macOS'ta aynı komut.
 
@@ -180,5 +185,17 @@ Son ölçüm (16 Kasım 2026, Apple Silicon, `npm run bench`, `ANALYZE` sonrası
 | Süzgeç sayımları, ülke / şehir / kategori | 64 / 55 / 56 ms |
 | En yavaş beş: tarama+ad, tarama+en yeni, sicil eşleşmedi+ad, sicil eşleşmedi+en yeni, tarama+yenilik | 266 / 218 / 217 / 194 / 191 ms |
 
+CI ölçümü henüz yok (dal itilmedi); ilk CI koşusunun `[perf]` satırları buraya eklenecek (Bölüm 9).
+
 Ad sıralaması önbellek veritabanındaki (`gcache.place_cache`) adı da kullandığı için bir indeksle karşılanamaz; eşleşen satırlar sıralanır. Bu yüzden ad sıralı geniş süzgeçler en yavaş durumlardır ve ileride kayıt sayısı 100 000'i çok aşarsa ilk izlenecek yer orasıdır.
+
+## 9. Açık kalemler (paket G)
+
+| Kalem | Neden açık | Kim / ne gerekiyor |
+|---|---|---|
+| Anahtarlı Keşfet haritasını paketli uygulamada CSP altında doğrulamak | Testler gerçek Google'a bağlanmaz; CSP Google'ın izin listesiyle hizalandı ama gerçek yükleme görülmedi | Kullanıcı: kendi Maps tarayıcı anahtarı ve Map ID'siyle paketli uygulamada Keşfet → harita; geliştirici araçlarında (paketlenmemiş çalıştırma) konsolda `Refused to` olmamalı |
+| Paketli uygulamada ağ izleme (temiz makine) | Gizlilik e2e'si Electron ana sürecini ve Chromium arka plan hizmetlerini çalıştırmaz | Temiz makinede demo kipinde aç; Little Snitch (macOS) / Kaynak İzleyicisi → Ağ (Windows) ile dışarı bağlantı olmadığını gör |
+| `secureWebPreferences` + `app.enableSandbox()` bağlantısı | main.ts P0'a ait | P0 entegrasyonu (Bölüm 4) |
+| Güvenlik ve gizlilik kartını Ayarlar'a takmak | settings-page.tsx P0'a ait | P0 entegrasyonu (belgenin başı) |
+| `tests/perf-100k.test.ts` CI ölçümü | Dal henüz itilmedi | İlk CI koşusunda `[perf]` satırlarını Bölüm 8'e işle |
 

@@ -98,9 +98,10 @@ describe("güvenlik başlıkları (next.config.ts)", () => {
     expect(nextConfig.poweredByHeader).toBe(false);
   });
 
-  it("CSP: kendi kökeni dışında yalnızca Google Maps (kullanıcı anahtarı girerse) ve hiçbir çerçeve/eklenti", () => {
+  it("CSP: kendi kökeni dışında yalnızca Google Maps (kullanıcı anahtarı girerse); eklenti yok, çerçeve yalnızca Google", () => {
     expect(csp["default-src"]).toEqual(["'self'"]);
-    expect(csp["frame-src"]).toEqual(["'none'"]);
+    // Maps JS'in kendi iç çerçeveleri (Google'ın izin listesi CSP'si); kendi kökenimiz dahil başka çerçeve kaynağı yok.
+    expect(csp["frame-src"]).toEqual(["https://*.google.com"]);
     expect(csp["object-src"]).toEqual(["'none'"]);
     expect(csp["frame-ancestors"]).toEqual(["'none'"]);
     expect(csp["base-uri"]).toEqual(["'self'"]);
@@ -117,5 +118,40 @@ describe("güvenlik başlıkları (next.config.ts)", () => {
     expect(csp["connect-src"]).toContain("'self'");
     expect(csp["script-src"]).not.toContain("https:");
     expect(csp["script-src"]).not.toContain("*");
+  });
+
+  it("CSP, Google'ın Maps JS için belgelediği izin listesi CSP'sinin her kaynağını içerir (vektör harita, gelişmiş işaretçi)", () => {
+    // developers.google.com/maps/documentation/javascript/content-security-policy ("allowlist CSP"). Eksik bir kaynak,
+    // anahtar girilince Keşfet haritasını boş ya da yarım bırakır (konsolda "Refused to ...").
+    const GOOGLE_MAPS_ALLOWLIST: Record<string, string[]> = {
+      "script-src": [
+        "'unsafe-eval'",
+        "blob:",
+        "https://*.googleapis.com",
+        "https://maps.gstatic.com",
+        "https://*.ggpht.com",
+        "https://*.google.com",
+      ],
+      "img-src": [
+        "https://*.googleapis.com",
+        "https://*.gstatic.com",
+        "https://*.google.com",
+        "https://*.googleusercontent.com",
+        "data:",
+      ],
+      "frame-src": ["https://*.google.com"],
+      "connect-src": [
+        "https://*.googleapis.com",
+        "https://*.google.com",
+        "https://*.gstatic.com",
+        "data:",
+        "blob:",
+      ],
+      "font-src": ["https://fonts.gstatic.com"],
+      "style-src": ["'unsafe-inline'", "https://fonts.googleapis.com"],
+      "worker-src": ["blob:"],
+    };
+    for (const [directive, sources] of Object.entries(GOOGLE_MAPS_ALLOWLIST))
+      for (const src of sources) expect(csp[directive], `${directive} ${src}`).toContain(src);
   });
 });

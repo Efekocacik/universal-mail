@@ -7,8 +7,10 @@ import {
   EGRESS_SERVICES,
   egressServices,
   findEgressEntry,
+  findSourceLiteralEntry,
   hostMatches,
   isLoopbackHost,
+  isReservedName,
 } from "@/lib/net/egress-allowlist";
 
 /**
@@ -50,6 +52,20 @@ function urlHosts(text: string): string[] {
   return out;
 }
 
+/**
+ * Adres olmayan, tırnaklı çıplak ana bilgisayar sabitleri: ana bilgisayar benzeri bir ada (`host`, `hostname`, `domain`,
+ * `origin`, `endpoint`, `server`, `baseUrl`, `apiBase`… ve büyük harfli `API_HOST` gibi) atanan ya da nesne alanı olarak
+ * verilen `"api.ornek.com"` biçimindeki değerler. Sınır: birleştirmeyle kurulan adresler (`"https://" + HOST`) ancak
+ * `HOST` bu biçimde bir sabitse yakalanır; çalışma anında hesaplanan adresler `e2e/privacy.spec.ts` ile denetlenir.
+ */
+function bareHosts(text: string): string[] {
+  const out: string[] = [];
+  const re =
+    /\b[A-Za-z_$]*(?:host|hostname|domain|origin|endpoint|server|baseurl|base_url|apibase|api_base)[A-Za-z_$]*\??\s*[:=]\s*["'`]([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,})["'`]/gi;
+  for (const m of text.matchAll(re)) out.push(m[1]!.toLowerCase());
+  return out;
+}
+
 describe("dış adres izin listesi", () => {
   it("izin listesi tutarlıdır: kategoriler bilinen dört türdür, geliştirici/telemetri girişi yoktur", () => {
     const allowed = new Set(["user-enabled-api", "user-link", "placeholder", "dynamic"]);
@@ -85,18 +101,60 @@ describe("dış adres izin listesi", () => {
       ).toBe(true);
   });
 
-  it("src ve electron altındaki her URL sabitinin ana bilgisayarı izin listesindedir", () => {
+  it("src ve electron altındaki her URL ve ana bilgisayar sabiti izin listesinde TAM olarak var", () => {
     expect(FILES.length).toBeGreaterThan(200);
     const unknown: string[] = [];
-    let seen = 0;
+    let urls = 0;
+    let bare = 0;
     for (const f of FILES) {
-      for (const host of urlHosts(fs.readFileSync(path.join(ROOT, f), "utf8"))) {
-        seen++;
-        if (!findEgressEntry(host)) unknown.push(`${f}: ${host}`);
+      const text = fs.readFileSync(path.join(ROOT, f), "utf8");
+      for (const host of urlHosts(text)) {
+        urls++;
+        if (!findSourceLiteralEntry(host)) unknown.push(`${f}: ${host}`);
+      }
+      for (const host of bareHosts(text)) {
+        bare++;
+        if (!findSourceLiteralEntry(host)) unknown.push(`${f}: ${host} (çıplak ana bilgisayar)`);
       }
     }
-    expect(seen).toBeGreaterThan(50);
+    expect(urls).toBeGreaterThan(50);
+    expect(bare).toBeGreaterThan(3);
     expect(unknown).toEqual([]);
+  });
+
+  it("kaynak sabitleri için joker yok: Google jokerleri yalnızca CSP içindir, örnek jokerleri yalnızca ayrılmış adlarda", () => {
+    for (const e of EGRESS_ALLOWLIST.filter((x) => x.host.startsWith("*."))) {
+      if (e.category === "placeholder") expect(isReservedName(e.host), e.host).toBe(true);
+      else expect(e.service, e.host).toBe("maps"); // CSP kaynağı
+    }
+    // Geliştiriciye ait bir aktarıcı ya da Google telemetri/günlük adresi "harita"/"örnek" diye geçemez.
+    for (const host of [
+      "my-relay.someone.workers.dev",
+      "logging.googleapis.com",
+      "play.googleapis.com",
+      "tile.googleapis.com",
+      "evil.firma.com",
+      "telemetry.google.com",
+    ])
+      expect(findSourceLiteralEntry(host), host).toBeUndefined();
+    // Kodda sabit yazılmış örnek ve ayrılmış adlar geçer.
+    for (const host of [
+      "cikis.firma.com",
+      "um-relay.youraccount.workers.dev",
+      "rdap.demo.example",
+      "unsubscribe.invalid",
+      "evil.example.com",
+      "places.googleapis.com",
+    ])
+      expect(findSourceLiteralEntry(host), host).toBeDefined();
+  });
+
+  it("çıplak ana bilgisayar taraması: ana bilgisayar benzeri adlara atanan sabitleri yakalar", () => {
+    expect(
+      bareHosts(
+        `const API_HOST = "api.gizli.io"; x = { hostname: 'log.dev.net', path: "/a.b" }; baseUrl = "c.d.org"; name = "e.f.com"`,
+      ),
+    ).toEqual(["api.gizli.io", "log.dev.net", "c.d.org"]);
   });
 
   it("ağ modüllerini yalnızca belirlenmiş dinamik çıkış modülleri içe aktarır", () => {
@@ -149,10 +207,14 @@ describe("yardımcılar", () => {
     expect(hostMatches("api.hunter.io", "API.HUNTER.IO.")).toBe(true);
     expect(findEgressEntry("maps.googleapis.com")?.note).toBe("Maps JavaScript API");
     expect(findEgressEntry("tile.googleapis.com")?.host).toBe("*.googleapis.com");
-    expect(findEgressEntry("evil.example.org")).toBeUndefined();
-    for (const h of ["127.0.0.1", "127.1.2.3", "::1", "[::1]", "localhost"])
+    expect(findEgressEntry("evil.example.net")).toBeUndefined();
+    for (const h of ["a.example", "x.invalid", "a.b.example.com", "example.org", "t.test"])
+      expect(isReservedName(h), h).toBe(true);
+    for (const h of ["example.co", "firma.com", "examples.com", "my.workers.dev"])
+      expect(isReservedName(h), h).toBe(false);
+    for (const h of ["127.0.0.1", "127.1.2.3", "::1", "[::1]", "localhost", "::ffff:127.0.0.2"])
       expect(isLoopbackHost(h), h).toBe(true);
-    for (const h of ["10.0.0.1", "0.0.0.0", "example.com", "128.0.0.1"])
+    for (const h of ["10.0.0.1", "0.0.0.0", "example.com", "128.0.0.1", "::ffff:10.0.0.1"])
       expect(isLoopbackHost(h), h).toBe(false);
   });
 

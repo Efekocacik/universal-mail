@@ -3,6 +3,8 @@ import type { EnFragment } from "../types";
 
 /** Package G (Faz 6): security and privacy UI copy (Settings > Security and privacy card). */
 export const security = {
+  /** Ayarlar gezinme girişi (`settings-page.tsx` SECTIONS; kart oraya takılınca kullanılır). */
+  "settings.nav.security": "Security and privacy",
   "security.title": "Security and privacy",
   "security.desc":
     "All your data stays on this computer. The app sends nothing to its developer or to advertising and analytics services; it only connects to the services you turn on.",

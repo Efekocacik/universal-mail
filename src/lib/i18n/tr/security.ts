@@ -4,6 +4,8 @@
  * Hizmet listesi `src/lib/net/egress-allowlist.ts` ile aynıdır (`src/lib/net/privacy-view.ts`).
  */
 export const security = {
+  /** Ayarlar gezinme girişi (`settings-page.tsx` SECTIONS; kart oraya takılınca kullanılır). */
+  "settings.nav.security": "Güvenlik ve gizlilik",
   "security.title": "Güvenlik ve gizlilik",
   "security.desc":
     "Tüm verileriniz yalnızca bu bilgisayarda tutulur. Uygulama, geliştiricisine ya da reklam ve analiz hizmetlerine hiçbir veri göndermez; yalnızca sizin açtığınız hizmetlere bağlanır.",

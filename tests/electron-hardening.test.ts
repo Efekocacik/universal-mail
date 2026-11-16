@@ -240,11 +240,20 @@ describe("secureWebPreferences", () => {
 
 describe("pencere ayarları (electron/main.ts, statik)", () => {
   const main = fs.readFileSync(path.join(__dirname, "..", "electron", "main.ts"), "utf8");
+  const doc = fs.readFileSync(path.join(__dirname, "..", "docs", "GUVENLIK.md"), "utf8");
+  /** main.ts `secureWebPreferences` ve `app.enableSandbox()` ile bağlandı mı (P0 entegrasyon adımı)? */
+  const wired =
+    /webPreferences:\s*\{[^}]*\.\.\.secureWebPreferences\(app\.isPackaged\)/.test(main) &&
+    /app\.enableSandbox\(\)[\s\S]*app\.whenReady\(\)/.test(main);
+  const PENDING = "[ENTEGRASYON BEKLİYOR: secureWebPreferences]";
+
   it("bağlam yalıtımı, kum havuzu, düğüm entegrasyonu kapalı, web güvenliği açık", () => {
-    expect(main).toMatch(/contextIsolation:\s*true/);
-    expect(main).toMatch(/sandbox:\s*true/);
-    expect(main).toMatch(/nodeIntegration:\s*false/);
-    expect(main).toMatch(/webSecurity:\s*true/);
+    if (!wired) {
+      expect(main).toMatch(/contextIsolation:\s*true/);
+      expect(main).toMatch(/sandbox:\s*true/);
+      expect(main).toMatch(/nodeIntegration:\s*false/);
+      expect(main).toMatch(/webSecurity:\s*true/);
+    }
     expect(main).not.toMatch(
       /nodeIntegrationInSubFrames:\s*true|allowRunningInsecureContent:\s*true/,
     );
@@ -253,6 +262,15 @@ describe("pencere ayarları (electron/main.ts, statik)", () => {
   it("her WebContents ve varsayılan oturum sertleştirilir", () => {
     expect(main).toMatch(/app\.on\("web-contents-created"[\s\S]{0,80}hardenWebContents\(/);
     expect(main).toMatch(/hardenSession\(session\.defaultSession\)/);
+  });
+  it("secureWebPreferences ve app.enableSandbox() main.ts'e bağlı; bağlı değilse GUVENLIK.md bunu açıkça 'bekliyor' yazar", () => {
+    // Paket G yardımcıyı yazdı; main.ts P0'a aittir. Bağlantı yapılana kadar bu açık unutulmasın: belge "bekliyor"
+    // işaretini taşımak ZORUNDA; bağlandığında işaret kaldırılmalıdır (aksi hâlde test yine kırılır).
+    if (wired) expect(doc).not.toContain(PENDING);
+    else expect(doc).toContain(PENDING);
+    // Kum havuzu çağrısı varsa pencere oluşturulmadan (whenReady'den) önce olmalıdır.
+    if (/app\.enableSandbox\(\)/.test(main))
+      expect(main.indexOf("app.enableSandbox()")).toBeLessThan(main.indexOf("app.whenReady()"));
   });
   it("geliştirici araçları menüsü yalnızca paketlenmemiş çalıştırmada", () => {
     expect(main).toMatch(/!app\.isPackaged \? \[\{ role: "toggleDevTools" \}\]/);

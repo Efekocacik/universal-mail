@@ -129,6 +129,54 @@ describe("egress-guard (block)", () => {
   });
 });
 
+describe("egress-guard (UDP bağımsız değişkenleri)", () => {
+  it("bağlı sokette ileti adres sanılmaz: yerel eşe gönderim geçer, dış eşe gönderim engellenir; ileti kaydedilmez", () => {
+    const r = runChild(
+      String.raw`
+      const dgram = require("node:dgram");
+      const out = {};
+      const once = (sock, ev) => new Promise((res, rej) => { sock.once(ev, res); sock.once("error", rej); });
+      (async () => {
+        const server = dgram.createSocket("udp4");
+        server.bind(0, "127.0.0.1");
+        await once(server, "listening");
+        const port = server.address().port;
+        const got = once(server, "message");
+        // 1) Bağlı soket, yerel eş, metin ileti, adres/bağlantı noktası YOK.
+        const a = dgram.createSocket("udp4");
+        a.connect(port, "127.0.0.1");
+        await once(a, "connect");
+        a.send("gizli-yerel-ileti");
+        out.loopbackConnected = String(await got);
+        // 2) Bağlı olmayan soket, aralıklı imza: send(msg, offset, length, port, address, cb).
+        const got2 = once(server, "message");
+        a.close();
+        const b = dgram.createSocket("udp4");
+        b.send(Buffer.from("xxaralikxx"), 2, 6, port, "127.0.0.1", () => {});
+        out.range = String(await got2);
+        // 3) Dış adrese aralıklı imza (belgeleme ağı, RFC 5737): engellenir.
+        out.rangeForeign = await new Promise((res) =>
+          b.send(Buffer.from("gizli-dis-ileti"), 0, 5, 9, "192.0.2.1", (e) => res(e ? e.code : "gönderildi")),
+        );
+        b.close();
+        server.close();
+        process.stdout.write(JSON.stringify(out));
+      })().catch((e) => { process.stdout.write(JSON.stringify({ error: String(e) })); });`,
+      "block",
+    );
+    expect(r.stderr).toBe("");
+    expect(r.status).toBe(0);
+    expect(JSON.parse(r.stdout)).toEqual({
+      loopbackConnected: "gizli-yerel-ileti",
+      range: "aralik",
+      rangeForeign: "ECONNREFUSED",
+    });
+    expect(r.entries.map((e) => `${e.kind} ${e.host} ${e.port}`)).toEqual(["udp 192.0.2.1 9"]);
+    // İleti içeriği hiçbir kayıtta yok.
+    expect(JSON.stringify(r.entries)).not.toMatch(/gizli/);
+  });
+});
+
 describe("egress-guard (record)", () => {
   it("yalnızca yerel trafik varken kayıt boştur ve davranış değişmez", () => {
     const r = runChild(
@@ -150,10 +198,21 @@ describe("egress-guard (record)", () => {
   it("iki kez yüklenmek yamaları iki kez uygulamaz", () => {
     const r = runChild(
       `require(${JSON.stringify(GUARD)}); const { isLoopback } = require(${JSON.stringify(GUARD)});
-       process.stdout.write(JSON.stringify(["127.0.0.1","::1","[::1]","localhost","a.localhost","","10.0.0.1","example.com"].map(isLoopback)));`,
+       process.stdout.write(JSON.stringify(["127.0.0.1","::1","[::1]","localhost","a.localhost","","::ffff:127.0.0.9","10.0.0.1","example.com","::ffff:10.0.0.1"].map(isLoopback)));`,
       "block",
     );
     expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout)).toEqual([true, true, true, true, true, true, false, false]);
+    expect(JSON.parse(r.stdout)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
 });

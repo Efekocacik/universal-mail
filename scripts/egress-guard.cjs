@@ -38,8 +38,7 @@ function isLoopback(host) {
     h.endsWith(".localhost") ||
     h === "::1" ||
     h === "0:0:0:0:0:0:0:1" ||
-    h === "::ffff:127.0.0.1" ||
-    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
+    /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
   );
 }
 
@@ -94,9 +93,12 @@ if (!globalThis[MARK]) {
   };
 
   /* ---------------------------------- DNS ---------------------------------- */
+  // IP sabitinin "çözümlenmesi" ağa çıkmaz (Node yanıtı yerelde üretir; ör. UDP soketinin 0.0.0.0'a örtük bağlanması).
+  // O IP'ye yapılacak asıl bağlantı `connect`/`send` sırasında yakalanır.
+  const needsDns = (hostname) => !isLoopback(hostname) && net.isIP(String(hostname)) === 0;
   const originalLookup = dns.lookup;
   dns.lookup = function guardedLookup(hostname, options, callback) {
-    if (!isLoopback(hostname)) {
+    if (needsDns(hostname)) {
       record("dns.lookup", hostname, null);
       if (BLOCK) {
         const cb = typeof options === "function" ? options : callback;
@@ -108,7 +110,7 @@ if (!globalThis[MARK]) {
   };
   const originalPromiseLookup = dns.promises.lookup;
   dns.promises.lookup = function guardedPromiseLookup(hostname, options) {
-    if (!isLoopback(hostname)) {
+    if (needsDns(hostname)) {
       record("dns.lookup", hostname, null);
       if (BLOCK) return Promise.reject(egressError("ENOTFOUND", "dns.lookup", hostname));
     }
@@ -157,13 +159,38 @@ if (!globalThis[MARK]) {
 
   /* ---------------------------------- UDP ---------------------------------- */
   const originalSend = dgram.Socket.prototype.send;
+  /**
+   * `send(msg[, offset, length][, port][, address][, callback])` bağımsız değişkenlerinden hedef {address, port}.
+   * Node'un kendi ayrıştırmasıyla aynı sırayla: ileti (ilk bağımsız değişken) HİÇBİR ZAMAN adres sayılmaz ve kaydedilmez.
+   * Bağlı (connected) sokette adres verilmez; hedef `remoteAddress()`tır. Adressiz bağlı olmayan gönderim Node'da
+   * 127.0.0.1 / ::1'e gider (yerel).
+   */
+  function udpTarget(socket, args) {
+    let remote = null;
+    try {
+      remote = socket.remoteAddress(); // bağlı değilse ERR_SOCKET_DGRAM_NOT_CONNECTED fırlatır
+    } catch {
+      remote = null;
+    }
+    if (remote) return { address: remote.address, port: remote.port ?? null };
+    const rest = args.slice(1);
+    // [offset, length, port, address?] ya da [port, address?]
+    const withRange =
+      typeof rest[0] === "number" &&
+      typeof rest[1] === "number" &&
+      rest.length >= 3 &&
+      typeof rest[2] !== "function";
+    const port = withRange ? rest[2] : rest[0];
+    const address = withRange ? rest[3] : rest[1];
+    return {
+      address: typeof address === "string" ? address : undefined,
+      port: typeof port === "number" || typeof port === "string" ? Number(port) : null,
+    };
+  }
   dgram.Socket.prototype.send = function guardedSend(...args) {
-    // send(msg, [offset, length,] port, address, cb)
-    const strings = args.filter((a) => typeof a === "string");
-    const address = strings.length ? strings[strings.length - 1] : undefined;
-    const numbers = args.filter((a) => typeof a === "number");
+    const { address, port } = udpTarget(this, args);
     if (!isLoopback(address)) {
-      record("udp", address, numbers.length ? numbers[numbers.length - 1] : null);
+      record("udp", address, port);
       if (BLOCK) {
         const cb = args.at(-1);
         if (typeof cb === "function")

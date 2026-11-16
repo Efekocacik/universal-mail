@@ -259,32 +259,53 @@ export const EGRESS_ALLOWLIST: readonly EgressEntry[] = [
   // --- Yer tutucular (hiçbir zaman bağlanılmaz) ---
   { host: "www.w3.org", category: "placeholder", service: null, note: "SVG XML ad alanı" },
   { host: "firma.com", category: "placeholder", service: null, note: "Örnek alan adı" },
-  { host: "*.firma.com", category: "placeholder", service: null, note: "Örnek alan adı" },
-  { host: "*.firmaniz.com", category: "placeholder", service: null, note: "Örnek alan adı" },
   {
-    host: "*.firma.example",
+    host: "cikis.firma.com",
     category: "placeholder",
     service: null,
-    note: "Örnek alan adı (.example ayrılmış)",
+    note: "Örnek çıkış aktarıcısı adresi",
+  },
+  {
+    host: "cikis.firmaniz.com",
+    category: "placeholder",
+    service: null,
+    note: "Örnek çıkış aktarıcısı adresi (Ayarlar ipucu)",
+  },
+  {
+    host: "unsubscribe.yourcompany.com",
+    category: "placeholder",
+    service: null,
+    note: "Örnek çıkış aktarıcısı adresi (İngilizce ipucu)",
+  },
+  {
+    host: "um-relay.hesabiniz.workers.dev",
+    category: "placeholder",
+    service: null,
+    note: "Örnek Cloudflare Worker adresi (Türkçe ipucu)",
+  },
+  {
+    host: "um-relay.youraccount.workers.dev",
+    category: "placeholder",
+    service: null,
+    note: "Örnek Cloudflare Worker adresi (İngilizce ipucu)",
   },
   {
     host: "*.example",
     category: "placeholder",
     service: null,
-    note: "Demo verisi (.example ayrılmış)",
+    note: "Demo verisi ve örnekler (.example ayrılmış, RFC 2606)",
+  },
+  {
+    host: "*.example.com",
+    category: "placeholder",
+    service: null,
+    note: "Örnek adres (example.com ayrılmış, RFC 2606)",
   },
   {
     host: "*.invalid",
     category: "placeholder",
     service: null,
-    note: "Geçersiz adres (.invalid ayrılmış)",
-  },
-  { host: "*.yourcompany.com", category: "placeholder", service: null, note: "Örnek alan adı" },
-  {
-    host: "*.workers.dev",
-    category: "placeholder",
-    service: null,
-    note: "Örnek Cloudflare Worker adresi",
+    note: "Geçersiz adres (.invalid ayrılmış, RFC 2606)",
   },
   {
     host: "ana.makine",
@@ -321,11 +342,46 @@ export function hostMatches(pattern: string, host: string): boolean {
   return h === p;
 }
 
-/** Ana bilgisayarı kapsayan ilk giriş (önce tam eşleşme). */
+/** Ana bilgisayarı kapsayan ilk giriş (önce tam eşleşme). Jokerli girişler dahil: CSP kaynakları ve çalışma anı içindir. */
 export function findEgressEntry(host: string): EgressEntry | undefined {
   return (
     EGRESS_ALLOWLIST.find((e) => !e.host.startsWith("*.") && hostMatches(e.host, host)) ??
     EGRESS_ALLOWLIST.find((e) => hostMatches(e.host, host))
+  );
+}
+
+/**
+ * Hiçbir zaman internette çözülmeyen, kimseye ait olmayan ayrılmış adlar (RFC 2606 / RFC 6761): `.example`, `.invalid`,
+ * `.test`, `.localhost` ve `example.com/net/org`.
+ */
+const RESERVED_SUFFIXES = [
+  ".example",
+  ".invalid",
+  ".test",
+  ".localhost",
+  ".example.com",
+  ".example.net",
+  ".example.org",
+] as const;
+
+/** Ad (ya da `*.` jokerinin soneki) ayrılmış bir ad alanında mı? */
+export function isReservedName(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\*\./, "").replace(/\.$/, "");
+  return RESERVED_SUFFIXES.some((s) => h === s.slice(1) || h.endsWith(s));
+}
+
+/**
+ * Kaynak koddaki bir adres/ana bilgisayar SABİTİNİ kapsayan giriş. Yalnızca TAM eşleşme kabul edilir; joker yalnızca
+ * ayrılmış ad alanlarında (`*.example`, `*.invalid`, `*.example.com`) geçerlidir. Google jokerleri (`*.googleapis.com`
+ * vb.) yalnızca CSP içindir: kodda sabit yazılmış `logging.googleapis.com` ya da bir geliştiricinin
+ * `x.workers.dev` aktarıcısı böylece "harita" ya da "örnek" diye geçemez, izin listesine açıkça eklenmesi gerekir.
+ */
+export function findSourceLiteralEntry(host: string): EgressEntry | undefined {
+  return EGRESS_ALLOWLIST.find(
+    (e) =>
+      e.category !== "dynamic" &&
+      (e.host.startsWith("*.") ? isReservedName(e.host) : true) &&
+      hostMatches(e.host, host),
   );
 }
 
@@ -336,8 +392,7 @@ export function isLoopbackHost(host: string): boolean {
     h === "localhost" ||
     h === "::1" ||
     h === "0:0:0:0:0:0:0:1" ||
-    /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h) ||
-    h === "::ffff:127.0.0.1"
+    /^(::ffff:)?127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)
   );
 }
 
