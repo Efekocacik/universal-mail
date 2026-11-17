@@ -30,8 +30,8 @@ import {
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
 
-// Bu sürümde gerçek kapı AÇIKTIR (sahip kararı). Kapı yeniden kapatılırsa (ör. acil geri alma sürümü) davranışın önceki
-// demo-yalnız sürümle aynı kalacağını korumak için birleşik kapı bu dosyada YALNIZCA test içinde kapatılır.
+// Bu sürümde gerçek kapı KAPALIDIR (güvenli varsayılan). Bu dosya, kapı AÇILSA bile bu yolun kapalı kalacağı savunma
+// katmanını sınar; birleşik kapı bu dosyada ayrıca (gerçek sabit kapalı olsa da) test içinde zorla kapatılır.
 vi.mock("@/lib/compliance/live-gate", async (orig) => ({
   ...(await orig<typeof import("@/lib/compliance/live-gate")>()),
   isLiveSendingPermitted: () => false,
@@ -40,8 +40,8 @@ vi.mock("@/lib/compliance/live-gate", async (orig) => ({
 /**
  * Canlı gönderim yolunun bağlantısı (go-live C1) — KAPI KAPALI (testte kapatılır). Davranış önceki demo-yalnız sürümle
  * aynı olmalı: Gmail kampanyası reddedilir, dağıtıcı Gmail kampanyalarını aday bile yapmaz, zamanlayıcı yalnızca demo
- * bayrağıyla açılır. Kapı açıkken davranış: `live-send-path-open.test.ts` ve (gerçek sabitlerle)
- * `live-gates-open.test.ts`.
+ * bayrağıyla açılır. Gerçek sabitlerin kapalı olması: `live-gates-default-closed.test.ts`. Kapı açıkken davranış:
+ * `live-send-path-open.test.ts` ve `live-gates-open.test.ts` (kapı yalnızca test içinde açılır).
  */
 
 const HANDLE = "__umDbHandle";
@@ -84,12 +84,12 @@ async function expectCode(p: Promise<unknown>, code: string) {
 }
 
 describe("canlı kapı kapalı: önceki demo-yalnız davranış korunur", () => {
-  it("kapı bu dosyada kapalı (gerçek sabitler açık; yalnızca birleşik kapı testte kapatıldı)", async () => {
+  it("kapı bu dosyada kapalı (gerçek sabitler de KAPALI; birleşik kapı ayrıca zorla kapatılır)", async () => {
     expect(isLiveSendingPermitted()).toBe(false);
     const real = await vi.importActual<typeof import("@/lib/compliance/live-gate")>(
       "@/lib/compliance/live-gate",
     );
-    expect(real.isLiveSendingPermitted()).toBe(true);
+    expect(real.isLiveSendingPermitted()).toBe(false); // gerçek sabit KAPALI: güvenli varsayılan
   });
 
   it("zamanlayıcı yalnızca demo bayrağıyla açılır; kapalıyken veritabanına yazmaz", async () => {

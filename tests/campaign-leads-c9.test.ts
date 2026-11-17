@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as reevaluateRoute from "@/app/api/campaigns/[id]/leads/reevaluate/route";
 import * as leadsRoute from "@/app/api/campaigns/[id]/leads/route";
 import {
@@ -28,6 +28,14 @@ import { tr } from "@/lib/i18n/tr";
 import { countLeadIds, queryLeadIds } from "@/lib/leads/query";
 import { setSetting } from "@/lib/settings";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * C9: hariç tutulan (`excluded`) dizilerin yeniden değerlendirilmesi ve süzgeçle sayfa sayfa ekleme.

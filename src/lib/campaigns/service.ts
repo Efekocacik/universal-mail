@@ -30,7 +30,7 @@ import { bumpUpdatedAt, CampaignError } from "./errors";
  * - Ayarlar, adımlar ve posta kutusu yalnızca `draft` durumunda değiştirilebilir.
  * - Eşzamanlı düzenlemeler `updated_at` iyimser kilidiyle yakalanır (bkz. `bumpUpdatedAt`).
  * - Bağlı DEMO posta kutusu her zaman atanabilir. Gmail posta kutusu YALNIZCA canlı gönderim kapısı
- *   (`isLiveSendingPermitted`) açıkken ve kutu gönderim izniyle bağlıyken atanabilir; kapı bu sürümde açıktır.
+ *   (`isLiveSendingPermitted`) açıkken ve kutu gönderim izniyle bağlıyken atanabilir; kapı bu sürümde KAPALIDIR (güvenli varsayılan).
  */
 
 export const MAX_STEPS = 3;

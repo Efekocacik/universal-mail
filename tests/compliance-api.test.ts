@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as liftRoute from "@/app/api/compliance/suppressions/[id]/lift/route";
 import * as importRoute from "@/app/api/compliance/suppressions/import/route";
 import * as suppressionsRoute from "@/app/api/compliance/suppressions/route";
@@ -14,6 +14,14 @@ import { hashEmail, suppressEmail } from "@/lib/compliance/suppression";
 import type { Db } from "@/lib/db/client";
 import { auditLog, leadEmails, leads, suppressions } from "@/lib/db/schema";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * Uyum API'si (Aşama 12): ülke politikası ve suppression yönetimi. Bellek içi veritabanı; gerçek `.data` açılmaz.

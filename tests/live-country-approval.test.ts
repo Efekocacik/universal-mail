@@ -24,6 +24,14 @@ import * as schema from "@/lib/db/schema";
 import { auditLog, countryPolicies } from "@/lib/db/schema";
 import { MIGRATIONS, openMemoryDb, T0 } from "./helpers/campaign-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 // Onay nesnesi: bu dosyadaki süreç içi testlerde her testten önce HEPSİ false yapılır (onaysız sürümün reddini
 // korumak için); "uygulama" testlerinde `liveCountryPolicies` test içinde true yapılır. Gerçek sabitler (bu sürümde
 // sahip kararıyla hepsi true) DEĞİŞMEZ; gerçek süreçle çalışan betik testleri gerçek sabitleri kullanır.

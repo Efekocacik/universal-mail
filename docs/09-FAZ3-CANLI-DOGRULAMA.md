@@ -11,9 +11,9 @@ Her madde için kanıt, Bölüm 9'daki biçimde kaydedilir (tarih, yapan, ortam,
 | Kilit (kodda sabit) | Şu an | Neyi engeller | Açılmadan önce | Bölüm |
 |---|---|---|---|---|
 | `GMAIL_HEADER_TRUST_VERIFIED` | `false` | Gmail başlıklarından tasdik üretme (gelen kutusundan otomatik suppression/durdurma) | Gerçek test hesabıyla başlık doğrulaması | 1.3 |
-| `LIVE_INBOX_READING_ENABLED` | **`true`** (`release/live-gates`, sahip kararı) | — (okuma izinli kutular okunur; başlık güveni kapalıyken etkisiz, `no_attestation`) | — | 1.3, 2 |
+| `LIVE_INBOX_READING_ENABLED` | **`false`** (güvenli varsayılan; `fix/live-gates-fail-closed`) | Gerçek gelen kutusu okuma (açılsa da başlık güveni kapalıyken etkisiz, `no_attestation`) | Yetkili temsilcinin yetkilendirmesi, `gmail.readonly` izni, kayıtlı ayrı sürüm | 1.3, 2 |
 | `LEGAL_APPROVALS.*` (7 madde) | **hepsi `true`** (sahip kararı, dış hukuki inceleme yok) | — | — | 6 |
-| `LIVE_SENDING_ENABLED` | **`true`** (`release/live-gates`, sahip kararı) | — (gönderim anında çalışma zamanı koşulları yine aranır: `08` Bölüm 3) | — | 8 |
+| `LIVE_SENDING_ENABLED` | **`false`** (güvenli varsayılan; `fix/live-gates-fail-closed`) | Gerçek kampanya gönderimi (açılsa da gönderim anında çalışma zamanı koşulları ayrıca aranır: `08` Bölüm 3) | Yetkili temsilcinin yetkilendirmesi, hukuki doğrulamalar, kayıtlı ayrı sürüm | 8 |
 | Canlı ülke politikası kilidi (`country_policies`, `scope=live`) | tamamı engelli ve kilitli | Ülke bazında canlı gönderim | Kendime test gönderimi; sahibin onay betiğini çalıştırması | 6 |
 | `oneClickEndpointVerified` (türetilmiş) | kanıt yok → `List-Unsubscribe-Post` eklenmez | Tek tıklamalı çıkış başlığı ve canlı iletiye çıkış bağlantısı | Gerçek uç noktaya karşı uçtan uca doğrulama | 3 |
 | `mail.arfReporters` (ayar) | boş | ARF şikâyetinin otomatik doğrulanması | Gerçek FBL sağlayıcıları ve rapor biçimi | 4 |

@@ -18,12 +18,20 @@ import { SCHEDULER_FLAG } from "@/lib/mail/scheduler/job";
 import { middleware } from "@/middleware";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Kampanya API'si: giriş doğrulama, hata biçimi, kurulum/onay kapısı, demo/live ayrımı ve güvenlik kurallarının API
  * üzerinden atlatılamaması. Bellek içi veritabanı, `getDb()`'nin kullandığı süreç tutamacına yerleştirilir; gerçek
  * `.data` açılmaz.
  *
- * Canlı gönderim kapısı bu sürümde açıktır (gerçek sabitler); kapı kapalıyken API eşlemesini (`SCHEDULER_DISABLED`)
+ * Canlı gönderim kapısı bu dosyada test içinde AÇIK varsayılır (yukarıdaki vi.mock; gerçek sabit KAPALIDIR); kapı kapalıyken API eşlemesini (`SCHEDULER_DISABLED`)
  * korumak için kapı YALNIZCA test içinde `gate.closed` ile geçici olarak kapatılabilir.
  */
 const gate = vi.hoisted(() => ({ closed: false }));

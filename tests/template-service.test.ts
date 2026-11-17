@@ -26,7 +26,15 @@ import {
 import { BUILTIN_CATEGORIES, seedCategories } from "@/lib/scan/categories";
 import { setSetting } from "@/lib/settings";
 
-// Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapalı kapı davranışı için kapı YALNIZCA test içinde
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
+// Canlı gönderim kapısı bu dosyada test içinde AÇIK varsayılır (yukarıdaki vi.mock; gerçek sabit KAPALIDIR); kapalı kapı davranışı için kapı YALNIZCA test içinde
 // `gate.closed` ile geçici olarak kapatılabilir.
 const gate = vi.hoisted(() => ({ closed: false }));
 vi.mock("@/lib/compliance/live-gate", async (orig) => {

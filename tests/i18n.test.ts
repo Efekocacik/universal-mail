@@ -113,12 +113,14 @@ describe("i18n: parça düzeni (Faz 4)", () => {
     // `sequenceStop.*` anahtarları yerini aldı) → 1673'ten 1672'ye. Çıkış sunucusu Cloudflare Worker yoluyla:
     // `unsubInfra.base.help`, `unsubInfra.file.title` ve `unsubInfra.file.help` metinleri bilerek güncellendi (SSH'ye
     // özgü ifade kaldırıldı; yeni anahtarlar core.ts'te) → anahtar sayısı aynı, özet yeni.
+    // Güvenli varsayılan (fix/live-gates-fail-closed): gerçek gönderim ve gelen kutusu okuma kapıları KAPALI olduğundan
+    // policy.live.body, ready.help ve mbx.note metinleri "kapılar açıktır" yerine gerçeği söyler → anahtar sayısı aynı.
     const entries = Object.entries(TR_FRAGMENTS.base as Record<string, string>).sort(([a], [b]) =>
       a < b ? -1 : a > b ? 1 : 0,
     );
     expect(entries).toHaveLength(1672);
     expect(createHash("sha256").update(JSON.stringify(entries)).digest("hex")).toBe(
-      "f08321c5143ad2d3ad4adfb401f59a0a019b30cfee88a4da058a51514c6e34bf",
+      "f4bf6b973da7d6bd090594ee06c2edeb055adcbfafb9bfcb0a46178d6a1f3787",
     );
   });
 

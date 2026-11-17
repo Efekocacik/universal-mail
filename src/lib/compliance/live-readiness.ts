@@ -18,7 +18,7 @@ import {
 
 /**
  * "Canlı gönderime hazırlık" (Aşama 14). SALT OKUNUR: gerçek gönderimin önünde hâlâ ne kaldığını gösterir ve
- * hiçbir kapıyı AÇMAZ (kod kapıları bu sürümde açıktır; çalışma anı maddeleri gönderim yolunda ayrıca denetlenir). Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
+ * hiçbir kapıyı AÇMAZ (kod kapıları bu sürümde KAPALIDIR; çalışma anı maddeleri gönderim yolunda ayrıca denetlenir). Hiçbir madde varsayımla "tamam" olmaz: durum yalnızca gerçek kayda/koda bakılarak hesaplanır;
  * ölçülemeyen madde `unknown` (doğrulanmadı) olarak kalır. Hukuki onaylar `LEGAL_APPROVALS` sabitlerindendir ve
  * kullanıcı beyanıyla değişmez.
  */

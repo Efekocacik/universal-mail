@@ -117,8 +117,8 @@ Bütün değiştiren çıkış altyapısı uçları kullanım onayı ister (`req
 
 | Sabit | Değer | Etkisi |
 |---|---|---|
-| `LIVE_SENDING_ENABLED` (`policies.ts`) | **`true`** | Gerçek gönderim kod kapısı açık |
-| `LIVE_INBOX_READING_ENABLED` (`policies.ts`) | **`true`** | Okuma izni verilmiş Gmail kutuları okunur |
+| `LIVE_SENDING_ENABLED` (`policies.ts`) | **`false`** (güvenli varsayılan) | Gerçek gönderim kod kapısı KAPALI; "kendime test gönder" bundan bağımsızdır |
+| `LIVE_INBOX_READING_ENABLED` (`policies.ts`) | **`false`** (güvenli varsayılan) | Gerçek gelen kutusu okuma KAPALI (yalnızca demo gelen kutusu) |
 | `GMAIL_HEADER_TRUST_VERIFIED` (`policies.ts`) | `false` (**kapalı kalır**) | Gmail başlıkları tasdik üretmez: gelen iletiler `no_attestation` ile saklanır, otomatik suppression/durdurma yok (Bölüm 5; docs/09 1.3) |
 | `LEGAL_APPROVALS` (`legal-status.ts`) | 7 madde, **hepsi `true`** (sahip kararı) | Birleşik kapı ve hazırlık maddeleri; silmede gönderim kayıtları hemen temizlenir |
 | `isLiveSendingPermitted()` (`live-gate.ts`) | bayrak VE tüm onaylar → **`true`** | Uygunluk, gönderim, ileti kurucusu, içerik, Gmail sağlayıcısı |
@@ -141,7 +141,7 @@ Bütün değiştiren çıkış altyapısı uçları kullanım onayı ister (`req
 
 ## 5. Kararlar ve SRS'den sapmalar
 
-- **Gerçek gönderim iki anahtarlı; `release/live-gates`'te ikisi de açık (sahip kararı):** `LIVE_SENDING_ENABLED = true` ve `LEGAL_APPROVALS` maddelerinin hepsi `true` (11 Kasım 2026; dış hukuki inceleme olmadan, sorumluluk şirkette). Gönderim yolu bunları BİRLİKTE denetler (`isLiveSendingPermitted`). Canlı kapsamın bütün politikaları yine engelli ve kilitli; kilit yalnızca sahibin çalıştırdığı onay betiğiyle ülke bazında açılır. Kapı açıkken gönderim anında ayrıca gönderim izni, DNS, HTTPS uç nokta, çekme sağlığı ve ülke kilidi aranır (Bölüm 3).
+- **Gerçek gönderim iki anahtarlı; bu sürümde kod kapısı KAPALIDIR (güvenli varsayılan):** `LIVE_SENDING_ENABLED = false`; `LEGAL_APPROVALS` maddeleri `true` (11 Kasım 2026 sahip kararı, dış hukuki inceleme olmadan; gönderimi açmak için tek başına yetmez ve hukuki onay yerine geçmez). Gönderim yolu bunları BİRLİKTE denetler (`isLiveSendingPermitted`). Canlı kapsamın bütün politikaları yine engelli ve kilitli; kilit yalnızca sahibin çalıştırdığı onay betiğiyle ülke bazında açılır. Kapı açıkken gönderim anında ayrıca gönderim izni, DNS, HTTPS uç nokta, çekme sağlığı ve ülke kilidi aranır (Bölüm 3).
 - **Sağlayıcı sözleşmesi:** `MailProvider` (sonuç `accepted`/`rejected`/`unknown`; `unknown` asla otomatik tekrarlanmaz) ve `InboxReader`. Gerçek uygulamalar: Gmail bağdaştırıcıları (yalnızca sahte sunucularla sınanmış). **Gmail API birincil (SRS); SMTP alternatif olarak planlanmadı** — eklenirse yeni paket (`nodemailer`) için önce onay gerekir.
 - **Kademeli Gmail yetkisi:** varsayılan yalnızca `gmail.send` (+ `openid email`); `gmail.readonly` yalnızca ayrı, açık bir yükseltmeyle. `gmail.modify` veya tam erişim ASLA istenmez. Workspace yapılandırması (Dahili/Harici) varsayılmadı.
 - **Gönderimde sınıflandırma güvenliği (15.4):** kesin ret yalnızca Google'ın belgelenmiş hata zarfı (`error.code` HTTP durumuyla aynı + beklenen `status`/`reason`) doğrulanırsa; bozuk/eksik/beklenmeyen yanıt `unknown` sayılır ve **asla otomatik tekrar gönderilmez**. 401'de belirteç yenileme ve tek tekrar yalnızca Google'ın tanınan kimlik doğrulama hatasında.

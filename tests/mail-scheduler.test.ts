@@ -42,11 +42,19 @@ import {
   WEEKDAYS,
 } from "./helpers/campaign-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Aşama 9: dağıtıcı, zamanlama kuralları ve `mail.send` iş entegrasyonu. Veritabanı BELLEKTE; ağ yok, gerçek
  * gönderim yok, `.data` kullanılmaz. Saat dışarıdan verilir (gerçek bekleme yok).
  *
- * Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler); kapı kapalıyken korunması gereken zamanlayıcı davranışı
+ * Canlı gönderim kapısı bu dosyada test içinde AÇIK varsayılır (yukarıdaki vi.mock; gerçek sabit KAPALIDIR); kapı kapalıyken korunması gereken zamanlayıcı davranışı
  * için kapı YALNIZCA test içinde `gate.closed` ile geçici olarak kapatılabilir.
  */
 const gate = vi.hoisted(() => ({ closed: false }));
@@ -588,7 +596,7 @@ describe("mail.send işi ve worker entegrasyonu", () => {
     expect(await db.select().from(jobs)).toHaveLength(0);
   });
 
-  it("kapı açma sürümü: demo bayrağı olmadan da başlangıç uzlaştırır ve dağıtım işini kurar", async () => {
+  it("kapı açıkken (test içinde): demo bayrağı olmadan da başlangıç uzlaştırır ve dağıtım işini kurar", async () => {
     await staleSendingRow();
     const s = await startMailScheduler(db, { env: {}, now: () => T0 + DAY, timers: false });
     expect(s).toMatchObject({ enabled: true, reconciled: 1 });

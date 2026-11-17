@@ -18,8 +18,16 @@ import {
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
- * Gerçek (mock'lanmamış) sabitlerle (Aşama 15.7; kapı açma sürümünde güncellendi): kod kapısı AÇIK olsa bile canlı
+ * Kod kapısı bu dosyada test içinde AÇIK varsayılarak (Aşama 15.7; gerçek sabit KAPALIDIR): kod kapısı AÇIK olsa bile canlı
  * ülke politikası kilitliyken ve kutu gönderime hazır değilken canlı bir posta kutusu hiçbir şey yapmaz — belirteç
  * basmaz, ileti kaydı açmaz, sağlayıcıyı çağırmaz.
  */
@@ -72,8 +80,8 @@ const snapshot = async () =>
   ]);
 
 describe("ülke kilidi ve uygunluk kapısı (kod kapısı açık)", () => {
-  it("gerçek kod kapısı açık ama ülke kilitli: canlı kutu kampanya yolunda hiçbir yan etki üretmez", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(true);
+  it("kod kapısı açık (test içinde) ama ülke kilitli: canlı kutu kampanya yolunda hiçbir yan etki üretmez", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true); // test bağlamı: yukarıdaki vi.mock; gerçek sabit KAPALIDIR
     const s = await liveSequence();
     await ensureSigningKey(db, T0); // anahtar var; yine de belirteç BASILMAMALI
     const before = await snapshot();

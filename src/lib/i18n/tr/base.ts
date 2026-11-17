@@ -1362,7 +1362,7 @@ export const base = {
   "policy.live.on": "Açık",
   "policy.live.off": "Kapalı",
   "policy.live.body":
-    "Gerçek gönderim kapısı bu sürümde açıktır, ancak ülkeler engelli ve kilitli başlar. Bir ülkenin kilidi yalnızca şirket sahibinin çalıştırdığı canlı ülke onay betiğiyle açılır; kilitli ülkeye hiçbir ileti gönderilmez. Bu satırlar uygulama içinden değiştirilemez.",
+    "Gerçek gönderim kapısı bu sürümde KAPALIDIR (güvenli varsayılan); ayrıca ülkeler engelli ve kilitli başlar. Kapı açılsa bile bir ülkenin kilidi yalnızca şirket sahibinin çalıştırdığı canlı ülke onay betiğiyle açılır; kilitli ülkeye hiçbir ileti gönderilmez. Bu satırlar uygulama içinden değiştirilemez.",
 
   "supReason.unsubscribe": "Çıkış talebi",
   "supReason.bounce_hard": "Kalıcı teslimat hatası",
@@ -1673,7 +1673,7 @@ export const base = {
     "Şu an: %{rate} üzeri, en az {recipients} alıcıda; daha azında {guard} doğrulanmış hata.",
   "ready.title": "Canlı gönderime hazırlık",
   "ready.help":
-    "Kod kapıları bu sürümde açıktır; yine de Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi tamamlanmadan gerçek ileti gönderilmez. Bu ekran hiçbir şeyi açmaz; maddeler gerçek duruma bakılarak hesaplanır, hiçbiri varsayımla tamamlanmış sayılmaz.",
+    "Kod kapıları bu sürümde kapalıdır; açılsalar bile Gmail bağlantısı, DNS denetimi, HTTPS çıkış uç noktası, çıkış talebi çekme ve ülke kilidi tamamlanmadan gerçek ileti gönderilmez. Bu ekran hiçbir şeyi açmaz; maddeler gerçek duruma bakılarak hesaplanır, hiçbiri varsayımla tamamlanmış sayılmaz.",
   "ready.summary": "{blocked} engel, {unknown} doğrulanmamış madde",
   "ready.status.ok": "Tamam",
   "ready.status.blocked": "Engel var",
@@ -1758,7 +1758,7 @@ export const base = {
   "mbx.desc":
     "Gönderen posta kutularını ve Google OAuth istemcisini burada tanımlar, kutuyu Google izin ekranıyla Gmail'e bağlarsınız (gönderim izni; isteğe bağlı gelen kutusu okuma izni).",
   "mbx.note":
-    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır. Gmail bağlamak tek başına ileti göndermez: gönderim izni, DNS denetimi (kişisel @gmail.com adresinde Google yönetir, gerekmez), HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Google Workspace zorunlu değildir; kişisel Gmail hesabı da kullanılabilir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
+    "Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde kapalıdır. Gmail bağlamak tek başına ileti göndermez: kapılar açılsa bile gönderim izni, DNS denetimi (kişisel @gmail.com adresinde Google yönetir, gerekmez), HTTPS çıkış uç noktası, çıkış talebi çekme ve kilidi açılmış bir ülke gerekir. Google Workspace zorunlu değildir; kişisel Gmail hesabı da kullanılabilir. Bağlantı belirteçleri ve istemci sırrı veritabanına değil, şifreli depoya yazılır.",
   "mbx.status.demo": "Demo (gerçek gönderim yapmaz)",
   "mbx.status.connected": "Bağlı",
   "mbx.status.disabled": "Devre dışı",

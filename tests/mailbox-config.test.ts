@@ -31,6 +31,14 @@ import {
 import { createCampaign, DEMO_MAILBOX, openMemoryDb, seedBase } from "./helpers/campaign-fixture";
 import { seedSent } from "./helpers/inbound-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Posta kutusu yapılandırması ve gizli bilgi adları (Aşama 15.2). Bellek içi veritabanı; gizli depo geçici klasörde;
  * gerçek `.data` açılmaz ve HİÇBİR dış ağ isteği atılmaz (fetch casusla doğrulanır).

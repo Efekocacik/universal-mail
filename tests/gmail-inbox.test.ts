@@ -34,6 +34,14 @@ import { NOW, rawArf, rawDsn, rawMessage, seedSent, type Sent } from "./helpers/
 import { setTrustedReporters } from "@/lib/mail/inbound/arf";
 import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Gmail gelen kutusu okuyucusu (Aşama 15.5). Yalnızca yerel SAHTE Gmail ve OAuth sunucuları; gerçek Google'a istek
  * yok (genel fetch casusla izlenir). Gerçek gönderim ve demo bayrakları kapalıdır.
@@ -206,8 +214,8 @@ describe("kapılar: ağ isteğinden ÖNCE", () => {
     expect(await cursorOf()).toBeNull();
   });
 
-  it("kapı açma sürümü: GERÇEK okuma kilidi açık, başlık güveni KAPALI → okur ama yalnızca incelemeye kaydeder; etki yok", async () => {
-    expect(LIVE_INBOX_READING_ENABLED).toBe(true);
+  it("okuma kapısı açıkken (test içinde açık), başlık güveni KAPALI → okur ama yalnızca incelemeye kaydeder; etki yok", async () => {
+    expect(LIVE_INBOX_READING_ENABLED).toBe(true); // test bağlamı: yukarıdaki vi.mock; gerçek sabit KAPALIDIR
     expect(GMAIL_HEADER_TRUST_VERIFIED).toBe(false);
     // Okuma kilidi ve güven kilidi için geçersiz kılma YOK; yalnızca sahte sunucunun adresi verilir.
     const real = new GmailInboxReader({ db, oauth: deps, apiBase: inbox.base });

@@ -3,7 +3,7 @@ import { createClient, type Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEMO_POLICY_PRESET,
   LIVE_SENDING_ENABLED,
@@ -24,6 +24,14 @@ import {
 } from "@/lib/mail/seed";
 import { TEMPLATE_VARIABLES, templateVariablesIn } from "@/lib/mail/variables";
 import { getSetting, setSetting } from "@/lib/settings";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * Faz 3 seed'leri. Veritabanı BELLEKTE açılır: gerçek `.data` veritabanına dokunulmaz ve Windows'taki libsql
@@ -95,8 +103,8 @@ describe("ülke politikaları", () => {
     expect(await seedCountryPolicies(db, NOW + 3)).toBe(0);
   });
 
-  it("seed canlı kapsamı kilitli ve engelli ekler; yalnızca onay kaydıyla açılan satır izinli olur (kod kapısı açık)", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(true);
+  it("seed canlı kapsamı kilitli ve engelli ekler; yalnızca onay kaydıyla açılan satır izinli olur (kod kapısı açık; test içinde)", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true); // test bağlamı: yukarıdaki vi.mock; gerçek sabit KAPALIDIR
     await seedCountryPolicies(db, NOW);
     expect(await resolveCountryPolicy(db, "live", "GB")).toEqual({
       mode: "blocked",

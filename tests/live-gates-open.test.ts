@@ -46,9 +46,17 @@ import { recordPassingDns } from "./helpers/dns-fixture";
 import { enableHealthyDrain } from "./helpers/drain-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
- * Kapı açma sürümü (release/live-gates, sahip kararı 11 Kasım 2026). Bu dosyada HİÇBİR kilit, onay, uygunluk veya
- * ülke politikası mock'lanmaz: gerçek sabitlerle (gönderim ve okuma kapısı açık, yedi onay `true`, başlık güveni
+ * Kapı AÇIK senaryosu (eskiden release/live-gates, sahip kararı 11 Kasım 2026; gerçek sabitler artık KAPALIDIR). Bu dosyada YALNIZCA iki kod kapısı test içinde açık varsayılır; hiçbir onay, uygunluk veya
+ * ülke politikası mock'lanmaz: (gönderim ve okuma kapısı test içinde açık, yedi onay gerçek değeriyle `true`, başlık güveni
  * kapalı) gerçek bir canlı kampanya, çalışma anı hazırlığı tamamlanmadan ve sahip ülke kilidini
  * `scripts/approve-live-country.ts` ile açmadan GÖNDERMEZ. Sağlayıcı sahte; ağ yok.
  */
@@ -160,8 +168,8 @@ const send = (cl: number, now = T0) =>
 const codes = (o: { reasons?: { code: string }[] }) => (o.reasons ?? []).map((r) => r.code);
 const outRows = () => db.select().from(messages).where(eq(messages.direction, "out"));
 
-describe("sürüm kapıları (gerçek sabitler)", () => {
-  it("gönderim ve okuma kapısı açık, yedi onay true; Gmail başlık güveni KAPALI kalır", () => {
+describe("kapı bağlamı (bu dosyada iki kod kapısı test içinde açık)", () => {
+  it("gönderim ve okuma kapısı (test içinde) açık, yedi onay true; Gmail başlık güveni KAPALI kalır", () => {
     expect(LIVE_SENDING_ENABLED).toBe(true);
     expect(LIVE_INBOX_READING_ENABLED).toBe(true);
     expect(GMAIL_HEADER_TRUST_VERIFIED).toBe(false);

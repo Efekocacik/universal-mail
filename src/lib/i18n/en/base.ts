@@ -1308,7 +1308,7 @@ export const base = {
   "policy.live.on": "On",
   "policy.live.off": "Off",
   "policy.live.body":
-    "The real sending gate is open in this version, but countries start blocked and locked. A country is unlocked only by the live country approval script run by the company owner; no message is sent to a locked country. These rows cannot be changed from inside the app.",
+    "The real sending gate is closed in this version (safe default), and countries also start blocked and locked. Even if the gate is opened, a country is unlocked only by the live country approval script run by the company owner; no message is sent to a locked country. These rows cannot be changed from inside the app.",
   "supReason.unsubscribe": "Unsubscribe request",
   "supReason.bounce_hard": "Permanent delivery error",
   "supReason.complaint": "Complaint",
@@ -1617,7 +1617,7 @@ export const base = {
     "Currently: above {rate}%, with at least {recipients} recipients; below that, {guard} verified errors.",
   "ready.title": "Readiness for live sending",
   "ready.help":
-    "The code gates are open in this version; still, no real message is sent until the Gmail connection, DNS check, HTTPS unsubscribe endpoint, unsubscribe request pulling and country lock are complete. This screen does not turn anything on; items are calculated from the real state, and none is counted as complete by assumption.",
+    "The code gates are closed in this version; even if they were opened, no real message is sent until the Gmail connection, DNS check, HTTPS unsubscribe endpoint, unsubscribe request pulling and country lock are complete. This screen does not turn anything on; items are calculated from the real state, and none is counted as complete by assumption.",
   "ready.summary": "{blocked} blockers, {unknown} unverified items",
   "ready.status.ok": "OK",
   "ready.status.blocked": "Blocked",
@@ -1704,7 +1704,7 @@ export const base = {
   "mbx.desc":
     "Here you define sending mailboxes and the Google OAuth client, and connect a mailbox to Gmail through the Google consent screen (sending permission; optional inbox read permission).",
   "mbx.note":
-    "The real sending and inbox reading gates are open in this version. Connecting Gmail does not send any message by itself: sending permission, a DNS check (not needed for a personal @gmail.com address, Google manages it), an HTTPS unsubscribe endpoint, unsubscribe request pulling and an unlocked country are required. Google Workspace is not required; a personal Gmail account can be used too. Connection tokens and the client secret are written to encrypted storage, not to the database.",
+    "The real sending and inbox reading gates are closed in this version. Connecting Gmail does not send any message by itself: even if the gates were opened, sending permission, a DNS check (not needed for a personal @gmail.com address, Google manages it), an HTTPS unsubscribe endpoint, unsubscribe request pulling and an unlocked country are required. Google Workspace is not required; a personal Gmail account can be used too. Connection tokens and the client secret are written to encrypted storage, not to the database.",
   "mbx.status.demo": "Demo (does not send for real)",
   "mbx.status.connected": "Connected",
   "mbx.status.disabled": "Disabled",

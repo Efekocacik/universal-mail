@@ -3,7 +3,7 @@ import { createClient, type Client } from "@libsql/client";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   policyScopeForMailbox,
   policyStrictness,
@@ -21,6 +21,14 @@ import * as cacheSchema from "@/lib/db/cache-schema";
 import * as schema from "@/lib/db/schema";
 import { auditLog, countryPolicies } from "@/lib/db/schema";
 import { COUNTRY_CODES } from "@/lib/geo/countries";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * Ülke politikası servisi ve çözümleyicisi. Veritabanı BELLEKTE açılır; gerçek `.data` veritabanına dokunulmaz.

@@ -2,34 +2,27 @@ import { and, eq } from "drizzle-orm";
 import type { Db, DbExecutor } from "@/lib/db/client";
 import { countryPolicies, type PolicyMode, type PolicyScope } from "@/lib/db/schema";
 import { COUNTRY_CODES } from "@/lib/geo/countries";
+import { LIVE_INBOX_READING_ENABLED, LIVE_SENDING_ENABLED } from "./live-switches";
 
 /**
  * Ülke bazlı gönderim politikası (SRS 8.2, FR-CMPL-01).
  *
  * `live` (gerçek gönderim) ve `demo` kapsamları ayrıdır; hangisinin uygulanacağını kampanyanın posta kutusu
- * belirler. Kod kapısı (`LIVE_SENDING_ENABLED`) bu sürümde AÇIKTIR (sahip kararı, 11 Kasım 2026); ülke kilidi ise
- * veritabanında kalır:
+ * belirler. Kod kapısı (`LIVE_SENDING_ENABLED`) bu sürümde KAPALIDIR (güvenli varsayılan); ülke kilidi ise
+ * veritabanında ayrıca kalır ve kapı açılsa bile geçerlidir:
  *  - `live` satırlarının hepsi `blocked` ve kilitli eklenir (veritabanı kısıtları kilitliyken gevşetmeyi reddeder);
  *    bir ülkenin kilidi YALNIZCA sürüm dışı canlı ülke onay betiğiyle (`scripts/`, docs/10), sahip tarafından açılır,
- *  - `LIVE_SENDING_ENABLED` false olsaydı `live` kapsamı satırdan bağımsız olarak her zaman `blocked` dönerdi.
+ *  - `LIVE_SENDING_ENABLED` false iken `live` kapsamı satırdan bağımsız olarak her zaman `blocked` döner.
  * Kaydı olmayan veya bilinmeyen ülke her iki kapsamda da `blocked` sayılır.
  */
 
 /**
- * Gerçek gönderimin kod kapısı. AÇIK: sahip kararı (11 Kasım 2026), dış hukuki inceleme olmadan yayımlandı;
- * sorumluluk şirkettedir. Kapı tek başına gönderim DEMEK DEĞİLDİR: bağlı Gmail kutusu (`gmail.send`), taze ve geçen
- * DNS denetimi, doğrulanmış HTTPS çıkış uç noktası, sağlıklı çıkış çekme işi ve kilidi açılmış canlı ülke politikası
- * çalışma anında ayrıca zorunludur (bkz. `send-service.ts`, `eligibility.ts`).
+ * Gerçek gönderim ve gerçek gelen kutusu okuma KOD KAPILARI (varsayılan KAPALI; güvenli varsayılan) `live-switches.ts`
+ * dosyasında tanımlıdır ve buradan yeniden dışa aktarılır; uygulamanın geri kalanı bunları bu dosyadan içe aktarır.
+ * Ayrı dosya, kapı AÇIKKEN çalışma anı korumalarının (ülke kilidi, DNS, çıkış bağlantısı) testtenı
+ * gerçek kodla sınanabilmesi içindir (bkz. live-switches.ts).
  */
-export const LIVE_SENDING_ENABLED = true;
-
-/**
- * Gerçek (Gmail) gelen kutusunu OKUMA kilidi (Aşama 15.5). Gönderim kilidinden ayrıdır. AÇIK: sahip kararı
- * (11 Kasım 2026). Okuyucu yalnızca bağlı ve `gmail.readonly` izni verilmiş Gmail kutularını okur. Başlık güveni
- * (`GMAIL_HEADER_TRUST_VERIFIED`) kapalı kaldıkça okunan hiçbir ileti tasdik üretmez: iletiler yalnızca inceleme
- * için kaydedilir; doğrulanmış bounce/suppression/otomatik durdurma doğmaz (kanıt düzeyi düşük kalır).
- */
-export const LIVE_INBOX_READING_ENABLED = true;
+export { LIVE_INBOX_READING_ENABLED, LIVE_SENDING_ENABLED };
 
 /**
  * Gmail başlıklarına (Authentication-Results, Return-Path, Delivered-To) dayalı kimlik tasdikine GÜVEN kilidi

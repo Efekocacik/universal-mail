@@ -45,13 +45,21 @@ import { createTemplate } from "@/lib/mail/template-service";
 import { setSetting } from "@/lib/settings";
 import { DEMO_MAILBOX, openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Aşama 10: kampanya yönetimi servisleri, durum geçişleri, dağıtıcıyla yarışlar ve demo temizliği.
  * Veritabanı BELLEKTE; gerçek gönderim yok, `.data` kullanılmaz, Google verisi yok.
  *
- * Canlı gönderim kapısı bu sürümde AÇIKTIR (gerçek sabitler). Kapı kapalıyken korunması gereken davranışı (demo bayrağı
+ * Canlı gönderim kapısı bu dosyada test içinde AÇIK varsayılır (yukarıdaki vi.mock; gerçek sabit KAPALIDIR). Kapı kapalıyken korunması gereken davranışı (demo bayrağı
  * olmadan zamanlayıcı engeli, gerçek kutunun atanamaması) sınamak için kapı YALNIZCA test içinde, `gate.closed` ile
- * geçici olarak kapatılabilir; varsayılan olarak gerçek kapı kullanılır.
+ * geçici olarak kapatılabilir; varsayılan olarak (test içinde açık varsayılan) kapı kullanılır.
  */
 const gate = vi.hoisted(() => ({ closed: false }));
 vi.mock("@/lib/compliance/live-gate", async (orig) => {

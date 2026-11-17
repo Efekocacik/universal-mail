@@ -37,7 +37,7 @@ import { decodeEncodedWords } from "./helpers/mime-parse";
 
 /**
  * GERÇEK kutuyla "kendime test gönder" (C11). HİÇBİR kilit veya onay mock'lanmaz. Kendine test `LIVE_SENDING_ENABLED`
- * ve `LEGAL_APPROVALS`'tan BAĞIMSIZDIR (kapı açma sürümünde bu sabitler açıktır; kendine test onlara bakmaz): gerçek
+ * ve `LEGAL_APPROVALS`'tan BAĞIMSIZDIR (kapılar KAPALIYKEN de çalışır; kendine test onlara bakmaz): gerçek
  * Gmail bağdaştırıcısı (yerel SAHTE Gmail/OAuth sunucusuna) ve gerçek MIME/alt bilgi kod yoluyla ileti YALNIZCA kutunun
  * kendi adresine gider. Gerçek Google'a istek yok.
  */
@@ -170,10 +170,10 @@ async function verifiedEndpoint() {
   expect(r.ok).toBe(true);
 }
 
-describe("kendime test gönder: gerçek Gmail kutusu (kapılardan bağımsız; kapı açma sürümü)", () => {
-  it("bu sürümde kapılar açık (bu dosyada hiçbir şey mock'lanmaz); kendine test yine yalnızca kendi adrese gider", () => {
-    expect(LIVE_SENDING_ENABLED).toBe(true);
-    expect(isLiveSendingPermitted()).toBe(true);
+describe("kendime test gönder: gerçek Gmail kutusu (kapılardan bağımsız; gerçek sabitler KAPALI)", () => {
+  it("bu sürümde kapılar KAPALI (bu dosyada hiçbir şey mock'lanmaz); kendine test yine çalışır ve yalnızca kendi adrese gider", () => {
+    expect(LIVE_SENDING_ENABLED).toBe(false);
+    expect(isLiveSendingPermitted()).toBe(false); // kampanya gönderimi kapalı; kendine test bundan bağımsız
     expect(Object.values(LEGAL_APPROVALS).every((v) => v)).toBe(true);
   });
 
@@ -420,9 +420,9 @@ describe("kendine test: başka alıcı MÜMKÜN DEĞİL (savunma katmanları)", 
     const ok = buildEmailMessage({ ...base, recipient: ADDRESS });
     expect(ok.to).toBe(ADDRESS);
     expect(ok.raw).not.toMatch(/^List-Unsubscribe/im);
-    // Kendine test bayrağı olmadan (kampanya yolu) kapı açıkken de alt bilgiyle aynı çıkış bağlantısı zorunludur.
+    // Kendine test bayrağı olmadan (kampanya yolu) kapı KAPALIYKEN ileti oluşturulamaz (kapı açıkken alt bilgiyle aynı çıkış bağlantısı zorunluluğu mime.test.ts'te sınanır).
     expect(() => buildEmailMessage({ ...base, selfTest: false, recipient: ADDRESS })).toThrow(
-      expect.objectContaining({ kind: "unsubscribe_mismatch" }),
+      expect.objectContaining({ kind: "live_sending_disabled" }),
     );
   });
 });

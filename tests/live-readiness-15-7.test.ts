@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getLiveReadiness } from "@/lib/compliance/live-readiness";
 import { LEGAL_APPROVALS } from "@/lib/compliance/legal-status";
 import type { Db } from "@/lib/db/client";
@@ -22,6 +22,14 @@ import { ensureChannelKey } from "@/lib/unsubscribe/channel";
 import { ensureSigningKey } from "@/lib/unsubscribe/keys";
 import { openMemoryDb, seedBase } from "./helpers/campaign-fixture";
 import { NOW } from "./helpers/inbound-fixture";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * Canlı hazırlık ekranı (Aşama 15.7): DNS sonuçlarının saklanması ve yeni kontroller. Ağ yok: DNS çözümleyicisi

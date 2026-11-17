@@ -28,8 +28,16 @@ import { gmailWrap, startFakeGmailInbox, type FakeGmailInbox } from "./helpers/f
 import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 import { NOW, rawMessage, seedSent, type Sent } from "./helpers/inbound-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
- * Gelen kutusu işinin Gmail bağlantısı (go-live C6). Kilit (`LIVE_INBOX_READING_ENABLED`) bu sürümde AÇIKTIR (sahip
+ * Gelen kutusu işinin Gmail bağlantısı (go-live C6). Kilit (`LIVE_INBOX_READING_ENABLED`) bu dosyada test içinde AÇIK varsayılır (gerçek sabit KAPALIDIR; eskiden sahip
  * kararı); kapalıyken korunması gereken davranış kilit testte kapatılarak sınanır (iş hiçbir Gmail kutusunu okumaz,
  * ağ isteği atmaz). Açıkken okuma izni olan Gmail kutusu yerel SAHTE Gmail/OAuth sunucularıyla eşitlenir ve
  * `mail.inboxSync` kanıtı yazılır. Gerçek Google'a istek yok.
@@ -348,8 +356,8 @@ describe("kilit açık (yalnızca test): okuma izni olan Gmail kutusu eşitlenir
     expect(await inboundRows()).toHaveLength(0);
   });
 
-  it("worker başlangıcı: GERÇEK kilit açık (geçersiz kılma yok), demo bayrağı olmadan da tur planlanır (tek iş, yinelenmez)", async () => {
-    expect(LIVE_INBOX_READING_ENABLED).toBe(true);
+  it("worker başlangıcı: okuma kapısı açıkken (test içinde açık; başka geçersiz kılma yok), demo bayrağı olmadan da tur planlanır (tek iş, yinelenmez)", async () => {
+    expect(LIVE_INBOX_READING_ENABLED).toBe(true); // test bağlamı: yukarıdaki vi.mock; gerçek sabit KAPALIDIR
     expect(isInboxSyncEnabled({})).toBe(true);
     const opts = { env: {}, now: () => NOW };
     expect(await startInboxScheduler(db, opts)).toEqual({ enabled: true, demo: false, live: true });
@@ -360,7 +368,7 @@ describe("kilit açık (yalnızca test): okuma izni olan Gmail kutusu eşitlenir
     expect(globalFetch).not.toHaveBeenCalled();
   });
 
-  it("GERÇEK kilitlerle (okuma açık, başlık güveni kapalı) iş okur; ileti yalnızca incelemeye kaydedilir, etki yok", async () => {
+  it("okuma açık (test içinde) ve başlık güveni kapalıyken iş okur; ileti yalnızca incelemeye kaydedilir, etki yok", async () => {
     inbox.add({ labels: ["INBOX"], raw: reply("k5"), threadId: "t-out1" });
     await createInboxSyncHandler({
       enabled: false,

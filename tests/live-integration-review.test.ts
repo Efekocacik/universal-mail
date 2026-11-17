@@ -54,8 +54,16 @@ import {
 } from "./helpers/campaign-fixture";
 import { addMailbox } from "./helpers/inbound-fixture";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
- * Canlı entegrasyon incelemesi (Aşama 15.7; kapı açma sürümünde güncellendi): (a) hazırlık ekranı gerçek ortam
+ * Canlı entegrasyon incelemesi (Aşama 15.7; kod kapıları bu dosyada test içinde açık varsayılır, gerçek sabitler KAPALIDIR): (a) hazırlık ekranı gerçek ortam
  * kanıtı olmadan başarılı görünmez, (b) kod kapıları açıkken de varsayılan ayarlarla (bağlantı belirteci, DNS, uç nokta,
  * ülke kilidi yok) HİÇBİR gerçek gönderim/okuma isteği oluşmaz, (c) iç durum anahtarları API'den yazılamaz.
  * Ağ yok: genel fetch casusla izlenir; "ağ" süreç içidir.
@@ -237,7 +245,7 @@ describe("hazırlık: gerçek ortam kanıtı olmadan başarılı görünmez", ()
     expect((await by(NOW + 1000)).https_unsubscribe).toBe("blocked");
   });
 
-  it("kapılar kodda sabit (kapı açma sürümü): gönderim/okuma açık, yedi onay true, başlık güveni kapalı", () => {
+  it("kapı bağlamı (bu dosyada test içinde): gönderim/okuma açık, yedi onay true, başlık güveni kapalı", () => {
     expect(LIVE_SENDING_ENABLED).toBe(true);
     expect(LIVE_INBOX_READING_ENABLED).toBe(true);
     expect(GMAIL_HEADER_TRUST_VERIFIED).toBe(false);

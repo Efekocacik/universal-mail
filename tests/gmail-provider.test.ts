@@ -29,6 +29,14 @@ import {
 import { startFakeGmail, type FakeGmail } from "./helpers/fake-gmail-server";
 import { startFakeOAuth, type FakeOAuth } from "./helpers/fake-oauth-server";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Gmail gönderim bağdaştırıcısı (Aşama 15.4). Yalnızca yerel SAHTE Gmail ve OAuth sunucuları; gerçek Google'a istek
  * yok (fetch sarmalayıcısı 127.0.0.1 dışını reddeder, genel fetch casusla izlenir). Canlı gönderim kapalı kalır.
@@ -153,8 +161,8 @@ describe("kapılar: ağ isteğinden ÖNCE", () => {
     expect(oauth.requests).toHaveLength(0);
   });
 
-  it("kapı açma sürümü: GERÇEK kapı açık (geçersiz kılma yok); gönderim izni yoksa yine ağa çıkılmaz", async () => {
-    expect(LIVE_SENDING_ENABLED).toBe(true);
+  it("kapı açıkken (test içinde açık; başka geçersiz kılma yok); gönderim izni yoksa yine ağa çıkılmaz", async () => {
+    expect(LIVE_SENDING_ENABLED).toBe(true); // test bağlamı: yukarıdaki vi.mock; gerçek sabit KAPALIDIR
     const noSend = await connected({ send: false, read: true });
     // `liveEnabled` verilmez: üretimdeki birleşik kapı kullanılır. Yalnızca sahte sunucu adresi verilir.
     const p = new GmailProvider({

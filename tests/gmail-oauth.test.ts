@@ -40,6 +40,14 @@ import {
   type FakeOAuth,
 } from "./helpers/fake-oauth-server";
 
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
+
 /**
  * Gmail OAuth çekirdeği (Aşama 15.3). Yalnızca yerel SAHTE OAuth sunucusu kullanılır; gerçek Google'a hiçbir istek
  * atılmaz (fetch sarmalayıcısı 127.0.0.1 dışını reddeder, genel fetch casusla izlenir).

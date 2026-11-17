@@ -1,6 +1,6 @@
 import type { Client } from "@libsql/client";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runPreflight } from "@/lib/campaigns/preflight";
 import { getLiveReadiness } from "@/lib/compliance/live-readiness";
 import { LEGAL_APPROVALS } from "@/lib/compliance/legal-status";
@@ -10,6 +10,14 @@ import { buildFooter, type SenderProfile } from "@/lib/mail/footer";
 import { composeEmail } from "@/lib/mail/template-service";
 import { getSetting, setSetting, settingSchemas } from "@/lib/settings";
 import { addSequence, createCampaign, openMemoryDb, seedBase } from "./helpers/campaign-fixture";
+
+// Güvenli varsayılan: gerçek canlı kapı sabitleri KAPALIDIR (bkz. live-gates-default-closed.test.ts). Bu dosya "kapı
+// açıkken" çalışma anı korumalarını sınadığı için kapılar YALNIZCA bu dosyada, test içinde açık varsayılır
+// (bkz. live-send-path-open.test.ts). Gerçek sabitler DEĞİŞMEZ.
+vi.mock("@/lib/compliance/live-switches", () => ({
+  LIVE_SENDING_ENABLED: true,
+  LIVE_INBOX_READING_ENABLED: true,
+}));
 
 /**
  * TR kurumsal tanımlayıcılar (Aşama 15.1): MERSİS ve ticaret sicil numarası İSTEĞE BAĞLIDIR, yalnızca Türkiye'ye

@@ -155,14 +155,18 @@ describe("canlıya geçiş belgeleri kodla tutarlı", () => {
     }
     // TB-3 (çıkış altyapısı arayüzü) kodlandı: belge onu artık bekleyen paket olarak anmaz.
     expect(doc).not.toContain("[TB-3]");
-    // Kod kapıları `release/live-gates`'te sahip kararıyla açıldı; belge bunu ve hâlâ kapalı olanları (başlık güveni,
-    // ülke kilitleri) kodla aynı anar.
-    expect(doc).toMatch(/Kod kapıları `release\/live-gates` dalında AÇILDI \(sahip kararı\)/);
-    expect(doc).toContain("`LIVE_SENDING_ENABLED = true`");
+    // Gerçek gönderim ve okuma kapıları güvenli varsayılan olarak KAPALIDIR; belge bunu ve hâlâ kapalı olanları (başlık
+    // güveni, ülke kilitleri) kodla aynı anar.
+    expect(doc).toMatch(/Gerçek gönderim ve gerçek gelen kutusu okuma kapıları KAPALIDIR/);
+    expect(doc).toContain("`LIVE_SENDING_ENABLED = false`");
+    expect(doc).toContain("`LIVE_INBOX_READING_ENABLED = false`");
     expect(doc).toMatch(/`GMAIL_HEADER_TRUST_VERIFIED` \*\*kapalı kalır\*\*/);
     expect(doc).toMatch(/Canlı ülke politikalarının hepsi \*\*engelli ve kilitli\*\* kalır/);
     const policies = read("src/lib/compliance/policies.ts");
-    expect(policies).toMatch(/export const LIVE_SENDING_ENABLED = true;/);
+    const switches = read("src/lib/compliance/live-switches.ts");
+    expect(switches).toMatch(/export const LIVE_SENDING_ENABLED = false;/);
+    expect(switches).toMatch(/export const LIVE_INBOX_READING_ENABLED = false;/);
+    expect(policies).toMatch(/from "\.\/live-switches"/);
     expect(policies).toMatch(/export const GMAIL_HEADER_TRUST_VERIFIED = false;/);
   });
 

@@ -248,14 +248,14 @@ test("ülke politikası: yalnızca sıkılaştırılır; gevşetme ve gerçek g�
   });
   expect(live.status()).toBe(400);
   const policies = await api.get("/api/compliance/policies");
-  expect(policies.liveSendingEnabled).toBe(true);
+  expect(policies.liveSendingEnabled).toBe(false); // güvenli varsayılan: gerçek gönderim kapısı KAPALI
   expect(
     (policies.live as { mode: string; locked: boolean }[]).every(
       (p) => p.mode === "blocked" && p.locked,
     ),
   ).toBe(true);
   await page.getByText("Gerçek gönderim politikaları (uygulamada değiştirilemez)").click();
-  await expect(page.getByText(/Gerçek gönderim kapısı bu sürümde açıktır/)).toBeVisible();
+  await expect(page.getByText(/Gerçek gönderim kapısı bu sürümde KAPALIDIR/)).toBeVisible();
   await expect(page.getByText(/kilitli ülkeye hiçbir ileti gönderilmez/)).toBeVisible();
 });
 

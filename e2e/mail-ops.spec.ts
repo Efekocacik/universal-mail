@@ -188,7 +188,7 @@ test("posta kutusu sağlığı ve canlı gönderime hazırlık: gerçek duruma b
   await expect(page.getByText(/Şikâyet oranı: ölçülemiyor/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Canlı gönderime hazırlık" })).toBeVisible();
   await expect(page.getByTestId("ready-summary")).toContainText("engel");
-  await expect(page.getByText(/Kod kapıları bu sürümde açıktır/)).toBeVisible();
+  await expect(page.getByText(/Kod kapıları bu sürümde kapalıdır/)).toBeVisible();
   await expect(page.getByText(/Bu ekran hiçbir şeyi açmaz/)).toBeVisible();
   // Hukuki maddeler sahip kararıyla 'Tamam'dır; canlı ülke kilidi ise ekrandan açılamaz ve engel olarak kalır.
   const owner = page.getByRole("listitem").filter({ hasText: "sahip kararı" });
@@ -198,10 +198,10 @@ test("posta kutusu sağlığı ve canlı gönderime hazırlık: gerçek duruma b
   await expect(country).toContainText("Engel var");
   const r = await (await page.request.get("/api/compliance/live-readiness")).json();
   expect(r.allOk).toBe(false);
-  expect(r.liveSendingEnabled).toBe(true);
+  expect(r.liveSendingEnabled).toBe(false); // güvenli varsayılan: gerçek gönderim kapısı KAPALI
   const status = (key: string) =>
     (r.items as { key: string; status: string }[]).find((i) => i.key === key)?.status;
-  expect(status("live_flag")).toBe("ok");
+  expect(status("live_flag")).toBe("blocked");
   expect(status("live_country_policies")).toBe("blocked");
   expect(status("real_mailbox")).toBe("blocked");
   expect(status("https_unsubscribe")).toBe("blocked");
@@ -322,7 +322,7 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
   await page.goto("/settings");
   const section = page.locator("#mailbox");
   await expect(
-    section.getByText(/Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde açıktır/),
+    section.getByText(/Gerçek gönderim ve gelen kutusu okuma kapıları bu sürümde kapalıdır/),
   ).toBeVisible();
   await expect(section.getByText("Demo (gerçek gönderim yapmaz)")).toBeVisible();
 
@@ -393,10 +393,10 @@ test("gönderim hesabı: Gmail kutusu yapılandırılmadı olarak eklenir, istem
     reauthorizationRequired: false,
   });
 
-  // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz (kod kapısı açık, kutu bağlı değil).
+  // Canlı hazırlık: kutu eklemek hiçbir şeyi açmaz (kod kapısı kapalı, kutu bağlı değil).
   const r = await (await page.request.get("/api/compliance/live-readiness")).json();
   expect(r.allOk).toBe(false);
-  expect(r.liveSendingEnabled).toBe(true);
+  expect(r.liveSendingEnabled).toBe(false); // güvenli varsayılan: gerçek gönderim kapısı KAPALI
   expect(r.items.find((i: { key: string }) => i.key === "real_mailbox").status).toBe("blocked");
   // Bağlı ve gönderim izinli olmayan Gmail kutusu kampanyaya atanamaz.
   const mbs = (await (await page.request.get("/api/mailboxes")).json()).items as {
