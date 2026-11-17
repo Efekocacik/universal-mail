@@ -13,6 +13,7 @@ import { imports } from "./tr/imports";
 import { backup } from "./tr/backup";
 import { install } from "./tr/install";
 import { security } from "./tr/security";
+import { restriction } from "./tr/restriction";
 
 /**
  * Türkçe sözlük (birincil dil). Paket başına PARÇA dosyalarından birleştirilir; böylece paralel çalışan Faz 4 paketleri
@@ -52,6 +53,7 @@ export const tr = {
   ...backup,
   ...install,
   ...security,
+  ...restriction,
 } as const;
 
 /** Parça adı → parça (kapsam raporu ve çakışma testi için). */
@@ -71,6 +73,7 @@ export const TR_FRAGMENTS = {
   backup,
   install,
   security,
+  restriction,
 } as const;
 export type FragmentName = keyof typeof TR_FRAGMENTS;
 export type TrKey = keyof typeof tr;

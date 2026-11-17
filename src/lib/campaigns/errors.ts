@@ -15,6 +15,8 @@ export type CampaignErrorCode =
   | "setup_required"
   | "preflight_failed"
   | "preflight_stale"
+  /** Test alıcı sınırı değişti ve kampanya duraklatıldı: devam için açık yeniden başlatma onayı gerekir. */
+  | "restriction_ack_required"
   /** Faz 5: adımda veya kategori varyantında yalnızca bilgi amaçlı (DE) şablon. */
   | "template_info_only"
   /** Faz 5: kategori varyantı şablonunun dili/türü adımla uyuşmuyor. */
@@ -33,6 +35,7 @@ export const CAMPAIGN_ERROR_STATUS: Readonly<Record<CampaignErrorCode, number>> 
   setup_required: 403,
   preflight_failed: 409,
   preflight_stale: 409,
+  restriction_ack_required: 409,
   template_info_only: 400,
   category_template_mismatch: 400,
 });

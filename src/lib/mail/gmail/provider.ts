@@ -1,4 +1,8 @@
 import { isLiveSendingPermitted } from "@/lib/compliance/live-gate";
+import {
+  isRecipientAllowed,
+  loadRecipientRestriction,
+} from "@/lib/compliance/recipient-restriction";
 import type { Db } from "@/lib/db/client";
 import { parseEmail } from "@/lib/email/address";
 import {
@@ -192,6 +196,20 @@ export class GmailProvider implements MailProvider {
         return rej("self_test_recipient", true);
       }
     } else if (!this.liveEnabled()) return rej("live_sending_disabled", true);
+
+    // 1b. Test alıcı sınırı (ZORUNLU yedek katman; uygunluk denetiminden bağımsız, arayüze bağlı değil): açıkken yalnızca
+    //     izinli listedeki tam adrese gidilir. Okunamazsa ağa ÇIKILMAZ (güvenli taraf). Kendine test muaftır (zaten
+    //     yalnızca kutunun kendi adresi). Normalde buraya yalnızca uygunluk denetimi ile bu denetim arasında sınır açılırsa
+    //     ulaşılır; ileti gönderilmez ve dizinin ertelenmesi/yeniden denenmesi mevcut hata yolundadır.
+    if (!this.opts.selfTest) {
+      let restriction;
+      try {
+        restriction = await loadRecipientRestriction(this.opts.db);
+      } catch {
+        return rej("recipient_restriction_unreadable", false);
+      }
+      if (!isRecipientAllowed(restriction, input.to)) return rej("recipient_not_allowed", false);
+    }
     if (input.signal.aborted) return rej("aborted_before_send", false);
 
     // 2. Girdi doğrulaması (ağ yok).

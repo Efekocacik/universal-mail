@@ -26,6 +26,11 @@ import {
 import { isLiveSendingPermitted } from "./live-gate";
 import { policyScopeForMailbox, resolveCountryPolicy, type ResolvedPolicy } from "./policies";
 import {
+  loadRecipientRestriction,
+  RESTRICTION_RECHECK_MS,
+  type ResolvedRestriction,
+} from "./recipient-restriction";
+import {
   checkSuppression,
   checkSuppressionBatch,
   hashEmail,
@@ -89,6 +94,8 @@ export type IneligibleCode =
   | "country_blocked"
   | "country_generic_only"
   | "suppressed"
+  /** Test alıcı sınırı açık ve adres izinli listede değil: dizi ertelenir (dışlanmaz), bkz. recipient-restriction.ts. */
+  | "recipient_not_allowed"
   | "already_in_campaign"
   | "domain_already_in_campaign"
   | "business_already_in_campaign"
@@ -260,6 +267,7 @@ export async function prepareEnrollmentBatch(
   const bizByDomain = new Map<string, BusinessRow[]>();
   const statuses = new Map<number, CampaignLeadStatus>();
   let campaign: typeof campaigns.$inferSelect | null = null;
+  let restriction: ResolvedRestriction | null = null;
   let failure: unknown = null;
 
   try {
@@ -273,6 +281,8 @@ export async function prepareEnrollmentBatch(
           ? []
           : await db.select().from(mailboxes).where(eq(mailboxes.id, campaign.mailboxId)).limit(1);
       scope = applyMailbox(campaign.mailboxId, mb, s["mail.gmailGrants"], global);
+      // Test alıcı sınırı (yalnızca gerçek kapsam). Yüklenemezse toplu hazırlık `evaluation_error` verir (güvenli taraf).
+      if (scope === "live") restriction = await loadRecipientRestriction(db);
       if (["completed", "cancelled", "stopped"].includes(campaign.status)) {
         global.add("campaign_closed", { detail: campaign.status });
       }
@@ -471,6 +481,8 @@ export async function prepareEnrollmentBatch(
         primary,
         policies.get(lead.countryCode) ?? { mode: "blocked", reason: "unknown_country" },
         (email) => sup.get(email) ?? { suppressed: true, invalidAddress: true, matches: [] },
+        restriction,
+        now,
       );
       if (!recipient) return c.result(scope);
 
@@ -624,7 +636,7 @@ export async function evaluateSend(
       ) {
         c.add("recipient_mismatch");
       } else if (lead) {
-        recipient = await checkRecipient(db, c, scope, lead.countryCode, emailRow);
+        recipient = await checkRecipient(db, c, scope, lead.countryCode, emailRow, now);
       }
     }
 
@@ -886,6 +898,7 @@ async function checkRecipient(
   scope: PolicyScope,
   countryCode: string | null,
   email: { email: string; kind: string; verifyStatus: string },
+  now: number,
 ): Promise<{ hash: string; domain: string } | null> {
   const parsed = parseEmail(email.email);
   if (!parsed || parsed.email !== email.email) {
@@ -894,7 +907,9 @@ async function checkRecipient(
   }
   const policy = await resolveCountryPolicy(db, scope, countryCode);
   const sup = await checkSuppression(db, parsed.email);
-  return applyRecipient(c, email, policy, () => sup);
+  // Test alıcı sınırı yalnızca gerçek (canlı) kapsamda uygulanır; demo kutusu gerçek kişilere ulaşmaz.
+  const restriction = scope === "live" ? await loadRecipientRestriction(db) : null;
+  return applyRecipient(c, email, policy, () => sup, restriction, now);
 }
 
 function applyRecipient(
@@ -902,6 +917,8 @@ function applyRecipient(
   email: { email: string; kind: string; verifyStatus: string },
   policy: ResolvedPolicy,
   suppressionOf: (email: string) => SuppressionCheck,
+  restriction: ResolvedRestriction | null,
+  now: number,
 ): { hash: string; domain: string } | null {
   const parsed = parseEmail(email.email);
   if (!parsed || parsed.email !== email.email) {
@@ -926,6 +943,12 @@ function applyRecipient(
   if (sup.suppressed) {
     for (const m of sup.matches) c.add("suppressed", { detail: `${m.scope}:${m.reason}` });
     if (sup.matches.length === 0) c.add("suppressed", { detail: "invalid_address" });
+  }
+  // Test alıcı sınırı (EK ret nedeni; yukarıdaki hiçbir kuralı gevşetmez): açıkken yalnızca listedeki tam adresler.
+  // Sürekli bir neden değildir: sınır kalkınca/genişleyince dizi kaldığı yerden devam edebilir, bu yüzden dışlanmaz,
+  // ertelenir (dağıtıcı: `EXCLUDE_CODES` dışındaki nedenler `until`e kadar ertelenir).
+  if (restriction?.enabled && !restriction.addresses.has(parsed.email)) {
+    c.add("recipient_not_allowed", { until: now + RESTRICTION_RECHECK_MS });
   }
   return { hash: hashEmail(parsed.email), domain: parsed.domain };
 }

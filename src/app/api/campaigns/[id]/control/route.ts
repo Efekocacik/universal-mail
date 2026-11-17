@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export const POST = route(async (req: Request, ctx: { params: Promise<{ id: string }> }) => {
   const db = await database();
   const id = intParam((await ctx.params).id);
-  const { action, confirmToken } = await body(req, controlSchema);
+  const { action, confirmToken, restrictionAck } = await body(req, controlSchema);
   await requireConsent(db);
-  return json(await transitionCampaign(db, id, action, { confirmToken }));
+  return json(await transitionCampaign(db, id, action, { confirmToken, restrictionAck }));
 });

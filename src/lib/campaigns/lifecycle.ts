@@ -1,5 +1,10 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, count, eq, inArray, like } from "drizzle-orm";
 import type { FrequencyLimits } from "@/lib/compliance/frequency";
+import {
+  loadRecipientRestriction,
+  RESTRICTION_PAUSE_REASON,
+  RESTRICTION_RECHECK_MS,
+} from "@/lib/compliance/recipient-restriction";
 import { audit } from "@/lib/db/audit";
 import { chunk } from "@/lib/util";
 import type { Db } from "@/lib/db/client";
@@ -62,6 +67,8 @@ export interface TransitionResult {
   updatedAt: number;
   scheduled?: number;
   excluded?: number;
+  /** Test alıcı sınırı nedeniyle bekletilen (dışlanmayan) dizi sayısı (başlatma). */
+  held?: number;
   /** Başlatma/devamdan sonra dağıtıcı uyandırma sonucu (gözlemlenebilirlik; gönderim kararı değildir). */
   wake?: WakeOutcome | "failed";
 }
@@ -70,6 +77,11 @@ export interface TransitionOptions {
   now?: number;
   /** `start` için zorunlu: `runPreflight` sonucundaki belirteç. */
   confirmToken?: string;
+  /**
+   * `resume` için: test alıcı sınırı değiştiği için duraklatılmış (`pause_reason = restriction`) kampanyayı sürdürmeye
+   * AÇIK onay. Yoksa devam reddedilir (ertelenen alıcılar kendiliğinden gönderime başlamaz).
+   */
+  restrictionAck?: boolean;
   env?: Record<string, string | undefined>;
   limits?: FrequencyLimits;
 }
@@ -98,6 +110,7 @@ export async function transitionCampaign(
     const values: Partial<typeof campaigns.$inferInsert> = { status: target };
     let scheduled: number | undefined;
     let excluded: number | undefined;
+    let held: number | undefined;
 
     if (action === "ready") {
       const blockers = (await campaignBlockers(tx, c, env)).filter((b) => CONFIG_BLOCKERS.has(b));
@@ -133,6 +146,22 @@ export async function transitionCampaign(
             .update(campaignLeads)
             .set({ status: "scheduled", language, nextSendAt: null, updatedAt: now })
             .where(and(inArray(campaignLeads.id, part), eq(campaignLeads.status, "pending")));
+      // Test alıcı sınırı nedeniyle bekletilenler DIŞLANMAZ: `scheduled` olur ve dağıtıcı sınır sürdükçe ertelemeye devam eder.
+      const heldByLanguage = new Map<string, number[]>();
+      for (const h of plan.held)
+        heldByLanguage.set(h.language, [...(heldByLanguage.get(h.language) ?? []), h.id]);
+      for (const [language, ids] of heldByLanguage)
+        for (const part of chunk(ids, 500))
+          await tx
+            .update(campaignLeads)
+            .set({
+              status: "scheduled",
+              language,
+              nextSendAt: now + RESTRICTION_RECHECK_MS,
+              lastError: "recipient_not_allowed",
+              updatedAt: now,
+            })
+            .where(and(inArray(campaignLeads.id, part), eq(campaignLeads.status, "pending")));
       const byReasons = new Map<string, { reasons: string[]; ids: number[] }>();
       for (const i of plan.ineligible) {
         const key = JSON.stringify(i.reasons);
@@ -152,6 +181,7 @@ export async function transitionCampaign(
             .where(and(inArray(campaignLeads.id, part), eq(campaignLeads.status, "pending")));
       scheduled = plan.eligible.length;
       excluded = plan.ineligible.length;
+      held = plan.held.length;
       Object.assign(values, {
         startConfirmedAt: now,
         startedAt: c.startedAt ?? now,
@@ -161,6 +191,45 @@ export async function transitionCampaign(
     }
 
     if (action === "resume") {
+      // Test alıcı sınırı: ertelenmiş (bekletilen) alıcılar kendiliğinden gönderime BAŞLAMAMALI. Kampanya sınır değişikliği
+      // nedeniyle duraklatılmışsa (`restriction`) VEYA sınır nedeniyle bekletilen alıcısı varsa (ör. kullanıcı kendisi
+      // duraklatmışken sınır kalktı/genişledi), devam yalnızca açık yeniden başlatma onayıyla yapılır; arayüz bekleyen alıcı
+      // sayısını gösterip onay alır.
+      if (opts.restrictionAck !== true) {
+        const [heldNow] = await tx
+          .select({ n: count() })
+          .from(campaignLeads)
+          .where(
+            and(
+              eq(campaignLeads.campaignId, id),
+              inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
+              like(campaignLeads.lastError, "%recipient_not_allowed%"),
+            ),
+          );
+        const held = Number(heldNow?.n ?? 0);
+        if (c.pauseReason === RESTRICTION_PAUSE_REASON || held > 0) {
+          const restriction = await loadRecipientRestriction(tx);
+          const [waiting] = await tx
+            .select({ n: count() })
+            .from(campaignLeads)
+            .where(
+              and(
+                eq(campaignLeads.campaignId, id),
+                inArray(campaignLeads.status, ["scheduled", "waiting_next"]),
+              ),
+            );
+          throw new CampaignError(
+            "restriction_ack_required",
+            "Test alıcı sınırı nedeniyle bekleyen alıcılar var; kampanyayı sürdürmek için açık onay gerekir.",
+            {
+              waiting: Number(waiting?.n ?? 0),
+              held,
+              restrictionEnabled: restriction.enabled,
+              allowedAddresses: restriction.addresses.size,
+            },
+          );
+        }
+      }
       const blockers = await campaignBlockers(tx, c, env);
       if (blockers.length > 0) {
         throw new CampaignError(
@@ -204,7 +273,7 @@ export async function transitionCampaign(
       `campaign.${action}`,
       "campaign",
       id,
-      { from: c.status, to: target, scheduled, excluded },
+      { from: c.status, to: target, scheduled, excluded, ...(held ? { held } : {}) },
       now,
     );
     return {
@@ -213,6 +282,7 @@ export async function transitionCampaign(
       updatedAt: rows[0]!.updatedAt,
       scheduled,
       excluded,
+      held,
     };
   });
 

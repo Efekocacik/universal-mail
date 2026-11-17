@@ -14,6 +14,7 @@ import { imports } from "./en/imports";
 import { backup } from "./en/backup";
 import { install } from "./en/install";
 import { security } from "./en/security";
+import { restriction } from "./en/restriction";
 
 /**
  * İngilizce sözlük (NFR-09). Türkçe parçalarla aynı adlı parçalardan birleştirilir. Faz 4 entegrasyonundan beri TÜM
@@ -36,6 +37,7 @@ export const en: Record<TrKey, string> = {
   ...backup,
   ...install,
   ...security,
+  ...restriction,
 };
 
 /** Parça adı → İngilizce parça (kapsam raporu için). */
@@ -55,4 +57,5 @@ export const EN_FRAGMENTS = {
   backup,
   install,
   security,
+  restriction,
 } as const;
