@@ -132,7 +132,22 @@ export const mailOpsApi = {
     }),
   dnsCheck: (mailboxId: number, input: { selector?: string }) =>
     api<DnsReport>(`/api/mailboxes/${mailboxId}/dns-check`, { method: "POST", json: input }),
-  testSend: (mailboxId: number, input: { templateId: number; leadId: number }) =>
+  /** Gerçek (Gmail) kutuda onay hazırlığı: hiçbir ileti göndermez; imzalı, tek kullanımlık onay belirteci verir. */
+  testSendChallenge: (mailboxId: number, input: { templateId: number; leadId: number }) =>
+    api<
+      | { required: false; scope: "demo" }
+      | {
+          required: true;
+          scope: "live";
+          confirmToken: string;
+          expiresAt: number;
+          recipient: string;
+        }
+    >(`/api/mailboxes/${mailboxId}/test-send/challenge`, { method: "POST", json: input }),
+  testSend: (
+    mailboxId: number,
+    input: { templateId: number; leadId: number; confirmToken?: string },
+  ) =>
     api<{
       outcome: "sent" | "failed" | "unknown";
       messageRowId: number;

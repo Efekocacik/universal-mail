@@ -200,6 +200,16 @@ export const core = {
   "apiError.IN_PROGRESS": "A test send is already running for this mailbox.",
   "apiError.BUILD_FAILED": "The test message could not be built.",
   "apiError.LIVE_SCOPE": "This cannot be done in the live scope.",
+  "apiError.CONFIRM_REQUIRED": "A live test send needs confirmation. Start the send again.",
+  "apiError.CONFIRM_INVALID":
+    "The confirmation is invalid or was already used. Start the send again.",
+  "apiError.CONFIRM_EXPIRED": "The confirmation has expired. Start the send again.",
+  "health.test.error.CONFIRM_REQUIRED":
+    "Confirmation is required. Press the button again and confirm.",
+  "health.test.error.CONFIRM_INVALID":
+    "The confirmation is invalid or was already used; nothing was sent. Press the button again and confirm.",
+  "health.test.error.CONFIRM_EXPIRED":
+    "The confirmation has expired; nothing was sent. Press the button again and confirm.",
   "apiError.CLIENT_NOT_CONFIGURED":
     "No Google OAuth client is set up. Enter the client ID and secret first.",
   "apiError.NOT_GMAIL": "This action is only for Gmail mailboxes.",

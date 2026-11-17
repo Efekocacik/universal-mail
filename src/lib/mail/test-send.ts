@@ -2,7 +2,7 @@ import { and, eq, gte, sql } from "drizzle-orm";
 import { policyScopeForMailbox } from "@/lib/compliance/policies";
 import { hashEmail, maskEmail } from "@/lib/compliance/suppression";
 import { audit } from "@/lib/db/audit";
-import type { Db } from "@/lib/db/client";
+import type { Db, DbExecutor } from "@/lib/db/client";
 import { mailboxes, messages } from "@/lib/db/schema";
 import { parseEmail } from "@/lib/email/address";
 import { getSetting, settingSchemas } from "@/lib/settings";
@@ -12,6 +12,7 @@ import { buildEmailMessage, MessageBuildError } from "./mime/message-builder";
 import { getProvider, ProviderUnavailableError, type MailProvider } from "./provider/provider";
 import { RECORD_RETRIES, STALE_SENDING_MS, isBusyError } from "./send-service";
 import { composeEmail, type ComposeIssue } from "./template-service";
+import { consumeConfirmNonce, issueConfirmToken, verifyConfirmToken } from "./test-send-confirm";
 
 /**
  * "Kendime test gönder" (FR-TPL-07, Aşama 13; gerçek kutu: C11). Alıcı HER ZAMAN posta kutusunun KENDİ adresidir
@@ -24,6 +25,10 @@ import { composeEmail, type ComposeIssue } from "./template-service";
  *    gönderimle AYNI kod yolundan geçer. Çıkış uç noktası doğrulanmışsa iletiye gerçek HTTPS tek tıklamalı çıkış
  *    başlıkları (alıcıya bağlı olmayan SINAMA belirteciyle: kendi adresiniz engellenmez) eklenir; değilse ileti
  *    `List-Unsubscribe` OLMADAN oluşturulur. Her iki durumda da konu "[TEST]" önekli ve alt bilgi "[TEST]" işaretlidir.
+ *  - ONAY (yalnızca gerçek kutu): gönderim, sunucunun ürettiği imzalı, kısa ömürlü, TEK KULLANIMLIK ve kutuya/şablona/
+ *    işletmeye/adrese bağlı bir onay belirteci ister (`test-send-confirm.ts`; önce `prepareTestSendConfirm`). Belirteç
+ *    yoksa, geçersizse, süresi dolmuşsa veya daha önce kullanılmışsa HİÇBİR ileti oluşturulmaz ve sağlayıcıya gidilmez.
+ *    Bu, insan varlığının kesin kanıtı DEĞİLDİR (bkz. test-send-confirm.ts). Demo kutusu için gerekmez.
  *  - `purpose="test"`: kampanya sayaçlarını, günlük tavanı, temas sıklığını ve alan adı sınırını etkilemez, otomatik
  *    durdurma payına/paydasına girmez ve bu iletiye gelen hiçbir bounce/yanıt etki üretmez.
  *  - Sınırlar: kutu başına saatte 10; gerçek kutuda ayrıca son 24 saatte 10. Aynı kutuda süren (`sending`) bir test
@@ -46,7 +51,10 @@ export type TestSendErrorKind =
   | "profile_incomplete"
   | "rate_limited"
   | "in_progress"
-  | "build_failed";
+  | "build_failed"
+  | "confirm_required"
+  | "confirm_invalid"
+  | "confirm_expired";
 
 export class TestSendError extends Error {
   constructor(
@@ -85,19 +93,20 @@ function masked(address: string): string {
   return maskEmail(address.slice(0, at), address.slice(at + 1));
 }
 
-export async function sendTestEmail(
-  db: Db,
-  input: { mailboxId: number; templateId: number; leadId: number },
-  opts: { now?: () => number; provider?: MailProvider; timeoutMs?: number } = {},
-): Promise<TestSendResult> {
-  const clock = opts.now ?? Date.now;
-  const now = clock();
+const CONFIRM_MESSAGES = {
+  confirm_required: "Canlı test gönderimi için onay gerekir. Gönderimi yeniden başlatın.",
+  confirm_invalid: "Onay geçersiz veya daha önce kullanılmış. Gönderimi yeniden başlatın.",
+  confirm_expired: "Onayın süresi doldu. Gönderimi yeniden başlatın.",
+} as const;
 
-  const [mailbox] = await db
-    .select()
-    .from(mailboxes)
-    .where(eq(mailboxes.id, input.mailboxId))
-    .limit(1);
+type TestScope = ReturnType<typeof policyScopeForMailbox>;
+
+/**
+ * Test gönderiminin hedefi ve ön koşulları (gönderim ve onay hazırlığı AYNI denetimi kullanır). Hiçbir G/Ç yapmaz,
+ * yalnızca veritabanını okur.
+ */
+async function resolveTarget(db: Db, mailboxId: number) {
+  const [mailbox] = await db.select().from(mailboxes).where(eq(mailboxes.id, mailboxId)).limit(1);
   if (!mailbox) throw new TestSendError("mailbox_not_found", "Posta kutusu bulunamadı.");
   const scope = policyScopeForMailbox(mailbox.provider);
   if (scope === "live" && mailbox.provider !== "gmail") {
@@ -125,6 +134,126 @@ export async function sendTestEmail(
     if (!profile.success) {
       throw new TestSendError("profile_incomplete", "Firma profili eksik veya geçersiz.");
     }
+  }
+  return { mailbox, scope, self };
+}
+
+/** Süren test ve saatlik/günlük sınır denetimi. Gönderimde KAYIT İŞLEMİNİN İÇİNDE, onay hazırlığında dışarıda çalışır. */
+async function assertCapacity(
+  exec: DbExecutor,
+  mailboxId: number,
+  scope: TestScope,
+  now: number,
+): Promise<void> {
+  const [inFlight] = await exec
+    .select({ n: sql<number>`count(*)` })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.purpose, "test"),
+        eq(messages.mailboxId, mailboxId),
+        eq(messages.status, "sending"),
+        gte(messages.createdAt, now - STALE_SENDING_MS),
+      ),
+    );
+  if (Number(inFlight?.n ?? 0) > 0) {
+    throw new TestSendError("in_progress", "Bu kutuda süren bir test gönderimi var.");
+  }
+  const countSince = async (since: number) => {
+    const [r] = await exec
+      .select({ n: sql<number>`count(*)` })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.purpose, "test"),
+          eq(messages.mailboxId, mailboxId),
+          gte(messages.createdAt, since),
+        ),
+      );
+    return Number(r?.n ?? 0);
+  };
+  if ((await countSince(now - 3_600_000)) >= TEST_SEND_HOURLY_LIMIT) {
+    throw new TestSendError("rate_limited", "Saatlik test gönderimi sınırına ulaşıldı.");
+  }
+  if (scope === "live" && (await countSince(now - 86_400_000)) >= TEST_SEND_DAILY_LIMIT) {
+    throw new TestSendError("rate_limited", "Günlük test gönderimi sınırına ulaşıldı.");
+  }
+}
+
+export type TestSendChallenge =
+  | { required: false; scope: "demo" }
+  | {
+      required: true;
+      scope: "live";
+      /** İmzalı, tek kullanımlık onay belirteci (120 sn). Gönderim isteğine `confirmToken` olarak eklenir. */
+      confirmToken: string;
+      expiresAt: number;
+      /** Gerçek e-postanın gideceği adres: her zaman kutunun KENDİ adresi (kullanıcıya gösterilir). */
+      recipient: string;
+    };
+
+/**
+ * Onay hazırlığı (challenge): gönderimle AYNI ön koşulları ve sınırları denetler, HİÇBİR ileti göndermez ve hiçbir kayıt
+ * yazmaz; geçerliyse imzalı, kısa ömürlü onay belirteci verir. Demo kutusu için onay gerekmez.
+ */
+export async function prepareTestSendConfirm(
+  db: Db,
+  input: { mailboxId: number; templateId: number; leadId: number },
+  opts: { now?: () => number } = {},
+): Promise<TestSendChallenge> {
+  const now = (opts.now ?? Date.now)();
+  const { mailbox, scope, self } = await resolveTarget(db, input.mailboxId);
+  if (scope !== "live") return { required: false, scope: "demo" };
+  await assertCapacity(db, mailbox.id, scope, now);
+  const issued = issueConfirmToken(
+    {
+      mailboxId: mailbox.id,
+      templateId: input.templateId,
+      leadId: input.leadId,
+      address: self.email,
+    },
+    now,
+  );
+  return {
+    required: true,
+    scope: "live",
+    confirmToken: issued.token,
+    expiresAt: issued.expiresAt,
+    recipient: self.email,
+  };
+}
+
+export async function sendTestEmail(
+  db: Db,
+  input: { mailboxId: number; templateId: number; leadId: number; confirmToken?: string },
+  opts: { now?: () => number; provider?: MailProvider; timeoutMs?: number } = {},
+): Promise<TestSendResult> {
+  const clock = opts.now ?? Date.now;
+  const now = clock();
+
+  const { mailbox, scope, self } = await resolveTarget(db, input.mailboxId);
+
+  // Gerçek kutu: sunucu tarafı onayı. Belirteç doğrulaması saftır (G/Ç yok); başarısızsa ileti oluşturulmaz.
+  let confirmed: { nonce: string; expiresAt: number } | null = null;
+  if (scope === "live") {
+    if (input.confirmToken === undefined || input.confirmToken === "") {
+      throw new TestSendError("confirm_required", CONFIRM_MESSAGES.confirm_required);
+    }
+    const check = verifyConfirmToken(
+      input.confirmToken,
+      {
+        mailboxId: mailbox.id,
+        templateId: input.templateId,
+        leadId: input.leadId,
+        address: self.email,
+      },
+      now,
+    );
+    if (!check.ok) {
+      const kind = check.reason === "expired" ? "confirm_expired" : "confirm_invalid";
+      throw new TestSendError(kind, CONFIRM_MESSAGES[kind]);
+    }
+    confirmed = { nonce: check.nonce, expiresAt: check.expiresAt };
   }
 
   // Gerçek kutu: uç nokta doğrulanmışsa gerçek tek tıklamalı çıkış bağlantısı (sınama belirteci), değilse yok.
@@ -165,39 +294,22 @@ export async function sendTestEmail(
 
   // Sınırlar ve kayıt AYNI işlemde: eşzamanlı iki istek sınırı aşamaz, süren test varken ikincisi açılmaz.
   const rowId = await db.transaction(async (tx) => {
-    const [inFlight] = await tx
-      .select({ n: sql<number>`count(*)` })
-      .from(messages)
-      .where(
-        and(
-          eq(messages.purpose, "test"),
-          eq(messages.mailboxId, mailbox.id),
-          eq(messages.status, "sending"),
-          gte(messages.createdAt, now - STALE_SENDING_MS),
-        ),
+    // ONAY TÜKETİMİ ve ileti kaydı AYNI işlemde: aşağıdaki denetimlerden biri hata verirse işlem geri alınır ve belirteç
+    // YANMAZ; ileti kaydı yazılırsa belirteç bir daha kullanılamaz (eşzamanlı ikinci istek "geçersiz" alır).
+    if (confirmed) {
+      if (!(await consumeConfirmNonce(tx, confirmed.nonce, confirmed.expiresAt, now))) {
+        throw new TestSendError("confirm_invalid", CONFIRM_MESSAGES.confirm_invalid);
+      }
+      await audit(
+        tx,
+        "mail.test_confirmed",
+        "mailbox",
+        mailbox.id,
+        { to: masked(built.to), nonce: confirmed.nonce.slice(0, 8), scope },
+        now,
       );
-    if (Number(inFlight?.n ?? 0) > 0) {
-      throw new TestSendError("in_progress", "Bu kutuda süren bir test gönderimi var.");
     }
-    const countSince = async (since: number) => {
-      const [r] = await tx
-        .select({ n: sql<number>`count(*)` })
-        .from(messages)
-        .where(
-          and(
-            eq(messages.purpose, "test"),
-            eq(messages.mailboxId, mailbox.id),
-            gte(messages.createdAt, since),
-          ),
-        );
-      return Number(r?.n ?? 0);
-    };
-    if ((await countSince(now - 3_600_000)) >= TEST_SEND_HOURLY_LIMIT) {
-      throw new TestSendError("rate_limited", "Saatlik test gönderimi sınırına ulaşıldı.");
-    }
-    if (scope === "live" && (await countSince(now - 86_400_000)) >= TEST_SEND_DAILY_LIMIT) {
-      throw new TestSendError("rate_limited", "Günlük test gönderimi sınırına ulaşıldı.");
-    }
+    await assertCapacity(tx, mailbox.id, scope, now);
     const [row] = await tx
       .insert(messages)
       .values({

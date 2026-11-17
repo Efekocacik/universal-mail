@@ -200,6 +200,9 @@ const TEST_SEND_STATUS: Record<TestSendError["kind"], number> = {
   rate_limited: 429,
   in_progress: 409,
   build_failed: 409,
+  confirm_required: 400,
+  confirm_invalid: 400,
+  confirm_expired: 409,
 };
 
 const ERASURE_STATUS: Record<ErasureError["kind"], number> = {
