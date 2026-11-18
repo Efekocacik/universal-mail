@@ -225,6 +225,9 @@ const TEST_SEND_INLINE_CODES = [
   "IN_PROGRESS",
   "BUILD_FAILED",
   "LIVE_SCOPE",
+  "CONFIRM_REQUIRED",
+  "CONFIRM_INVALID",
+  "CONFIRM_EXPIRED",
 ] as const;
 
 type TestSendFeedback =
@@ -251,6 +254,8 @@ function TestSendCard({
   const [search, setSearch] = useState("");
   const [leadId, setLeadId] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Sunucunun verdiği onay belirteci ve gerçek alıcı adresi (canlı kutu). Belirteç 120 sn geçerli, tek kullanımlıktır.
+  const [challenge, setChallenge] = useState<{ token: string; recipient: string } | null>(null);
   const q = useDebounced(search.trim(), 300);
   const leads = useQuery({
     queryKey: ["mail-ops", "lead-options", q],
@@ -276,8 +281,12 @@ function TestSendCard({
   }, [tpls, templateId]);
   const [feedback, setFeedback] = useState<TestSendFeedback | null>(null);
   const send = useSafeMutation(
-    () =>
-      mailOpsApi.testSend(mailbox.id, { templateId: Number(templateId), leadId: Number(leadId) }),
+    (confirmToken: string | undefined) =>
+      mailOpsApi.testSend(mailbox.id, {
+        templateId: Number(templateId),
+        leadId: Number(leadId),
+        ...(confirmToken ? { confirmToken } : {}),
+      }),
     {
       invalidate: [mk.all],
       ...(live ? {} : { successMessage: t("health.test.sent") }),
@@ -293,6 +302,28 @@ function TestSendCard({
       },
       onError: (info) => {
         if (info.code === "NOT_SENDABLE") return setFeedback({ kind: "not_sendable" });
+        const inline = TEST_SEND_INLINE_CODES.find((c) => c === info.code);
+        setFeedback(live && inline ? { kind: "error", code: inline } : null);
+      },
+    },
+  );
+  // Gerçek kutuda önce SUNUCUDAN onay belirteci istenir (hiçbir ileti gitmez); belirteç ancak kullanıcı adresi görüp
+  // onayladıktan sonra gönderim isteğine eklenir. Belirteç sunucuda doğrulanır; bu bir insan varlığı kanıtı değildir.
+  const prepare = useSafeMutation(
+    (_: undefined) =>
+      mailOpsApi.testSendChallenge(mailbox.id, {
+        templateId: Number(templateId),
+        leadId: Number(leadId),
+      }),
+    {
+      silentCodes: TEST_SEND_INLINE_CODES,
+      onSuccess: (c) => {
+        if (c.required) {
+          setChallenge({ token: c.confirmToken, recipient: c.recipient });
+          setConfirmOpen(true);
+        } else send.mutate(undefined);
+      },
+      onError: (info) => {
         const inline = TEST_SEND_INLINE_CODES.find((c) => c === info.code);
         setFeedback(live && inline ? { kind: "error", code: inline } : null);
       },
@@ -367,24 +398,35 @@ function TestSendCard({
       )}
       <Button
         variant={live ? "success" : "default"}
-        loading={send.isPending}
+        loading={send.isPending || prepare.isPending}
         disabled={!templateId || !leadId}
-        onClick={() => (live ? setConfirmOpen(true) : send.mutate(undefined))}
+        onClick={() => {
+          if (!live) return send.mutate(undefined);
+          setFeedback(null);
+          prepare.mutate(undefined);
+        }}
       >
         {live ? t("health.test.liveSend") : t("health.test.send")}
       </Button>
       {live && (
         <ConfirmDialog
           open={confirmOpen}
-          onOpenChange={setConfirmOpen}
+          onOpenChange={(open) => {
+            setConfirmOpen(open);
+            if (!open) setChallenge(null); // iptal: belirteç atılır (zaten tek kullanımlık ve kısa ömürlü)
+          }}
           tone="success"
           title={t("health.test.liveConfirmTitle")}
-          description={t("health.test.liveConfirmBody", { address })}
+          description={t("health.test.liveConfirmBody", {
+            address: challenge?.recipient ?? address,
+          })}
           confirmLabel={t("health.test.liveConfirm")}
           pending={send.isPending}
           onConfirm={async () => {
             setFeedback(null);
-            await send.mutateAsync(undefined).catch(() => undefined);
+            const token = challenge?.token;
+            await send.mutateAsync(token).catch(() => undefined);
+            setChallenge(null);
           }}
         />
       )}

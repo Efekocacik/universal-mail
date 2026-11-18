@@ -12,17 +12,21 @@ import * as reviewRoute from "@/app/api/inbox/review/route";
 import * as mailLogExport from "@/app/api/mail-log/export/route";
 import * as mailLogRoute from "@/app/api/mail-log/route";
 import * as dnsRoute from "@/app/api/mailboxes/[id]/dns-check/route";
+import * as challengeRoute from "@/app/api/mailboxes/[id]/test-send/challenge/route";
 import * as testSendRoute from "@/app/api/mailboxes/[id]/test-send/route";
 import * as unsubRoute from "@/app/api/unsubscribe/[token]/route";
 import type { Db } from "@/lib/db/client";
 import {
+  auditLog,
   campaignLeads,
   campaigns,
+  mailboxes,
   messages,
   settings,
   suppressions,
   templates,
 } from "@/lib/db/schema";
+import { setSetting } from "@/lib/settings";
 import { resetUnsubscribeRateLimitForTests } from "@/lib/mail/unsubscribe-service";
 import { createCampaign, DEMO_MAILBOX, openMemoryDb, seedBase } from "./helpers/campaign-fixture";
 import { seedSent } from "./helpers/inbound-fixture";
@@ -277,6 +281,15 @@ describe("kendime test gönder ve DNS uçları", () => {
     );
     expect(ok.status).toBe(200);
     expect(ok.body.outcome).toBe("sent");
+    // Demo kutusu onay belirteci istemez; verilirse de yok sayılır (gerçek ileti zaten gitmez).
+    const withToken = await call(
+      testSendRoute.POST(
+        req("POST", url, { templateId: tpl!.id, leadId: s.leadId, confirmToken: "x".repeat(30) }),
+        idCtx(DEMO_MAILBOX),
+      ),
+    );
+    expect(withToken.status).toBe(200);
+    expect(withToken.body.outcome).toBe("sent");
     expect(
       (
         await call(
@@ -410,5 +423,166 @@ describe("demo çıkış uç noktası", () => {
     );
     const [c] = await db.select().from(campaigns).where(eq(campaigns.id, campaignId));
     expect(c!.status).toBe("running");
+  });
+});
+
+describe("kendime test gönder: onay hazırlığı (challenge) ve canlı kutuda zorunlu belirteç", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    // Bu bölümde HİÇBİR ağ isteği atılmamalı (gerçek Gmail/Google'a gidilirse test kırılır).
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      throw new Error("Bu testte ağ isteği ATILMAMALI.");
+    });
+  });
+  afterEach(() => fetchSpy.mockRestore());
+
+  const tplId = async () =>
+    (await db.select().from(templates).where(eq(templates.language, "en")))[0]!.id;
+
+  async function liveMailbox(grantSend: boolean) {
+    const now = Date.now();
+    const [row] = await db
+      .insert(mailboxes)
+      .values({
+        provider: "gmail",
+        label: "Canlı",
+        address: "satis@firma-ornek.com",
+        credentialsRef: "ref",
+        status: "connected",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning({ id: mailboxes.id });
+    await setSetting(db, "mail.gmailGrants", {
+      [String(row!.id)]: { send: grantSend, read: false, at: now },
+    });
+    return row!.id;
+  }
+  const testRows = () => db.select().from(messages).where(eq(messages.purpose, "test"));
+
+  it("demo kutusu: onay gerekmez (required: false); katı şema; olmayan kutu 404; hiçbir kayıt yazılmaz", async () => {
+    const s = await seedSent(db, campaignId);
+    const url = `/api/mailboxes/${DEMO_MAILBOX}/test-send/challenge`;
+    const ok = await call(
+      challengeRoute.POST(
+        req("POST", url, { templateId: await tplId(), leadId: s.leadId }),
+        idCtx(DEMO_MAILBOX),
+      ),
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.body).toEqual({ required: false, scope: "demo" });
+    expect(
+      (
+        await call(
+          challengeRoute.POST(
+            req("POST", url, { templateId: await tplId(), leadId: s.leadId, to: "x@y.example" }),
+            idCtx(DEMO_MAILBOX),
+          ),
+        )
+      ).status,
+    ).toBe(400); // alıcı veya belirteç alanı girilemez (katı şema)
+    expect(
+      (
+        await call(
+          challengeRoute.POST(
+            req("POST", "/api/mailboxes/999/test-send/challenge", {
+              templateId: await tplId(),
+              leadId: s.leadId,
+            }),
+            idCtx(999),
+          ),
+        )
+      ).status,
+    ).toBe(404);
+    expect(await testRows()).toHaveLength(0);
+    expect(
+      (await db.select().from(auditLog)).filter((r) => r.action.startsWith("mail.test_")),
+    ).toHaveLength(0);
+  });
+
+  it("canlı kutu: gönderim izni yoksa hazırlık da reddedilir (belirteç verilmez)", async () => {
+    const s = await seedSent(db, campaignId);
+    const id = await liveMailbox(false);
+    const r = await call(
+      challengeRoute.POST(
+        req("POST", `/api/mailboxes/${id}/test-send/challenge`, {
+          templateId: await tplId(),
+          leadId: s.leadId,
+        }),
+        idCtx(id),
+      ),
+    );
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe("SEND_SCOPE_MISSING");
+    expect(r.text).not.toContain("confirmToken");
+  });
+
+  it("canlı kutu: hazırlık belirteç ve gerçek alıcıyı (kutunun KENDİ adresi) verir; hiçbir ileti/kayıt oluşmaz", async () => {
+    const s = await seedSent(db, campaignId);
+    const id = await liveMailbox(true);
+    const r = await call(
+      challengeRoute.POST(
+        req("POST", `/api/mailboxes/${id}/test-send/challenge`, {
+          templateId: await tplId(),
+          leadId: s.leadId,
+        }),
+        idCtx(id),
+      ),
+    );
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({
+      required: true,
+      scope: "live",
+      recipient: "satis@firma-ornek.com",
+    });
+    expect(typeof r.body.confirmToken).toBe("string");
+    expect(await testRows()).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("canlı kutu: belirteçsiz, kısa veya uydurma belirteçle gönderim REDDEDİLİR; ağ isteği ve ileti kaydı yok", async () => {
+    const s = await seedSent(db, campaignId);
+    const id = await liveMailbox(true);
+    const url = `/api/mailboxes/${id}/test-send`;
+    const base = { templateId: await tplId(), leadId: s.leadId };
+
+    const none = await call(testSendRoute.POST(req("POST", url, base), idCtx(id)));
+    expect(none.status).toBe(400);
+    expect(none.body.code).toBe("CONFIRM_REQUIRED");
+
+    const short = await call(
+      testSendRoute.POST(req("POST", url, { ...base, confirmToken: "kisa" }), idCtx(id)),
+    );
+    expect(short.status).toBe(400);
+    expect(short.body.code).toBe("VALIDATION"); // şema: en az 20 karakter
+
+    const fake = await call(
+      testSendRoute.POST(req("POST", url, { ...base, confirmToken: "x".repeat(60) }), idCtx(id)),
+    );
+    expect(fake.status).toBe(400);
+    expect(fake.body.code).toBe("CONFIRM_INVALID");
+
+    // Hazırlıktan alınan belirteç başka bir şablonla kullanılamaz.
+    const ch = await call(challengeRoute.POST(req("POST", `${url}/challenge`, base), idCtx(id)));
+    const otherTemplate = (await db.select().from(templates)).find(
+      (t) => t.id !== base.templateId,
+    )!.id;
+    const swapped = await call(
+      testSendRoute.POST(
+        req("POST", url, {
+          ...base,
+          templateId: otherTemplate,
+          confirmToken: ch.body.confirmToken,
+        }),
+        idCtx(id),
+      ),
+    );
+    expect(swapped.status).toBe(400);
+    expect(swapped.body.code).toBe("CONFIRM_INVALID");
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await testRows()).toHaveLength(0);
+    // Hata yanıtları belirteci veya adresi geri yansıtmaz.
+    for (const r of [none, short, fake, swapped]) expect(r.text).not.toContain("firma-ornek");
   });
 });

@@ -74,7 +74,20 @@ export const oauthDisconnectSchema = z.object({ confirm: z.boolean() }).strict()
 
 export const reviewDecisionSchema = z.object({ decision: z.enum(["apply", "ignore"]) }).strict();
 
+/**
+ * "Kendime test gönder" isteği. Alıcı alanı YOKTUR (alıcı her zaman kutunun kendi adresidir). Gerçek (Gmail) kutuda
+ * `confirmToken` ZORUNLUDUR (sunucu `challenge` uç noktasının verdiği, tek kullanımlık belirteç); demo kutusunda gerekmez.
+ */
 export const testSendSchema = z
+  .object({
+    templateId: z.number().int().min(1),
+    leadId: z.number().int().min(1),
+    confirmToken: z.string().min(20).max(1000).optional(),
+  })
+  .strict();
+
+/** Onay hazırlığı (challenge) isteği: gönderimle aynı parametreler, belirteç hariç. */
+export const testSendChallengeSchema = z
   .object({ templateId: z.number().int().min(1), leadId: z.number().int().min(1) })
   .strict();
 

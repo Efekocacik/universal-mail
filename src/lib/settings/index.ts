@@ -273,6 +273,12 @@ export const settingSchemas = {
     z.string(),
     z.object({ until: z.number().int(), code: z.string(), at: z.number().int() }),
   ),
+  /**
+   * "Kendime test gönder" onay belirteçlerinin TÜKETİLMİŞ nonce kayıtları (nonce -> süre sonu, ms). Belirteç tek
+   * kullanımlıktır; nonce, test iletisinin kaydıyla AYNI işlemde yazılır. Yalnızca test gönderim servisi yazar; süresi
+   * dolmuş kayıtlar her yazımda budanır (sınırsız büyüme yok). İç durum: ayarlar API'siyle yazılamaz.
+   */
+  "mail.testSendConfirms": z.record(z.string().regex(/^[0-9a-f]{32}$/), z.number().int()),
   "mail.mailboxHalts": z.record(
     z.string(),
     z.object({
@@ -452,6 +458,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "seed.faz3": { templates: 0, demoMailbox: 0 },
   "mail.autoStop": { minRecipients: 20, minRateBp: 500 },
   "mail.mailboxLimits": { bounceBp: 300, minRecipients: 50, guardBounces: 3 },
+  "mail.testSendConfirms": {},
   "mail.mailboxHalts": {},
   "mail.mailboxSendBackoff": {},
   "mail.gmailOAuth": { clientId: "" },

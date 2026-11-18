@@ -200,6 +200,17 @@ export const core = {
   "apiError.IN_PROGRESS": "Bu kutuda süren bir test gönderimi var.",
   "apiError.BUILD_FAILED": "Test iletisi oluşturulamadı.",
   "apiError.LIVE_SCOPE": "Bu işlem canlı kapsamda yapılamaz.",
+  "apiError.CONFIRM_REQUIRED":
+    "Canlı test gönderimi için onay gerekir. Gönderimi yeniden başlatın.",
+  "apiError.CONFIRM_INVALID":
+    "Onay geçersiz veya daha önce kullanılmış. Gönderimi yeniden başlatın.",
+  "apiError.CONFIRM_EXPIRED": "Onayın süresi doldu. Gönderimi yeniden başlatın.",
+  "health.test.error.CONFIRM_REQUIRED":
+    "Gönderim için onay gerekiyor. Düğmeye yeniden basıp onaylayın.",
+  "health.test.error.CONFIRM_INVALID":
+    "Onay geçersiz veya daha önce kullanılmış; ileti gönderilmedi. Düğmeye yeniden basıp onaylayın.",
+  "health.test.error.CONFIRM_EXPIRED":
+    "Onayın süresi doldu; ileti gönderilmedi. Düğmeye yeniden basıp onaylayın.",
   "apiError.CLIENT_NOT_CONFIGURED":
     "Google OAuth istemcisi tanımlı değil. Önce istemci kimliğini ve sırrını girin.",
   "apiError.NOT_GMAIL": "Bu işlem yalnızca Gmail kutuları içindir.",
