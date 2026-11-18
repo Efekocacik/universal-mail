@@ -791,3 +791,74 @@ describe("güvenlik: sızıntı ve yan etkiler", () => {
     expect(oauth.requests).toHaveLength(0);
   });
 });
+
+describe("test alıcı sınırı: sağlayıcı katmanında zorunlu (uygunluk katmanından bağımsız)", () => {
+  const setRestriction = (value: unknown) =>
+    db
+      .insert(settings)
+      .values({ key: "mail.recipientRestriction", value, updatedAt: clock })
+      .onConflictDoUpdate({ target: settings.key, set: { value, updatedAt: clock } });
+  const none = () => {
+    expect(gmail.requests).toHaveLength(0);
+    expect(oauth.requests).toHaveLength(0);
+  };
+
+  it("sınır KAPALI/kayıt yok: davranış değişmez, ileti gider", async () => {
+    const id = await connected();
+    expect((await provider(id).send(input())).status).toBe("accepted");
+    expect(gmail.requests).toHaveLength(1);
+  });
+
+  it("sınır AÇIK, alıcı listede DEĞİL: kesin ret, ağ isteği SIFIR", async () => {
+    const id = await connected();
+    await setRestriction({ enabled: true, addresses: ["baska@izinli-test.example"], updatedAt: 1 });
+    expect(await provider(id).send(input())).toEqual({
+      status: "rejected",
+      code: "recipient_not_allowed",
+      permanent: false,
+    });
+    none();
+  });
+
+  it("sınır AÇIK, alıcı listede: tek istek gider (büyük/küçük harf fark etmez)", async () => {
+    const id = await connected();
+    await setRestriction({ enabled: true, addresses: [TO], updatedAt: 1 });
+    expect((await provider(id).send(input())).status).toBe("accepted");
+    expect(gmail.requests).toHaveLength(1);
+  });
+
+  it("BOZUK kayıt: her şey engellenir (kapalıya düşmez), ağ isteği yok", async () => {
+    const id = await connected();
+    await setRestriction({ enabled: "evet", addresses: 5 });
+    expect(await provider(id).send(input())).toMatchObject({
+      status: "rejected",
+      code: "recipient_not_allowed",
+    });
+    none();
+  });
+
+  it("durum OKUNAMIYORSA (veritabanı hatası) gönderilmez: recipient_restriction_unreadable", async () => {
+    const id = await connected();
+    const broken = new Proxy(db, {
+      get(t, p, r) {
+        if (p === "select") throw new Error("db kapalı");
+        return Reflect.get(t, p, r);
+      },
+    }) as Db;
+    expect(await provider(id, { db: broken }).send(input())).toEqual({
+      status: "rejected",
+      code: "recipient_restriction_unreadable",
+      permanent: false,
+    });
+    none();
+  });
+
+  it("'kendime test gönder' (selfTest) sınırdan MUAF: yalnızca kutunun kendi adresine, kendi kuralıyla", async () => {
+    const id = await connected();
+    await setRestriction({ enabled: true, addresses: ["baska@izinli-test.example"], updatedAt: 1 });
+    const r = await provider(id, { selfTest: true }).send(input({ to: ADDRESS }));
+    expect(r).not.toMatchObject({ code: "recipient_not_allowed" });
+    // selfTest başka adrese hâlâ gönderemez (mevcut kural).
+    expect((await provider(id, { selfTest: true }).send(input())).status).toBe("rejected");
+  });
+});

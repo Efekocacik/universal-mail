@@ -91,4 +91,11 @@ export const enOne: Partial<Record<TrKey, string>> = {
   "sup.import.confirm.body":
     "{n} record will be added or strengthened because of unsubscribe or complaint; {domains} of them block an entire domain. These blocks cannot be removed later by an ordinary action. If you are not sure, set the reason of these rows to “manual” in the file.",
   "registry.stats.inSearch": "In this search: {n} record",
+  "restriction.paused":
+    "{n} running live campaign was paused for safety; it can only be restarted with an explicit confirmation.",
+  "restriction.running": "There is {n} running live campaign right now.",
+  "restriction.loosen.body":
+    "This change allows sending to more addresses. {n} running live campaign will be paused for safety; you can restart it only with an explicit confirmation. Deferred recipients will not start receiving emails by themselves.",
+  "preflight.held":
+    "{n} recipient will be held because of test mode; it is not excluded and continues only after the limit is lifted, with an explicit confirmation.",
 };

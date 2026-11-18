@@ -278,10 +278,15 @@ export const campaignApi = {
     }),
   removeLead: (id: number, clId: number) =>
     api<{ removed: true }>(`/api/campaigns/${id}/leads/${clId}`, { method: "DELETE" }),
-  control: (id: number, action: CampaignAction, confirmToken?: string) =>
+  control: (id: number, action: CampaignAction, confirmToken?: string, restrictionAck?: boolean) =>
     api<TransitionResult>(`/api/campaigns/${id}/control`, {
       method: "POST",
-      json: confirmToken ? { action, confirmToken } : { action },
+      json: {
+        action,
+        ...(confirmToken ? { confirmToken } : {}),
+        // Test alıcı sınırı nedeniyle bekleyen alıcıları olan kampanyayı sürdürmek için AÇIK onay.
+        ...(restrictionAck ? { restrictionAck: true } : {}),
+      },
     }),
 };
 

@@ -99,6 +99,8 @@ export const controlSchema = z
       .string()
       .regex(/^[0-9a-f]{32}$/)
       .optional(),
+    /** Test alıcı sınırı nedeniyle duraklatılmış kampanyayı sürdürmek için açık yeniden başlatma onayı. */
+    restrictionAck: z.boolean().optional(),
   })
   .strict();
 

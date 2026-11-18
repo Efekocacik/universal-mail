@@ -158,6 +158,9 @@ export function PreflightPanel({ campaign }: { campaign: CampaignDetail }) {
               text={t("preflight.check.excluded", { n: fmtNumber(r.counts.ineligible) })}
             />
           )}
+          {r.counts.held > 0 && (
+            <CheckRow tone="warn" text={t("preflight.held", { n: fmtNumber(r.counts.held) })} />
+          )}
           {r.estimate.perDay > 0 && (
             <CheckRow
               tone="ok"

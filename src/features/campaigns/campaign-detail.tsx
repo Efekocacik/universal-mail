@@ -16,6 +16,7 @@ import {
   type CampaignDetail,
 } from "@/lib/client/campaigns";
 import { categoryLabel, fmtDateTime, fmtNumber } from "@/lib/client/format";
+import { useRecipientRestriction } from "@/lib/client/restriction";
 import { t, type TrKey } from "@/lib/i18n";
 import {
   allowedActions,
@@ -48,12 +49,23 @@ const DONE_MESSAGE: Record<CampaignAction, TrKey | null> = {
 function Actions({ c }: { c: CampaignDetail }) {
   const a = allowedActions(c.status);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmResume, setConfirmResume] = useState(false);
+  const restriction = useRecipientRestriction();
   const control = useSafeMutation((action: CampaignAction) => campaignApi.control(c.id, action), {
     onSuccess: (_r, action) => {
       const msg = DONE_MESSAGE[action];
       if (msg) toast.success(t(msg));
     },
+    // Test alıcı sınırı nedeniyle bekleyen alıcılar var: sunucu AÇIK onay ister; bildirim yerine onay penceresi açılır.
+    silentCodes: ["RESTRICTION_ACK_REQUIRED"],
+    onError: (info) => {
+      if (info.code === "RESTRICTION_ACK_REQUIRED") setConfirmResume(true);
+    },
   });
+  const resumeAck = useSafeMutation(() => campaignApi.control(c.id, "resume", undefined, true), {
+    onSuccess: () => toast.success(t("campaign.resumed.done")),
+  });
+  const waiting = (c.counts.scheduled ?? 0) + (c.counts.waiting_next ?? 0);
   const busy = control.isPending;
   const pendingAction = busy ? control.variables : null;
   return (
@@ -79,8 +91,12 @@ function Actions({ c }: { c: CampaignDetail }) {
       {a.resume && (
         <Button
           size="sm"
-          onClick={() => control.mutate("resume")}
-          disabled={busy}
+          onClick={() => {
+            // Sınır değişikliğiyle duraklatılmışsa doğrudan açık onay istenir; diğer durumlarda sunucu gerekirse ister.
+            if (c.pauseReason === "restriction") setConfirmResume(true);
+            else control.mutate("resume");
+          }}
+          disabled={busy || resumeAck.isPending}
           loading={pendingAction === "resume"}
         >
           {pendingAction !== "resume" && <Play />} {t("campaign.resume")}
@@ -96,6 +112,25 @@ function Actions({ c }: { c: CampaignDetail }) {
           <Square /> {t("campaign.cancel")}
         </Button>
       )}
+      <ConfirmDialog
+        open={confirmResume}
+        onOpenChange={setConfirmResume}
+        tone="danger"
+        title={t("restriction.resume.title")}
+        description={`${t("restriction.resume.body", { waiting: fmtNumber(waiting) })} ${
+          restriction.data?.enabled
+            ? t("restriction.resume.stillOn", {
+                allowed: fmtNumber(restriction.data.addresses.length),
+              })
+            : t("restriction.resume.off")
+        }`}
+        confirmLabel={t("restriction.resume.confirm")}
+        pending={resumeAck.isPending}
+        onConfirm={async () => {
+          await resumeAck.mutateAsync(undefined).catch(() => undefined);
+          setConfirmResume(false);
+        }}
+      />
       <ConfirmDialog
         open={confirmCancel}
         onOpenChange={setConfirmCancel}

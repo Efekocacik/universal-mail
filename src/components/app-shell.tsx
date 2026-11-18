@@ -16,6 +16,7 @@ import { t } from "@/lib/i18n";
 import { NotificationBell } from "./notification-bell";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { useResolvedTheme } from "./providers";
+import { TestModeBanner } from "./test-mode-banner";
 import { WorkerStatusBanner } from "./worker-status-banner";
 
 /**
@@ -200,6 +201,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </header>
         <ProviderStrip />
         <WorkerStatusBanner />
+        <TestModeBanner />
         <main id="icerik" tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
           {children}
         </main>

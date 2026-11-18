@@ -361,6 +361,17 @@ export const settingSchemas = {
    * Posta kutusu başına SON DNS (SPF/DKIM/DMARC) denetim sonucu (Aşama 15.7): yalnızca durumlar ve neden kodları;
    * ham TXT kayıtları saklanmaz. Yalnızca DNS servisi yazar.
    */
+  /**
+   * Test alıcı sınırı ("test modu"): AÇIKKEN gerçek (canlı) kampanya iletileri YALNIZCA `addresses` listesindeki tam
+   * adreslere gider (alan adı veya joker YOK). Varsayılan KAPALI: normal kullanım hiç sınırlanmaz. İç durum: ayarlar
+   * API'siyle yazılamaz; yalnızca `src/lib/compliance/recipient-restriction.ts` yazar (gevşetme açık onay ve kampanya
+   * duraklatması ister). Satır var ama biçimi bozuksa sınır AÇIK ve boş liste sayılır (her şeyi engeller; güvenli taraf).
+   */
+  "mail.recipientRestriction": z.object({
+    enabled: z.boolean(),
+    addresses: z.array(z.string().min(3).max(254)).max(50),
+    updatedAt: z.number().int(),
+  }),
   "mail.dnsReports": z.record(
     z.string(),
     z.object({
@@ -465,6 +476,7 @@ export const SETTING_DEFAULTS: { [K in SettingKey]: SettingValue<K> } = {
   "mail.gmailGrants": {},
   "mail.unsubscribeKeys": { current: null, keys: [] },
   "mail.unsubscribeChannel": { current: null, keys: [] },
+  "mail.recipientRestriction": { enabled: false, addresses: [], updatedAt: 0 },
   "mail.dnsReports": {},
   "mail.inboxSync": {},
   "mail.arfReporters": [],

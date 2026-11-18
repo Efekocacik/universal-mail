@@ -68,6 +68,11 @@ export interface StartPlan {
   updatedAt: number;
   blockers: BlockerCode[];
   eligible: { id: number; leadId: number; language: string }[];
+  /**
+   * Test alıcı sınırı nedeniyle BEKLETİLEN alıcılar (tek nedeni `recipient_not_allowed`): dışlanmaz; başlatmada `scheduled`
+   * olur ve dağıtıcı sınır sürdükçe ertelemeye devam eder (bkz. compliance/recipient-restriction.ts).
+   */
+  held: { id: number; leadId: number; language: string }[];
   ineligible: { id: number; reasons: string[] }[];
   token: string;
 }
@@ -176,6 +181,7 @@ export async function computeStartPlan(
     .orderBy(asc(campaignLeads.id));
 
   const eligible: StartPlan["eligible"] = [];
+  const held: StartPlan["held"] = [];
   const ineligible: StartPlan["ineligible"] = [];
   // Toplu denetim: sorgu sayısı dizi sayısından bağımsız (eskiden dizi başına ~15-18 sorgu ve kampanyanın bütün
   // dizilerinin her seferinde okunması; başlatmada bu, yazma işlemi boyunca kilidi tutuyordu).
@@ -197,7 +203,10 @@ export async function computeStartPlan(
     }
     const language = pickTemplateLanguage(suggestLanguage(row.countryCode), languages);
     if (!language) reasons.add("step_missing");
-    if (reasons.size > 0) ineligible.push({ id: row.id, reasons: [...reasons].sort() });
+    if (reasons.size === 1 && reasons.has("recipient_not_allowed")) {
+      // Yalnızca test alıcı sınırı: alıcı dışlanmaz, bekletilir (sınır kalkınca/genişleyince açık onayla devam eder).
+      held.push({ id: row.id, leadId: row.leadId, language: language! });
+    } else if (reasons.size > 0) ineligible.push({ id: row.id, reasons: [...reasons].sort() });
     else eligible.push({ id: row.id, leadId: row.leadId, language: language! });
   }
   if (eligible.length === 0) blockers.push("no_eligible_leads");
@@ -242,12 +251,13 @@ export async function computeStartPlan(
         templateVersions.map((t) => [t.id, t.version]),
         profileDigest,
         eligible.map((e) => [e.id, e.language]),
+        held.map((h) => [h.id, h.language]),
         ineligible.map((i) => [i.id, i.reasons]),
       ]),
     )
     .digest("hex")
     .slice(0, 32);
-  return { campaignId, updatedAt: c.updatedAt, blockers, eligible, ineligible, token };
+  return { campaignId, updatedAt: c.updatedAt, blockers, eligible, held, ineligible, token };
 }
 
 export interface PreflightStepPreview {
@@ -283,7 +293,7 @@ export interface PreflightReport {
   updatedAt: number;
   ready: boolean;
   blockers: BlockerCode[];
-  counts: { pending: number; eligible: number; ineligible: number };
+  counts: { pending: number; eligible: number; ineligible: number; held: number };
   exclusions: Record<string, number>;
   estimate: PreflightEstimate;
   previews: PreflightPreview[];
@@ -532,9 +542,10 @@ export async function runPreflight(
     ready: plan.blockers.length === 0,
     blockers: plan.blockers,
     counts: {
-      pending: plan.eligible.length + plan.ineligible.length,
+      pending: plan.eligible.length + plan.held.length + plan.ineligible.length,
       eligible: plan.eligible.length,
       ineligible: plan.ineligible.length,
+      held: plan.held.length,
     },
     exclusions,
     estimate: estimateDuration({

@@ -4,6 +4,7 @@ import { MailboxHealthError } from "@/lib/mail/mailbox-health";
 import { OAuthError } from "@/lib/mail/gmail/oauth";
 import { MailboxServiceError } from "@/lib/mail/mailbox-service";
 import { PolicyChangeError } from "@/lib/compliance/policy-service";
+import { RestrictionError } from "@/lib/compliance/recipient-restriction";
 import { SuppressionError } from "@/lib/compliance/suppression";
 import { ReviewError } from "@/lib/mail/inbound/process";
 import { TestSendError } from "@/lib/mail/test-send";
@@ -46,6 +47,14 @@ const TEMPLATE: Record<TemplateServiceError["kind"], { status: number; message: 
   },
 };
 
+const RESTRICTION_STATUS: Record<RestrictionError["kind"], number> = {
+  invalid_input: 400,
+  list_required: 400,
+  too_many_addresses: 400,
+  invalid_address: 400,
+  loosening_ack_required: 409,
+};
+
 const POLICY_STATUS: Record<PolicyChangeError["kind"], number> = {
   invalid_input: 400,
   live_locked: 409,
@@ -79,6 +88,12 @@ export function mapDomainError(e: unknown): Mapped | null {
         ...(e.issues.length > 0 ? { issues: e.issues } : {}),
         ...e.detail,
       },
+    };
+  }
+  if (e instanceof RestrictionError) {
+    return {
+      status: RESTRICTION_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase(), ...e.detail },
     };
   }
   if (e instanceof PolicyChangeError) {
@@ -263,6 +278,7 @@ export function domainErrorCodes(): string[] {
     ...new Set([
       ...up(TEMPLATE),
       ...up(POLICY_STATUS),
+      ...up(RESTRICTION_STATUS),
       ...up(SUPPRESSION_STATUS),
       ...up(AUTO_STOP_STATUS),
       ...up(REVIEW_STATUS),
