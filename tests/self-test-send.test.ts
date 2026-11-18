@@ -718,3 +718,89 @@ describe("kendime test: sunucu tarafı onay belirteci (tek kullanımlık, kısa 
     expect(r).toMatchObject({ status: "rejected", code: "self_test_recipient" });
   });
 });
+
+describe("kendime test + test alıcı sınırı birlikte (entegrasyon)", () => {
+  const RESTRICT = "mail.recipientRestriction";
+  const campaignProvider = (id: number) =>
+    new GmailProvider({
+      db,
+      mailbox: { id, address: ADDRESS },
+      oauth: deps,
+      apiBase: gmail.base,
+      liveEnabled: () => true,
+    });
+  const input = (to: string) => ({
+    raw: [
+      `From: Satis <${ADDRESS}>`,
+      `To: ${to}`,
+      "Subject: x",
+      "Message-ID: <x@firma-ornek.com>",
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "x",
+      "",
+    ].join("\r\n"),
+    from: ADDRESS,
+    to,
+    messageId: "<x@firma-ornek.com>",
+    signal: AbortSignal.timeout(5000),
+  });
+  const lock = (addresses: string[]) =>
+    db
+      .insert(settings)
+      .values({
+        key: RESTRICT,
+        value: { enabled: true, addresses, updatedAt: clock },
+        updatedAt: clock,
+      })
+      .onConflictDoUpdate({
+        target: settings.key,
+        set: { value: { enabled: true, addresses, updatedAt: clock }, updatedAt: clock },
+      });
+
+  it("sınır AÇIKKEN kendime test yine yalnızca kutunun kendi adresine gider (sınırdan muaf), kampanya yolu ise başka hiçbir adrese gidemez", async () => {
+    const id = await connected();
+    await lock(["izinli@izinli-test.example"]); // kutunun kendi adresi listede DEĞİL
+    // 1) Kendime test: onay belirteciyle gönderilir, alıcı yalnızca kutunun kendi adresi.
+    await sendTestEmail(
+      db,
+      { mailboxId: id, templateId, leadId, confirmToken: await confirmFor(id) },
+      { now: () => clock, provider: selfProvider(id) },
+    );
+    expect(gmail.requests).toHaveLength(1);
+    expect(unfold(gmail.requests[0]!.rawDecoded!)).toMatch(/^To: <?satis@firma-ornek.com>?$/m);
+    // 2) Kampanya yolu (aynı kutu): listede olmayan alıcıya, hatta kutunun kendi adresine bile ağ isteği YOK.
+    const before = gmail.requests.length;
+    for (const to of ["kisi@alici-ornek.com", ADDRESS]) {
+      expect(await campaignProvider(id).send(input(to))).toEqual({
+        status: "rejected",
+        code: "recipient_not_allowed",
+        permanent: false,
+      });
+    }
+    expect(gmail.requests).toHaveLength(before);
+    // 3) Yalnızca listedeki adres kampanya yolundan gider.
+    expect((await campaignProvider(id).send(input("izinli@izinli-test.example"))).status).toBe(
+      "accepted",
+    );
+    expect(gmail.requests).toHaveLength(before + 1);
+  });
+
+  it("sınır AÇIKKEN kendime test başka bir alıcıya gönderemez; sınır kendime test belirtecini/kurallarını gevşetmez", async () => {
+    const id = await connected();
+    await lock([ADDRESS, "kisi@alici-ornek.com"]);
+    const r = await selfProvider(id).send(input("kisi@alici-ornek.com"));
+    expect(r).toMatchObject({ status: "rejected", code: "self_test_recipient" });
+    expect(gmail.requests).toHaveLength(0);
+    // Belirteçsiz gönderim sınır açıkken de reddedilir.
+    await expect(
+      sendTestEmail(
+        db,
+        { mailboxId: id, templateId, leadId },
+        { now: () => clock, provider: selfProvider(id) },
+      ),
+    ).rejects.toBeInstanceOf(TestSendError);
+    expect(gmail.requests).toHaveLength(0);
+  });
+});
