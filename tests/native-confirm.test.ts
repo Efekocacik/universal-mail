@@ -205,3 +205,42 @@ describe("requestNativeConfirm", () => {
     await expect(next).resolves.toBe("approved");
   });
 });
+
+describe("test kancası ve vitest IPC güvenliği", () => {
+  it("kanal kancası: null = kanal yok, nesne = sahte kanal, undefined = varsayılan; üretimde kullanılamaz", async () => {
+    const { isNativeConfirmChannelAvailable, setNativeConfirmChannelForTests } =
+      await import("@/lib/native-confirm");
+    setNativeConfirmChannelForTests(null);
+    expect(isNativeConfirmChannelAvailable()).toBe(false);
+    const ch = new FakeChannel();
+    setNativeConfirmChannelForTests(asChannel(ch));
+    expect(isNativeConfirmChannelAvailable()).toBe(true);
+    ch.connected = false;
+    expect(isNativeConfirmChannelAvailable()).toBe(false);
+    setNativeConfirmChannelForTests(undefined);
+    const old = process.env.NODE_ENV;
+    (process.env as Record<string, string>).NODE_ENV = "production";
+    try {
+      expect(() => setNativeConfirmChannelForTests(null)).toThrow(/yalnızca testte/i);
+    } finally {
+      (process.env as Record<string, string>).NODE_ENV = old!;
+    }
+  });
+
+  it("hiçbir test gerçek process.send/connected'ı değiştirmez (vitest çalışanı kendi IPC kanalı olarak kullanır; çökertir)", async () => {
+    const fs = await import("node:fs");
+    const path = await import("node:path");
+    const dir = __dirname;
+    const self = path.basename(__filename);
+    const offenders = fs
+      .readdirSync(dir)
+      // electron-ipc-seams: mevcut; YALNIZCA eşzamanlı bir çağrı süresince değiştirip `finally` ile geri yükler (await yok).
+      .filter((f) => /\.test\.tsx?$/.test(f) && f !== self && f !== "electron-ipc-seams.test.ts")
+      .filter((f) =>
+        /defineProperty\(\s*process\s*,\s*["'](send|connected)["']|process\.(send|connected)\s*=[^=]|vi\.spyOn\(\s*process\s*,\s*["']send["']/.test(
+          fs.readFileSync(path.join(dir, f), "utf8"),
+        ),
+      );
+    expect(offenders).toEqual([]);
+  });
+});

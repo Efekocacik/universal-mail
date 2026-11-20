@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,7 +10,11 @@ import { updateRecipientRestriction } from "@/lib/compliance/recipient-restricti
 import { trackTransactions, type Db } from "@/lib/db/client";
 import { auditLog, countryPolicies, mailboxes, messages, settings } from "@/lib/db/schema";
 import { t, type TrKey } from "@/lib/i18n";
-import { resetNativeConfirmForTests } from "@/lib/native-confirm";
+import {
+  resetNativeConfirmForTests,
+  setNativeConfirmChannelForTests,
+  type IpcChannel,
+} from "@/lib/native-confirm";
 import { setSetting } from "@/lib/settings";
 import { createNativeConfirmHandler } from "../electron/native-confirm";
 import { openMemoryDb, seedBase, T0 } from "./helpers/campaign-fixture";
@@ -18,7 +23,8 @@ import { addMailbox } from "./helpers/inbound-fixture";
 /**
  * /api/compliance/live-country: strict şema, onay (consent) şartı ve SUNUCU ↔ ANA SÜREÇ zinciri uçtan uca. Ana süreç,
  * gerçek `createNativeConfirmHandler` ve sahte pencereyle taklit edilir; sunucu tarafı gerçek `process` kanalını kullanır
- * (testte `process.send` geçici olarak yer değiştirilir). Yerel onay kanalı OLMADAN aktivasyon yapılamaz.
+ * (enjekte edilen sahte kanal; gerçek `process.send` ASLA değiştirilmez: vitest çalışanı onu kendi IPC kanalı olarak kullanır).
+ * Yerel onay kanalı OLMADAN aktivasyon yapılamaz.
  */
 
 const rd = vi.hoisted(() => ({ failing: new Set<string>() }));
@@ -57,8 +63,6 @@ let client: Client;
 let db: Db;
 let dir: string;
 let savedDataDir: string | undefined;
-const realSend = Object.getOwnPropertyDescriptor(process, "send");
-const realConnected = Object.getOwnPropertyDescriptor(process, "connected");
 
 const body = () => ({
   action: "activate",
@@ -103,20 +107,21 @@ function installFakeMain(dialog: () => { response: number; checkboxChecked: bool
         signal.addEventListener("abort", () => resolve({ response: 0, checkboxChecked: false }));
       }),
   });
-  Object.defineProperty(process, "connected", { value: true, configurable: true });
-  Object.defineProperty(process, "send", {
-    configurable: true,
-    value: (m: unknown) => {
+  // Sunucu ↔ ana süreç kanalının sahtesi: sunucu `send` eder, ana süreç işleyicisi yanıtı `message` olarak döndürür.
+  const channel = Object.assign(new EventEmitter(), {
+    connected: true,
+    send: (m: unknown) => {
       sent.push(m);
-      handler.handle(m, (r) => setImmediate(() => process.emit("message", r as never, undefined)));
+      handler.handle(m, (r) => setImmediate(() => channel.emit("message", r)));
       return true;
     },
   });
+  setNativeConfirmChannelForTests(channel as unknown as IpcChannel);
   return sent;
 }
+/** Yerel onay kanalı YOK (tarayıcı, betik, yetkisiz yerel HTTP). */
 function removeChannel() {
-  Object.defineProperty(process, "send", { value: undefined, configurable: true });
-  Object.defineProperty(process, "connected", { value: false, configurable: true });
+  setNativeConfirmChannelForTests(null);
 }
 
 beforeEach(async () => {
@@ -155,9 +160,6 @@ beforeEach(async () => {
   );
 });
 afterEach(() => {
-  if (realSend) Object.defineProperty(process, "send", realSend);
-  else delete (process as unknown as Record<string, unknown>).send;
-  if (realConnected) Object.defineProperty(process, "connected", realConnected);
   delete (globalThis as Record<string, unknown>)[HANDLE];
   client.close();
   try {
