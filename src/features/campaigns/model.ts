@@ -416,6 +416,8 @@ export function pauseReasonText(reason: string | null | undefined): string | nul
   if (reason === "restore") return t("campaign.pause.restore");
   // Test alıcı sınırı değişti (gevşetildi): açık yeniden başlatma onayı gerekir (`campaigns/lifecycle.ts`).
   if (reason === "restriction") return t("campaign.pause.restriction");
+  // Canlı ülke yeniden kilitlendi: açık onay gerekir (`compliance/live-country-activation.ts`).
+  if (reason === "country_revoked") return t("campaign.pause.country_revoked");
   if (reason.startsWith("auto:")) {
     const codes = reason.slice(5).split(",").filter(Boolean);
     return t("campaign.pause.auto", { reasons: codes.map(reasonLabel).join(", ") });

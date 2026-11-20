@@ -98,4 +98,5 @@ export const enOne: Partial<Record<TrKey, string>> = {
     "This change allows sending to more addresses. {n} running live campaign will be paused for safety; you can restart it only with an explicit confirmation. Deferred recipients will not start receiving emails by themselves.",
   "preflight.held":
     "{n} recipient will be held because of test mode; it is not excluded and continues only after the limit is lifted, with an explicit confirmation.",
+  "countryActivation.revoked.paused": "{n} running live campaign was paused.",
 };

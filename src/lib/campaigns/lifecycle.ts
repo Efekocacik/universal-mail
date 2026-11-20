@@ -11,6 +11,7 @@ import type { Db } from "@/lib/db/client";
 import { campaignLeads, campaigns, type CampaignStatus } from "@/lib/db/schema";
 import { wakeDispatchSafely, type WakeOutcome } from "@/lib/mail/scheduler/job";
 import { bumpUpdatedAt, CampaignError } from "./errors";
+import { COUNTRY_REVOKED_PAUSE_REASON } from "@/lib/compliance/live-country-constants";
 import { campaignBlockers, computeStartPlan, type BlockerCode } from "./preflight";
 
 /**
@@ -207,7 +208,10 @@ export async function transitionCampaign(
             ),
           );
         const held = Number(heldNow?.n ?? 0);
-        if (c.pauseReason === RESTRICTION_PAUSE_REASON || held > 0) {
+        // Ülke geri alındığı için duraklatılan kampanya da yalnızca açık onayla sürdürülür: o ülkenin alıcıları sürdürmede
+        // `country_blocked` ile kalıcı olarak dışlanır (ülke yeniden açılmadıkça).
+        const countryRevoked = c.pauseReason === COUNTRY_REVOKED_PAUSE_REASON;
+        if (c.pauseReason === RESTRICTION_PAUSE_REASON || countryRevoked || held > 0) {
           const restriction = await loadRecipientRestriction(tx);
           const [waiting] = await tx
             .select({ n: count() })
@@ -226,6 +230,7 @@ export async function transitionCampaign(
               held,
               restrictionEnabled: restriction.enabled,
               allowedAddresses: restriction.addresses.size,
+              countryRevoked,
             },
           );
         }

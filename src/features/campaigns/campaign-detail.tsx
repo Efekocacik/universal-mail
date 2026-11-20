@@ -93,7 +93,8 @@ function Actions({ c }: { c: CampaignDetail }) {
           size="sm"
           onClick={() => {
             // Sınır değişikliğiyle duraklatılmışsa doğrudan açık onay istenir; diğer durumlarda sunucu gerekirse ister.
-            if (c.pauseReason === "restriction") setConfirmResume(true);
+            if (c.pauseReason === "restriction" || c.pauseReason === "country_revoked")
+              setConfirmResume(true);
             else control.mutate("resume");
           }}
           disabled={busy || resumeAck.isPending}
@@ -117,7 +118,9 @@ function Actions({ c }: { c: CampaignDetail }) {
         onOpenChange={setConfirmResume}
         tone="danger"
         title={t("restriction.resume.title")}
-        description={`${t("restriction.resume.body", { waiting: fmtNumber(waiting) })} ${
+        description={`${
+          c.pauseReason === "country_revoked" ? `${t("countryActivation.resume.revoked")} ` : ""
+        }${t("restriction.resume.body", { waiting: fmtNumber(waiting) })} ${
           restriction.data?.enabled
             ? t("restriction.resume.stillOn", {
                 allowed: fmtNumber(restriction.data.addresses.length),

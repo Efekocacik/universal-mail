@@ -235,17 +235,42 @@ describe("betik uygulamadan ayrıdır", () => {
     }
     return out;
   }
-  it("src/, electron/ ve diğer betiklerde içe aktarılmaz", () => {
-    const self = path.join(REPO, "src", "lib", "compliance", "live-country-approval.ts");
+  const compliance = (n: string) => path.join(REPO, "src", "lib", "compliance", n);
+  const files = () => ["src", "electron", "scripts"].flatMap((r) => walk(path.join(REPO, r)));
+  /** Yalnızca GERÇEK içe aktarmalar (açıklama satırlarındaki anmalar sayılmaz). */
+  const imports = (f: string, mod: string) =>
+    new RegExp(
+      "(?:from\\s*|import\\s*\\(\\s*|require\\s*\\(\\s*)[\"'][^\"']*" + mod + "[\"']",
+    ).test(fs.readFileSync(f, "utf8"));
+
+  it("src/, electron/ ve diğer betiklerde içe aktarılmaz (tek istisna: uygulama içi aktivasyon hizmeti)", () => {
+    const self = compliance("live-country-approval.ts");
     const cli = path.join(REPO, "scripts", "approve-live-country.ts");
-    const files = ["src", "electron", "scripts"].flatMap((r) => walk(path.join(REPO, r)));
-    const hits = files.filter(
+    const activation = compliance("live-country-activation.ts");
+    const hits = files().filter(
       (f) =>
         f !== self &&
         f !== cli &&
+        f !== activation &&
         /live-country-approval|approve-live-country/.test(fs.readFileSync(f, "utf8")),
     );
     expect(hits).toEqual([]);
+    // İstisna dar: aktivasyon hizmeti onay modülünü içe aktarır, başka hiçbir şey.
+    expect(imports(activation, "live-country-approval")).toBe(true);
+  });
+
+  it("aktivasyon hizmetini YALNIZCA kendi rotası içe aktarır (web dışı ve başka rotalar, Electron, işçi yasak)", () => {
+    const activation = compliance("live-country-activation.ts");
+    const route = path.join(REPO, "src", "app", "api", "compliance", "live-country", "route.ts");
+    const hits = files().filter((f) => f !== activation && imports(f, "live-country-activation"));
+    expect(hits).toEqual([route]);
+  });
+
+  it("hizmetin dışına sızmayan saf modüller: hata sınıfı ve sabitler onay modülünü içe aktarmaz", () => {
+    for (const n of ["live-country-error.ts", "live-country-constants.ts"]) {
+      expect(imports(compliance(n), "live-country-approval")).toBe(false);
+      expect(imports(compliance(n), "live-country-activation")).toBe(false);
+    }
   });
 });
 

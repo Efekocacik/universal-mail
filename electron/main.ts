@@ -35,6 +35,7 @@ import {
 } from "./master-key";
 import { activeMaintenance } from "../src/lib/db/maintenance";
 import { isFileLockHeld } from "../src/lib/util/file-lock";
+import { createNativeConfirmHandler } from "./native-confirm";
 import { handleMigrationFailure, MAIN_DB_FILENAME, rememberBackup } from "./migration-recovery";
 import {
   createWakeSignal,
@@ -296,6 +297,36 @@ function listenForNotify(child: ChildProcess): void {
 }
 
 /**
+ * Yerel onay (ülke aktivasyonu gibi yüksek etkili işlemler): YALNIZCA web sunucusu alt sürecinin özel IPC kanalından
+ * gelen `native-confirm-*` mesajları işlenir; yanıt aynı kanala döner. Web arayüzü veya yerel betikler pencereyi
+ * açtırabilir ama onaylayamaz. Ayrıntı: electron/native-confirm.ts ve src/lib/native-confirm-protocol.ts.
+ */
+const nativeConfirm = createNativeConfirmHandler({
+  tl: (key, params) => tl(key as TrKey, params),
+  getParent: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+  showMessageBox: async (parent, spec, signal) => {
+    const win = parent as BrowserWindow;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    const r = await dialog.showMessageBox(win, { ...spec, signal });
+    return { response: r.response, checkboxChecked: r.checkboxChecked };
+  },
+});
+
+function listenForNativeConfirm(child: ChildProcess): void {
+  child.on("message", (m: unknown) => {
+    nativeConfirm.handle(m, (r) => {
+      try {
+        if (child.connected) child.send(r);
+      } catch (e) {
+        log("main", `Yerel onay yanıtı gönderilemedi: ${(e as Error).message}`);
+      }
+    });
+  });
+}
+
+/**
  * İşçiye `{type:'wake'}`: bilgisayar uykudan uyanınca, ekran kilidi açılınca ve pencere öne gelince (odak en çok
  * dakikada bir). İşçi kaçırılan zamanlanmış taramaları ve bekleyen gönderimi hemen değerlendirir (src/worker/wake.ts).
  */
@@ -425,7 +456,9 @@ async function startBackend(): Promise<string> {
   await runMigrateChild(env);
 
   // 2) web sunucusu
-  listenForNotify(spawnChild("server", "server.js", env));
+  const serverChild = spawnChild("server", "server.js", env);
+  listenForNotify(serverChild);
+  listenForNativeConfirm(serverChild);
   const url = `http://127.0.0.1:${port}`;
   await waitForHealth(url);
 

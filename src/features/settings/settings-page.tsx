@@ -53,6 +53,7 @@ import {
   useSave,
 } from "./shared";
 import { MailboxSettingsSection } from "./mailbox-section";
+import { LiveCountryCard } from "./live-country-card";
 import { RecipientRestrictionCard } from "./recipient-restriction-card";
 import { NoveltyRdapCard } from "./novelty-rdap-card";
 import { UnsubscribeSettingsSection } from "./unsubscribe-section";
@@ -1250,6 +1251,9 @@ export function SettingsPage() {
                 </div>
                 <div id="test-mode" className="scroll-mt-16 lg:scroll-mt-6">
                   <RecipientRestrictionCard />
+                </div>
+                <div id="live-country" className="scroll-mt-16 lg:scroll-mt-6">
+                  <LiveCountryCard />
                 </div>
                 <div id="unsubscribe" className="scroll-mt-16 lg:scroll-mt-6">
                   <UnsubscribeSettingsSection />
