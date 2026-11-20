@@ -188,9 +188,14 @@ describe("electron-builder.config.cjs", () => {
     expect(fs.existsSync(path.join(REPO, n.include))).toBe(true);
   });
 
-  it("hedefler: macOS arm64 dmg, Windows x64 NSIS; paket içeriği değişmedi", () => {
+  it("hedefler: macOS arm64 dmg + zip (aynı derleme), Windows x64 NSIS; paket içeriği değişmedi", () => {
     const c = load();
-    expect(c.mac.target).toEqual([{ target: "dmg", arch: ["arm64"] }]);
+    // Varsayılan arm64; x64 yalnızca UM_MAC_ARCH ile (aşağıdaki test). Universal yok.
+    expect(c.mac.target).toEqual([
+      { target: "dmg", arch: ["arm64"] },
+      { target: "zip", arch: ["arm64"] },
+    ]);
+    expect(c.artifactName).toBe("Universal-Mail-${version}-${os}-${arch}.${ext}");
     expect(c.win.target).toEqual([{ target: "nsis", arch: ["x64"] }]);
     expect(c.files).toEqual(["dist/electron/**", "package.json"]);
     expect(c.extraResources.map((r: { to: string }) => r.to)).toEqual([
@@ -346,6 +351,46 @@ describe("build/installer.nsh (kaldırırken 'verilerimi de sil')", () => {
   });
 });
 
+describe("platform ve mimari", () => {
+  const withEnv = (v: string | undefined, fn: () => void) => {
+    const old = process.env.UM_MAC_ARCH;
+    if (v === undefined) delete process.env.UM_MAC_ARCH;
+    else process.env.UM_MAC_ARCH = v;
+    try {
+      fn();
+    } finally {
+      if (old === undefined) delete process.env.UM_MAC_ARCH;
+      else process.env.UM_MAC_ARCH = old;
+    }
+  };
+
+  it("UM_MAC_ARCH: varsayılan arm64, x64 seçilebilir; geçersiz değer (ör. universal) derlemeyi durdurur", () => {
+    withEnv(undefined, () => expect(load().mac.target[0].arch).toEqual(["arm64"]));
+    if (process.platform !== "darwin")
+      withEnv("x64", () => {
+        const c = load();
+        expect(c.mac.target).toEqual([
+          { target: "dmg", arch: ["x64"] },
+          { target: "zip", arch: ["x64"] },
+        ]);
+        expect(c.artifactName).toContain("${arch}");
+      });
+    withEnv("universal", () => expect(() => load()).toThrow(/desteklenmiyor/));
+    withEnv("ia32", () => expect(() => load()).toThrow(/desteklenmiyor/));
+  });
+
+  it("Windows paketi yalnızca x64'tür (libsql Windows ARM64 ikilisi yok); mimari uyuşmazlığı yalnızca ilgili ana bilgisayarda durdurur", () => {
+    expect(load().win.target).toEqual([{ target: "nsis", arch: ["x64"] }]);
+    const lock = JSON.parse(fs.readFileSync(path.join(REPO, "package-lock.json"), "utf8")) as {
+      packages: Record<string, unknown>;
+    };
+    // Gerekçe kanıtı: kilit dosyasında libsql için Windows ARM64 ikilisi yok (x64 ve macOS ikilileri var).
+    expect(lock.packages["node_modules/@libsql/win32-arm64-msvc"]).toBeUndefined();
+    for (const p of ["win32-x64-msvc", "darwin-x64", "darwin-arm64"])
+      expect(lock.packages[`node_modules/@libsql/${p}`], p).toBeDefined();
+  });
+});
+
 describe("CI paket işi", () => {
   const ci = fs.readFileSync(path.join(REPO, ".github", "workflows", "ci.yml"), "utf8");
   it("imzalama sırları yalnızca 'Derle ve paketle' adımına ortam değişkeni olarak verilir", () => {
@@ -364,6 +409,34 @@ describe("CI paket işi", () => {
     ])
       expect(step).toContain(`${k}: \${{ secrets.${k} }}`);
     // Sırlar başka hiçbir adımda kullanılmaz (ör. test adımlarına sızmaz).
-    expect(ci.split("secrets.").length - 1).toBe(7);
+    // (+2: yalnızca "tanımlı mı" kontrolü için HAS_MAC_SIGNING; değerler başka hiçbir yerde kullanılmaz.)
+    expect(ci.split("secrets.").length - 1).toBe(9);
+    expect(ci).toContain(
+      "HAS_MAC_SIGNING: ${{ secrets.CSC_LINK != '' && secrets.APPLE_ID != '' }}",
+    );
+    // İmza doğrulaması yalnızca sırlar tanımlıyken çalışır.
+    expect(ci).toContain("if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'");
+  });
+
+  it("teslimat: DMG+ZIP aynı işte, SHA-256 aynı derlemeden, Release yalnızca TASLAK ve özetler doğrulanır", () => {
+    expect(ci).toContain('exts: "dmg,zip"');
+    // macOS: arm64 (macos-26) ve x64 (macos-26-intel) AYRI makinelerde, kendi yerel modülleriyle derlenir.
+    expect(ci).toMatch(/os: macos-26, name: macOS-arm64[^}]*macArch: arm64/);
+    expect(ci).toMatch(/os: macos-26-intel, name: macOS-x64[^}]*macArch: x64/);
+    expect(ci).toContain("UM_MAC_ARCH: ${{ matrix.macArch }}");
+    expect(ci).toContain("node scripts/make-checksums.mjs teslimat");
+    // Özet, derlemeden hemen sonra aynı işte üretilir ve dosyalarla birlikte yüklenir.
+    expect(ci.indexOf("Teslimat dosyalarını topla")).toBeGreaterThan(
+      ci.indexOf("- name: Derle ve paketle"),
+    );
+    expect(ci.indexOf("path: teslimat/")).toBeGreaterThan(ci.indexOf("make-checksums.mjs"));
+    // Release işi yeniden DERLEMEZ (npm run dist yok), özetleri doğrular ve taslak oluşturur.
+    const release = ci.slice(ci.indexOf("  release:"));
+    expect(release).not.toContain("npm run");
+    expect(release).toContain("sha256sum -c");
+    expect(release).toContain("--draft");
+    expect(release).not.toMatch(/gh release (edit|publish)|--draft=false|--latest/);
+    // Etiket ile package.json sürümü tutarlı olmalı.
+    expect(ci).toContain('if [ "$TAG" != "v$ver" ]');
   });
 });

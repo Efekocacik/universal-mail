@@ -14,6 +14,29 @@
 const env = process.env;
 const has = (name) => typeof env[name] === "string" && env[name].trim() !== "";
 
+/**
+ * Hedef mimari. macOS: `UM_MAC_ARCH` = `arm64` (varsayılan, Apple Silicon) veya `x64` (Intel). Yerel modül (libsql)
+ * mimariye özgüdür ve paket, o mimarinin kendi makinesinde (CI: arm64 → macos-26, x64 → macos-26-intel) derlenir;
+ * ana bilgisayar mimarisi hedefle uyuşmuyorsa derleme DURUR (yanlış mimarili yerel modülle sessizce paket üretilmez).
+ * Windows: yalnızca x64. libsql'in Windows ARM64 yerel ikilisi YOKTUR (npm'de `@libsql/win32-arm64-msvc` yok), bu
+ * yüzden ARM64 Windows'ta yerel paket üretilmez; Windows 11 ARM bilgisayarlar x64 paketini x64 öykünmesiyle çalıştırır
+ * (docs/PAKETLEME.md "Platform desteği").
+ */
+const macArch = (env.UM_MAC_ARCH || "arm64").trim();
+if (macArch !== "arm64" && macArch !== "x64") {
+  throw new Error(`UM_MAC_ARCH "${macArch}" desteklenmiyor: yalnızca arm64 veya x64.`);
+}
+if (process.platform === "darwin" && macArch !== process.arch) {
+  throw new Error(
+    `macOS ${macArch} paketi ${process.arch} makinesinde derlenemez: yerel modüller (libsql) hedef mimariyle eşleşmeli.`,
+  );
+}
+if (process.platform === "win32" && process.arch !== "x64") {
+  throw new Error(
+    "Windows ARM64'te yerel paket desteklenmiyor (libsql için win32-arm64 ikilisi yok). x64 paketini kullanın.",
+  );
+}
+
 const macSigning = has("CSC_LINK") || has("CSC_NAME");
 const macNotarize =
   macSigning && has("APPLE_ID") && has("APPLE_APP_SPECIFIC_PASSWORD") && has("APPLE_TEAM_ID");
@@ -76,7 +99,12 @@ module.exports = {
   ],
   mac: {
     category: "public.app-category.business",
-    target: [{ target: "dmg", arch: ["arm64"] }],
+    // DMG (ana) ve ZIP (alternatif) AYNI derlemenin çıktısıdır. Mimari: `UM_MAC_ARCH` (varsayılan arm64); universal
+    // derleme YOKTUR (yerel modüller mimariye özgü, her mimari kendi makinesinde derlenir).
+    target: [
+      { target: "dmg", arch: [macArch] },
+      { target: "zip", arch: [macArch] },
+    ],
     // 1024×1024 PNG; electron-builder .icns dosyasını kendisi üretir.
     icon: "build/icon.png",
     // `null` = imzalama yok (bugünkü davranış); `undefined` = electron-builder sertifikayı CSC_LINK/CSC_NAME'den bulur.

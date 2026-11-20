@@ -28,16 +28,23 @@ Kurulumdan sonraki kullanım için: [Kullanım Kılavuzu](KULLANIM.md).
 | Disk | En az 1 GB boş yer (veriler büyüdükçe artar) | En az 1 GB boş yer |
 | Yetki | Normal kullanıcı yeterli | Normal kullanıcı yeterli (yönetici parolası istenmez) |
 
-Intel işlemcili Mac'ler için şu an kurulum dosyası üretilmiyor. Mac'inizin işlemcisini **Apple menüsü → Bu Mac
-Hakkında** penceresinde "Çip: Apple M…" satırından görebilirsiniz.
+Mac'inizin işlemcisini **Apple menüsü → Bu Mac Hakkında** penceresinde görebilirsiniz: "Çip: Apple M…" ise **arm64**,
+"İşlemci: Intel…" ise **x64** dosyasını indirin. macOS 13 (Ventura) veya daha yenisi gerekir. Windows ARM64 (ör. Surface
+ProX) için yerel kurulum dosyası YOKTUR; Windows 11 ARM'da `win-x64` dosyası öykünmeyle çalışması beklenir (Windows 10 ARM
+desteklenmez).
 
 **Kurulum dosyası:** Size verilen **GitHub Release** bağlantısını açın. Sayfanın altındaki **Assets** (Dosyalar)
-bölümünde iki dosya vardır:
+bölümünde şu dosyalar vardır:
 
 | Dosya | Bilgisayar |
 | --- | --- |
-| `Universal-Mail-<sürüm>-mac-arm64.dmg` | Mac |
+| `Universal-Mail-<sürüm>-mac-arm64.dmg` | Apple Silicon Mac (önerilen) |
+| `Universal-Mail-<sürüm>-mac-arm64.zip` | Apple Silicon Mac (DMG açılmazsa alternatif; içindeki uygulama aynıdır) |
+| `Universal-Mail-<sürüm>-mac-x64.dmg` / `….zip` | Intel işlemcili Mac |
 | `Universal-Mail-<sürüm>-win-x64.exe` | Windows |
+
+Her dosyanın SHA-256 özeti Release sayfasında (ve `SHA256SUMS.txt` dosyasında) yazılıdır; indirdiğiniz dosyanın özetini
+karşılaştırmak isterseniz Terminal'de `shasum -a 256 <dosya>` komutunu kullanabilirsiniz (kurulum için gerekmez).
 
 Kendi bilgisayarınıza uygun dosyaya tıklayıp indirin. Dosyayı yalnızca size verilen bağlantıdan indirin; başkasının
 gönderdiği bir kopyayı kurmayın.
@@ -64,6 +71,9 @@ modu** ile tamamlayıp anahtarları sonra Ayarlar'dan girebilirsiniz.
 
 1. İndirilenler klasöründeki `Universal-Mail-<sürüm>-mac-arm64.dmg` dosyasına çift tıklayın.
 2. Açılan pencerede **Universal Mail** simgesini yanındaki **Applications (Uygulamalar)** klasörüne sürükleyin.
+   **ZIP kullanıyorsanız:** İndirilenler'deki `…-mac-arm64.zip` dosyasına çift tıklayın (Mac onu açar), çıkan
+   **Universal Mail** uygulamasını **Applications (Uygulamalar)** klasörüne sürükleyin. Sonraki adımlar (2.2, 2.3)
+   aynıdır.
 3. Kopyalama bitince pencereyi kapatın. Masaüstünde veya Finder'ın kenar çubuğunda "Universal Mail" diski görünüyorsa
    yanındaki **⏏** (çıkar) simgesine basın.
 

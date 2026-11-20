@@ -7,9 +7,14 @@ bağlı kod imzalamanın nasıl açılacağını anlatır. Son kullanıcıya yö
 
 | Platform | Çıktı | Nerede derlenir |
 | --- | --- | --- |
-| macOS (Apple Silicon, arm64) | `Universal-Mail-<sürüm>-mac-arm64.dmg` | GitHub Actions `macos-26` |
+| macOS Apple Silicon (arm64) | `Universal-Mail-<sürüm>-mac-arm64.dmg` (ana) ve `…-mac-arm64.zip` (alternatif); ikisi AYNI derlemenin çıktısıdır | GitHub Actions `macos-26` |
+| macOS Intel (x64) | `Universal-Mail-<sürüm>-mac-x64.dmg` ve `…-mac-x64.zip` | GitHub Actions `macos-26-intel` |
 | Windows 10/11 (x64) | `Universal-Mail-<sürüm>-win-x64.exe` (NSIS kurulum programı) | GitHub Actions `windows-2025` |
 
+Windows ARM64 için YEREL paket üretilmez (aşağıda "Platform desteği").
+
+- Her paket işi teslim dosyalarını `teslimat/` klasöründe toplar ve `SHA256SUMS-<platform>.txt` üretir
+  (`scripts/make-checksums.mjs`; biçim `shasum -a 256 -c` ile uyumlu). Universal macOS derlemesi YOKTUR.
 - Yapılandırma: `electron-builder.config.cjs` (JS; imzalama ortam değişkenlerine göre koşullu alanlar içerir).
 - Komut: `npm run dist` (önce `npm run build`). Yerelde hızlı deneme için `npm run dist:dir` (yalnızca açılmış
   uygulama klasörü). Paketlenmiş uygulamanın duman testi: `npm run smoke`.
@@ -65,6 +70,45 @@ Veri klasörünün içi: `data/` (veritabanı `universal-mail.db`, `secrets.json
     ile çalıştırır; `${isUpdated}` koruması nedeniyle veri silme adımı tamamen atlanır.
   - **Sessiz kaldırmada (`/S`) sorulmaz** ve veriler korunur.
   - Dosya UTF-8 **BOM'lu** kaydedilir (NSIS Türkçe karakterleri ancak böyle okur).
+
+## 3a. Platform desteği (bağımlılık ve yerel modül değerlendirmesi)
+
+Yerel modül: `libsql` (veritabanı) mimariye ve işletim sistemine özgü ikili paketlerle gelir. Standalone sunucuya yalnızca
+derleme makinesinin ikilisi girer; bu yüzden her mimari KENDİ makinesinde derlenir (`UM_MAC_ARCH` ile uyuşmayan
+makinede derleme durur) ve universal derleme yoktur. Electron 44, macOS 13 (Ventura) ve üstünü gerektirir.
+
+| Platform | Durum | Not |
+| --- | --- | --- |
+| Windows x64 | Destekli, CI'da derlenir ve duman testi yapılır | Gerçek cihazda denenmedi |
+| Windows ARM64 (yerel) | **DESTEKLENMİYOR** | `libsql` için `win32-arm64` ikilisi yok (npm: `@libsql/win32-arm64-msvc` yok; sürüm 0.5.29) |
+| Windows 11 ARM (x64 paketiyle) | Öykünme ile çalışması BEKLENİR, doğrulanmadı | Windows 10 ARM x64 öykünmesi sunmaz: desteklenmez. Gerçek ARM cihazda denenmeli |
+| macOS Apple Silicon (arm64) | Destekli, CI'da derlenir ve duman testi yapılır | Gerçek Mac'te (M4) denenmedi |
+| macOS Intel (x64) | CI'da derlenir (`macos-26-intel`) | Gerçek Intel Mac'te denenmedi; koşucu kapasitesine bağlı |
+
+Çalıştığı varsayılmaz: CI başarısı yalnızca derleme ve paketlenmiş uygulamanın duman testini kanıtlar; kurulum, imza
+davranışı, Anahtarlık ve gerçek entegrasyonlar her platformda gerçek cihazda sınanmalıdır (docs/15-MAC-TEST-KONTROL-LISTESI.md).
+
+## 3b. Teslimat süreci: test edilen dosya = teslim edilen dosya
+
+Amaç: Efe'nin Mac'inde test edilen DMG/ZIP ile müşteriye verilen dosya BİREBİR aynı olsun. Yeniden derleme yapılmaz.
+
+1. Nihai commit'te `package.json` sürümü güncellenir. `vX.Y.Z` etiketi **yalnızca açık onayla** atılır; etiket ile sürüm
+   uyuşmuyorsa CI derlemeden önce durur ("Etiket ve sürüm tutarlılığı").
+2. Etiket CI'ı çalıştırır: paket işleri dosyaları ve `SHA256SUMS-*.txt` özetlerini aynı derlemeden üretir; Release
+   işi özetleri doğrular ve **TASLAK** Release oluşturur (`--draft`; kod bunu asla yayımlamaz). Özetler Release
+   notlarına da yazılır.
+3. Efe'nin Mac'inde testte kullanılacak dosya bu **taslak Release'in** dosyasıdır (tarayıcıyla indirilir: karantina
+   bayrağı ve Gatekeeper davranışı gerçek müşteri deneyimiyle aynı olur). İndirilen dosyanın özeti
+   `shasum -a 256 <dosya>` ile `SHA256SUMS.txt` değeriyle karşılaştırılır ve test kaydına yazılır.
+4. Test başarılıysa AYNI taslak yayımlanır (yalnızca taslak durumu kalkar; dosyalar değişmez) ve müşteri bu
+   Release'ten indirir; özet müşteri tarafında aynı komutla doğrulanabilir.
+5. Test sırasında kod değişirse yeni sürüm, yeni etiket ve yeniden test gerekir; eski taslak silinir veya
+   kullanılmaz.
+
+İmzalama (Developer ID, notarization) bu akışı değiştirmez: `CSC_LINK`, `APPLE_*` depo sırları tanımlıysa paket
+işi imzalı/notarize üretir. Sırlar tanımlı olmadığı sürece paket imzasızdır ve **imzasız teslimata kendiliğinden karar
+verilmez**: imza kararı test paketi üretilmeden ÖNCE verilir (imzasız test edilip imzalı teslim edilirse dosyalar
+aynı olmaz).
 
 ## 4. macOS kurulumu
 
@@ -177,6 +221,6 @@ denetler.
   seçip `applyPendingLifecycleInMain`'in uyguladığı geri yükleme hazırlığına (restore staging) bağlayan bir düğme.
 - Yedeğe dönüş öncesi "veritabanı kullanımda" denetimi bakım kilidi ve `migrate.lock` işaretlerine bakar; bu
   işaretlere uymayan (eski sürüm) bir süreci göremez. `BLOCKED` sınıflaması bu durumda yedeğe dönüşü hiç sunmaz.
-- Yalnızca Apple Silicon (arm64) macOS paketi üretilir; Intel Mac için ayrı bir x64 hedefi gerekir (karar bekliyor).
+- macOS arm64 ve x64 AYRI makinelerde derlenir (aşağıda). Intel (x64) paketi CI'da derlenir; gerçek Intel Mac'te denenmedi.
 - Gerçek "temiz makinede kurulum → güncelleme → kaldırma" denemesi ve işletim sistemi iletişim kutularının ekran
   görüntüleri kullanıcının makinelerinde yapılmalıdır.
