@@ -14,6 +14,7 @@ import { imports } from "./en/imports";
 import { backup } from "./en/backup";
 import { install } from "./en/install";
 import { security } from "./en/security";
+import { countryActivation } from "./en/countryActivation";
 import { restriction } from "./en/restriction";
 
 /**
@@ -37,6 +38,7 @@ export const en: Record<TrKey, string> = {
   ...backup,
   ...install,
   ...security,
+  ...countryActivation,
   ...restriction,
 };
 
@@ -57,5 +59,6 @@ export const EN_FRAGMENTS = {
   backup,
   install,
   security,
+  countryActivation,
   restriction,
 } as const;

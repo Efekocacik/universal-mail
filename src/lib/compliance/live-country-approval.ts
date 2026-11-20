@@ -9,9 +9,10 @@ import { isPolicyMode, normalizeCountryCode, POLICY_MODES } from "./policies";
 /**
  * Canlı ülke politikası kilidinin SÜRÜM sırasında açılması (go-live C10-a).
  *
- * Yalnızca `scripts/approve-live-country.ts` ve testler kullanır; uygulamanın normal çalışma yolu (web, çalışan,
- * Electron) bu modülü ASLA içe aktarmaz (testle doğrulanır). Uygulama içinde canlı satırları değiştiren bir yol yoktur
- * (`policy-service.ts` canlı satırları reddeder); kilit yalnızca kaydı tutulan bir sürüm adımıyla açılır.
+ * Yalnızca `scripts/approve-live-country.ts`, testler ve TEK uygulama içi giriş noktası
+ * `live-country-activation.ts` (yerel onaylı ülke aktivasyonu; YALNIZCA `/api/compliance/live-country` rotası onu içe
+ * aktarır) kullanır; uygulamanın başka hiçbir yolu (web, çalışan, Electron, diğer rotalar) bu modülü içe aktarmaz
+ * (testle doğrulanır). `policy-service.ts` canlı satırları değiştirmeyi reddetmeye devam eder.
  *
  * GÜVENLİK:
  * - Varsayılan işlem PLAN'dır: hiçbir şeyi değiştirmez.
@@ -231,7 +232,7 @@ export interface ApprovalResult {
 export async function applyLiveCountryApproval(
   db: Db,
   input: ApprovalInput,
-  opts: { now?: number } = {},
+  opts: { now?: number; via?: string } = {},
 ): Promise<ApprovalResult> {
   const now = opts.now ?? Date.now();
   return db.transaction(async (tx) => {
@@ -281,7 +282,7 @@ export async function applyLiveCountryApproval(
           approvalRef: input.approvalRef,
           approvedBy: input.approvedBy,
           approvedAt: now,
-          via: "scripts/approve-live-country.ts",
+          via: opts.via ?? "scripts/approve-live-country.ts",
         },
       });
     }

@@ -1,5 +1,6 @@
 import { AutoStopError } from "@/lib/campaigns/auto-stop";
 import { ErasureError } from "@/lib/compliance/erasure";
+import { ActivationError } from "@/lib/compliance/live-country-error";
 import { MailboxHealthError } from "@/lib/mail/mailbox-health";
 import { OAuthError } from "@/lib/mail/gmail/oauth";
 import { MailboxServiceError } from "@/lib/mail/mailbox-service";
@@ -47,6 +48,17 @@ const TEMPLATE: Record<TemplateServiceError["kind"], { status: number; message: 
   },
 };
 
+const ACTIVATION_STATUS: Record<ActivationError["kind"], number> = {
+  activation_invalid: 400,
+  activation_legal: 400,
+  activation_prerequisites: 409,
+  activation_test_mode: 409,
+  activation_refused: 409,
+  confirm_unavailable: 503,
+  confirm_declined: 409,
+  confirm_timeout: 409,
+};
+
 const RESTRICTION_STATUS: Record<RestrictionError["kind"], number> = {
   invalid_input: 400,
   list_required: 400,
@@ -88,6 +100,12 @@ export function mapDomainError(e: unknown): Mapped | null {
         ...(e.issues.length > 0 ? { issues: e.issues } : {}),
         ...e.detail,
       },
+    };
+  }
+  if (e instanceof ActivationError) {
+    return {
+      status: ACTIVATION_STATUS[e.kind],
+      body: { error: e.message, code: e.kind.toUpperCase(), ...e.detail },
     };
   }
   if (e instanceof RestrictionError) {
@@ -279,6 +297,7 @@ export function domainErrorCodes(): string[] {
       ...up(TEMPLATE),
       ...up(POLICY_STATUS),
       ...up(RESTRICTION_STATUS),
+      ...up(ACTIVATION_STATUS),
       ...up(SUPPRESSION_STATUS),
       ...up(AUTO_STOP_STATUS),
       ...up(REVIEW_STATUS),

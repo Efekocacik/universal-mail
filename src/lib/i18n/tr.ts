@@ -13,6 +13,7 @@ import { imports } from "./tr/imports";
 import { backup } from "./tr/backup";
 import { install } from "./tr/install";
 import { security } from "./tr/security";
+import { countryActivation } from "./tr/countryActivation";
 import { restriction } from "./tr/restriction";
 
 /**
@@ -53,6 +54,7 @@ export const tr = {
   ...backup,
   ...install,
   ...security,
+  ...countryActivation,
   ...restriction,
 } as const;
 
@@ -73,6 +75,7 @@ export const TR_FRAGMENTS = {
   backup,
   install,
   security,
+  countryActivation,
   restriction,
 } as const;
 export type FragmentName = keyof typeof TR_FRAGMENTS;
