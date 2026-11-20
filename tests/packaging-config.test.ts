@@ -392,51 +392,112 @@ describe("platform ve mimari", () => {
 });
 
 describe("CI paket işi", () => {
-  const ci = fs.readFileSync(path.join(REPO, ".github", "workflows", "ci.yml"), "utf8");
-  it("imzalama sırları yalnızca 'Derle ve paketle' adımına ortam değişkeni olarak verilir", () => {
-    const step = ci.slice(
-      ci.indexOf("- name: Derle ve paketle"),
-      ci.indexOf("- name: Paketlenmiş"),
-    );
-    for (const k of [
-      "CSC_LINK",
-      "CSC_KEY_PASSWORD",
-      "APPLE_ID",
-      "APPLE_APP_SPECIFIC_PASSWORD",
-      "APPLE_TEAM_ID",
-      "WIN_CSC_LINK",
-      "WIN_CSC_KEY_PASSWORD",
-    ])
-      expect(step).toContain(`${k}: \${{ secrets.${k} }}`);
-    // Sırlar başka hiçbir adımda kullanılmaz (ör. test adımlarına sızmaz).
-    // (+2: yalnızca "tanımlı mı" kontrolü için HAS_MAC_SIGNING; değerler başka hiçbir yerde kullanılmaz.)
-    expect(ci.split("secrets.").length - 1).toBe(9);
-    expect(ci).toContain(
-      "HAS_MAC_SIGNING: ${{ secrets.CSC_LINK != '' && secrets.APPLE_ID != '' }}",
-    );
-    // İmza doğrulaması yalnızca sırlar tanımlıyken çalışır.
-    expect(ci).toContain("if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'");
+  // CRLF/LF farkından bağımsız (Windows çalışma kopyası satır sonlarını dönüştürebilir).
+  const ci = fs
+    .readFileSync(path.join(REPO, ".github", "workflows", "ci.yml"), "utf8")
+    .replace(/\r\n/g, "\n");
+  /** Bir işin metni: "  <ad>:" satırından bir sonraki iş başlığına kadar. */
+  const job = (name: string): string => {
+    const start = ci.indexOf(`\n  ${name}:\n`);
+    expect(start, `${name} işi yok`).toBeGreaterThan(-1);
+    const rest = ci.slice(start + 1);
+    const next = rest.slice(1).search(/\n {2}[a-z][a-z-]*:\n/);
+    return next < 0 ? rest : rest.slice(0, next + 1);
+  };
+  /** Bir adımın metni: "- name: <ad>" satırından bir sonraki adıma ("      - ") kadar. */
+  const step = (jobText: string, name: string): string => {
+    const i = jobText.indexOf(`- name: ${name}`);
+    expect(i, `${name} adımı yok`).toBeGreaterThan(-1);
+    const rest = jobText.slice(i);
+    const next = rest.slice(1).search(/\n {6}- /);
+    return next < 0 ? rest : rest.slice(0, next + 1);
+  };
+  const APPLE = [
+    "CSC_LINK",
+    "CSC_KEY_PASSWORD",
+    "APPLE_ID",
+    "APPLE_APP_SPECIFIC_PASSWORD",
+    "APPLE_TEAM_ID",
+  ];
+
+  it("normal dal işleri imzalama sırlarına ERİŞEMEZ: sırlar yalnızca imzalı paket işinde, iki adımda geçer", () => {
+    // Sır başvurusu yalnızca `package-signed` işinde; diğer hiçbir işte (checks, e2e, package, release) yok.
+    for (const j of ["checks", "e2e", "package", "release"])
+      expect(job(j), `${j} işinde sır başvurusu olmamalı`).not.toContain("secrets.");
+    const signed = job("package-signed");
+    expect(ci.split("secrets.").length - 1).toBe(2 * APPLE.length);
+    expect(signed.split("secrets.").length - 1).toBe(2 * APPLE.length);
+    // Yalnızca Apple sırları (Windows imza sırrı CI'da yok); depo düzeyi genel `env:` veya iş düzeyi sır yok.
+    expect(ci).not.toContain("WIN_CSC");
+    expect(ci.slice(0, ci.indexOf("\njobs:\n"))).not.toContain("secrets.");
+    for (const k of APPLE) {
+      expect(step(signed, "İmzalama sırları tanımlı mı (değerler yazdırılmaz)")).toContain(
+        `${k}: \${{ secrets.${k} }}`,
+      );
+      expect(step(signed, "Derle, imzala ve notarize et")).toContain(`${k}: \${{ secrets.${k} }}`);
+    }
+    // `npm ci` (üçüncü taraf kurulum betikleri) ve diğer adımlar sırları görmez.
+    const afterCi = signed.slice(signed.indexOf("- run: npm ci"));
+    const secretSteps = afterCi.split(/\n {6}- /).filter((s) => s.includes("secrets."));
+    expect(secretSteps).toHaveLength(2);
+    // Sırlar günlüğe yazdırılmaz: yalnızca varlık denetimi (değer yankısı yok).
+    const check = step(signed, "İmzalama sırları tanımlı mı (değerler yazdırılmaz)");
+    expect(check).toContain('[ -z "${!v}" ]');
+    expect(check).not.toMatch(/echo[^\n]*\$\{?(CSC_|APPLE_)/);
   });
 
-  it("teslimat: DMG+ZIP aynı işte, SHA-256 aynı derlemeden, Release yalnızca TASLAK ve özetler doğrulanır", () => {
+  it("imzalı paket işi: yalnızca sürüm etiketinde, korumalı 'release-signing' Environment'ıyla, imza eksikse BAŞARISIZ", () => {
+    const signed = job("package-signed");
+    expect(signed).toContain("environment: release-signing");
+    expect(signed).toContain("if: startsWith(github.ref, 'refs/tags/v')");
+    // Her iki Mac mimarisi desteklenmeye devam eder; Windows bu işte yok (imzasız `package` işinde).
+    expect(signed).toMatch(/os: macos-26, name: macOS-arm64[^}]*macArch: arm64/);
+    expect(signed).toMatch(/os: macos-26-intel, name: macOS-x64[^}]*macArch: x64/);
+    expect(signed).not.toContain("windows");
+    expect(signed).toContain("UM_MAC_ARCH: ${{ matrix.macArch }}");
+    // Sırlar eksikse sessizce imzasız üretilmez: iş hata verir.
+    expect(step(signed, "İmzalama sırları tanımlı mı (değerler yazdırılmaz)")).toContain("exit 1");
+    // Zorunlu doğrulama (koşulsuz): imza, sertleştirilmiş çalışma zamanı, Gatekeeper, notarization bileti.
+    const verify = step(signed, "macOS imza ve notarization doğrulaması");
+    expect(verify).not.toContain("if:");
+    for (const c of [
+      "codesign --verify --deep --strict",
+      "runtime",
+      "spctl --assess --type execute",
+      "xcrun stapler validate",
+    ])
+      expect(verify).toContain(c);
+    // İmzasız paket işi etiket dışında da çalışır ve hiçbir imza değişkeni içermez.
+    const unsigned = job("package");
+    expect(unsigned).not.toContain("if: startsWith(github.ref, 'refs/tags/v')\n    needs");
+    expect(unsigned).not.toContain("environment:");
+    for (const k of [...APPLE, "HAS_MAC_SIGNING"]) expect(unsigned).not.toContain(k);
+  });
+
+  it("teslimat: DMG+ZIP aynı işte, SHA-256 aynı derlemeden, Release yalnızca imzalı macOS + Windows ve yalnızca TASLAK", () => {
     expect(ci).toContain('exts: "dmg,zip"');
     // macOS: arm64 (macos-26) ve x64 (macos-26-intel) AYRI makinelerde, kendi yerel modülleriyle derlenir.
-    expect(ci).toMatch(/os: macos-26, name: macOS-arm64[^}]*macArch: arm64/);
-    expect(ci).toMatch(/os: macos-26-intel, name: macOS-x64[^}]*macArch: x64/);
-    expect(ci).toContain("UM_MAC_ARCH: ${{ matrix.macArch }}");
-    expect(ci).toContain("node scripts/make-checksums.mjs teslimat");
-    // Özet, derlemeden hemen sonra aynı işte üretilir ve dosyalarla birlikte yüklenir.
-    expect(ci.indexOf("Teslimat dosyalarını topla")).toBeGreaterThan(
-      ci.indexOf("- name: Derle ve paketle"),
-    );
-    expect(ci.indexOf("path: teslimat/")).toBeGreaterThan(ci.indexOf("make-checksums.mjs"));
-    // Release işi yeniden DERLEMEZ (npm run dist yok), özetleri doğrular ve taslak oluşturur.
-    const release = ci.slice(ci.indexOf("  release:"));
+    const unsigned = job("package");
+    expect(unsigned).toMatch(/os: macos-26, name: macOS-arm64[^}]*macArch: arm64/);
+    expect(unsigned).toMatch(/os: macos-26-intel, name: macOS-x64[^}]*macArch: x64/);
+    expect(unsigned).toMatch(/os: windows-2025, name: Windows-x64/);
+    // Özet, derlemeden hemen sonra AYNI işte üretilir ve dosyalarla birlikte yüklenir (her iki paket işinde).
+    for (const j of [unsigned, job("package-signed")]) {
+      expect(j).toContain("node scripts/make-checksums.mjs teslimat");
+      expect(j.indexOf("Teslimat dosyalarını topla")).toBeGreaterThan(j.indexOf("npm run dist"));
+      expect(j.indexOf("path: teslimat/")).toBeGreaterThan(j.indexOf("make-checksums.mjs"));
+    }
+    // Release işi yeniden DERLEMEZ, özetleri doğrular, YALNIZCA imzalı macOS ve Windows artifact'larını alır.
+    const release = job("release");
     expect(release).not.toContain("npm run");
+    expect(release).toContain("needs: [package, package-signed]");
+    expect(release).toContain("pattern: kurulum-imzali-*");
+    expect(release).toContain("pattern: kurulum-Windows-*");
+    expect(release).not.toMatch(/pattern: kurulum-(macOS|\*)/);
     expect(release).toContain("sha256sum -c");
     expect(release).toContain("--draft");
     expect(release).not.toMatch(/gh release (edit|publish)|--draft=false|--latest/);
-    // Etiket ile package.json sürümü tutarlı olmalı.
-    expect(ci).toContain('if [ "$TAG" != "v$ver" ]');
+    // Etiket ile package.json sürümü tutarlı olmalı (her iki paket işinde).
+    expect(ci.split('if [ "$TAG" != "v$ver" ]').length - 1).toBe(2);
   });
 });

@@ -100,13 +100,16 @@ jobs:
           path: test-results/
           retention-days: 7
 
+  # ---------------------------------------------------------------------------------------------------------------------
+  # PAKET (İMZASIZ): her dal itişinde, PR'da ve etiket derlemesinde çalışır. HİÇBİR sır kullanmaz (ne Apple ne Windows):
+  # normal dal işleri imzalama sırlarına ERİŞEMEZ. macOS (arm64/x64) ve Windows x64 paketlerinin derlendiğini ve
+  # paketlenmiş uygulamanın duman testini doğrular. Etiket derlemesinde bu işin macOS dosyaları Release'e GİRMEZ
+  # (Release yalnızca imzalı macOS paketlerini ve Windows paketini alır; bkz. `package-signed` ve `release`).
+  # ---------------------------------------------------------------------------------------------------------------------
   package:
     name: Paket (${{ matrix.name }})
     needs: [checks, e2e]
     runs-on: ${{ matrix.os }}
-    env:
-      # Yalnızca imza/notarization sırlarının TANIMLI olup olmadığı (değerleri değil) bilinir; imza doğrulama adımı buna bağlıdır.
-      HAS_MAC_SIGNING: ${{ secrets.CSC_LINK != '' && secrets.APPLE_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,6 +119,7 @@ jobs:
           - { os: macos-26, name: macOS-arm64, macArch: arm64, exts: "dmg,zip" }
           - { os: macos-26-intel, name: macOS-x64, macArch: x64, exts: "dmg,zip" }
           # Windows yalnızca x64: libsql için win32-arm64 ikilisi yok (Windows 11 ARM x64 paketini öykünmeyle çalıştırır).
+          # Windows kod imzalama bu sürümde YOKTUR (karar bekliyor); eklenirse bu işe değil, korumalı ayrı bir işe eklenir.
           - { os: windows-2025, name: Windows-x64, exts: "exe" }
     steps:
       - uses: actions/checkout@v7
@@ -137,33 +141,14 @@ jobs:
             exit 1
           fi
       - run: npm ci
-      # İmzalama İSTEĞE BAĞLI ve varsayılan KAPALI (electron-builder.config.cjs, docs/PAKETLEME.md): depo sırları
-      # tanımlı değilse değişkenler boş gelir ve paket bugünkü gibi imzasız üretilir. Sırlar günlüğe yazılmaz.
-      # Sertifika verilmediyse yapılandırma `mac.identity: null` ile koşucunun anahtarlığındaki bir kimliği de kullanmaz.
-      - name: Derle ve paketle
+      # Bu işte imzalama değişkeni YOKTUR: yapılandırma `mac.identity: null` ile koşucunun anahtarlığındaki bir kimliği de
+      # kullanmaz; paket her zaman imzasız üretilir.
+      - name: Derle ve paketle (imzasız)
         run: npm run dist
         env:
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
           UM_MAC_ARCH: ${{ matrix.macArch }}
       - name: Paketlenmiş uygulamanın duman testi
         run: npm run smoke
-      # İmza sırları tanımlıysa: imza, sertleştirilmiş çalışma zamanı, Gatekeeper değerlendirmesi ve notarization bileti
-      # (stapler) DOĞRULANIR; sırlar yoksa atlanır ve paket imzasız kalır (imza kararı açıkça verilmelidir).
-      - name: macOS imza ve notarization doğrulaması
-        if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'
-        shell: bash
-        run: |
-          app=$(ls -d release/mac*/"Universal Mail.app" | head -1)
-          codesign --verify --deep --strict --verbose=2 "$app"
-          codesign -d --entitlements - "$app" >/dev/null
-          spctl --assess --type execute --verbose=4 "$app"
-          xcrun stapler validate "$app"
       # Windows: imzasız derlemede de simge ve sürüm bilgisi .exe'ye gömülü olmalı (kısayollar Universal Mail simgesini taşır).
       - name: Windows .exe simge ve sürüm bilgisi
         if: runner.os == 'Windows'
@@ -188,18 +173,120 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # ---------------------------------------------------------------------------------------------------------------------
+  # PAKET (İMZALI, YALNIZCA SÜRÜM ETİKETİ): Apple imzalama/notarization sırları YALNIZCA bu işte ve yalnızca
+  # `release-signing` GitHub Environment'ı üzerinden okunabilir. Sırlar depo düzeyinde TANIMLANMAZ, Environment
+  # sırlarıdır; Environment'ın dal/etiket kuralı ve gerekli onaylayıcısı (docs/16-DAGITIM-HAZIRLIGI.md) sırların
+  # yetkisiz bir dal veya etikette kullanılmasını engeller. İş yalnızca `v*` etiketinde çalışır; sırlar eksikse iş
+  # BAŞARISIZ olur (sessizce imzasız paket üretilmez ve Release oluşmaz). Sırlar yalnızca iki adımın ortamına verilir
+  # (varlık denetimi ve derleme); `npm ci` ve diğer adımlar onları görmez.
+  # ---------------------------------------------------------------------------------------------------------------------
+  package-signed:
+    name: Paket imzalı (${{ matrix.name }})
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [checks, e2e]
+    runs-on: ${{ matrix.os }}
+    environment: release-signing
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-26, name: macOS-arm64, macArch: arm64, exts: "dmg,zip" }
+          - { os: macos-26-intel, name: macOS-x64, macArch: x64, exts: "dmg,zip" }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - name: Etiket ve sürüm tutarlılığı
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$ver" ]; then
+            echo "::error title=Etiket ve sürüm uyuşmuyor::Etiket $TAG, package.json sürümü $ver (beklenen v$ver)."
+            exit 1
+          fi
+      - run: npm ci
+      # Sırların hepsi TANIMLI mı? Yalnızca varlık denetlenir; değerler yazdırılmaz.
+      - name: İmzalama sırları tanımlı mı (değerler yazdırılmaz)
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          missing=""
+          for v in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!v}" ]; then missing="$missing $v"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error title=İmzalama sırları eksik::release-signing Environment'ında tanımlı olmayan sırlar:$missing"
+            exit 1
+          fi
+      - name: Derle, imzala ve notarize et
+        run: npm run dist
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          UM_MAC_ARCH: ${{ matrix.macArch }}
+      - name: Paketlenmiş uygulamanın duman testi
+        run: npm run smoke
+      # İmza, sertleştirilmiş çalışma zamanı, Gatekeeper değerlendirmesi ve notarization bileti (stapler) ZORUNLU olarak
+      # doğrulanır; biri başarısızsa iş (ve Release) başarısız olur.
+      - name: macOS imza ve notarization doğrulaması
+        shell: bash
+        run: |
+          app=$(ls -d release/mac*/"Universal Mail.app" | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -E "flags=.*runtime" >/dev/null
+          codesign -d --entitlements - "$app" >/dev/null
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
+      - name: Teslimat dosyalarını topla ve SHA-256 üret
+        shell: bash
+        env:
+          EXTS: ${{ matrix.exts }}
+          OS_NAME: ${{ matrix.name }}
+        run: |
+          mkdir -p teslimat
+          for e in ${EXTS//,/ }; do cp release/*."$e" teslimat/; done
+          node scripts/make-checksums.mjs teslimat "teslimat/SHA256SUMS-$OS_NAME.txt" "$EXTS"
+          cd teslimat
+          shasum -a 256 -c "SHA256SUMS-$OS_NAME.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kurulum-imzali-${{ matrix.name }}
+          path: teslimat/
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: GitHub Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: package
+    needs: [package, package-signed]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
+      # Release'e YALNIZCA imzalı macOS paketleri (`kurulum-imzali-*`) ve Windows paketi girer. İmzasız macOS
+      # artifact'ları (`kurulum-macOS-*`) bilerek ALINMAZ.
       - uses: actions/download-artifact@v8
         with:
           path: paketler
-          pattern: kurulum-*
+          pattern: kurulum-imzali-*
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          path: paketler
+          pattern: kurulum-Windows-*
           merge-multiple: true
       # Aşamalar arası bütünlük: indirilen dosyalar paket işinde üretilen özetlerle birebir eşleşmeli.
       - name: Özetleri doğrula

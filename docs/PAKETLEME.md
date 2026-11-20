@@ -105,10 +105,12 @@ Amaç: Efe'nin Mac'inde test edilen DMG/ZIP ile müşteriye verilen dosya BİREB
 5. Test sırasında kod değişirse yeni sürüm, yeni etiket ve yeniden test gerekir; eski taslak silinir veya
    kullanılmaz.
 
-İmzalama (Developer ID, notarization) bu akışı değiştirmez: `CSC_LINK`, `APPLE_*` depo sırları tanımlıysa paket
-işi imzalı/notarize üretir. Sırlar tanımlı olmadığı sürece paket imzasızdır ve **imzasız teslimata kendiliğinden karar
-verilmez**: imza kararı test paketi üretilmeden ÖNCE verilir (imzasız test edilip imzalı teslim edilirse dosyalar
-aynı olmaz).
+İmzalama (Developer ID, notarization) bu akışı değiştirmez, ama sırlar YALNIZCA korumalı `release-signing` GitHub
+Environment'ında tutulur ve yalnızca sürüm etiketinde çalışan `package-signed` işinde kullanılır (docs/16 §1). Normal dal
+işleri (`package`) hiçbir imza sırrı kullanmaz ve her zaman imzasız paket üretir. Etiket derlemesinde Release'e imzalı
+macOS paketleri ve Windows paketi girer; sırlar eksikse imzalı iş başarısız olur ve Release oluşmaz. **İmzasız
+teslimata kendiliğinden karar verilmez**: imza kararı test paketi üretilmeden ÖNCE verilir (imzasız test edilip imzalı
+teslim edilirse dosyalar aynı olmaz).
 
 ## 4. macOS kurulumu
 
@@ -164,18 +166,18 @@ dosyası müşterinin verisini içerir; yalnızca müşterinin onayıyla paylaş
 
 İmzasız paketler çalışır; yalnızca ilk açılışta işletim sistemi uyarısı çıkar (`docs/KURULUM.md`). İmzalama için
 sertifika ve hesaplar **müşteri/geliştirici kararıdır** (ücretli). Kancalar hazırdır; GitHub deposuna aşağıdaki
-**Actions sırları** eklenince CI kendiliğinden imzalar. Sırlar yoksa değişkenler boş gelir ve paket bugünkü gibi
-imzasız üretilir.
+**Environment sırları** (`release-signing`, docs/16 §1.2) eklenince sürüm etiketinde `package-signed` işi imzalar ve
+notarize eder; sırlar eksikse o iş başarısız olur. Normal dal derlemeleri sır kullanmaz ve imzasız üretilir.
 
-| Sır (GitHub → Settings → Secrets and variables → Actions) | Platform | Ne |
+| Environment sırrı (GitHub → Settings → Environments → release-signing → Environment secrets) | Platform | Ne |
 | --- | --- | --- |
 | `CSC_LINK` | macOS (Windows'ta da yedek) | Developer ID Application sertifikası (`.p12`), base64 |
 | `CSC_KEY_PASSWORD` | macOS | `.p12` parolası |
 | `APPLE_ID` | macOS | Notarize için Apple hesabı e-postası |
 | `APPLE_APP_SPECIFIC_PASSWORD` | macOS | appleid.apple.com'dan uygulamaya özel parola |
 | `APPLE_TEAM_ID` | macOS | 10 karakterlik ekip kimliği |
-| `WIN_CSC_LINK` | Windows | Kod imzalama sertifikası (`.pfx`), base64 |
-| `WIN_CSC_KEY_PASSWORD` | Windows | `.pfx` parolası |
+| `WIN_CSC_LINK` | Windows | CI'da KULLANILMIYOR (Windows imzası karar bekliyor; yapılandırma yalnızca yerel derleme için bu değişkeni okur) |
+| `WIN_CSC_KEY_PASSWORD` | Windows | CI'da KULLANILMIYOR |
 
 Davranış (`electron-builder.config.cjs`):
 
