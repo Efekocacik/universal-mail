@@ -5,7 +5,11 @@ import type { Db, DbExecutor } from "@/lib/db/client";
 import { campaigns, countryPolicies, mailboxes, messages } from "@/lib/db/schema";
 import { isKnownCountry } from "@/lib/geo/countries";
 import type { CountryActivationSummary } from "@/lib/native-confirm-protocol";
-import { NativeConfirmUnavailableError, type NativeConfirmOutcome } from "@/lib/native-confirm";
+import {
+  isNativeConfirmChannelAvailable,
+  NativeConfirmUnavailableError,
+  type NativeConfirmOutcome,
+} from "@/lib/native-confirm";
 import { getSetting } from "@/lib/settings";
 import {
   applyLiveCountryApproval,
@@ -329,9 +333,7 @@ export async function getLiveCountryState(
       }))
       .sort((a, b) => a.countryCode.localeCompare(b.countryCode)),
     prerequisites: await checkActivationPrerequisites(db, now, opts.env),
-    nativeConfirmAvailable:
-      opts.nativeConfirmAvailable ??
-      (typeof process.send === "function" && process.connected === true),
+    nativeConfirmAvailable: opts.nativeConfirmAvailable ?? isNativeConfirmChannelAvailable(),
     runningLiveCampaigns: await runningLiveCampaignCount(db),
     limits: {
       maxCountries: ACTIVATION_MAX_COUNTRIES,

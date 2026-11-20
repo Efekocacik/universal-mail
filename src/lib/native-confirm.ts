@@ -43,12 +43,31 @@ export interface IpcChannel {
 
 let pendingId: string | null = null;
 
+/**
+ * Test kancası: `undefined` = gerçek `process` kanalı (üretim ve varsayılan); `null` = kanal YOK; bir nesne = sahte kanal.
+ * Testler gerçek `process.send`'i DEĞİŞTİRMEMELİDİR: vitest çalışanı kendi IPC kanalı olarak onu kullanır ve değiştirmek
+ * çalışanı çökertir. Üretimde (NODE_ENV=production) kullanılamaz.
+ */
+let channelOverride: IpcChannel | null | undefined;
+export function setNativeConfirmChannelForTests(channel: IpcChannel | null | undefined): void {
+  if (process.env.NODE_ENV === "production") throw new Error("Yalnızca testte kullanılabilir.");
+  channelOverride = channel;
+}
+const activeChannel = (): IpcChannel | null =>
+  channelOverride === undefined ? (process as unknown as IpcChannel) : channelOverride;
+
+/** Yerel onay kanalı var mı (paketli uygulamada sunucu alt sürecinin IPC'si)? */
+export function isNativeConfirmChannelAvailable(): boolean {
+  const c = activeChannel();
+  return !!c && typeof c.send === "function" && c.connected !== false;
+}
+
 export async function requestNativeConfirm(
   input: { kind: NativeConfirmKind; summary: CountryActivationSummary },
   opts: { ttlMs?: number; channel?: IpcChannel; newId?: () => string } = {},
 ): Promise<NativeConfirmOutcome> {
-  const channel = opts.channel ?? (process as unknown as IpcChannel);
-  if (typeof channel.send !== "function" || channel.connected === false) {
+  const channel = opts.channel ?? activeChannel();
+  if (!channel || typeof channel.send !== "function" || channel.connected === false) {
     throw new NativeConfirmUnavailableError("no_channel");
   }
   if (pendingId !== null) throw new NativeConfirmUnavailableError("busy");
@@ -105,4 +124,5 @@ export async function requestNativeConfirm(
 /** Testler için: bekleyen istek kaydını sıfırlar. */
 export function resetNativeConfirmForTests(): void {
   pendingId = null;
+  channelOverride = undefined;
 }
