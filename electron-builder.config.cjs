@@ -76,7 +76,12 @@ module.exports = {
   ],
   mac: {
     category: "public.app-category.business",
-    target: [{ target: "dmg", arch: ["arm64"] }],
+    // DMG (ana) ve ZIP (alternatif) AYNI derlemenin çıktısıdır; yalnızca Apple Silicon (arm64). Başka mimari için
+    // müşterinin/Efe'nin Mac bilgisi kesinleşmeden hedef EKLENMEZ (docs/PAKETLEME.md).
+    target: [
+      { target: "dmg", arch: ["arm64"] },
+      { target: "zip", arch: ["arm64"] },
+    ],
     // 1024×1024 PNG; electron-builder .icns dosyasını kendisi üretir.
     icon: "build/icon.png",
     // `null` = imzalama yok (bugünkü davranış); `undefined` = electron-builder sertifikayı CSC_LINK/CSC_NAME'den bulur.

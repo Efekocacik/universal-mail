@@ -188,9 +188,14 @@ describe("electron-builder.config.cjs", () => {
     expect(fs.existsSync(path.join(REPO, n.include))).toBe(true);
   });
 
-  it("hedefler: macOS arm64 dmg, Windows x64 NSIS; paket içeriği değişmedi", () => {
+  it("hedefler: macOS arm64 dmg + zip (aynı derleme), Windows x64 NSIS; paket içeriği değişmedi", () => {
     const c = load();
-    expect(c.mac.target).toEqual([{ target: "dmg", arch: ["arm64"] }]);
+    // Başka mimari (x64/universal) bilinçli olarak YOK: Mac bilgisi kesinleşmeden hedef eklenmez.
+    expect(c.mac.target).toEqual([
+      { target: "dmg", arch: ["arm64"] },
+      { target: "zip", arch: ["arm64"] },
+    ]);
+    expect(c.artifactName).toBe("Universal-Mail-${version}-${os}-${arch}.${ext}");
     expect(c.win.target).toEqual([{ target: "nsis", arch: ["x64"] }]);
     expect(c.files).toEqual(["dist/electron/**", "package.json"]);
     expect(c.extraResources.map((r: { to: string }) => r.to)).toEqual([
@@ -365,5 +370,23 @@ describe("CI paket işi", () => {
       expect(step).toContain(`${k}: \${{ secrets.${k} }}`);
     // Sırlar başka hiçbir adımda kullanılmaz (ör. test adımlarına sızmaz).
     expect(ci.split("secrets.").length - 1).toBe(7);
+  });
+
+  it("teslimat: DMG+ZIP aynı işte, SHA-256 aynı derlemeden, Release yalnızca TASLAK ve özetler doğrulanır", () => {
+    expect(ci).toContain('exts: "dmg,zip"');
+    expect(ci).toContain("node scripts/make-checksums.mjs teslimat");
+    // Özet, derlemeden hemen sonra aynı işte üretilir ve dosyalarla birlikte yüklenir.
+    expect(ci.indexOf("Teslimat dosyalarını topla")).toBeGreaterThan(
+      ci.indexOf("- name: Derle ve paketle"),
+    );
+    expect(ci.indexOf("path: teslimat/")).toBeGreaterThan(ci.indexOf("make-checksums.mjs"));
+    // Release işi yeniden DERLEMEZ (npm run dist yok), özetleri doğrular ve taslak oluşturur.
+    const release = ci.slice(ci.indexOf("  release:"));
+    expect(release).not.toContain("npm run");
+    expect(release).toContain("sha256sum -c");
+    expect(release).toContain("--draft");
+    expect(release).not.toMatch(/gh release (edit|publish)|--draft=false|--latest/);
+    // Etiket ile package.json sürümü tutarlı olmalı.
+    expect(ci).toContain('if [ "$TAG" != "v$ver" ]');
   });
 });

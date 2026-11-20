@@ -109,14 +109,28 @@ jobs:
       matrix:
         include:
           # macos-26 Apple Silicon (arm64). Intel Mac için ayrı bir x64 koşucu gerekir (docs/05-FAZ1-NOTLARI.md).
-          - { os: macos-26, name: macOS, pattern: "release/*.dmg" }
-          - { os: windows-2025, name: Windows, pattern: "release/*.exe" }
+          # exts: teslim edilecek dosya uzantıları (macOS: DMG ana, ZIP alternatif; ikisi AYNI derlemenin çıktısıdır).
+          - { os: macos-26, name: macOS, exts: "dmg,zip" }
+          - { os: windows-2025, name: Windows, exts: "exe" }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
+      # Sürüm etiketi (v*) ile package.json sürümü AYNI olmalı: dosya adları (Universal-Mail-<sürüm>-…) ve Release
+      # başlığı tutarlı kalır; farklıysa derleme daha başlamadan durur.
+      - name: Etiket ve sürüm tutarlılığı
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$ver" ]; then
+            echo "::error title=Etiket ve sürüm uyuşmuyor::Etiket $TAG, package.json sürümü $ver (beklenen v$ver)."
+            exit 1
+          fi
       - run: npm ci
       # İmzalama İSTEĞE BAĞLI ve varsayılan KAPALI (electron-builder.config.cjs, docs/PAKETLEME.md): depo sırları
       # tanımlı değilse değişkenler boş gelir ve paket bugünkü gibi imzasız üretilir. Sırlar günlüğe yazılmaz.
@@ -137,10 +151,23 @@ jobs:
       - name: Windows .exe simge ve sürüm bilgisi
         if: runner.os == 'Windows'
         run: node scripts/check-win-exe.mjs
+      # Teslim edilecek dosyalar tek klasörde toplanır ve SHA-256 özetleri BU derlemeden üretilir. Test edilen dosyanın
+      # müşteriye verilenle aynı olduğu bu özetle (shasum -a 256) doğrulanır. Özetler artifact ile birlikte saklanır.
+      - name: Teslimat dosyalarını topla ve SHA-256 üret
+        shell: bash
+        env:
+          EXTS: ${{ matrix.exts }}
+          OS_NAME: ${{ matrix.name }}
+        run: |
+          mkdir -p teslimat
+          for e in ${EXTS//,/ }; do cp release/*."$e" teslimat/; done
+          node scripts/make-checksums.mjs teslimat "teslimat/SHA256SUMS-$OS_NAME.txt" "$EXTS"
+          cd teslimat
+          if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "SHA256SUMS-$OS_NAME.txt"; else shasum -a 256 -c "SHA256SUMS-$OS_NAME.txt"; fi
       - uses: actions/upload-artifact@v7
         with:
           name: kurulum-${{ matrix.name }}
-          path: ${{ matrix.pattern }}
+          path: teslimat/
           if-no-files-found: error
           retention-days: 30
 
@@ -157,10 +184,26 @@ jobs:
           path: paketler
           pattern: kurulum-*
           merge-multiple: true
-      - name: Release oluştur
+      # Aşamalar arası bütünlük: indirilen dosyalar paket işinde üretilen özetlerle birebir eşleşmeli.
+      - name: Özetleri doğrula
+        shell: bash
+        working-directory: paketler
+        run: |
+          ls -la
+          for f in SHA256SUMS-*.txt; do sha256sum -c "$f"; done
+          cat SHA256SUMS-*.txt > SHA256SUMS.txt
+      # Release HER ZAMAN TASLAK oluşur (--draft). Test edilen dosyalar bu taslağın dosyalarıdır; yayımlama yalnızca
+      # taslağı açar, dosyalar değişmez (yeniden derleme yok). Bkz. docs/PAKETLEME.md "Teslimat süreci".
+      - name: Release oluştur (taslak)
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          ls -la paketler
-          gh release create "$TAG" paketler/* --repo "$GITHUB_REPOSITORY" --title "Universal Mail $TAG" --generate-notes --draft
+          {
+            echo "## SHA-256"
+            echo
+            echo '```'
+            cat paketler/SHA256SUMS.txt
+            echo '```'
+          } > notes.md
+          gh release create "$TAG" paketler/* --repo "$GITHUB_REPOSITORY" --title "Universal Mail $TAG" --notes-file notes.md --generate-notes --draft
