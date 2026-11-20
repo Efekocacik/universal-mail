@@ -104,14 +104,19 @@ jobs:
     name: Paket (${{ matrix.name }})
     needs: [checks, e2e]
     runs-on: ${{ matrix.os }}
+    env:
+      # Yalnızca imza/notarization sırlarının TANIMLI olup olmadığı (değerleri değil) bilinir; imza doğrulama adımı buna bağlıdır.
+      HAS_MAC_SIGNING: ${{ secrets.CSC_LINK != '' && secrets.APPLE_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macos-26 Apple Silicon (arm64). Intel Mac için ayrı bir x64 koşucu gerekir (docs/05-FAZ1-NOTLARI.md).
           # exts: teslim edilecek dosya uzantıları (macOS: DMG ana, ZIP alternatif; ikisi AYNI derlemenin çıktısıdır).
-          - { os: macos-26, name: macOS, exts: "dmg,zip" }
-          - { os: windows-2025, name: Windows, exts: "exe" }
+          # Yerel modül (libsql) mimariye özgüdür: her mimari KENDİ makinesinde derlenir (universal derleme yok).
+          - { os: macos-26, name: macOS-arm64, macArch: arm64, exts: "dmg,zip" }
+          - { os: macos-26-intel, name: macOS-x64, macArch: x64, exts: "dmg,zip" }
+          # Windows yalnızca x64: libsql için win32-arm64 ikilisi yok (Windows 11 ARM x64 paketini öykünmeyle çalıştırır).
+          - { os: windows-2025, name: Windows-x64, exts: "exe" }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -145,8 +150,20 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          UM_MAC_ARCH: ${{ matrix.macArch }}
       - name: Paketlenmiş uygulamanın duman testi
         run: npm run smoke
+      # İmza sırları tanımlıysa: imza, sertleştirilmiş çalışma zamanı, Gatekeeper değerlendirmesi ve notarization bileti
+      # (stapler) DOĞRULANIR; sırlar yoksa atlanır ve paket imzasız kalır (imza kararı açıkça verilmelidir).
+      - name: macOS imza ve notarization doğrulaması
+        if: runner.os == 'macOS' && env.HAS_MAC_SIGNING == 'true'
+        shell: bash
+        run: |
+          app=$(ls -d release/mac*/"Universal Mail.app" | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -d --entitlements - "$app" >/dev/null
+          spctl --assess --type execute --verbose=4 "$app"
+          xcrun stapler validate "$app"
       # Windows: imzasız derlemede de simge ve sürüm bilgisi .exe'ye gömülü olmalı (kısayollar Universal Mail simgesini taşır).
       - name: Windows .exe simge ve sürüm bilgisi
         if: runner.os == 'Windows'
