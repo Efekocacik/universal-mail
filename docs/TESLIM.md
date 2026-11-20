@@ -147,7 +147,7 @@ Aşağıdakiler yazılımda hazırdır ama müşterinin hesabını, parasını v
 | Kaynak kod ve kullanım hakları | Bölüm 4 | İki taraf |
 | Bakım süresi ve başlangıç tarihi | Bölüm 5 | İki taraf |
 | Kod imzalama (uyarısız kurulum) | Apple Developer üyeliği ve/veya Windows kod imzalama sertifikası (ücretli). Olmadan uygulama çalışır, yalnızca ilk açılışta uyarı çıkar | Müşteri |
-| Intel işlemcili Mac desteği | Gerekiyorsa ayrı bir kurulum dosyası üretilir | Müşteri |
+| Intel işlemcili Mac desteği | Intel (x64) dosyası CI'da üretilir; gerçek Intel Mac'te denenmeli. Windows ARM64'te yerel dosya yoktur (x64 dosyası Windows 11 ARM'da öykünmeyle çalışması beklenir, doğrulanmadı) | Müşteri |
 | Gönderen hesap türü | Kişisel @gmail.com (düşük günlük sınır) veya Google Workspace + kendi alan adı (SPF/DKIM/DMARC) | Müşteri |
 | Cloudflare hesabı | Çıkış sunucusu için ücretsiz Cloudflare hesabı müşteri adına açılır | Müşteri |
 | Hedef ülkelerin canlı onayı ve pilot | [Canlıya Geçiş](10-CANLIYA-GECIS.md) Bölüm 3.3; sorumluluk gönderen şirkette | Müşteri |

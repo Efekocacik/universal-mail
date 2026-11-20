@@ -331,6 +331,32 @@ Gerçek e-posta göndermek için şirketin Gmail (kişisel @gmail.com veya Googl
 Kişisel Gmail'in Google tarafındaki gönderim sınırı düşüktür; uygulama bu yüzden günde az sayıda iletiyle başlar ve
 kademeli artırır.
 
+### 3.2a Test modu ve canlı ülke aktivasyonu (gerçek gönderimden önce)
+
+Varsayılan olarak **hiçbir ülke gerçek gönderime açık değildir**: ülke açılmadan kampanya iletisi gönderilemez. Güvenli
+ilk kullanım sırası:
+
+1. **Test modunu açın** (Ayarlar → Test modu): kampanya iletileri yalnızca burada yazdığınız **tam e-posta
+   adreslerine** gider (alan adı veya joker yok; en çok 50 adres). Kapalıyken alıcı sınırı yoktur. Açıkken ekranın
+   üstünde bir uyarı bandı görünür. İzinli listede olmayan alıcılar silinmez, bekletilir. Genel işletme adresleri
+   (`info@`, `sales@`) kullanın: kişisel posta sağlayıcıları ve kişi adlı adresler kampanyada zaten uygun sayılmaz.
+2. **Gmail'i bağlayın** (3.2) ve **kendinize test e-postası gönderin** (2.7).
+3. **Canlı ülke aktivasyonu** (Ayarlar → Canlı ülke aktivasyonu): ön koşulların hepsi "Tamam" olmalıdır (kullanım
+   onayı, firma profili, bağlı Gmail kutusu, DNS, doğrulanmış HTTPS çıkış ucu, çıkış taleplerinin çekilmesi, **test modu
+   açık ve listesi dolu**, kendime test). Ardından yetkili temsilcinin **yazılı onayını** (belge referansı ve tarihi) ve
+   kapsam beyanını girin, **Kontrol et** deyip **Aktive et**'e basın. Bilgisayarda bir **onay penceresi** açılır:
+   bilgileri okuyup "okudum" kutusunu işaretleyin ve **Onayla**'ya basın (varsayılan düğme İptal'dir). Bu pencere yalnızca
+   yüklü masaüstü uygulamasında çalışır.
+4. İlk pilot gönderimleri izinli adreslere yapın. **Üretime geçmek** için Test modunu kapatın (bu bir gevşetmedir:
+   onay ister ve çalışan canlı kampanyaları duraklatır; kampanyayı yeniden başlatmak için ayrıca açık onay verirsiniz).
+
+Girdiğiniz onay kaydı, hukuki yetkinin doğrulandığı anlamına **gelmez**: uygulama belgeyi veya kişinin yetkisini
+doğrulayamaz, yalnızca kimin hangi belgeye dayanarak açtığını kayda yazar. Hukuki onay uygulama dışında alınmalıdır.
+
+**Geri alma:** aynı kartta açık ülkenin yanındaki **Geri al (kilitle)** ülkeyi yeniden kilitler. Çalışan canlı
+kampanyalar önce duraklatılır; kampanyayı sürdürmek açık onay ister ve o ülkenin alıcıları sürdürmede kalıcı olarak
+dışlanır (ülke yeniden açılmadıkça).
+
 ### 3.3 Abonelikten çıkış altyapısı (çıkış sunucusu)
 
 Her gerçek e-postada alıcının **tek tıkla listeden çıkabileceği** bir bağlantı bulunmak zorundadır. Bu bağlantının
