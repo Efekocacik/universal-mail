@@ -116,7 +116,11 @@ describe("electron/main.ts bağlantıları (Electron'u başlatmadan kaynak denet
     expect(main).toMatch(/powerMonitor\.on\("unlock-screen", \(\) => wake\("unlock"\)\)/);
     expect(main).toMatch(/app\.on\("browser-window-focus", \(\) => wake\("focus"\)\)/);
     expect(main).toMatch(/listenForNotify\(w\)/);
-    expect(main).toMatch(/listenForNotify\(spawnChild\("server"/);
+    expect(main).toMatch(/const serverChild = spawnChild\("server"/);
+    expect(main).toMatch(/listenForNotify\(serverChild\)/);
+    // Yerel onay (ülke aktivasyonu) YALNIZCA web sunucusu alt sürecine bağlanır; işçiye bağlanmaz.
+    expect(main).toMatch(/listenForNativeConfirm\(serverChild\)/);
+    expect(main).not.toMatch(/listenForNativeConfirm\(w\)/);
     expect(main).toMatch(/w\.send\(\{ type: "wake" \}\)/);
     // Bildirim tıklaması pencereyi öne getirir ve yalnızca uygulama içi yola gider.
     expect(main).toMatch(/win\.focus\(\);[\s\S]{0,200}joinAppPath\(origin, toast\.url\)/);
