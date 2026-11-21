@@ -124,6 +124,9 @@ jobs:
       - name: Derle ve paketle
         run: npm run dist
         env:
+          # electron-builder PR derlemelerinde imzayı atlar; ad-hoc imzanın PR paketinde de uygulanması için açılır.
+          # (Çatal PR'larına sır verilmediğinden sertifika sızma riski yoktur.)
+          CSC_FOR_PULL_REQUEST: "true"
           CSC_LINK: ${{ secrets.CSC_LINK }}
           CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}

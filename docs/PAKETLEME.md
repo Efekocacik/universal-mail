@@ -138,8 +138,9 @@ Davranış (`electron-builder.config.cjs`):
 - **macOS:** `CSC_LINK` veya `CSC_NAME` varsa `identity` electron-builder'a bırakılır, `hardenedRuntime: true` ve
   `build/entitlements.mac.plist` yetkileri kullanılır (yalnızca JIT, imzasız yürütülebilir bellek ve kütüphane
   doğrulamasını kapatma: Electron ve libsql yerel modülü için). **Notarize** yalnızca `APPLE_ID`,
-  `APPLE_APP_SPECIFIC_PASSWORD` ve `APPLE_TEAM_ID` üçü birlikte varsa açılır. Sertifika yoksa `identity: null`
-  (koşucunun anahtarlığındaki bir kimlik de kullanılmaz).
+  `APPLE_APP_SPECIFIC_PASSWORD` ve `APPLE_TEAM_ID` üçü birlikte varsa açılır. Sertifika yoksa `identity: "-"`:
+  paket **ad-hoc** imzalanır (ücretsiz, sertifikasız; koşucunun anahtarlığındaki bir kimlik kullanılmaz). Hiç
+  imzalamamak (`null`) Apple Silicon'da indirilen uygulamanın "hasar görmüş" hatasıyla açılmamasına yol açar.
 - **Windows:** `signAndEditExecutable: true` her zaman: `.exe` simgesi ve sürüm bilgisi (ürün adı) imzasız derlemede
   de gömülür, masaüstü/Başlat kısayolları Universal Mail simgesini taşır. İmzalama ayrı bir anahtardır:
   `signExecutable` yalnızca `WIN_CSC_LINK` veya `CSC_LINK` varsa `true` (electron-builder 26: `signAndEditExecutable:

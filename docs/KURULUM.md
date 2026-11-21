@@ -88,6 +88,15 @@ vardır. Bu durumda:
 
 Bu onay bir kez verilir. Sonraki açılışlarda Universal Mail doğrudan açılır.
 
+**"Universal Mail hasar görmüş olduğu için açılamıyor. Disk görüntüsünü çıkarmalısınız" uyarısı çıkarsa:** dosya
+bozuk değildir; macOS, internetten inen ve Apple'a kayıtlı olmayan uygulamayı bu ifadeyle engeller. Uygulamayı
+Applications klasörüne sürükledikten sonra **Terminal**'i açın, aşağıdaki satırı yapıştırıp Enter'a basın ve
+uygulamayı yeniden açın:
+
+```bash
+xattr -cr "/Applications/Universal Mail.app"
+```
+
 ### 2.4 Anahtarlık izni
 
 İlk açılışta (veya ilk anahtar kaydında) macOS, **"Universal Mail Safe Storage"** anahtarlık öğesine erişim izni

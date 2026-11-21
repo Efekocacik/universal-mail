@@ -91,16 +91,19 @@ describe("electron-builder.config.cjs", () => {
     expect(c.nsis.uninstallDisplayName).toBe(c.productName);
   });
 
-  it("ortam boşken imzasız: bugünkü davranış (sertifika aranmaz, notarize yok)", () => {
+  it('ortam boşken sertifikasız: macOS ad-hoc imza ("hasar görmüş" hatasını önler), notarize yok', () => {
     const c = load();
-    expect(c.mac.identity).toBeNull();
+    expect(c.mac.identity).toBe("-");
     expect(c.mac.hardenedRuntime).toBe(false);
     expect(c.mac.notarize).toBe(false);
     expect(c.win.signExecutable).toBe(false);
     expect(c.dmg.sign).toBe(false);
     // Boş dize de "yok" sayılır (CI'da tanımsız sır boş dize olarak gelir).
     const empty = load({ CSC_LINK: "", WIN_CSC_LINK: " ", APPLE_ID: "" });
-    expect(empty.mac.identity).toBeNull();
+    expect(empty.mac.identity).toBe("-");
+    // Boş değişkenler ortamdan silinir: electron-builder boş CSC_LINK'i proje klasörüne çözüp "not a file" ile durur.
+    expect(process.env.CSC_LINK).toBeUndefined();
+    expect(process.env.WIN_CSC_LINK).toBeUndefined();
     expect(empty.win.signExecutable).toBe(false);
   });
 

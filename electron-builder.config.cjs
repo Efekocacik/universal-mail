@@ -14,6 +14,18 @@
 const env = process.env;
 const has = (name) => typeof env[name] === "string" && env[name].trim() !== "";
 
+// CI'da tanımsız sır BOŞ DİZE olarak gelir. electron-builder boş `CSC_LINK`'i "sertifika yok" saymaz; proje
+// klasörüne çözüp "<klasör> not a file" hatasıyla durur (ad-hoc imzada da sertifika aranır). Boş olanlar silinir.
+for (const name of [
+  "CSC_LINK",
+  "CSC_KEY_PASSWORD",
+  "CSC_NAME",
+  "WIN_CSC_LINK",
+  "WIN_CSC_KEY_PASSWORD",
+]) {
+  if (!has(name)) delete env[name];
+}
+
 const macSigning = has("CSC_LINK") || has("CSC_NAME");
 const macNotarize =
   macSigning && has("APPLE_ID") && has("APPLE_APP_SPECIFIC_PASSWORD") && has("APPLE_TEAM_ID");
@@ -79,8 +91,10 @@ module.exports = {
     target: [{ target: "dmg", arch: ["arm64"] }],
     // 1024×1024 PNG; electron-builder .icns dosyasını kendisi üretir.
     icon: "build/icon.png",
-    // `null` = imzalama yok (bugünkü davranış); `undefined` = electron-builder sertifikayı CSC_LINK/CSC_NAME'den bulur.
-    identity: macSigning ? undefined : null,
+    // `"-"` = ad-hoc (sertifikasız, ücretsiz) imza; `undefined` = electron-builder sertifikayı CSC_LINK/CSC_NAME'den bulur.
+    // `null` (hiç imzalama) KULLANILMAZ: Apple Silicon'da imzası bozuk kalan paket, indirildikten sonra
+    // "hasar görmüş olduğu için açılamıyor" hatası verir ve Gizlilik ve Güvenlik'te "Yine de Aç" seçeneği çıkmaz.
+    identity: macSigning ? undefined : "-",
     hardenedRuntime: macSigning,
     gatekeeperAssess: false,
     // libsql yerel modülü ve Node alt süreçleri (sunucu, işçi) sertleştirilmiş çalışma zamanında bu yetkileri ister.
